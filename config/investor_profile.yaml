@@ -1,0 +1,150 @@
+# config/investor_profile.yaml
+# Intent layer: who the investor is, what they want, what they permit.
+# Values here are ceilings; config/risk_profile.yaml must be equal or stricter.
+# Any field left as TODO blocks every execution mode except research (fail closed).
+# "value: TODO" fields carry a recommended_default and reasoning for review.
+
+schema_version: 1
+profile_name: conservative_stable_v1
+base_currency: USD
+created: 2026-09-03
+unresolved_policy: fail_closed
+accept_all_recommended_defaults: false   # true = adopt every recommended_default in both files at once
+
+objective:
+  primary: stable_investing
+  priorities_in_order:
+    - capital_preservation
+    - avoid_large_losses
+    - stable_long_term_growth
+    - risk_adjusted_return
+    - absolute_return
+  accept_lower_upside_for_lower_downside: true
+  cash_is_valid_outcome: true
+  no_trade_is_valid_outcome: true
+  mandate_file: MANDATE.md
+  mandate_context_file: config/mandate_context.md   # compact version injected into every agent prompt
+
+capital:
+  total_usd: 3000
+  buckets:
+    core:
+      allocation_usd: 2500
+      purpose: conservative_core
+    sandbox:
+      allocation_usd_max: 500              # hard ceiling on deployed cost basis, never a target
+      purpose: experimental
+      may_stay_all_cash: true
+  bucket_isolation: strict                 # sandbox can never draw on core capital
+  brokerage_layout: single_account_with_ledger   # two paper accounts is the fallback if reconciliation proves unreliable
+  external_cashflows_expected: false       # a deposit or withdrawal must be declared before it happens
+
+horizon:
+  investment_horizon:
+    value: TODO
+    recommended_default: long_term_3y_plus
+    reasoning: stable growth with low turnover only works over years; also sets the reflection horizon
+  evaluation_period_days: 30
+  evaluation_is_holding_period: false      # never force-close positions when the evaluation ends
+
+risk_tolerance:
+  max_portfolio_drawdown_pct: 15           # absolute boundary; the ladder in risk_profile acts well before it
+  react_before_limit: true
+  preferred_operating_model: human_approval   # default operating model; autonomy levels are separate permissions
+
+universe:
+  core:
+    foundation: etf
+    # Exposure groups prevent fake diversification: the risk layer treats every ETF in a group as
+    # one exposure, and at most one ETF per group may be held in core (recommended default).
+    etf_exposure_groups:
+      value: TODO
+      recommended_default:
+        us_broad_equity: [VTI, VOO]
+        international_equity: [VXUS]
+        us_total_bond: [BND]
+        us_treasury_intermediate: [VGIT]
+        cash_like_tbill: [SGOV, BIL]
+        defensive_equity_optional: [USMV, SCHD]
+        gold_optional: [IAU]
+      reasoning: low-cost, highly liquid, easy-to-understand index ETFs; tickers verified 2026-09-03; optional groups stay unused until approved
+    max_etfs_per_exposure_group: 1
+    always_excluded: [leveraged_etf, inverse_etf, single_stock_etf, crypto_etf, commodity_futures_etf, covered_call_etf]
+    individual_stocks:
+      allowed: true
+      evidence_bar: stronger_than_etf      # higher confidence floor, tighter caps, deterministic eligibility screen
+      watchlist:
+        value: TODO
+        recommended_default: []
+        reasoning: candidates come from you; the system never invents a stock list, it only screens and analyzes what you supply
+  sandbox:
+    permitted_instruments: see_risk_profile_permissions
+
+preferences:
+  turnover_preference: low
+  holding_period_preference:
+    value: TODO
+    recommended_default: months_to_years
+    reasoning: matches the horizon and keeps trader entry and exit logic on a position basis, never intraday
+  rebalancing_cadence:
+    value: TODO
+    recommended_default: monthly_review_with_5pct_drift_bands
+    reasoning: rebalance only when a sleeve drifts 5 points from baseline, which keeps turnover low
+  averaging_down: never_automatic          # only with your approval and a re-validated thesis
+  earnings_event_policy: see_risk_profile_event_rules
+  extended_hours_trading: false
+  dividends: hold_as_bucket_cash
+
+benchmarks:
+  primary: passive_core_baseline           # the baseline allocation held passively from day 1, no AI
+  external: [AOM, SPY, SGOV]               # 40/60 balanced fund, US equity, T-bills
+
+evaluation_criteria:
+  - decision_quality
+  - stability
+  - drawdown
+  - unnecessary_turnover
+  - reasoning_quality
+  - risk_control_effectiveness
+  - behavior_under_uncertainty
+  - ability_to_choose_no_trade
+  - value_added_vs_passive
+
+run_schedule:
+  core_etf_analysis: weekly_or_on_trigger  # triggers: tranche day, ladder level change, regime change
+  stock_watchlist_max_analyses_per_day: 3
+  sandbox_analysis: on_request
+
+# LLM execution layer. The system runs on the Claude Max subscription through the official
+# Claude Code CLI (`claude -p`); no Anthropic API key is ever used or accepted.
+llm:
+  backend: claude_code_cli
+  deep_effort: high                        # Research Manager, Portfolio Manager, policy step
+  quick_effort: medium                     # analysts, researchers, trader, risk debators
+  policy_effort: high
+  timeout_seconds: 900
+  max_turns: 12                            # cap on tool-use turns inside one analyst call
+  never_use_api_key: true                  # adapter strips ANTHROPIC_API_KEY / AUTH_TOKEN from the CLI environment
+  on_limit: wait_for_reset                 # a subscription limit stops the run; it never falls back to API billing
+  subscription_budget_note: "Max 5x: 5-hour session limit plus a weekly cap shared with interactive use; keep analyses per day small"
+
+tradingagents:                             # merged verbatim into upstream DEFAULT_CONFIG; keys are upstream names
+  llm_provider: claude_code                # handled by conservative_trading.llm, not by upstream's provider list
+  deep_think_llm: claude-opus-5
+  quick_think_llm: claude-sonnet-5
+  max_debate_rounds: 2                     # gives the Bear a rebuttal round
+  max_risk_discuss_rounds: 1
+  data_vendors:
+    core_stock_apis: yfinance
+    technical_indicators: yfinance
+    fundamental_data: yfinance
+    news_data: yfinance
+    macro_data: fred                       # needs FRED_API_KEY; degrades to a sentinel without it
+    prediction_markets: polymarket
+  memory_log_path: null                    # upstream 5-day reflection disabled during Stages 1 and 2
+  checkpoint_enabled: true                 # a run interrupted by a subscription limit resumes from the last node
+  output_language: English
+analyst_selection:                         # passed to upstream selected_analysts per instrument type
+  etf: [market, news]                      # fundamentals tools return no statements for ETFs
+  stock: [market, social, news, fundamentals]
+  crypto: [market, social, news]

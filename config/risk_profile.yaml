@@ -1,0 +1,652 @@
+# config/risk_profile.yaml
+# Enforcement layer. Read only by deterministic code (execution-policy resolver and, from
+# Stage 2, the Hard Risk Layer). No LLM output can read, modify, or override it.
+# Must be equal or stricter than investor_profile.yaml (checked at load).
+# TODO fields block every mode except research until resolved.
+
+schema_version: 1
+profile_name: conservative_stable_v1
+unresolved_policy: fail_closed
+
+execution_policy:
+  # 1 research, 2 recommend, 3 execution-capable with human approval, 4 evaluate,
+  # 5 broader live capital, 6 narrowly scoped autonomy. Stage 3 permits human_approval; the
+  # Micro-Live master switch below is a second, independent gate on real money.
+  stage: 3
+  broker_environment: paper                # live needs stage >= 5 AND live_trading_approved: true
+  live_trading_approved: false
+  buckets:
+    core:
+      execution_mode: recommend_only       # recommend_only | human_approval | autonomous
+    sandbox:
+      execution_mode: recommend_only       # conceptual portfolios: no venue, nothing to execute
+    micro_live:
+      execution_mode: human_approval       # the only bucket with a real venue behind it
+  stage_allowed_modes:                     # effective mode = strictest of stage, bucket, ladder, downgrade, kill switch
+    1: [recommend_only]
+    2: [recommend_only]
+    3: [recommend_only, human_approval]
+    4: [recommend_only, human_approval]
+    5: [recommend_only, human_approval]
+    6: [recommend_only, human_approval, autonomous]
+  human_approval:                          # MODE B
+    channel: cli
+    proposal_ttl_minutes: 240
+    revalidate_all_rules_at_submit: true
+    max_price_drift_pct_since_proposal: 2.0
+  # Autonomy is three independent capabilities, all off. None bypasses the Hard Risk Layer.
+  autonomy:
+    defensive:                             # risk-reducing actions only
+      enabled: false                       # defensive automation; still disabled
+      allowed_actions: [close_sandbox_positions, close_core_satellites, ladder_de_risk_sells]
+    conservative:                          # very limited pre-approved conservative investing
+      enabled: false
+      whitelist: core_etf_exposure_groups_only    # individual stocks are never opened autonomously
+      max_order_usd: 250
+      max_position_pct_of_core: 25
+      max_trades_per_day: 1
+      max_trades_per_week: 2
+      min_confidence: 80
+      allowed_purposes: [initial_deployment_tranche, drift_rebalance_within_bands]
+    experimental:                          # strictly isolated sandbox activity
+      enabled: false
+      whitelist: []                        # TODO if ever considered
+      max_order_usd: 100
+      max_position_pct_of_sandbox: 30
+      max_trades_per_day: 1
+      max_trades_per_week: 2
+      min_confidence: 75
+    common_conditions:                     # apply to every autonomous action
+      require_ladder_level: NORMAL
+      require_fresh_market_data: true
+      require_no_event_blackout: true
+      require_daily_loss_gate_clear: true
+      require_broker_side_settings_verified: true
+      require_stage_at_least: 6
+    auto_downgrade:
+      to_mode: human_approval
+      sticky_until_manual_reset: true
+      triggers:
+        - ladder_level_at_or_above: WARNING          # disables conservative and experimental autonomy
+        - ladder_level_at_or_above: RISK_REDUCTION   # disables all autonomy except defensive
+        - daily_loss_gate_hit
+        - hard_risk_rejections_in_one_day: 2
+        - broker_error_or_unexpected_response
+        - stale_market_data
+        - ledger_reconciliation_mismatch
+        - consecutive_losing_autonomous_trades: 3
+        - market_calendar_mismatch
+  kill_switch:
+    halt_file: state/HALT                  # file present => no orders except defensive actions you approved
+    trading_halted: false                  # config flag, same effect
+    broker_suspend_trade_on_halt: true     # mirrored at the broker via update_account_config
+
+fail_closed_conditions:                    # any one => NO TRADE, reason recorded, alert raised
+  - exception_in_risk_engine_or_adapter
+  - market_data_older_than_freshness_limits
+  - account_snapshot_older_than_60s
+  - ledger_reconciliation_mismatch_over_usd_1_or_0_1_pct
+  - position_in_account_not_in_ledger
+  - broker_response_missing_expected_fields
+  - proposal_missing_bucket_confidence_or_size
+  - profile_has_unresolved_todo
+  - market_closed_or_calendar_unavailable
+  - proposal_expired
+  - clock_skew_over_5_minutes
+  - llm_backend_error_or_subscription_limit
+
+market_data_freshness:
+  last_trade_max_age_minutes: 15           # free IEX feed; tighten if a paid feed is used
+  daily_bar_max_age_trading_days: 1
+  verified_snapshot_required: true         # upstream get_verified_market_snapshot output must exist for the run
+  account_snapshot_max_age_seconds: 60
+
+buckets:
+  core:
+    allocation_usd: 2500
+    asset_class_bands_pct_of_core:         # any order that leaves a sleeve outside its band is rejected
+      broad_equity_etf: {value: TODO, recommended_default: {min: 30, max: 55}}
+      bond_etf:         {value: TODO, recommended_default: {min: 15, max: 45}}
+      cash_like_etf:    {value: TODO, recommended_default: {min: 5,  max: 45}}
+      satellites:       {value: TODO, recommended_default: {min: 0,  max: 15}}   # stocks + sector/factor/thematic ETFs
+      cash:             {value: TODO, recommended_default: {min: 10, max: 100}}
+      reasoning: equity capped near half of core, so a 20 percent equity decline costs roughly 10 percent of core; cash is always allowed up to 100 percent
+    baseline_allocation_pct_of_core:       # passive reference the AI deviates from only with evidence; also benchmark C1
+      value: TODO
+      recommended_default: {VTI: 35, VXUS: 10, BND: 15, VGIT: 10, SGOV: 20, CASH: 10}
+      reasoning: 45 broad equity, 25 bonds, 20 T-bill ETF, 10 cash; satellites, when used, are funded from the SGOV sleeve
+    initial_deployment:
+      value: TODO
+      recommended_default: {tranches: 3, spacing_trading_days: 5, regime_gate: true}
+      reasoning: three equal tranches over about three weeks average the entry; a tranche is skipped, never forced, when the regime flag is HIGH_RISK
+    position_limits_pct_of_core:
+      broad_diversified_etf:      {value: TODO, recommended_default: 40}
+      bond_or_cash_like_etf:      {value: TODO, recommended_default: 50}
+      sector_factor_thematic_etf: {value: TODO, recommended_default: 10}
+      individual_stock:           {value: TODO, recommended_default: 5}
+      reasoning: 5 percent of core is 125 dollars; a single-name failure then costs under 1 percent of the portfolio; fractional shares make it tradable
+    concentration_pct_of_core:
+      all_individual_stocks_combined: {value: TODO, recommended_default: 15}
+      direct_sector_exposure:         {value: TODO, recommended_default: 10}   # stocks + sector ETFs in one sector; broad ETFs exempt
+      max_open_positions:             {value: TODO, recommended_default: 8}
+      max_etfs_per_exposure_group:    1
+      reasoning: at most three stocks, never two of them dominating one sector; one ETF per exposure group prevents fake diversification
+    cash:
+      min_cash_pct_of_core: {value: TODO, recommended_default: 10}
+      reasoning: settlement buffer and dry powder; SGOV counts as cash-like, not cash, for this rule
+    activity_limits:
+      max_new_positions_per_day:  {value: TODO, recommended_default: 1}
+      max_new_positions_per_week: {value: TODO, recommended_default: 3}
+      discretionary_turnover_pct_of_core:
+        daily:   {value: TODO, recommended_default: 15}
+        weekly:  {value: TODO, recommended_default: 35}
+        monthly: {value: TODO, recommended_default: 60}
+      turnover_exempt: [initial_deployment_tranche, ladder_risk_reduction]
+      no_same_day_round_trips: true        # never buy and sell one symbol in one session; also avoids pattern-day-trader status
+      reasoning: turnover is buys plus sells over core equity; de-risking must never be blocked by a turnover cap
+    per_position_loss_rules_pct_from_cost:
+      individual_stock:           {review_at: {value: TODO, recommended_default: -10}, mandatory_exit_proposal_at: {value: TODO, recommended_default: -15}}
+      sector_factor_thematic_etf: {review_at: {value: TODO, recommended_default: -10}, mandatory_exit_proposal_at: {value: TODO, recommended_default: -15}}
+      broad_diversified_etf:      {review_at: {value: TODO, recommended_default: -10}, mandatory_exit_proposal_at: null}
+      bond_or_cash_like_etf:      {review_at: {value: TODO, recommended_default: -5},  mandatory_exit_proposal_at: null}
+      reasoning: a review forces a fresh analysis and an explicit HOLD, REDUCE, or SELL with reasons; diversified holdings are governed by the portfolio ladder and human review, never by an automatic per-position stop
+    stock_eligibility_screen:              # deterministic, from upstream identity and fundamentals data; must pass before LLM output is considered
+      value: TODO
+      recommended_default:
+        listed_on: [NYSE, NASDAQ]
+        min_market_cap_usd: 10000000000
+        positive_free_cash_flow_ttm: true
+        positive_net_income_ttm: true
+        max_debt_to_equity_pct: 150
+        min_current_ratio: 1.0
+        min_average_daily_dollar_volume_usd: 20000000
+      reasoning: keeps core stocks to large, liquid, profitable, self-funding businesses; the LLM cannot argue a name past this screen
+    order_rules:
+      regular_hours_only: true
+      time_in_force: day
+      default_order_type: limit
+      marketable_limit_band_pct: {etf: 0.3, stock: 0.5}
+      market_orders_allowed_for: [broad_diversified_etf_tranche_buys_under_500_usd]
+      fractional_shares: true
+      max_single_order_pct_of_core: 40
+  sandbox:
+    allocation_usd_max: 500                # hard ceiling on deployed cost basis
+    may_stay_all_cash: true
+    profit_sweep:
+      value: TODO
+      recommended_default: monthly_sweep_of_realized_gains_above_cap_to_core_cash
+      reasoning: keeps deployed sandbox capital at or below 500 dollars even after wins
+    position_limits:
+      max_single_position_pct_of_allocation: {value: TODO, recommended_default: 30}   # 150 dollars
+      max_open_positions:                    {value: TODO, recommended_default: 3}
+      max_options_premium_per_position_usd:  {value: TODO, recommended_default: 100}
+      max_options_premium_total_usd:         {value: TODO, recommended_default: 200}
+      max_crypto_notional_usd:               {value: TODO, recommended_default: 150}
+    activity_limits:
+      max_new_positions_per_day:  {value: TODO, recommended_default: 1}
+      max_new_positions_per_week: {value: TODO, recommended_default: 2}
+      max_orders_per_week:        {value: TODO, recommended_default: 6}
+      no_same_day_round_trips: true
+    loss_limits:
+      per_position_review_pct_from_cost:          {value: TODO, recommended_default: -15}
+      per_position_mandatory_close_pct_from_cost: {value: TODO, recommended_default: -25}
+      daily_loss_gate_pct_of_allocation:          {value: TODO, recommended_default: -5}    # 25 dollars: no new sandbox opens that day
+      monthly_realized_loss_budget_usd:           {value: TODO, recommended_default: 100}   # exhausted => sandbox frozen until manual reset
+      reasoning: the worst plausible sandbox loss is bounded near 100 dollars, about 3 percent of the portfolio, so a sandbox failure alone cannot push the whole portfolio past WARNING
+    order_rules:
+      regular_hours_only: true
+      time_in_force: day
+      default_order_type: limit
+      broker_side_stop_for_equities: {value: TODO, recommended_default: true}   # bracket stop at the mandatory-close level
+      fractional_shares: true
+
+  micro_live:
+    allocation_usd_max: 100                # the hard capital boundary, verified against the live account
+    may_stay_all_cash: true
+    position_limits:
+      max_single_position_pct_of_allocation: {value: TODO, recommended_default: 40}   # $40
+      max_open_positions:                    {value: TODO, recommended_default: 3}
+    activity_limits:
+      max_new_positions_per_day:  {value: TODO, recommended_default: 1}
+      max_new_positions_per_week: {value: TODO, recommended_default: 2}
+      max_orders_per_week:        {value: TODO, recommended_default: 4}
+      no_same_day_round_trips: true
+    loss_limits:
+      per_position_review_pct_from_cost:          {value: TODO, recommended_default: -12}
+      per_position_mandatory_close_pct_from_cost: {value: TODO, recommended_default: -20}
+      daily_loss_gate_pct_of_allocation:          {value: TODO, recommended_default: -5}
+      reasoning: >-
+        Real money at a small size. The worst plausible single-position loss is about $8 and the
+        whole experiment is bounded at $100, so a failure here cannot threaten anything else.
+    order_rules:
+      regular_hours_only: true
+      time_in_force: day
+      default_order_type: limit
+      fractional_shares: true
+
+
+drawdown_ladder:
+  measurement:
+    basis: equity_vs_high_water_mark
+    high_water_mark_start_usd: 3000
+    cashflow_adjusted: true
+    evaluated_on: [daily_close, before_every_order]   # intraday checks can escalate, never de-escalate
+    persisted_state_file: state/ladder.json
+  # Principle: speculative and satellite exposure is reduced automatically and early; diversified
+  # long-term core holdings are never liquidated solely because a threshold was crossed. At HARD_HALT
+  # and EMERGENCY the system stops adding risk, protects the broker account, and escalates to you.
+  total_portfolio:
+    levels:
+      - {name: NORMAL,         trigger_pct: 0}
+      - {name: WARNING,        trigger_pct: {value: TODO, recommended_default: -4}}
+      - {name: RISK_REDUCTION, trigger_pct: {value: TODO, recommended_default: -7}}
+      - {name: HARD_HALT,      trigger_pct: {value: TODO, recommended_default: -10}}
+      - {name: EMERGENCY,      trigger_pct: -15}      # your absolute boundary; cannot be loosened here
+    actions:                               # cumulative; each level keeps the actions of the level before it
+      WARNING:
+        - no_new_sandbox_opens
+        - core_opens_limited_to_broad_etf_within_bands
+        - min_confidence_core_open: 75
+        - discretionary_turnover_caps_halved
+        - conservative_and_experimental_autonomy_disabled
+        - notify_user
+      RISK_REDUCTION:
+        - no_opening_orders_any_bucket
+        - all_autonomy_except_defensive_disabled_sticky
+        - automatic_if_defensive_enabled: {close_all_sandbox: true, close_core_satellites: true}
+        - proposal_for_human_review: {core_broad_equity_target_pct_of_core: 35}
+        - proposals_flagged_urgent
+      HARD_HALT:
+        - only_risk_reducing_orders_allowed
+        - proposal_for_human_review: {core_broad_equity_target_pct_of_core: 20, remainder: cash_or_cash_like}
+        - core_diversified_holdings_never_sold_automatically: true
+        - trading_halted_flag_set
+        - broker_suspend_trade: true       # blocks new orders at the broker; you lift it after review
+        - manual_reset_required_with_written_note
+      EMERGENCY:
+        - all_speculative_and_satellite_exposure_closed_if_defensive_enabled: true
+        - core_diversified_holdings_escalated_to_you_with_a_liquidation_proposal: true
+        - core_diversified_holdings_never_sold_automatically: true
+        - broker_suspend_trade: true
+        - system_disabled_until_post_mortem_and_re_approval
+  de_escalation:
+    hysteresis_pct_points: 2               # WARNING clears above -2; RISK_REDUCTION returns to WARNING above -5
+    manual_reset_levels: [HARD_HALT, EMERGENCY]
+  core:
+    mirror_total_portfolio_levels: true    # same thresholds on core equity alone, so a core-only slump escalates core actions
+  micro_live:
+    # Real money, its own portfolio, its own high-water mark. Tighter than the sandbox because
+    # this is not experimental capital: an 8% slide stops new buying, 15% stops the experiment.
+    levels:
+      - {name: WARNING, trigger_pct: {value: TODO, recommended_default: -8},  actions: [no_new_micro_live_opens]}
+      - {name: HALT,    trigger_pct: {value: TODO, recommended_default: -15}, actions: [no_opens, escalate_to_investor, position_review_required]}
+  sandbox:
+    levels:
+      - {name: WARNING, trigger_pct: {value: TODO, recommended_default: -10}, actions: [no_new_sandbox_opens_until_above_minus_8]}
+      - {name: HALT,    trigger_pct: {value: TODO, recommended_default: -20}, actions: [close_all_sandbox_positions_if_defensive_enabled, sandbox_frozen_until_manual_reset]}
+
+permissions:                               # each is a separate permission, enforced by deterministic code and mirrored at the broker where possible
+  margin:
+    core: false
+    sandbox: false                         # separate explicit approval; broker max_margin_multiplier stays "1"
+  short_selling:
+    core: false
+    sandbox: {value: TODO, recommended_default: false}
+    reasoning: shorting needs margin, which is off; broker no_shorting=true makes this two layers deep
+  options:
+    core: false
+    sandbox:
+      value: TODO
+      recommended_default:
+        enabled_during_first_evaluation_month: false
+        later: {level: 2, long_options_only: true, no_selling_options: true, min_days_to_expiry_at_entry: 30, max_premium_per_position_usd: 100, max_premium_total_usd: 200}
+      reasoning: month one should evaluate core behavior; when enabled, long options cap the loss at the premium paid, and broker level 2 excludes spreads and naked writes
+  crypto:
+    core: false
+    sandbox:
+      value: TODO
+      recommended_default: {enabled: true, spot_only: true, symbols: [BTC/USD, ETH/USD], max_notional_usd: 150, no_leverage: true}
+      reasoning: the two most liquid coins, spot only, bounded at 30 percent of the sandbox
+  leveraged_or_inverse_etfs:
+    core: false
+    sandbox: {value: TODO, recommended_default: false}
+  extended_hours:
+    core: false
+    sandbox: false
+  fractional_shares:
+    core: true
+    sandbox: true
+
+event_rules:
+  earnings:
+    core_stock_no_new_position_trading_days_before:      {value: TODO, recommended_default: 5}
+    core_stock_no_add_trading_days_after:                {value: TODO, recommended_default: 2}
+    sandbox_options_no_expiry_within_days_after_earnings: {value: TODO, recommended_default: 7}
+    source: yfinance_earnings_dates        # fail closed for a stock whose next earnings date cannot be determined
+    reasoning: earnings gaps are the main single-name jump risk; a conservative core never opens into one
+  macro_blackout_autonomous_only:
+    calendar_file: config/event_calendar.yaml   # TODO: FOMC decision days, CPI and payroll release days
+    fail_closed_if_missing: true
+
+confidence_requirements:                   # bands from MANDATE.md v0.1; REVIEW or missing confidence always maps to NO_TRADE
+  bands: {no_trade_below: 50, watchlist_only: [50, 64], small_position: [65, 74], normal_position: [75, 84], high_conviction_still_capped: [85, 100]}
+  minimum_to_open:
+    core_broad_etf_half_size: 65
+    core_broad_etf_full_size: 75
+    core_sector_factor_etf: 70
+    core_individual_stock: 75
+    sandbox: 65
+    autonomous_any: 80
+
+broker_side_settings:                      # applied once via update_account_config; verified before every run; mismatch => fail closed
+  paper_account_starting_balance_usd: 3000 # create the paper account at the real experiment size, not the 100k default
+  no_shorting: true
+  max_margin_multiplier: "1"
+  max_options_trading_level: 0             # raised to 2 only when sandbox options are approved
+  fractional_trading: true
+  suspend_trade: false                     # set true by the kill switch and by HARD_HALT and EMERGENCY
+  trade_confirm_email: all
+  mcp_toolsets_by_stage:
+    stages_1_2: [account, assets, stock-data, news]              # no trading toolset is loaded at all
+    stages_3_plus: [account, assets, stock-data, news, trading]
+    sandbox_crypto_when_approved: [crypto-data]
+    sandbox_options_when_approved: [options-data]
+
+# ---------------------------------------------------------------------------
+# Stage 2: portfolio awareness + deterministic Hard Risk (no broker yet)
+# ---------------------------------------------------------------------------
+portfolio_state:                           # conceptual portfolio kept in a local file; the Stage 3 broker adapter replaces it
+  file: state/portfolio.yaml
+  risk_state_file: state/risk_state.json
+  max_age_days: 7                          # a snapshot older than this fails closed
+  price_source: upstream_yfinance_ohlcv    # tradingagents.dataflows.stockstats_utils.load_ohlcv, look-ahead safe, cached
+  max_price_age_trading_days: 3            # a holding priced older than this fails closed
+
+sleeve_of_exposure_group:                  # maps investor universe exposure groups to the asset-class sleeves above
+  us_broad_equity: broad_equity_etf
+  international_equity: broad_equity_etf
+  us_total_bond: bond_etf
+  us_treasury_intermediate: bond_etf
+  cash_like_tbill: cash_like_etf
+  defensive_equity_optional: satellites
+  gold_optional: satellites
+  unknown_etf: satellites                  # any ETF outside the universe is a satellite, never a core sleeve
+  individual_stock: satellites
+
+sizing:                                    # deterministic dollar sizing of a policy size hint; the LLM never chooses size
+  core:
+    baseline_sleeve_classes: [broad_diversified_etf, bond_or_cash_like_etf]   # normal = the ticker's baseline weight, small = half
+    unlisted_baseline_fallback_pct_of_core: 10                               # baseline-class ETF not in the baseline table
+    satellite_normal_pct_of_core: 5                                          # stocks and sector/factor ETFs
+    satellite_small_pct_of_core: 2.5
+  sandbox:
+    normal_pct_of_allocation: 30
+    small_pct_of_allocation: 15
+  micro_live:
+    normal_pct_of_allocation: 35           # ~$35 of a $100 account; three positions fit comfortably
+    small_pct_of_allocation: 20
+  min_order_usd: 25
+  sizing_basis: bucket_allocation          # weights are taken on the fixed bucket allocation, not on a fluctuating equity
+
+market_regime:                             # keyless and deterministic, from the upstream OHLCV loader
+  index_symbol: SPY
+  volatility_symbol: ^VIX
+  vix_low_risk_below: 15
+  vix_elevated_at_or_above: 20
+  vix_high_risk_at_or_above: 30
+  index_below_200sma_is_elevated: true
+  high_risk_if_index_below_200sma_and_vix_at_or_above: 25
+  max_data_age_trading_days: 3
+  gates:
+    HIGH_RISK: no_new_opening_positions
+    ELEVATED_RISK: {min_confidence_to_open: 75, size_cap: small}
+    UNKNOWN: no_new_opening_positions       # missing regime data fails closed
+
+# ---------------------------------------------------------------------------
+# Strategy policy (2026-09-03 investor directive). Deterministic, not prompt-based.
+# ---------------------------------------------------------------------------
+strategy_policy:
+  core:
+    stance: long_only                      # no short selling, no margin, no leverage, ever
+    allowed_strategies:
+      - long_only_diversified              # the only way to open core exposure
+      - buy_and_hold
+      - rebalance                          # drift-band correction within the sleeves
+      - de_risk                            # ladder-driven reduction of existing longs
+    forbidden_strategies:
+      - short
+      - margin
+      - leverage
+      - momentum_trading                   # momentum as a primary thesis
+      - event_driven
+      - speculative
+      - pairs
+      - arbitrage
+      - options
+      - crypto
+    momentum_use: supporting_only          # timing, volatility and risk context only, never the thesis
+    reasoning: >-
+      Core is the conservative, long-only, diversified sleeve. Momentum may inform when and how
+      to act on a thesis built on quality and valuation, but core must never become a momentum
+      trading book. Naked shorts are structurally impossible here as well: a SELL or REDUCE is
+      only accepted against a position that already exists (rule HR14).
+  sandbox:
+    # These may be researched and proposed in a later stage. Each is separately permissioned
+    # (see `permissions` above, all currently false/TODO) AND carries a permanent human-approval
+    # requirement that no autonomy setting can remove.
+    strategies_requiring_human_approval_always:
+      - momentum
+      - short
+      - event_driven
+      - options
+      - crypto
+      - leverage
+      - margin
+    never_autonomous: true
+    required_flow: ai_analysis -> conservative_policy -> hard_risk -> human_approval -> execution
+    reasoning: >-
+      Autonomy and instrument permission are independent. Even if a future stage enables
+      autonomous execution, a proposal carrying one of these strategy tags is stamped
+      requires_human_approval by the deterministic layer and can never execute without an
+      explicit confirmation from the investor.
+
+# ---------------------------------------------------------------------------
+# Stage 3: broker paper execution, proposal lifecycle, freshness and revalidation
+# ---------------------------------------------------------------------------
+broker:
+  # simulated: deterministic in-process venue for offline validation and the conceptual buckets.
+  # robinhood: the real Micro-Live venue, gated separately by micro_live_execution.enabled.
+  adapter: simulated
+  order_defaults:
+    time_in_force: day
+    extended_hours: false
+    fractional: true                       # venue-specific rules live in each broker adapter
+  marketable_limit_band_pct:               # limit orders only; a band above the last price for buys
+    etf: 0.3
+    stock: 0.5
+    crypto: 0.5
+  submit_timeout_seconds: 30
+  reconcile_after_submit_seconds: 5        # give the paper broker a moment before reading state back
+  state_file: state/proposals.json
+  fills_file: state/fills.jsonl
+
+# Freshness is per strategy, not one universal number. The window is set by how fast the
+# thesis can decay, the drift band by how much price movement changes the decision.
+proposal_freshness:
+  default_class: core_conservative
+  classes:
+    core_conservative:                     # long-only diversified core: slow-moving thesis
+      ttl_minutes: 2880                    # 2 calendar days
+      stale_after_minutes: 960             # 16h: still executable, but revalidation is mandatory
+      max_price_drift_pct: 3.0
+      require_market_open: true
+      news_recheck: false                  # the thesis rests on fundamentals and allocation, not headlines
+      reasoning: >-
+        A core allocation decision does not change because the tape moved 1% overnight. It does
+        change if the price moved enough to alter the entry, hence a 3% band.
+    sandbox_conservative:
+      ttl_minutes: 960
+      stale_after_minutes: 240
+      max_price_drift_pct: 2.5
+      require_market_open: true
+      news_recheck: false
+    momentum:                              # rule-based trend following, never emotional chasing
+      ttl_minutes: 90
+      stale_after_minutes: 30
+      max_price_drift_pct: 1.5
+      require_market_open: true
+      news_recheck: true
+      reasoning: >-
+        A trend-continuation thesis is a statement about the current tape. Ninety minutes later it
+        is a different tape, so the proposal expires rather than being re-priced.
+    short:
+      ttl_minutes: 90
+      stale_after_minutes: 30
+      max_price_drift_pct: 1.5
+      require_market_open: true
+      news_recheck: true
+    event_driven:
+      ttl_minutes: 45
+      stale_after_minutes: 15
+      max_price_drift_pct: 1.0
+      require_market_open: true
+      news_recheck: true
+      news_recheck_mandatory: true
+      reasoning: >-
+        The whole thesis is one event. A newer material headline can reverse it outright, so this
+        class carries the shortest window and a mandatory news re-check before execution.
+
+# How fast each data class decays. Fast data must be re-read at execution time; slow data
+# is expensive and is not refreshed just because someone clicked approve.
+data_freshness:
+  fast:                                    # re-read on every execution attempt
+    max_age_seconds: 120
+    fields: [price, account, cash, buying_power, positions, open_orders, exposure, drawdown, market_session]
+  medium:
+    max_age_minutes: 1440                  # news and company developments
+    fields: [news, company_developments, event_information]
+    event_driven_max_age_minutes: 60
+  slow:
+    max_age_days: 90                       # statements, cash flow, most macro after publication
+    fields: [financial_statements, balance_sheet, free_cash_flow, quarterly_fundamentals]
+
+revalidation:
+  # A fast deterministic re-check handles the common case. A full multi-agent reanalysis is
+  # reserved for a materially changed thesis, both to stay safe and to conserve Claude usage.
+  allow_size_reduction: true
+  min_reduction_ratio: 0.5                 # never execute less than half the approved idea silently
+  reanalysis_triggers:
+    - price_drift_beyond_class_band
+    - news_recheck_required_and_material_change
+    - ladder_level_escalated_since_proposal
+    - regime_worsened_since_proposal
+    - position_appeared_or_disappeared
+  invalidate_triggers:
+    - proposal_expired
+    - hard_risk_rejects_at_execution_time
+    - bucket_cash_insufficient_beyond_reduction
+    - market_closed
+    - broker_state_unavailable_or_inconsistent
+    - kill_switch_active
+  outcomes: [VALID, REDUCED, STALE, INVALIDATED, REANALYZE, REJECTED]
+
+approval:
+  required_always_for_strategies: [momentum, short, event_driven, options, crypto, leverage, margin]
+  approval_ttl_minutes: 60                 # an approval itself goes stale; re-approve after this
+  reasoning: >-
+    Approval is permission to execute the idea if current conditions still support it, never a
+    standing authorization. Both the proposal and the approval carry their own clocks.
+
+idempotency:
+  client_order_id_prefix: ct
+  # client_order_id = "<prefix>-<proposal_id>-<attempt>", mapped to the venue's own idempotency
+  # key (Robinhood: a ref_id UUID derived from it). The venue rejects a duplicate, which makes a
+  # retry after a timeout safe rather than a second position.
+  check_broker_before_submit: true
+  max_submit_attempts: 1                   # a timeout is resolved by reading state back, never by blind retry
+
+# ---------------------------------------------------------------------------
+# Robinhood Agentic Trading (Micro-Live). Real money. Everything here is off by default.
+# ---------------------------------------------------------------------------
+robinhood:
+  mcp_url: https://agent.robinhood.com/mcp/trading
+  token_file: state/robinhood_token.json     # OAuth tokens; gitignored, written 0600
+  connect_timeout_seconds: 60
+  call_timeout_seconds: 45
+  # Tool names are discovered from the server at connect time and matched against these
+  # candidates in order. Robinhood has renamed tools before, so a missing capability is a
+  # hard failure rather than an assumption. Add a name here if the server renames one.
+  tool_candidates:
+    accounts:        [get_accounts, get_account, list_accounts]
+    portfolio:       [get_portfolio, get_portfolios, get_account_portfolio]
+    positions:       [get_equity_positions, get_positions]
+    quotes:          [get_equity_quotes, get_quotes, get_quote]
+    orders:          [get_equity_orders, get_orders, list_orders]
+    place_order:     [place_equity_order, place_order]
+    cancel_order:    [cancel_equity_order, cancel_order]
+    review_order:    [review_equity_order, review_order]   # official pre-trade simulation and alerts
+    tradability:     [get_equity_tradability]     # per-account eligibility and fractional support
+  required_capabilities: [accounts, portfolio, positions, quotes, orders, place_order, review_order]
+  # Read access spans every Robinhood account, but orders are confined to the Agentic account.
+  # The account is identified from the accounts tool; a mismatch or ambiguity fails closed.
+  agentic_account:
+    match_field_candidates: [brokerage_account_type, account_type, type, deprecated_account_type]
+    match_values: [agentic, agentic_account, ira_agentic, agent]
+    account_number: null                     # optional pin, set after `ct-robinhood status`
+  # Robinhood's own pre-trade review is a separate safety layer, used in addition to ours.
+  use_broker_pretrade_review: true
+
+micro_live_execution:
+  enabled: false                             # master switch for real-money orders
+  bucket_name: micro_live
+  ledger_file: state/micro_live_portfolio.yaml   # reconciles against the Robinhood Agentic account, separate from the conceptual portfolio
+  risk_state_file: state/micro_live_risk_state.json   # its own drawdown high-water mark
+  max_capital_usd: 100                       # hard boundary; verified against the live account
+  capital_tolerance_usd: 5                   # allows for market drift above the funded amount
+  refuse_if_account_equity_above_usd: 150    # a clearly over-funded account halts trading outright
+  execution_mode: human_approval             # opening orders always need explicit confirmation
+  allow_autonomous_opening: false
+  permissions:
+    equities_long: true                      # the only thing enabled at this size
+    fractional: true
+    options: false                           # not justified at $100: contract sizing and decay
+    crypto: false                            # separate permission, state-restricted, higher risk
+    short_selling: false                     # margin borrowing is not enabled for Agentic accounts
+    margin: false
+    extended_hours: false
+  order_rules:
+    # Robinhood accepts a fractional quantity or a dollar amount only on a market order in
+    # regular hours. A $100 account cannot buy a whole share of a broad ETF, so fractional is
+    # mandatory and the order type follows from it. Mitigations for the lack of a limit price:
+    # the venue's own pre-trade review runs first and returns a live quote, our revalidation
+    # rejects the order if that quote has drifted from the analysis price, only highly liquid
+    # instruments are permitted, and order size is small.
+    order_type: market
+    time_in_force: gfd
+    market_hours: regular_hours
+    max_review_quote_drift_pct: 1.0      # the review's quote vs our revalidation price
+    max_spread_pct: 0.5                  # refuse to trade a wide book
+    min_order_usd: 10
+    max_single_order_usd: 40                 # no single order may commit more than 40% of the account
+    max_positions: 3
+    max_new_positions_per_day: 1
+    max_new_positions_per_week: 2
+  freshness_class: core_conservative
+  preflight_checks:                          # every one must pass before a real order is sent
+    - agentic_account_connected
+    - account_equity_within_capital_boundary
+    - hard_risk_active
+    - human_approval_active
+    - stale_proposal_protection_active
+    - execution_time_revalidation_active
+    - duplicate_protection_active
+    - reconciliation_active
+    - unsupported_strategies_disabled
+    - risk_parameters_acknowledged
+    - audit_logging_active
+    - research_runtime_has_no_broker_tools
+    - market_calendar_available
+    - order_state_followed_to_terminal
+
+# Micro-Live bucket limits. Same shape as the sandbox so the risk engine treats it generically.
+# Sized for a $100 account: one order is at most $40, at most three positions, one new per day.
