@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+runs/
+.env
+.env.*
+!.env.example
+state/risk_state.json
+state/micro_live_risk_state.json
+state/robinhood_token.json
+state/proposals.json
+state/fills.jsonl
+state/HALT
+.DS_Store

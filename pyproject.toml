@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "conservative-trading"
+version = "0.1.0"
+description = "Conservative, portfolio-aware wrapper around TradingAgents: subscription-backed LLM adapter, conservative policy step, deterministic risk enforcement (later stages)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Upstream research framework, pinned to the commit inspected on 2026-09-03 (v0.4.1 merge). Never vendored, never modified.
+    "tradingagents",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    # Official MCP Python SDK: exposes TradingAgents' own data tools to the Claude Code CLI.
+    "mcp>=1.23,<3",
+    # Mature exchange calendars: NYSE holidays, half days and session times, so execution
+    # never relies on hand-maintained holiday assumptions.
+    "exchange-calendars>=4.5,<5",
+    # Frontend-facing API. Chosen for the OpenAPI schema it publishes, which is the contract a
+    # frontend is generated against.
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
+
+[project.scripts]
+ct-research = "conservative_trading.cli:main"
+ct-risk-check = "conservative_trading.cli:risk_check_main"
+ct-scenarios = "conservative_trading.scenarios:main"
+ct-stage3 = "conservative_trading.stage3_scenarios:main"
+ct-approve = "conservative_trading.cli:approve_main"
+ct-proposals = "conservative_trading.cli:proposals_main"
+ct-robinhood = "conservative_trading.robinhood_cli:main"
+ct-api = "conservative_trading.api.app:main"
+ct-trigger = "conservative_trading.triggers:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[tool.uv.sources]
+tradingagents = { git = "https://github.com/TauricResearch/TradingAgents", rev = "9dee508c44662702281a8dbaad1f7b42179b5ba7" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["conservative_trading"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
