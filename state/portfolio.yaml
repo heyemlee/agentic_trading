@@ -1,0 +1,14 @@
+# state/portfolio.yaml
+# Conceptual portfolio and bucket ledger. From Stage 3 the broker is the source of truth for
+# cash, quantities and prices; this file answers what the broker cannot: which bucket owns a
+# symbol, and how cash is divided between buckets. Execution updates it after every fill.
+as_of: 2026-09-03
+currency: USD
+buckets:
+  core:
+    cash_usd: 2500
+  sandbox:
+    cash_usd: 500
+positions: []
+recent_opens: []
+notes: Initial state, all cash.
