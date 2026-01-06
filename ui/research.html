@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Research · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" data-i18n-title="rs.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="rs.title">Research</h1>
+    </div>
+  </section>
+
+  <!-- ── decision strength ─────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="confidence-chart">
+    <div class="container">
+      <div class="card">
+        <div class="row-between row-wrap" style="margin-bottom:16px;">
+          <p class="eyebrow" data-i18n="rs.floorChart">Decision strength against the trading floor</p>
+          <span class="chip" data-i18n="rs.floor">Floor 50</span>
+        </div>
+        <div id="conf-chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── run history ───────────────────────────────────────────────── -->
+  <section class="section" data-od-id="run-history">
+    <div class="container">
+      <div class="section-head"><h2 data-i18n="rs.runs">Runs</h2></div>
+      <div class="tabs" data-tabs role="tablist" aria-label="Filter runs">
+          <button class="tab" role="tab" id="tab-runs-all"      aria-controls="panel-runs-all"      aria-selected="true" data-i18n="common.all">All</button>
+          <button class="tab" role="tab" id="tab-runs-notrade"  aria-controls="panel-runs-notrade"  aria-selected="false" data-i18n="rs.noTrade">No trade</button>
+          <button class="tab" role="tab" id="tab-runs-proposal" aria-controls="panel-runs-proposal" aria-selected="false" data-i18n="rs.proposed">Proposed</button>
+        </div>
+      <div class="tabpanel" role="tabpanel" id="panel-runs-all" aria-labelledby="tab-runs-all"></div>
+      <div class="tabpanel" role="tabpanel" id="panel-runs-notrade" aria-labelledby="tab-runs-notrade" hidden></div>
+      <div class="tabpanel" role="tabpanel" id="panel-runs-proposal" aria-labelledby="tab-runs-proposal" hidden></div>
+    </div>
+  </section>
+
+  <!-- ── most recent decision ──────────────────────────────────────── -->
+  <section class="section" data-od-id="run-detail">
+    <div class="container">
+      <h2 style="margin-bottom:8px;" data-i18n="rs.recent">Most recent decision</h2>
+      <div class="card" id="recent-card"></div>
+    </div>
+  </section>
+
+  <!-- ── start a run ───────────────────────────────────────────────── -->
+  <section class="section" data-od-id="start-run">
+    <div class="container grid-2-1">
+      <div class="card">
+        <h2 data-i18n="rs.ask">Ask for fresh research</h2>
+        <p class="body-sm body-muted" style="margin-top:8px;">
+
+        </p>
+        <form id="run-form" style="margin-top:20px;">
+          <div class="grid-2" style="gap:16px;">
+            <div class="field">
+              <label for="f-ticker" data-i18n="rs.ticker">Ticker</label>
+              <input class="input" id="f-ticker" value="VTI" required pattern="[A-Za-z.\-]{1,10}" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="f-bucket" data-i18n="rs.bucket">Bucket</label>
+              <select class="select" id="f-bucket">
+                <option value="core" data-i18n="bucket.core">Core</option>
+                <option value="sandbox" data-i18n="bucket.sandbox">Sandbox</option>
+                <option value="micro_live" selected data-i18n="bucket.micro_live">Micro-Live</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-instrument" data-i18n="rs.instrument">Instrument</label>
+              <select class="select" id="f-instrument">
+                <option value="etf" selected>ETF</option>
+                <option value="stock" data-i18n="rs.stock">Stock</option>
+                <option value="auto" data-i18n="rs.autoDetect">Auto-detect</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="f-date" data-i18n="rs.tradeDate">Trade date</label>
+              <input class="input" id="f-date" type="date" value="2026-09-04" />
+            </div>
+          </div>
+          <div class="field" style="margin-top:16px;">
+            <label for="f-trigger" data-i18n="rs.trigger">Trigger</label>
+            <select class="select" id="f-trigger">
+              <option value="manual" selected data-i18n="rs.trgManual">Manual</option>
+              <option value="scheduled" data-i18n="rs.trgScheduled">Scheduled</option>
+              <option value="event" data-i18n="rs.trgEvent">Event</option>
+              <option value="reanalysis" data-i18n="rs.trgReanalysis">Reanalysis</option>
+            </select>
+          </div>
+          <p class="body-sm body-muted" style="margin-top:12px;" id="run-hint"></p>
+          <button class="btn btn-primary" type="submit" style="margin-top:16px;" data-od-id="cta-start-run" data-i18n="rs.start">Start the run</button>
+        </form>
+        <div id="run-progress"></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<dialog class="sheet" id="trace-sheet" data-od-id="trace-sheet">
+  <div class="sheet-inner">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="sheet-scroll">
+      <div class="trace-head" id="trace-head"></div>
+      <div id="trace-steps"></div>
+    </div>
+    <button class="btn btn-secondary" id="trace-close" style="margin-top:16px;" data-i18n="common.close">Close</button>
+  </div>
+</dialog>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script>
+(function () {
+  const C = window.Console, D = C.D;
+  C.mount('research');
+  C.wireTabs();
+
+  /* Everything below is re-run on every poll cycle. */
+  function render() {
+
+    const FLOOR = 50;
+
+    /* ── confidence bars — filled encoding, real values only ─────────── */
+    document.getElementById('conf-chart').innerHTML = '<div class="stack stack-4">' +
+      D.research.map((r) =>
+        '<div data-od-id="conf-' + r.run_id + '">' +
+          '<div class="row-between" style="margin-bottom:6px;">' +
+            '<span class="body-sm">' + r.ticker + ' · ' + C.bucket(r.bucket) +
+              ' <span class="body-muted">' + C.dateOnly(r.trade_date) + '</span></span>' +
+            '<span class="body-sm num">' + r.confidence + '</span>' +
+          '</div>' +
+          '<div style="position:relative;">' +
+            '<div class="meter-track" style="height:10px;">' +
+              '<div class="meter-fill' + (r.confidence < FLOOR ? ' is-warn' : ' is-accent') +
+              '" style="width:' + r.confidence + '%"></div></div>' +
+            '<span style="position:absolute;top:-3px;bottom:-3px;left:' + FLOOR +
+              '%;width:2px;background:var(--fg);" aria-hidden="true"></span>' +
+          '</div>' +
+        '</div>').join('') + '</div>';
+
+    /* ── run list ────────────────────────────────────────────────────── */
+    function runList(rows) {
+      if (!rows.length) {
+        return '<div class="empty"><p class="empty-title">' + C.t('rs.noRuns') + '</p>' +
+          '<p>' + C.t('rs.noRunsBody') + '</p></div>';
+      }
+      return '<div class="list">' + rows.map((r) => C.listRow({
+        id: 'run-row-' + r.run_id,
+        href: '#trace',
+        trace: r.run_id,
+        title: r.ticker + ' · ' + C.bucket(r.bucket),
+        sub: (r.final_action ? C.code(r.final_action) : C.t('ac.incomplete')) + ' · ' +
+             C.code(r.portfolio_manager_rating) + ' · ' +
+             C.t('rs.traceCalls', { n: r.llm_calls }) + ' · ' + C.clock(r.elapsed_seconds),
+        value: String(r.confidence),
+        note: C.dateOnly(r.trade_date),
+      })).join('') + '</div>';
+    }
+    document.getElementById('panel-runs-all').innerHTML = runList(D.research);
+    document.getElementById('panel-runs-notrade').innerHTML =
+      runList(D.research.filter((r) => r.final_action === 'NO_TRADE'));
+    document.getElementById('panel-runs-proposal').innerHTML =
+      runList(D.research.filter((r) => r.proposal_id));
+
+    /* Most recent decision — read from the record, not baked into markup. */
+    const last = (D.research || [])[0];
+    document.getElementById('recent-card').innerHTML = !last ? '' :
+      '<div class="section-head">' +
+        '<span class="chip chip-ink">' +
+          (last.final_action ? C.code(last.final_action) : C.t('ac.incomplete')) + '</span>' +
+        '<span class="body-sm body-muted mono">' + last.run_id + '</span></div>' +
+      '<h3 style="font-size:20px;">' + last.ticker + ' · ' + C.bucket(last.bucket) + ' · ' +
+        C.dateOnly(last.trade_date) + '</h3>' +
+      '<dl class="kv" style="margin-top:16px;">' +
+        '<div class="kv-row"><dt>' + C.t('rs.rating') + '</dt><dd>' +
+          C.code(last.portfolio_manager_rating) + '</dd></div>' +
+        '<div class="kv-row"><dt>' + C.t('rs.policyAction') + '</dt><dd>' +
+          (last.policy_action || '—') + '</dd></div>' +
+        '<div class="kv-row"><dt>' + C.t('rs.hardRiskVerdict') + '</dt><dd>' +
+          (last.hard_risk_verdict || '—') + '</dd></div>' +
+        '<div class="kv-row"><dt>' + C.t('rs.strength') + '</dt><dd>' +
+          last.confidence + ' / 100</dd></div>' +
+        '<div class="kv-row"><dt>' + C.t('rs.callsElapsed') + '</dt><dd>' +
+          last.llm_calls + ' · ' + C.clock(last.elapsed_seconds) + '</dd></div>' +
+        '<div class="kv-row"><dt>' + C.t('rs.proposal') + '</dt><dd>' +
+          (last.proposal_id || C.t('common.none')) + '</dd></div>' +
+      '</dl>';
+
+  }
+
+  C.live(['research', 'researchRun'], render);
+
+  /* ── POST /research → poll GET /research/{run_key} ───────────────── */
+  const hint = document.getElementById('run-hint');
+  const bucketSel = document.getElementById('f-bucket');
+  const paintHint = () => {
+    hint.textContent = bucketSel.value === 'micro_live'
+      ? C.t('rs.hintMicro') : C.t('rs.hintConceptual');
+  };
+  paintHint();
+  bucketSel.addEventListener('change', paintHint);
+
+  /* ── agent trace: GET /research/{run_id}/trace ────────────────────
+     The pipeline writes one report per agent under runs/<id>/reports. The
+     endpoint returns them in order, so a run reads as a sequence of steps. */
+  const traceSheet = document.getElementById('trace-sheet');
+  document.getElementById('trace-close').addEventListener('click', () => traceSheet.close());
+  traceSheet.addEventListener('click', (e) => { if (e.target === traceSheet) traceSheet.close(); });
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest && e.target.closest('[data-trace]');
+    if (!row) return;
+    e.preventDefault();
+    openTrace(row.getAttribute('data-trace'));
+  });
+
+  async function openTrace(runId) {
+    const head = document.getElementById('trace-head');
+    const list = document.getElementById('trace-steps');
+    head.innerHTML = '<p class="agent-state">' + C.escapeHtml(runId) + '</p>';
+    list.innerHTML = '<p class="body-sm body-muted" style="padding-top:12px;">' + C.t('rs.traceLoading') + '</p>';
+    traceSheet.showModal();
+
+    let t;
+    try {
+      t = await CT_API.fetchJSON('/research/' + encodeURIComponent(runId) + '/trace');
+    } catch (err) {
+      list.innerHTML = '<div class="banner" style="margin-top:12px;"><p>' +
+        C.t('rs.traceFailed', { err: C.escapeHtml(err.message) }) + '</p></div>';
+      return;
+    }
+
+    const usage = t.llm_usage || {};
+    head.innerHTML =
+      '<p class="agent-state">' + C.escapeHtml(t.ticker || runId) + ' · ' +
+        (t.final_action ? C.code(t.final_action) : C.t('home.noResult')) + '</p>' +
+      '<p class="agent-note">' + [
+        t.bucket ? C.bucket(t.bucket) : null,
+        t.trade_date ? C.dateOnly(t.trade_date) : null,
+        t.confidence != null ? C.t('rs.traceStrength', { c: t.confidence }) : null,
+        usage.calls ? C.t('rs.traceCalls', { n: usage.calls }) : null,
+        t.elapsed_seconds ? C.clock(t.elapsed_seconds) : null,
+        (t.analysts || []).length ? (t.analysts || []).join(' + ') : null,
+      ].filter(Boolean).map(C.escapeHtml).join(' · ') + '</p>';
+
+    let group = null;
+    list.innerHTML = (t.steps || []).map((st, i) => {
+      const gl = C.t('tg.' + st.group) === 'tg.' + st.group ? st.group_label : C.t('tg.' + st.group);
+      const gh = gl !== group
+        ? (group = gl, '<p class="trace-group">' + C.escapeHtml(group) + '</p>')
+        : '';
+      return gh +
+        '<button class="trace-step" type="button" aria-expanded="false" ' +
+          'aria-controls="trace-body-' + i + '">' +
+          '<span class="trace-num">' + st.order + '</span>' +
+          '<span class="trace-label">' + (C.t('tk.' + st.key) === 'tk.' + st.key ? C.escapeHtml(st.label) : C.t('tk.' + st.key)) + '</span>' +
+          '<span class="trace-size">' + (Math.round(st.chars / 100) / 10) + 'k</span>' +
+          C.CHEVRON +
+        '</button>' +
+        '<div class="trace-body md" id="trace-body-' + i + '" hidden>' + C.md(st.markdown || '') +
+          (st.truncated ? '<p class="body-sm body-muted">' + C.t('rs.truncated') + '</p>' : '') + '</div>';
+    }).join('') || '<p class="body-sm body-muted" style="padding-top:12px;">' + C.t('rs.traceEmpty') + '</p>';
+
+    list.querySelectorAll('.trace-step').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const body = document.getElementById(btn.getAttribute('aria-controls'));
+        const open = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', String(!open));
+        body.hidden = open;
+      });
+    });
+  }
+
+  const progress = document.getElementById('run-progress');
+
+  /* The backend streams the run's own stdout as `log_tail` (service.py:486).
+     That log is the agent working — show it, rather than a progress bar that
+     would be inventing a percentage nobody reports. */
+  function renderRun() {
+    const r = D.researchRun;
+    if (!r) return;
+    const running = r.state === 'RUNNING';
+    const tone = { RUNNING: 'chip-accent', COMPLETE: 'chip-ink',
+                   FAILED: 'chip-danger', CLAUDE_LIMIT_REACHED: 'chip-warn' }[r.state] || 'chip';
+    progress.innerHTML =
+      '<hr style="margin-block:20px;" />' +
+      '<div class="run-head">' +
+        '<span class="agent-dot' + (running ? ' is-live' : '') + '"></span>' +
+        '<span class="agent-state">' + C.code(r.state) + '</span>' +
+        '<span class="spacer"></span>' +
+        '<span class="chip ' + tone + '">' + C.t(running ? 'rs.polling' : 'rs.settled') + '</span>' +
+      '</div>' +
+      '<p class="body-sm body-muted" style="margin-top:6px;">' +
+        '<span class="mono">' + r.run_key + '</span>' +
+        (r.proposal_created ? ' · ' + C.t('rs.producedProposal') : '') + '</p>' +
+      '<pre class="logview" id="run-log"></pre>' +
+      (r.proposal_created
+        ? '<a class="btn btn-green btn-sm" href="approvals.html" style="margin-top:12px;">' + C.t('rs.reviewIt') + '</a>'
+        : '');
+    const log = document.getElementById('run-log');
+    log.textContent = r.log_tail || '';
+    log.scrollTop = log.scrollHeight;          /* follow the tail */
+  }
+  document.addEventListener('ct:data', renderRun);
+
+  /* POST /research is a write. It spends Claude quota and spawns a run, so it
+     obeys the same switch as every other write. */
+  document.getElementById('run-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      ticker: document.getElementById('f-ticker').value.trim().toUpperCase(),
+      bucket: bucketSel.value,
+      instrument_type: document.getElementById('f-instrument').value,
+      trade_date: document.getElementById('f-date').value,
+      trigger: document.getElementById('f-trigger').value,
+    };
+    progress.innerHTML = '<hr style="margin-block:20px;" />' +
+      '<p class="body-sm body-muted">' + C.t('rs.starting') + '</p>';
+    let res;
+    try {
+      res = await CT_API.post('/research', body);
+    } catch (err) {
+      progress.innerHTML = '<hr style="margin-block:20px;" />' +
+        '<div class="banner"><p>' + C.t('rs.startFailed', { err: err.message }) + '</p></div>';
+      return;
+    }
+    if (res.blocked) {
+      progress.innerHTML = '<hr style="margin-block:20px;" />' +
+        '<div class="banner"><p>' + C.t('rs.writesOff') + '</p></div>';
+      return;
+    }
+    CT_API.watchRun(res.run_key);
+  });
+
+})();
+</script>
+</body>
+</html>

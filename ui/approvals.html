@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Approvals · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" data-i18n-title="ap.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <div class="row-between row-wrap">
+        <h1 data-i18n="ap.title">Approvals</h1>
+        <span class="chip" id="queue-count">—</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;" data-od-id="live-conditions" id="live-conditions">
+    <div class="container">
+      <div class="banner" data-od-id="banner-current-refusal">
+        <span class="banner-mark" id="banner-icon"></span>
+        <p><strong data-i18n="ap.wouldNot">Would not execute now.</strong> <span id="wouldnot-why"></span></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;" data-od-id="queue-empty-wrap">
+    <div class="container">
+      <div class="empty" id="queue-empty" hidden>
+        <p class="empty-title" data-i18n="ap.empty">Nothing is waiting on you</p>
+        <p data-i18n="ap.emptyBody">…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── the proposal ──────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="proposal-detail">
+    <div class="container stack stack-6">
+
+      <div class="card card-real" data-od-id="detail-head">
+        <div class="row-between row-wrap" style="margin-bottom:16px;">
+          <span class="chip chip-accent" id="d-bucket">—</span>
+          <span class="body-sm body-muted mono" id="d-id">—</span>
+        </div>
+
+        <p class="eyebrow" id="d-shape">—</p>
+        <p class="figure" style="margin-top:6px;" id="d-headline">—</p>
+        <p class="body-sm body-muted" style="margin-top:8px;" id="d-weight"></p>
+
+        <div style="margin-top:20px;">
+          <div class="row-between body-sm body-muted" style="margin-bottom:6px;">
+            <span id="fresh-note">Freshness · core_conservative</span>
+            <span class="num" id="fresh-left">—</span>
+          </div>
+          <div class="meter-track"><div class="meter-fill is-accent" id="fresh-meter" style="width:0%"></div></div>
+        </div>
+
+        <dl class="kv" style="margin-top:20px;">
+          <div class="kv-row"><dt data-i18n="ap.strength">Decision strength</dt><dd id="d-strength">—</dd></div>
+          <div class="kv-row"><dt data-i18n="ap.reference">Reference price</dt><dd id="d-ref">—</dd></div>
+          <div class="kv-row"><dt data-i18n="ap.drift">Tolerated drift</dt><dd id="d-drift">—</dd></div>
+          <div class="kv-row"><dt data-i18n="ap.dataQuality">Data quality</dt><dd id="d-quality">—</dd></div>
+          <div class="kv-row"><dt data-i18n="ap.created">Created</dt><dd id="detail-created">—</dd></div>
+        </dl>
+      </div>
+
+      <!-- ── actions ─────────────────────────────────────────────── -->
+      <div class="card" data-od-id="actions">
+        <div class="btn-row">
+          <button class="btn btn-green" id="btn-approve" data-od-id="cta-approve">—</button>
+          <button class="btn btn-secondary" id="btn-revalidate" data-od-id="cta-revalidate" data-i18n="ap.checkFirst">—</button>
+        </div>
+        <div class="row" style="justify-content:center;gap:4px;margin-top:8px;">
+          <button class="btn btn-ghost" id="btn-reanalyze" data-od-id="cta-reanalyze" data-i18n="ap.freshResearch">—</button>
+          <span class="body-sm body-muted" aria-hidden="true">·</span>
+          <button class="btn btn-ghost" id="btn-reject" data-od-id="cta-reject" data-i18n="ap.decline">—</button>
+        </div>
+        <div id="result-slot"></div>
+      </div>
+
+      <!-- ── tabs ────────────────────────────────────────────────── -->
+      <div data-od-id="detail-body">
+        <div class="tabs" data-tabs role="tablist" aria-label="Proposal detail" style="margin-bottom:16px;">
+          <button class="tab" role="tab" id="tab-thesis"  aria-controls="panel-thesis"  aria-selected="true" data-i18n="ap.tabCase">The case</button>
+          <button class="tab" role="tab" id="tab-doubt"   aria-controls="panel-doubt"   aria-selected="false" data-i18n="ap.tabDoubt">Blind spots</button>
+          <button class="tab" role="tab" id="tab-rules"   aria-controls="panel-rules"   aria-selected="false" data-i18n="ap.tabRules">Hard Risk</button>
+          <button class="tab" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" data-i18n="ap.tabHistory">History</button>
+        </div>
+
+        <div class="tabpanel card" role="tabpanel" id="panel-thesis" aria-labelledby="tab-thesis">
+          <div class="stack stack-6">
+            <div>
+              <p class="eyebrow" data-i18n="ap.thesis">Investment thesis</p>
+              <p style="margin-top:8px;max-width:74ch;" id="t-thesis"></p>
+            </div>
+            <hr />
+            <div class="grid-2" style="gap:24px;">
+              <div>
+                <p class="eyebrow" data-i18n="ap.bull">Bull case</p>
+                <p class="body-sm body-muted" style="margin-top:8px;" id="t-bull"></p>
+              </div>
+              <div>
+                <p class="eyebrow" data-i18n="ap.bear">Bear case</p>
+                <p class="body-sm body-muted" style="margin-top:8px;" id="t-bear"></p>
+              </div>
+            </div>
+            <hr />
+            <dl class="kv kv-wide">
+              <div class="kv-row"><dt data-i18n="ap.entry">Entry</dt><dd id="t-entry"></dd></div>
+              <div class="kv-row"><dt data-i18n="ap.exit">Exit</dt><dd id="t-exit"></dd></div>
+              <div class="kv-row"><dt data-i18n="ap.holding">Holding period</dt><dd id="t-hold"></dd></div>
+              <div class="kv-row"><dt data-i18n="ap.whySize">Why this size</dt><dd id="t-policy"></dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="tabpanel card" role="tabpanel" id="panel-doubt" aria-labelledby="tab-doubt" hidden>
+          <div class="stack stack-6">
+            <div>
+              <p class="eyebrow" data-i18n="ap.missing">Missing information</p>
+              <div class="list list-inset" id="t-missing"></div>
+            </div>
+            <div>
+              <p class="eyebrow" data-i18n="ap.risks">Primary risks</p>
+              <div class="list list-inset" id="t-risks"></div>
+            </div>
+            <hr />
+            <dl class="kv kv-wide">
+              <div class="kv-row"><dt data-i18n="ap.wrong">What could make this wrong</dt><dd id="t-wrong"></dd></div>
+              <div class="kv-row"><dt data-i18n="ap.nothing">Why doing nothing may be better</dt><dd id="t-nothing"></dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="tabpanel card" role="tabpanel" id="panel-rules" aria-labelledby="tab-rules" hidden>
+          <div class="section-head">
+            <h2 data-i18n="ap.tabRules">Hard Risk</h2>
+            <span class="chip chip-accent" id="rule-count">—</span>
+          </div>
+          <div id="rule-list"></div>
+        </div>
+
+        <div class="tabpanel card" role="tabpanel" id="panel-history" aria-labelledby="tab-history" hidden>
+          <div class="list list-inset" id="history-list"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ── dialogs ────────────────────────────────────────────────────── -->
+<dialog class="modal" id="approve-dialog" data-od-id="approve-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2 id="approve-dialog-title">—</h2>
+    <div class="field" style="margin-top:20px;">
+      <label for="approve-note" data-i18n="ap.note">Note</label>
+      <textarea class="textarea" id="approve-note" data-i18n-ph="ap.notePh" placeholder=""></textarea>
+    </div>
+    <label class="row row-top body-sm" style="margin-top:16px;gap:10px;">
+      <input type="checkbox" id="approve-confirm" style="margin-top:4px;width:18px;height:18px;flex:none;" />
+      <span data-i18n="ap.ack">…</span>
+    </label>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-green" id="approve-submit" disabled data-i18n="ap.authoriseBtn">—</button>
+    <button class="btn btn-secondary" id="approve-cancel" data-i18n="common.cancel">—</button>
+  </div>
+</dialog>
+
+<dialog class="modal" id="reject-dialog" data-od-id="reject-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2 data-i18n="ap.declineTitle">Decline this proposal</h2>
+    <p class="body-sm body-muted" style="margin-top:8px;" data-i18n="ap.declineBody">…</p>
+    <div class="field" style="margin-top:20px;">
+      <label for="reject-reason" data-i18n="ap.reason">Reason</label>
+      <textarea class="textarea" id="reject-reason" data-i18n-ph="ap.reasonPh" placeholder=""></textarea>
+    </div>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-dark" id="reject-submit" data-i18n="ap.decline">—</button>
+    <button class="btn btn-secondary" id="reject-cancel" data-i18n="ap.keepOpen">—</button>
+  </div>
+</dialog>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script>
+(function () {
+  const C = window.Console, D = C.D;
+  C.mount('approvals');
+  C.wireTabs();
+
+  document.getElementById('banner-icon').innerHTML = C.ICON.lock;
+
+  const set = (id, v) => { document.getElementById(id).textContent = v; };
+  const plainRows = (arr) => (arr || []).map((x) => C.listRow({ title: x })).join('');
+
+  /* Re-read the detail from window.CT on every call — the polling layer
+     replaces it in place, so nothing here may capture it in a closure. */
+  function renderDetail() {
+    const p = D.proposalDetail;
+    const detail = document.querySelector('[data-od-id="proposal-detail"]');
+    const empty = document.getElementById('queue-empty');
+    if (!p) {
+      /* No open proposal. Show that, rather than leaving the last render up. */
+      detail.hidden = true;
+      empty.hidden = false;
+      document.getElementById('live-conditions').hidden = true;
+      set('queue-count', C.t('common.open', { n: C.openCount() }));
+      return;
+    }
+    detail.hidden = false;
+    empty.hidden = true;
+    document.getElementById('live-conditions').hidden = false;
+    const r = p.research;
+
+    /* the whole head is read from the proposal, never baked into markup */
+    set('d-bucket', (p.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.bucket(p.bucket));
+    set('d-id', p.proposal_id);
+    set('d-shape', C.t('ap.orderShape', { action: C.code(p.action) }));
+    set('d-headline', p.ticker + ' ' + C.usd(p.notional_usd));
+    /* The position cap only exists inside the HR08 rule text, not as a field.
+       Rather than parse prose, say the part that is structured. */
+    const cap = p.hard_risk && p.hard_risk.position_cap_pct;
+    set('d-weight', p.target_weight_pct == null ? ''
+      : cap != null
+        ? C.t('ap.weight', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket), cap: C.pct(cap) })
+        : C.t('ap.weightNoCap', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket) }));
+    set('d-strength', C.t('ap.notProbability', { c: p.confidence }));
+    set('d-ref', p.reference_price != null ? C.usd(p.reference_price) : '—');
+    set('d-drift', p.freshness && p.freshness.max_price_drift_pct != null
+      ? '±' + C.pct(p.freshness.max_price_drift_pct) : '—');
+    set('d-quality', (p.research && p.research.data_quality) || '—');
+    set('detail-created', C.dateTime(p.created_at));
+    set('queue-count', C.t('common.open', { n: C.openCount() }) + ' · ' + C.psCopy(p.status));
+    document.getElementById('btn-approve').textContent =
+      C.t('ap.approve', { v: C.usd(p.notional_usd) });
+    document.getElementById('approve-dialog-title').textContent =
+      C.t('ap.authorise', { v: C.usd(p.notional_usd), t: p.ticker });
+    const why = document.getElementById('wouldnot-why');
+    if (why) {
+      const blocked = ((D.microLive || {}).blocking || []);
+      why.textContent = [
+        (D.health.market || {}).is_open ? null : C.t('home.marketClosed'),
+        blocked.length ? C.t('home.blocking', { ids: blocked.join(', ') }) : null,
+      ].filter(Boolean).join(' · ');
+      document.getElementById('live-conditions').hidden = !why.textContent;
+    }
+
+    /* the case */
+    set('t-thesis', r.investment_thesis);
+    set('t-bull', r.bull_case);
+    set('t-bear', r.bear_case);
+    set('t-entry', r.entry_logic);
+    set('t-exit', r.exit_logic);
+    set('t-hold', r.expected_holding_period);
+    set('t-policy', (r.policy_reasons || []).join('; '));
+
+    /* blind spots */
+    document.getElementById('t-missing').innerHTML = plainRows(r.missing_information);
+    document.getElementById('t-risks').innerHTML = plainRows(r.primary_risks);
+    set('t-wrong', r.what_could_make_this_wrong);
+    set('t-nothing', r.why_doing_nothing_may_be_better);
+
+    /* hard risk */
+    const rules = p.hard_risk.rules || [];
+    set('rule-count', C.t('ap.rulesPass', { n: rules.filter((x) => x.passed).length, m: rules.length }));
+    document.getElementById('rule-list').innerHTML = rules.map((x) => C.gateRow(x)).join('');
+
+    /* history */
+    document.getElementById('history-list').innerHTML = (p.history || []).map((h) =>
+      C.listRow({ title: C.titleise(h.event), sub: h.detail, note: C.dateTime(h.at) })).join('');
+
+    tick();
+  }
+
+  /* The freshness clock ticks locally between polls so the countdown stays
+     smooth; handoff §15 asks for exactly this. */
+  function tick() {
+    const p = D.proposalDetail;
+    const meter = document.getElementById('fresh-meter');
+    if (!p || !meter) return;
+    const f = C.freshnessNow(p);
+    set('fresh-left', C.t('common.left', { d: C.duration(f.remaining) }));
+    set('fresh-note', C.code(f.state) + ' · ' + C.duration(f.age) + ' / ' +
+      f.ttl.toLocaleString('en-US') + 'm');
+    meter.style.width = f.pctUsed.toFixed(2) + '%';
+    meter.className = 'meter-fill ' +
+      (f.state === 'EXPIRED' ? 'is-bad' : f.state === 'STALE' ? 'is-warn' : 'is-accent');
+  }
+  setInterval(tick, 1000);
+
+  /* ── actions ─────────────────────────────────────────────────────── */
+  const slot = document.getElementById('result-slot');
+  const approveBtn = document.getElementById('btn-approve');
+
+  function panel(title, tone, message, lines, extra) {
+    slot.innerHTML =
+      '<div class="card ' + (tone === 'accent' ? 'card-real' : 'card-quiet') +
+        '" style="margin-top:20px;" data-od-id="result-panel">' +
+        '<div class="row-between row-wrap" style="margin-bottom:10px;">' +
+          '<span class="chip' + (tone === 'accent' ? ' chip-accent' : '') + '">' + title + '</span>' +
+          '<span class="body-sm body-muted mono">' +
+            C.dateTime(new Date(C.snapshotNow()).toISOString()) + '</span>' +
+        '</div>' +
+        '<p class="body-sm" style="max-width:74ch;">' + message + '</p>' +
+        (lines && lines.length
+          ? '<div class="list list-inset" style="margin-top:8px;">' +
+              lines.map((x) => C.listRow({ title: x })).join('') + '</div>'
+          : '') +
+        (extra || '') +
+      '</div>';
+  }
+
+  const pid = () => (D.proposalDetail || {}).proposal_id;
+  const blockedPanel = (verb) => panel(C.t('ap.writesOff'), 'quiet',
+    C.t('ap.writesOffBody', { verb: C.t(verb) }), []);
+  const errPanel = (verb, err) => panel(C.t('ap.failed'), 'quiet',
+    C.t('ap.failedBody', { verb: C.t(verb), err: C.escapeHtml(err.message) }), []);
+
+  /* Whatever the endpoint returns is what gets rendered. Never declare a fill
+     before reading `status`; a refusal is a correct result. */
+  function resultPanel(res) {
+    const done = res.status === 'EXECUTED' || res.status === 'PARTIALLY_FILLED';
+    const o = res.order;
+    const extra = o
+      ? '<hr style="margin-block:16px;" /><dl class="kv">' +
+          '<div class="kv-row"><dt>' + C.t('ap.clientOrderId') + '</dt><dd>' + C.escapeHtml(o.client_order_id || '—') + '</dd></div>' +
+          '<div class="kv-row"><dt>' + C.t('ap.typeStatus') + '</dt><dd>' + C.escapeHtml((o.order_type || '—') + ' · ' + (o.status || '—')) + '</dd></div>' +
+          '<div class="kv-row"><dt>' + C.t('ap.filled') + '</dt><dd>' + (o.filled_quantity != null ? o.filled_quantity : '—') +
+            (o.filled_avg_price != null ? ' @ ' + C.usd(o.filled_avg_price) : '') + '</dd></div>' +
+          (o.notional != null ? '<div class="kv-row"><dt>' + C.t('ap.notional') + '</dt><dd>' + C.usd(o.notional) + '</dd></div>' : '') +
+        '</dl>' +
+        '<a class="btn btn-secondary btn-sm" href="activity.html" style="margin-top:16px;">' + C.t('ap.seeActivity') + '</a>'
+      : '';
+    panel(C.code(res.status) || res.outcome || C.t('ap.result'), done ? 'accent' : 'quiet',
+      C.escapeHtml(res.message || res.error || ''), res.reasons || [], extra);
+  }
+
+  /* GET /proposals/{id}/revalidate — a read, so it needs no write flag. */
+  document.getElementById('btn-revalidate').addEventListener('click', async () => {
+    panel(C.t('ap.checking'), 'quiet', C.t('ap.checkingBody'), []);
+    try {
+      const res = await CT_API.fetchJSON('/proposals/' + encodeURIComponent(pid()) + '/revalidate');
+      panel(C.t('ap.dryRun', { o: res.outcome || '—' }), 'quiet',
+        C.t('ap.dryRunBody'), res.reasons || []);
+    } catch (err) { errPanel('ap.verbCheck', err); }
+  });
+
+  const dlg = document.getElementById('approve-dialog');
+  const confirmBox = document.getElementById('approve-confirm');
+  const submitBtn = document.getElementById('approve-submit');
+  approveBtn.addEventListener('click', () => {
+    confirmBox.checked = false; submitBtn.disabled = true; dlg.showModal();
+  });
+  confirmBox.addEventListener('change', () => { submitBtn.disabled = !confirmBox.checked; });
+  document.getElementById('approve-cancel').addEventListener('click', () => dlg.close());
+
+  /* POST /proposals/{id}/approve — authorises the idea. The backend still
+     revalidates and may refuse; that refusal is the expected outcome. */
+  submitBtn.addEventListener('click', async () => {
+    dlg.close();
+    approveBtn.disabled = true;
+    panel(C.t('ap.revalidating'), 'quiet', C.t('ap.revalidatingBody'), []);
+    try {
+      const res = await CT_API.post('/proposals/' + encodeURIComponent(pid()) + '/approve', {
+        note: document.getElementById('approve-note').value.trim() || null,
+        confirm: true,
+      });
+      if (res.blocked) { blockedPanel('ap.verbApprove'); approveBtn.disabled = false; return; }
+      resultPanel(res);
+      approveBtn.textContent = C.t('ap.approved');
+      CT_API.readOnce('proposals'); CT_API.readOnce('proposalDetail');
+    } catch (err) { errPanel('ap.verbApprove', err); approveBtn.disabled = false; }
+  });
+
+  const rdlg = document.getElementById('reject-dialog');
+  document.getElementById('btn-reject').addEventListener('click', () => rdlg.showModal());
+  document.getElementById('reject-cancel').addEventListener('click', () => rdlg.close());
+
+  /* POST /proposals/{id}/reject */
+  document.getElementById('reject-submit').addEventListener('click', async () => {
+    rdlg.close();
+    try {
+      const res = await CT_API.post('/proposals/' + encodeURIComponent(pid()) + '/reject', {
+        reason: document.getElementById('reject-reason').value.trim() || null,
+      });
+      if (res.blocked) return blockedPanel('ap.verbDecline');
+      approveBtn.disabled = true;
+      panel(C.code(res.status || 'REJECTED'), 'quiet',
+        C.escapeHtml(res.message || '') || C.t('ap.rejected'), res.reasons || []);
+      CT_API.readOnce('proposals');
+    } catch (err) { errPanel('ap.verbDecline', err); }
+  });
+
+  /* POST /proposals/{id}/reanalyze — marks it and starts a fresh run. */
+  document.getElementById('btn-reanalyze').addEventListener('click', async () => {
+    try {
+      const res = await CT_API.post('/proposals/' + encodeURIComponent(pid()) + '/reanalyze', {});
+      if (res.blocked) return blockedPanel('ap.verbReanalyze');
+      approveBtn.disabled = true;
+      panel(C.code(res.status) || C.t('ap.reanalysisStarted'), 'quiet',
+        C.escapeHtml(res.message || '') || C.t('ap.reanalysisBody'),
+        res.reasons || (res.run_key ? ['run ' + res.run_key] : []));
+      CT_API.readOnce('proposals');
+    } catch (err) { errPanel('ap.verbReanalyze', err); }
+  });
+
+  /* Every action above calls the real endpoint. CT_API.writesEnabled gates
+     the POSTs and ships false, so a prototype cannot fire one by accident. */
+  C.live(['proposals', 'proposalDetail', 'health'], renderDetail);
+})();
+</script>
+</body>
+</html>

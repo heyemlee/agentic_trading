@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Activity · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" data-i18n-title="ac.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="ac.title">Activity</h1>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;" data-od-id="orders">
+    <div class="container grid-2">
+      <div class="card" data-od-id="fills">
+        <div class="section-head"><h2 data-i18n="ac.fills">Recorded fills</h2>
+          <span class="chip" id="fill-count">—</span>
+        </div>
+        <div id="fills-body"></div>
+      </div>
+      <div class="card" data-od-id="open-orders">
+        <div class="section-head">
+          <h2 data-i18n="ac.open">Open at the venue</h2>
+          <span class="chip" id="open-count">—</span>
+        </div>
+        <div id="open-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="audit">
+    <div class="container">
+      <div class="section-head">
+        <h2 data-i18n="ac.audit">Audit trail</h2></div>
+      <div class="tabs" data-tabs role="tablist" aria-label="Filter the audit trail">
+          <button class="tab" role="tab" id="tab-audit-all"       aria-controls="panel-audit-all"       aria-selected="true" data-i18n="ac.everything">Everything</button>
+          <button class="tab" role="tab" id="tab-audit-decisions" aria-controls="panel-audit-decisions" aria-selected="false" data-i18n="ac.decisions">Decisions</button>
+          <button class="tab" role="tab" id="tab-audit-proposals" aria-controls="panel-audit-proposals" aria-selected="false" data-i18n="ac.proposals">Proposals</button>
+        </div>
+      <div class="card">
+        <div class="tabpanel" role="tabpanel" id="panel-audit-all" aria-labelledby="tab-audit-all"></div>
+        <div class="tabpanel" role="tabpanel" id="panel-audit-decisions" aria-labelledby="tab-audit-decisions" hidden></div>
+        <div class="tabpanel" role="tabpanel" id="panel-audit-proposals" aria-labelledby="tab-audit-proposals" hidden></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script>
+(function () {
+  const C = window.Console, D = C.D;
+  C.mount('activity');
+  C.wireTabs();
+
+  /* Everything below is re-run on every poll cycle. */
+  function render() {
+
+    const o = D.orders;
+    document.getElementById('fill-count').textContent = C.t('ac.recorded', { n: o.fills.length });
+    document.getElementById('open-count').textContent = o.error
+      ? C.t('ac.venueUnreachable') : C.t('ac.live', { n: o.open_orders.length });
+
+    document.getElementById('fills-body').innerHTML = o.fills.length
+      ? '<div class="list">' + o.fills.map((f) => C.listRow({
+          title: f.symbol + ' · ' + f.side,
+          sub: C.dateTime(f.at) + ' · ' + C.bucket(f.bucket),
+          value: C.usd(f.notional),
+          note: f.quantity + ' @ ' + C.usd(f.price),
+        })).join('') + '</div>'
+      : '<div class="empty" data-od-id="empty-fills">' +
+          '<p class="empty-title">' + C.t('ac.noFills') + '</p></div>';
+
+    document.getElementById('open-body').innerHTML = o.open_orders.length
+      ? '<div class="list">' + o.open_orders.map((x) => C.listRow({
+          title: x.symbol + ' · ' + x.side,
+          sub: x.status,
+          value: (x.filled_quantity || 0) + ' / ' + x.quantity,
+          note: x.filled_avg_price ? C.usd(x.filled_avg_price) : C.t('ac.unfilled'),
+        })).join('') + '</div>'
+      : o.error
+        ? '<div class="empty" data-od-id="error-open">' +
+            '<p class="empty-title">' + C.t('ac.venueError') + '</p><p>' + o.error + '</p></div>'
+        : '<div class="empty" data-od-id="empty-open">' +
+            '<p class="empty-title">' + C.t('ac.noOpen') + '</p></div>';
+
+
+    /* ── audit trail ─────────────────────────────────────────────────── */
+    const events = [];
+    D.research.forEach((r) => events.push({
+      at: r.created_at, kind: 'decision',
+      title: (r.final_action ? C.code(r.final_action) : C.t('ac.incomplete')) + ' · ' + r.ticker,
+      sub: 'Rating ' + r.portfolio_manager_rating + ', strength ' + r.confidence + ', hard risk ' +
+           (r.hard_risk_verdict || 'not reached') + ' · ' + r.run_id,
+    }));
+    D.proposalDetail.history.forEach((h) => events.push({
+      at: h.at, kind: 'proposal',
+      title: C.titleise(h.event) + ' · ' + D.proposalDetail.ticker,
+      sub: h.detail + ' · ' + D.proposalDetail.proposal_id,
+    }));
+    events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+    const auditList = (rows) => '<div class="list list-inset">' + rows.map((e) => C.listRow({
+      title: e.title, sub: e.sub, note: C.dateTime(e.at),
+    })).join('') + '</div>';
+    document.getElementById('panel-audit-all').innerHTML = auditList(events);
+    document.getElementById('panel-audit-decisions').innerHTML =
+      auditList(events.filter((e) => e.kind === 'decision'));
+    document.getElementById('panel-audit-proposals').innerHTML =
+      auditList(events.filter((e) => e.kind === 'proposal'));
+  }
+
+  C.live(['orders', 'research', 'proposalDetail'], render);
+})();
+</script>
+</body>
+</html>

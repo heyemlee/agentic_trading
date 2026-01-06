@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>System · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" data-i18n-title="sy.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="sy.title">System</h1>
+    </div>
+  </section>
+
+  <!-- ── kill switch ───────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="kill-switch">
+    <div class="container">
+      <div class="card" id="switch-card">
+        <span class="chip" id="switch-pill">—</span>
+        <h2 style="margin-top:12px;" id="switch-title">—</h2>
+        <p class="body-sm body-muted" style="margin-top:6px;" id="switch-copy"></p>
+        <div class="btn-row" style="margin-top:20px;">
+          <button class="btn btn-dark" id="switch-btn" data-od-id="cta-kill-switch">—</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── health ────────────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="health">
+    <div class="container grid-3">
+      <div class="card" data-od-id="health-market">
+        <p class="eyebrow" id="mk-label">—</p>
+        <p class="figure figure-sm" style="margin-top:4px;" id="mk-state">—</p>
+        <dl class="kv" style="margin-top:12px;">
+          <div class="kv-row"><dt data-i18n="sy.nextOpen">Next open</dt><dd id="mk-open">—</dd></div>
+          <div class="kv-row"><dt data-i18n="sy.nextClose">Next close</dt><dd id="mk-close">—</dd></div>
+        </dl>
+      </div>
+
+      <div class="card" data-od-id="health-claude">
+        <p class="eyebrow" data-i18n="sy.runtime">Research runtime</p>
+        <p class="figure figure-sm" style="margin-top:4px;" id="cl-state">—</p>
+        <dl class="kv" style="margin-top:12px;">
+          <div class="kv-row"><dt data-i18n="sy.billing">Billing</dt><dd id="cl-billing">—</dd></div>
+          <div class="kv-row"><dt data-i18n="sy.callsToday">Calls today</dt><dd id="cl-calls">—</dd></div>
+          <div class="kv-row"><dt data-i18n="sy.lastCall">Last call</dt><dd id="cl-last">—</dd></div>
+        </dl>
+      </div>
+
+      <div class="card card-real" data-od-id="health-money">
+        <p class="eyebrow" data-i18n="sy.realMoney">Real money</p>
+        <p class="figure figure-sm" style="margin-top:4px;" id="ml-state">—</p>
+        <dl class="kv" style="margin-top:12px;">
+          <div class="kv-row"><dt data-i18n="sy.connected">Connected</dt><dd id="ml-conn">—</dd></div>
+          <div class="kv-row"><dt data-i18n="sy.account">Account</dt><dd id="ml-acct">—</dd></div>
+          <div class="kv-row"><dt data-i18n="sy.blockingGate">Blocking gate</dt><dd id="ml-block">—</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── notices ───────────────────────────────────────────────────── -->
+  <section class="section" data-od-id="warnings">
+    <div class="container">
+      <div class="section-head"><h2 data-i18n="sy.notices">Notices</h2>
+        <span class="chip" id="warn-count">—</span>
+      </div>
+      <div class="stack stack-3" id="warning-list"></div>
+    </div>
+  </section>
+
+</main>
+
+<dialog class="modal" id="switch-dialog" data-od-id="switch-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2 id="dialog-title">—</h2>
+    <p class="body-sm body-muted" style="margin-top:8px;" id="dialog-copy"></p>
+    <div class="field" style="margin-top:20px;" id="reason-field">
+      <label for="switch-reason" data-i18n="ap.reason">Reason (optional)</label>
+      <textarea class="textarea" id="switch-reason" data-i18n-ph="sy.reasonPh" placeholder=""></textarea>
+    </div>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-dark" id="switch-confirm">—</button>
+    <button class="btn btn-secondary" id="switch-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script>
+(function () {
+  const C = window.Console, D = C.D;
+  C.mount('system');
+  C.wireTabs();
+
+  /* ── notices — re-read on every poll cycle ───────────────────────── */
+  function renderHealth() {
+    const warnings = D.health.warnings || [];
+    const h = D.health, ml = D.microLive || {}, acct = ml.account || {};
+    const $ = (id) => document.getElementById(id);
+
+    /* every figure below is read, not baked into the markup */
+    $('mk-label').textContent = C.t('sy.market', { cal: (h.market || {}).calendar || '—' });
+    $('mk-state').textContent = C.t((h.market || {}).is_open ? 'sy.open' : 'sy.closed');
+    $('mk-open').textContent = (h.market || {}).next_open
+      ? C.dateTime((h.market.next_open || '').replace(' ', 'T')) : '—';
+    $('mk-close').textContent = (h.market || {}).next_close
+      ? C.dateTime((h.market.next_close || '').replace(' ', 'T')) : '—';
+    $('cl-state').textContent = C.code((h.claude || {}).state);
+    $('cl-billing').textContent = (h.claude || {}).billing || '—';
+    $('cl-calls').textContent = (h.claude || {}).calls_today != null ? h.claude.calls_today : '—';
+    $('cl-last').textContent = (h.claude || {}).last_call_at
+      ? C.dateTime(h.claude.last_call_at) : '—';
+    $('ml-state').textContent = C.code(ml.status);
+    $('ml-conn').textContent = ml.connected == null ? '—'
+      : C.t(ml.connected ? 'sy.yes' : 'sy.no') + (ml.connected ? ' · Robinhood' : '');
+    $('ml-acct').textContent = acct.account_id_masked || '—';
+    $('ml-block').textContent = (ml.blocking || []).join(', ') || '—';
+
+    document.getElementById('warn-count').textContent = C.t('common.open', { n: warnings.length });
+    document.getElementById('warning-list').innerHTML = warnings.length
+      ? warnings.map((w, i) =>
+          '<div class="banner" data-od-id="warning-' + i + '">' +
+            '<span class="banner-mark">' + C.ICON.info + '</span><p>' + w + '</p></div>').join('')
+      : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
+        '</span><p>' + C.t('home.noNotices') + '</p></div>';
+    paint();
+  }
+
+
+
+  /* ── kill switch: POST /system/pause | /system/resume ────────────── */
+  const pill = document.getElementById('switch-pill');
+  const title = document.getElementById('switch-title');
+  const copy = document.getElementById('switch-copy');
+  const btn = document.getElementById('switch-btn');
+  const dlg = document.getElementById('switch-dialog');
+
+  function paint() {
+    const paused = C.isPaused();
+    pill.textContent = C.code(C.systemStatus());
+    pill.className = 'chip' + (paused ? ' chip-warn' : ' chip-accent');
+    title.textContent = C.t(paused ? 'sy.pausedTitle' : 'sy.readyTitle');
+    copy.textContent = C.t(paused ? 'sy.pausedBody' : 'sy.readyBody');
+    btn.textContent = C.t(paused ? 'sy.release' : 'sy.engage');
+    btn.className = paused ? 'btn btn-green' : 'btn btn-dark';
+    C.paintNavStatus();
+  }
+
+  btn.addEventListener('click', () => {
+    const paused = C.isPaused();
+    document.getElementById('dialog-title').textContent = C.t(paused ? 'sy.release' : 'sy.engage');
+    document.getElementById('dialog-copy').textContent =
+      C.t(paused ? 'sy.releaseBody' : 'sy.engageBody');
+    document.getElementById('reason-field').hidden = paused;
+    document.getElementById('switch-confirm').textContent =
+      C.t(paused ? 'sy.releaseBtn' : 'sy.pauseBtn');
+    dlg.showModal();
+  });
+  document.getElementById('switch-cancel').addEventListener('click', () => dlg.close());
+  /* POST /system/pause | /system/resume — the only state this console writes. */
+  document.getElementById('switch-confirm').addEventListener('click', async () => {
+    dlg.close();
+    const wasPaused = C.isPaused();
+    btn.disabled = true;
+    try {
+      const res = wasPaused
+        ? await CT_API.post('/system/resume', {})
+        : await CT_API.post('/system/pause', {
+            reason: document.getElementById('switch-reason').value.trim() ||
+                    'paused from the interface',
+          });
+      if (res.blocked) {
+        copy.textContent = C.t('sy.switchWritesOff');
+        btn.disabled = false;
+        return;
+      }
+      /* Trust the server's answer, not the local guess. */
+      C.setPaused(res.paused !== undefined ? !!res.paused : !wasPaused);
+      CT_API.readOnce('health');
+    } catch (err) {
+      copy.textContent = C.t('sy.switchFailed', { err: err.message });
+    } finally {
+      btn.disabled = false;
+      paint();
+    }
+  });
+
+  C.live(['health', 'microLive'], renderHealth);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Portfolio · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" data-i18n-title="pf.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="pf.title">Portfolio</h1>
+      <p class="figure figure-lg" style="margin-top:12px;" id="pf-total">—</p>
+      <p class="body-sm body-muted" style="margin-top:6px;" id="pf-asof"></p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;" data-od-id="allocation">
+    <div class="container">
+      <div class="card">
+        <p class="eyebrow" data-i18n="pf.allocation">Allocation across buckets</p>
+        <div class="sleeve" style="margin-top:12px;" id="alloc-bar" aria-hidden="true"></div>
+        <div class="list list-inset" style="margin-top:8px;" id="alloc-legend"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="buckets">
+    <div class="container stack stack-4" id="bucket-cards"></div>
+  </section>
+
+</main>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script>
+(function () {
+  const C = window.Console, D = C.D;
+  C.mount('portfolio');
+
+  /* Everything below is re-run on every poll cycle. */
+  function render() {
+
+    const order = ['core', 'sandbox', 'micro_live'];
+    const B = D.portfolio.buckets;
+    const total = D.portfolio.total_equity_usd;
+
+    const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--green)' };
+
+    /* the header is live data, not a value baked into the markup */
+    C.tickValue(document.getElementById('pf-total'), C.usd(total));
+    document.getElementById('pf-asof').textContent =
+      C.t('pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
+
+    /* ── allocation ──────────────────────────────────────────────────── */
+    document.getElementById('alloc-bar').innerHTML = order.map((k) =>
+      '<span style="width:' + ((B[k].equity_usd / total) * 100).toFixed(2) +
+      '%;background:' + SHADE[k] + ';"></span>').join('');
+    document.getElementById('alloc-legend').innerHTML = order.map((k) =>
+      C.listRow({
+        title: '<span class="row" style="gap:8px;"><span class="dot" style="background:' +
+          SHADE[k] + ';"></span>' + C.bucket(k) + '</span>',
+        value: C.usd(B[k].equity_usd),
+        note: C.t('pf.ofTotal', { p: C.pct((B[k].equity_usd / total) * 100) }),
+      })).join('');
+
+    /* ── bucket cards ────────────────────────────────────────────────── */
+    document.getElementById('bucket-cards').innerHTML = order.map((key) => {
+      const b = B[key];
+      const real = b.is_real_money;
+      const positions = b.positions.length
+        ? '<div class="list list-inset" style="margin-top:16px;">' + b.positions.map((pos) =>
+            C.listRow({
+              title: pos.symbol, sub: pos.classification || '',
+              value: C.usd(pos.market_value),
+              note: pos.quantity + ' @ ' + C.usd(pos.price) + ' · ' + C.pct(pos.unrealized_pct),
+            })).join('') + '</div>'
+        : '<div class="empty" style="margin-top:16px;" data-od-id="empty-' + key + '">' +
+            '<p class="empty-title">' + C.t('pf.noPositions') + '</p>' +
+            '<p>' + C.t('pf.noPositionsBody') + '</p></div>';
+
+      return '<div class="card' + (real ? ' card-real' : '') + '" data-od-id="portfolio-' + key + '">' +
+        '<div class="section-head">' +
+          '<span class="chip' + (real ? ' chip-accent' : '') + '">' +
+            (real ? C.t('bucket.real', { venue: C.titleise(b.venue || '—') })
+                  : C.t('bucket.conceptual')) + '</span>' +
+          '<span class="body-sm body-muted">' +
+            C.t('pf.positions', { n: b.position_count }) + '</span>' +
+        '</div>' +
+        '<h2>' + C.bucket(key) + '</h2>' +
+        '<p class="figure" style="margin-top:6px;">' + C.usd(b.equity_usd) + '</p>' +
+        '<p class="body-sm body-muted" style="margin-top:4px;">' +
+          C.t('bucket.ofAllocation', { v: C.usd(b.allocation_usd, 0) }) + '</p>' +
+        '<dl class="kv" style="margin-top:16px;">' +
+          '<div class="kv-row"><dt>' + C.t('pf.cash') + '</dt><dd>' + C.usd(b.cash_usd) + '</dd></div>' +
+          '<div class="kv-row"><dt>' + C.t('pf.positionsValue') + '</dt><dd>' + C.usd(b.positions_value_usd) + '</dd></div>' +
+          Object.entries(b.sleeves_pct).map(([k, v]) =>
+            '<div class="kv-row"><dt>' + C.t('pf.sleeve', { k: C.titleise(k) }) + '</dt><dd>' + C.pct(v) + '</dd></div>').join('') +
+        '</dl>' + positions +
+      '</div>';
+    }).join('');
+  }
+
+  C.live(['portfolio'], render);
+})();
+</script>
+</body>
+</html>
