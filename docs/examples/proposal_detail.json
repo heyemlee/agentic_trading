@@ -1,0 +1,139 @@
+{
+  "proposal_id": "2026-09-08-VTI-f4c6ec7f",
+  "status": "WAITING_FOR_APPROVAL",
+  "ticker": "VTI",
+  "bucket": "micro_live",
+  "is_real_money": true,
+  "action": "BUY",
+  "strategy": "long_only_diversified",
+  "notional_usd": 35.0,
+  "target_weight_pct": 35.0,
+  "confidence": 78,
+  "requires_human_approval": true,
+  "created_at": "2026-09-04T01:33:01.850005+00:00",
+  "approved_at": null,
+  "freshness": {
+    "state": "VALID",
+    "label": "current",
+    "detail": "core_conservative: 0 min old, inside the 960 min window",
+    "class": "core_conservative",
+    "ttl_minutes": 2880,
+    "age_minutes": 0.0,
+    "max_price_drift_pct": 3.0
+  },
+  "reference_price": 381.42,
+  "run_id": "2026-09-08_VTI_a1b2c3d4",
+  "history": [
+    {
+      "at": "2026-09-04T01:33:01.850146+00:00",
+      "event": "created",
+      "detail": "BUY VTI in micro_live for $35.00 (long_only_diversified)"
+    }
+  ],
+  "world_at_proposal": {
+    "ladder_level": "NORMAL",
+    "regime": "NORMAL",
+    "portfolio_equity_usd": 100.0,
+    "bucket_cash_usd": 100.0,
+    "data_quality": "partial"
+  },
+  "research": {
+    "portfolio_manager_rating": "Buy",
+    "policy_action": "BUY",
+    "confidence": 78,
+    "data_quality": "partial",
+    "market_risk_level": "NORMAL",
+    "policy_reasons": [
+      "confidence 78 below full-size floor 75 -> normal position"
+    ],
+    "investment_thesis": "VTI is the most mandate-compliant instrument available: ~3,600 holdings, a 0.03% expense ratio, deep liquidity and no single-name risk. Price has held the 50-day average on a retest and momentum has turned back up, while the position would be the account's first and only exposure.",
+    "bull_case": "Broad, cheap, liquid exposure with no issuer risk; the support retest held and the trend structure is intact; entry at a modest discount to the recent high.",
+    "bear_case": "The macro backdrop is unverified this cycle, cap-weighting concentrates roughly a third of assets in ten mega-cap names, and a broad-market entry inherits that correlation.",
+    "primary_risks": [
+      "unverified macro backdrop (FRED unavailable)",
+      "mega-cap concentration inside a nominally diversified fund",
+      "single-position account: no diversification across holdings yet"
+    ],
+    "what_could_make_this_wrong": "A rate-path surprise or an earnings-led repricing of the mega-cap complex.",
+    "why_doing_nothing_may_be_better": "Cash carries no drawdown risk and the account has no clock forcing it to be invested.",
+    "missing_information": [
+      "FRED macro series unavailable (no API key)",
+      "no fundamentals pass for an ETF instrument"
+    ],
+    "entry_logic": "Single tranche of roughly one third of the account at the current quote, regular hours only.",
+    "exit_logic": "Reviewed if the position falls 12% from cost or the drawdown ladder reaches WARNING.",
+    "expected_holding_period": "indefinite; this is a core-style long-term holding"
+  },
+  "hard_risk": {
+    "verdict": "APPROVE",
+    "final_action": "BUY",
+    "notional_usd": 35.0,
+    "post_trade_weight_pct": 35.0,
+    "requires_human_approval": true,
+    "rules": [
+      {
+        "id": "HR00",
+        "name": "preconditions",
+        "passed": true,
+        "detail": "proposal complete and bucket known"
+      },
+      {
+        "id": "HR01",
+        "name": "kill switch",
+        "passed": true,
+        "detail": "kill switch clear"
+      },
+      {
+        "id": "HR02",
+        "name": "drawdown ladder (micro_live)",
+        "passed": true,
+        "detail": "micro_live ladder level NORMAL"
+      },
+      {
+        "id": "HR03",
+        "name": "market regime",
+        "passed": true,
+        "detail": "regime NORMAL: SPY above its 200-day average; VIX 15.2"
+      },
+      {
+        "id": "HR15",
+        "name": "strategy policy",
+        "passed": true,
+        "detail": "sandbox strategy 'long_only_diversified' carries no special gate"
+      },
+      {
+        "id": "HR17",
+        "name": "micro-live master switch",
+        "passed": true,
+        "detail": "real-money execution is enabled for the Micro-Live bucket"
+      },
+      {
+        "id": "HR06",
+        "name": "sizing",
+        "passed": true,
+        "detail": "$35.00 toward a 35.0% target of the micro_live allocation"
+      },
+      {
+        "id": "HR07",
+        "name": "bucket funding",
+        "passed": true,
+        "detail": "micro_live cash $100.00 vs order $35.00; the other bucket is never a funding source"
+      },
+      {
+        "id": "HR08",
+        "name": "position cap",
+        "passed": true,
+        "detail": "post-trade 35.0% vs cap 40.0%"
+      }
+    ],
+    "failed_rule_ids": [],
+    "advisories": [],
+    "ladder": {
+      "effective_level_for_bucket": "NORMAL"
+    },
+    "regime": {
+      "level": "NORMAL",
+      "available": true
+    }
+  }
+}

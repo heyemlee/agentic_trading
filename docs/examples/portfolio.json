@@ -1,0 +1,46 @@
+{
+  "as_of": "2026-09-02",
+  "buckets": {
+    "core": {
+      "allocation_usd": 2500.0,
+      "cash_usd": 2500.0,
+      "positions_value_usd": 0.0,
+      "equity_usd": 2500.0,
+      "position_count": 0,
+      "is_real_money": false,
+      "venue": null,
+      "positions": [],
+      "sleeves_pct": {
+        "cash": 100.0
+      }
+    },
+    "sandbox": {
+      "allocation_usd": 500.0,
+      "cash_usd": 500.0,
+      "positions_value_usd": 0.0,
+      "equity_usd": 500.0,
+      "position_count": 0,
+      "is_real_money": false,
+      "venue": null,
+      "positions": [],
+      "sleeves_pct": {
+        "cash": 100.0
+      }
+    },
+    "micro_live": {
+      "allocation_usd": 100.0,
+      "cash_usd": 100.0,
+      "positions_value_usd": 0.0,
+      "equity_usd": 100.0,
+      "position_count": 0,
+      "is_real_money": true,
+      "venue": "robinhood",
+      "positions": [],
+      "sleeves_pct": {
+        "cash": 100.0
+      }
+    }
+  },
+  "errors": {},
+  "total_equity_usd": 3100.0
+}

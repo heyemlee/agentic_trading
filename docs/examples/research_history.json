@@ -1,0 +1,47 @@
+[
+  {
+    "run_id": "2026-09-02_VTI_2bf5a8b5",
+    "ticker": "VTI",
+    "bucket": "micro_live",
+    "trade_date": "2026-09-02",
+    "created_at": "2026-09-04T00:09:52.569799+00:00",
+    "portfolio_manager_rating": "Hold",
+    "policy_action": "NO_TRADE",
+    "confidence": 38,
+    "hard_risk_verdict": "NO_ACTION",
+    "final_action": "NO_TRADE",
+    "proposal_id": null,
+    "llm_calls": 13,
+    "elapsed_seconds": 420.9
+  },
+  {
+    "run_id": "2026-09-02_VTI_f819eaa6",
+    "ticker": "VTI",
+    "bucket": "core",
+    "trade_date": "2026-09-02",
+    "created_at": "2026-09-03T21:05:24.598310+00:00",
+    "portfolio_manager_rating": "Hold",
+    "policy_action": "NO_TRADE",
+    "confidence": 57,
+    "hard_risk_verdict": "NO_ACTION",
+    "final_action": "NO_TRADE",
+    "proposal_id": null,
+    "llm_calls": 13,
+    "elapsed_seconds": 582.7
+  },
+  {
+    "run_id": "2026-09-02_VTI_56717678",
+    "ticker": "VTI",
+    "bucket": "core",
+    "trade_date": "2026-09-02",
+    "created_at": "2026-09-03T20:37:50.909749+00:00",
+    "portfolio_manager_rating": "Hold",
+    "policy_action": "NO_TRADE",
+    "confidence": 44,
+    "hard_risk_verdict": null,
+    "final_action": null,
+    "proposal_id": null,
+    "llm_calls": 7,
+    "elapsed_seconds": 302.9
+  }
+]

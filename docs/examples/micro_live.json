@@ -1,0 +1,120 @@
+{
+  "status": "DISABLED",
+  "enabled": false,
+  "connected": true,
+  "connect_error": null,
+  "capital_boundary_usd": 100.0,
+  "account": {
+    "account_id_masked": "\u2022\u2022\u2022\u20220000",
+    "cash": 100.0,
+    "equity": 100.0,
+    "buying_power": 100.0,
+    "type": "individual"
+  },
+  "preflight_ready": false,
+  "checks": [
+    {
+      "id": "PF00",
+      "name": "micro-live master switch",
+      "passed": false,
+      "detail": "micro_live_execution.enabled is false: real-money orders are disabled (this is the intended default)"
+    },
+    {
+      "id": "PF04",
+      "name": "human approval active",
+      "passed": true,
+      "detail": "execution_mode=human_approval, autonomous opening=False"
+    },
+    {
+      "id": "PF05",
+      "name": "stale-proposal protection active",
+      "passed": true,
+      "detail": "5 freshness classes configured; the micro-live class is core_conservative"
+    },
+    {
+      "id": "PF06",
+      "name": "execution-time revalidation active",
+      "passed": true,
+      "detail": "outcomes: ['VALID', 'REDUCED', 'STALE', 'INVALIDATED', 'REANALYZE', 'REJECTED']"
+    },
+    {
+      "id": "PF07",
+      "name": "duplicate protection active",
+      "passed": true,
+      "detail": "client-order-id prefix 'ct', broker checked before submit, max attempts 1"
+    },
+    {
+      "id": "PF09",
+      "name": "unsupported strategies disabled",
+      "passed": true,
+      "detail": "disabled: options, crypto, short_selling, margin, extended_hours; enabled: equities_long, fractional"
+    },
+    {
+      "id": "PF09b",
+      "name": "sensitive strategies permanently human-gated",
+      "passed": true,
+      "detail": "always human-approved: ['momentum', 'short', 'event_driven', 'options', 'crypto', 'leverage', 'margin']"
+    },
+    {
+      "id": "PF10",
+      "name": "audit logging active",
+      "passed": true,
+      "detail": "micro-live ledger micro_live_portfolio.yaml present, fills log and proposal store directories writable, decision records under runs/"
+    },
+    {
+      "id": "PF08",
+      "name": "reconciliation active",
+      "passed": true,
+      "detail": "every snapshot is rebuilt from broker cash, quantities and prices; an unattributed position or a cash mismatch beyond 0.1% fails closed; order state is followed to a terminal state through the venue's own order-status tool and only filled quantity is recorded"
+    },
+    {
+      "id": "PF12",
+      "name": "market calendar available",
+      "passed": true,
+      "detail": "XNYS exchange calendar loaded, holidays and half days included; market open now: False"
+    },
+    {
+      "id": "PF13",
+      "name": "risk parameters acknowledged",
+      "passed": true,
+      "detail": "all risk parameters are explicit values"
+    },
+    {
+      "id": "PF11",
+      "name": "research runtime has no broker tools",
+      "passed": true,
+      "detail": "built-in tools disabled, strict MCP config, only our data tools exposed (mcp__ta__get_stock_data); no trading tool is reachable by the model"
+    },
+    {
+      "id": "PF03",
+      "name": "hard risk active",
+      "passed": true,
+      "detail": "the deterministic layer runs at proposal time and again at execution time"
+    },
+    {
+      "id": "PF01",
+      "name": "agentic account connected",
+      "passed": true,
+      "detail": "account \u2022\u2022\u2022\u20224118, equity $100.00, cash $100.00, trading blocked: False"
+    },
+    {
+      "id": "PF02",
+      "name": "account equity within the capital boundary",
+      "passed": true,
+      "detail": "equity $100.00 vs boundary $100.00 (+$5.00 tolerance)"
+    }
+  ],
+  "blocking": [
+    "PF00"
+  ],
+  "permissions": {
+    "equities_long": true,
+    "fractional": true,
+    "options": false,
+    "crypto": false,
+    "short_selling": false,
+    "margin": false,
+    "extended_hours": false
+  },
+  "execution_mode": "human_approval"
+}
