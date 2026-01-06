@@ -1,0 +1,11 @@
+# state/micro_live_portfolio.yaml
+# Bucket ledger for the Micro-Live experiment. Reconciles against the real Robinhood Agentic
+# account, so cash here must match that account's cash. Execution updates it after every fill.
+as_of: 2026-09-03
+currency: USD
+buckets:
+  micro_live:
+    cash_usd: 100
+positions: []
+recent_opens: []
+notes: Agentic account funded with $100, all cash. Real-money execution still disabled.
