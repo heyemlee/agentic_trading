@@ -1,0 +1,156 @@
+**Agentic Trading 项目评审与个人使用方案**
+
+评审日期：2026-09-03（America/Los_Angeles）。代码基线：7d39fa7。
+
+结论：架构方向合理，研究、规则、人工审批和券商边界已建立，前端适合继续完善。当前更适合称为“有完整流程雏形的个人投资研究与审批工具”；实盘退出、持续对账、并发一致性、访问控制与真实数据展示仍需完善。建议先修可靠性，再建立手机私有访问，之后验证研究价值。
+
+**评审与验证范围**
+
+- 阅读后端研究、策略、风险、执行、券商、API、存储及前端七个页面的代码。
+- 执行现有离线测试：124 passed，1 条依赖弃用警告，36.73 秒。没有提交真实订单或开启实盘。
+- 在浏览器检查桌面和 390×844 手机尺寸，重点查看首页、审批页和研究页；预览使用静态页面与示例数据，未做真实手机或真实交易验收。
+- 使用假的业务服务验证 API：无身份、无请求体、带外站 Origin 的 approve/resume 请求仍进入处理函数并返回 200。测试没有触及真实服务状态。这证明服务端没有相关校验，不等于所有浏览器都能绕过各自的本地网络限制。
+- 另用离线内存对象验证总梯级、产品分类、缺失数据条件；用离线 JavaScript 环境验证样例/实时混用、暂停状态覆盖与未转义 HTML。
+- 本文提出改进建议，未修改业务实现、部署服务或开放远程访问。测试通过不证明实盘可靠性，也不证明投资收益。
+
+**1. 项目已经具备什么**
+
+研究链路是 TradingAgents 多角色分析，经 Claude Code CLI 运行，再进入保守策略与确定性风控。模型提供研究和建议，Python 决定是否允许与金额。提案需要人工审批，执行前再次读取行情、账户与风险状态；券商访问集中在适配器内。
+
+Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当前实盘总开关关闭。资金边界、回撤梯级、过期提案、客户端订单标识、研究报告留痕都是值得保留的设计。但这些控制的存在不能代替跨模块与故障场景验证。
+
+前端采用静态 HTML/CSS/JS，与 FastAPI 一起服务，七个页面覆盖首页、组合、审批、研究、风险、活动、系统。底部导航、较大输入控件、安全区与折叠报告已考虑手机。现阶段没有必要为此重写 React 或原生 App。
+
+**2. 开放交易操作前优先修复的问题**
+
+**A. 卖出与减仓金额为零，导致无法执行。**
+
+[风险引擎](/Users/l/Desktop/agentic_trading/conservative_trading/risk/engine.py:209) 对已有持仓的 SELL/REDUCE 返回 APPROVE，但金额固定为 0。[执行复核](/Users/l/Desktop/agentic_trading/conservative_trading/execution.py:269) 将新金额与批准金额取最小值，再因低于最低订单金额而拒绝。
+
+建议：SELL 按可卖持仓数量，REDUCE 按明确目标差额定量；检查碎股、小额余仓、已有卖单占用数量。验证持仓→提案→批准→部分/全部卖出→记账的完整流程。理由：风险降低必须能真正完成，单测只检查风控 verdict 会漏掉此问题。
+
+**B. 部分成交、延迟成交和重启恢复没有闭合。**
+
+[券商轮询](/Users/l/Desktop/agentic_trading/conservative_trading/broker/robinhood.py:573) 最多等待约 30 秒。[执行代码](/Users/l/Desktop/agentic_trading/conservative_trading/execution.py:425) 随后把 pending/partial 也存为 EXECUTED，[后续执行](/Users/l/Desktop/agentic_trading/conservative_trading/execution.py:316) 直接返回。当前没有持续同步剩余成交的 worker；订单查询只是读取和展示。
+
+建议：将提案状态和订单状态分开，保留 SUBMITTING、SUBMITTED、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED、UNKNOWN；持久保存订单意图、券商订单号与已入账成交量。后台及启动时查询未终结/未知订单，只入账新增成交量。理由：提交成功不等于成交完成，手机超时也不意味着订单失败，盲目重试或只读本地账本都会产生错误。
+
+**C. 审批 API 没有身份校验；确认参数默认同意。**
+
+[approve 路由](/Users/l/Desktop/agentic_trading/conservative_trading/api/app.py:148) 的 confirm 默认为 true，请求体也可省略。API 当前没有登录与 Origin 校验。[审批记录](/Users/l/Desktop/agentic_trading/conservative_trading/api/service.py:391) 将批准人固定写成 investor，无法追溯实际身份。
+
+建议：由可信访问网关或应用会话识别唯一用户，在服务器端实施写权限；审批要求显式确认、提案 ID/版本与幂等键，并记真实身份。交易审批与恢复交易可要求短时间内重新验证。若用 Cookie 会话，增加 CSRF 保护与严格 Origin/Host 检查。前端按钮和 writesEnabled 都不能充当安全边界。CORS 也不是登录或完整的 CSRF 防护，参见 [OWASP CSRF 指南](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)。
+
+**D. 无锁整文件存储不适合手机、多页面与研究并发。**
+
+[ProposalStore](/Users/l/Desktop/agentic_trading/conservative_trading/proposals.py:187) 和[账本写入](/Users/l/Desktop/agentic_trading/conservative_trading/portfolio.py:342) 都是先读、修改、写固定临时文件再替换，缺少事务/执行锁。存在并发时的记录覆盖和丢更新风险；本次未进行真实并发订单复现。
+
+建议：单机使用 SQLite，事务保存状态转换和额度预留，并串行处理同一账户的订单。事务不应跨越漫长网络调用：先原子记录意图与预留，再调用券商，再原子记结果。确定性券商订单 ID 仍需保留。理由：同一订单防重不能解决两条不同提案同时使用同一笔现金；单 Uvicorn worker 也不能自动消除线程/子进程并发。
+
+**E. 报价的接收时间冒充市场时间。**
+
+[get_quote](/Users/l/Desktop/agentic_trading/conservative_trading/broker/robinhood.py:404) 使用本地当前时间为报价打戳，之后的新鲜度检查无法识别券商返回的旧成交价。Micro-Live 实际使用市价单，计算的参考 limit 不是实际成交价格上限。
+
+建议：分开记录市场时间与接收时间，验证原始时间、买卖价差与数据来源；市场时间缺失时明确拒绝或降级。理由：刚收到的数据可能已经过时，研究价格、预览价格和成交价格也不应混为一谈。
+
+**3. 前端专项建议**
+
+| 当前情况 | 建议 | 理由 |
+|---|---|---|
+| [API 地址固定为本机](/Users/l/Desktop/agentic_trading/ui/assets/api.js:26) | 使用相对路径，由同一 HTTPS 入口代理 UI 和 API | 手机的 127.0.0.1 指向手机；域名、不同端口及 HTTPS 访问也会出问题 |
+| [全部写请求默认关闭](/Users/l/Desktop/agentic_trading/ui/assets/api.js:173) | 界面清楚显示当前可用能力；完成服务端权限后再接通写操作 | 目前研究、审批、拒绝、暂停按钮都不能完成对应 POST，不能仅改此变量就上线 |
+| [任一接口成功即标全局在线](/Users/l/Desktop/agentic_trading/ui/assets/api.js:111) | 演示模式独立；真实模式从空数据开始，逐模块标记来源、时效与错误 | 已复现组合接口失败、健康接口成功后，示例组合仍展示而警告消失 |
+| [暂停状态优先读 localStorage](/Users/l/Desktop/agentic_trading/ui/assets/console.js:76) | 暂停只以服务器确认状态为准，失败提示单独保留 | 手机、电脑、服务端状态可能不一致；离线时应显示“未知”而非“已暂停” |
+| [弹窗提交时重新读取动态提案 ID](/Users/l/Desktop/agentic_trading/ui/approvals.html:361) | 打开弹窗即固定 ID、版本、账户、金额、方向；变化后重新确认 | 15 秒轮询可更换队首提案，已勾选的确认可能用于另一笔 |
+| [部分外部文本直接拼入 HTML](/Users/l/Desktop/agentic_trading/ui/assets/console.js:400) | 普通文本用 textContent；富文本采用严格允许列表，并加合适 CSP | 研究、风险、警告文本可成为注入入口；同源脚本执行会影响交易操作台 |
+| [运行句柄仅存在浏览器内存](/Users/l/Desktop/agentic_trading/ui/assets/api.js:57) | 后端提供运行中任务列表，刷新/跨页后按 run ID 恢复 | 手机切后台、关页、断网不应丢失研究状态或诱发重复运行 |
+| [活动页直接访问详情 history](/Users/l/Desktop/agentic_trading/ui/activity.html:106) | 正确处理无提案，提供服务器分页审计事件流 | 空详情会抛错，单条提案历史不能替代完整活动记录 |
+
+审批页还使用 microLive 的拦截信息，但[轮询清单](/Users/l/Desktop/agentic_trading/ui/approvals.html:419) 未包含 microLive；应确保所有交易相关字段来自当前真实状态。按钮文案也应根据结果区分“批准但未提交”“已提交”“部分成交”“已成交”和“拒绝”。
+
+首页建议把真实 Micro-Live 净值放在最显眼处，概念账户单独展示。把概念资金和真钱合成一个醒目的总资产数，容易误解；净入金也应与投资收益分离。研究全文保留在展开详情中，手机首屏优先展示操作、金额、理由、最大风险、阻挡原因和数据更新时间。
+
+**4. 是否需要部署，以及怎么部署**
+
+只在电脑前使用时，运行本地 ct-api 即可。希望手机随时查看/审批，需要一台持续在线的主机和经过身份控制的入口；不一定需要购买云服务器。
+
+推荐初期结构：手机浏览器 → Tailscale 私有 HTTPS → 持续在线的个人 Mac → FastAPI + 同源 UI → 研究进程/订单同步 → 本地持久化。
+
+理由：沿用当前 Claude CLI 登录、Robinhood OAuth 和本地文件目录，迁移最少。Tailscale Serve 支持把本机服务通过 HTTPS 提供给同一私有网络，且遵循网络访问规则，见 [Tailscale Serve 官方文档](https://tailscale.com/docs/features/tailscale-serve)。只允许本人账号和设备访问该端口。
+
+推荐实施顺序：
+
+1. 修复前述交易、安全与真实数据问题；首先保持实盘关闭验证远程只读。
+2. 前端请求改相对路径；API 与 /ui/ 始终使用同一来源。
+3. 用固定服务账号、绝对工作目录和锁定依赖运行应用，采用单实例执行 worker。开发和长期运行使用不同状态目录。
+4. 在 Mac 与手机配置 Tailscale，限制本人访问，启用 Serve 所需 HTTPS。
+5. 以下仅为配置完成后的启动示例，本次未执行部署命令：
+
+       cd /Users/l/Desktop/agentic_trading
+       uv sync --frozen
+       uv run ct-api --host 127.0.0.1 --port 8787
+
+   另一个终端启动私有入口：
+
+       tailscale serve 8787
+
+   手机连接 Tailscale，打开命令返回的 HTTPS 地址加 /ui/。
+
+6. 稳定后用 macOS launchd 管理 API 与 worker，指定工作目录、PATH、日志、重启策略；配置供电与睡眠行为。手机关闭网页不影响后台任务，但主机睡眠/关机会影响它。
+7. 验证启动恢复、掉线、重复点击、拒绝订单与暂停，再由本人决定是否启用当前小额实盘。
+
+如果不想在手机安装网络客户端，可考虑“域名 + Cloudflare Tunnel + Access”，Access 仅放行本人身份，覆盖 UI 和所有 API 路径，并验证身份断言、堵住绕过网关直连后端的路径。Tunnel 负责连接，Access 负责身份，两者职责不同，参见 [Cloudflare 自托管应用文档](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。使用这种入口也不必先迁移主机。
+
+当个人电脑无法保持在线时，再考虑常开小主机或单台云 VM。云部署需要重新验证 Claude CLI 登录持久化、Robinhood OAuth 回调与刷新、数据备份和权限；本次没有验证这些在云环境下可行。当前分钟级子进程研究、后台同步和本地持久化要求，不适合直接搬到短生命周期无服务器函数。无需先引入 Kubernetes 或多节点数据库。
+
+**5. 登录需要分三层理解**
+
+| 登录/授权 | 作用 | 建议 |
+|---|---|---|
+| 控制台身份 | 证明现在操作的是本人 | Tailscale 私有身份或 Access/OIDC 网关起步；无需开放注册。写接口识别已验证身份并审计 |
+| Claude 登录 | 后端研究运行时使用订阅 | 保留在服务主机；手机不需要登录 Claude。到期/额度耗尽应显示明确状态并通知 |
+| Robinhood OAuth | 后端读取账户/提交授权范围内订单 | 保留在服务主机，刷新失败要求本人重新连接；手机不保存券商 token |
+
+如果采用应用会话，使用安全 Cookie、过期与撤销机制，不将券商密钥或会话令牌塞进前端 localStorage。手机丢失时应能撤销设备访问与会话。可在实盘审批与恢复交易时要求短时重新验证；只读访问保持便捷。
+
+**6. 日常手机流程与容易遗漏的运行问题**
+
+期望流程：系统按计划完成研究 → 有待审批/失败/风险状态变化时通知 → 手机查看原始理由和当前条件 → 固定提案版本后确认 → 后端复核并提交 → 手机看到真实订单进展与最终结果。网页关闭不取消任务；没有确认的提案按时效过期，不应自动追单。
+
+| 场景 | 需要的行为及理由 |
+|---|---|
+| 手机断线或点击后超时 | 显示提交结果未知，按请求 ID 查状态；避免鼓励立即重复下单 |
+| 主机断电/重启 | 先恢复订单与对账，确认一致后才允许新订单；恢复旧备份不能直接继续交易 |
+| 研究卡死/额度不足 | 持久任务状态、超时、有限并发、重复任务合并；[当前后台线程](/Users/l/Desktop/agentic_trading/conservative_trading/api/service.py:443) 和日志关键字不足以提供可靠恢复 |
+| 多设备暂停/恢复 | 以服务器状态为准；区分“禁止新单”与“取消已挂单”，不能假设暂停会撤掉券商现有订单 |
+| 主机已离线 | 手机远程暂停也无法到达主机；紧急时应能直接在 Robinhood 查看/处理现有订单 |
+| 开市/收市与时区 | 调度明确 America/New_York，以交易日历识别假日/半日市；研究默认日期由后端给出最近完成交易日 |
+| 运行一段时间后日志增长 | 保留研究证据、审批与成交审计，做好轮转、磁盘空间告警与备份 |
+| 更新应用 | 先停止新执行、记录未完成订单、备份与迁移状态，再发布固定版本；保留回滚路径 |
+| 通知频率 | 只通知需审批、执行结果、对账失败、连接失效与重要风控变化；避免每次轮询发消息 |
+| 券商 token 与数据 | 0600 权限是基础，另需磁盘加密/加密备份、日志脱敏、密钥撤销流程；不要把备份包与凭证一起公开 |
+
+先使用浏览器“添加到主屏幕”即可。后续补 manifest/PWA 和推送可改善体验；若加 service worker，仅缓存静态资源，交易状态必须重新读取，不能离线排队审批再自动补发。
+
+**7. 风控扩展与研究价值**
+
+另有三项规则实现差距，应在扩展策略或开放对应能力前修正：
+
+- 总组合梯级没有正确约束 Sandbox 开仓。[风险引擎](/Users/l/Desktop/agentic_trading/conservative_trading/risk/engine.py:180) 对非 Core 只取 bucket 自身梯级；离线场景总回撤 −4%、−7%、−15% 而 Sandbox 正常时均批准开仓，与配置的总梯级限制不一致。Sandbox 当前是概念账户，不能称为已发生实盘越限。
+- ETF 识别和权限没有确定性执行排除杠杆/反向等结构。[分类](/Users/l/Desktop/agentic_trading/conservative_trading/portfolio.py:144) 与[权限](/Users/l/Desktop/agentic_trading/conservative_trading/risk/engine.py:436) 在注入 leverage=3 的未知 ETF 时仍批准。建议初期用明确允许的标的清单，未知产品拒绝；做多不等于没有杠杆。
+- 材料缺失仍依赖模型自评分。[数据门](/Users/l/Desktop/agentic_trading/conservative_trading/risk/engine.py:277) 只挡 poor，模型同时报告 good 与 material missing 时仍可放行。给关键证据、时间戳和来源建立代码级要求，区分必需信息与可选宏观补充。
+
+下一步的价值验证应与工程测试分开：先积累前瞻模拟建议和执行记录，把 BUY、SELL、拒绝及 NO_TRADE 都保存，再与相同资金、日期、入金和风险约束的被动配置比较。比较收益、最大回撤、换手、交易摩擦、模型调用量和人工耗时。30 天适合观察流程稳定性，不足以证明长期收益优势。
+
+78/100 是模型自评强度，未经校准不能当作 78% 成功率。多角色讨论可以改善研究组织，但同一模型与同一数据源的判断不等于独立证据。建议进行“完整多 Agent / 简化单 Agent / 无 LLM 基准”的对照，验证额外复杂度是否带来可测收益。
+
+历史回放需要 point-in-time 数据。[个股筛选](/Users/l/Desktop/agentic_trading/conservative_trading/risk/engine.py:453) 读取当前 yfinance.info，不能据此代表历史当时已知的财务情况；LLM 对历史事件的预训练记忆也是额外评估限制。优先前瞻记录，再考虑严格历史回放。
+
+**8. 建议实施顺序**
+
+1. 交易正确性：SELL/REDUCE、持久订单状态、成交增量对账、账户执行串行化。
+2. 身份与界面可信度：写接口授权、显式确认、提案版本固定、HTML 安全渲染、演示/真实隔离、服务端暂停状态。
+3. 手机私有使用：同源路径、Tailscale/Access、常驻服务、任务恢复、有限通知、备份和应急路径。
+4. 价值验证：前瞻模拟、被动基准、成本/回撤/人工耗时对比，再决定是否扩大实盘范围。
+
+验收重点应覆盖：能卖出、部分成交后重启不丢账、超时重试不重复下单、两个提案不超配现金、未授权请求被拒绝、弹窗不会批准另一条提案、某接口失联时不展示伪实时状态，以及主机重启后的安全恢复。

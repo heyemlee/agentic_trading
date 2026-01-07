@@ -1,4 +1,4 @@
-English | [简体中文](./README.zh-CN.md)
+English | [简体中文](README.zh-CN.md)
 
 # Conservative Trading
 
@@ -9,11 +9,11 @@ permitted, and you approve anything that touches money.
 
 `Python 3.12` · `FastAPI` · `Local-only` · Real-money execution off by default
 
-[Documentation](./docs/OPERATIONS.md) · [Quick Start](#getting-started) · [Frontend handoff](./docs/FRONTEND_HANDOFF.md)
+[Documentation](docs/OPERATIONS.md) · [Quick Start](#getting-started) · [Frontend handoff](docs/FRONTEND_HANDOFF.md)
 
 <br />
 
-![Conservative Trading — Home](./docs/screenshots/index.png)
+![Conservative Trading — Home](docs/screenshots/index.png)
 
 <sub>The console, running on the bundled sample payloads. The amber strip is the product
 working: sample data can never be mistaken for live data.</sub>
@@ -51,13 +51,13 @@ verdict. The console reads them back as an ordered trace.
 
 <br />
 
-![Approval detail](./docs/screenshots/approvals.png)
+![Approval detail](docs/screenshots/approvals.png)
 
 <sub>A proposal, with the case, the blind spots and every risk rule it had to clear.</sub>
 
 <br />
 
-![Research trace](./docs/screenshots/research.png)
+![Research trace](docs/screenshots/research.png)
 
 <sub>Decision strength against the trading floor, and every recorded run.</sub>
 
@@ -180,7 +180,7 @@ http://127.0.0.1:8787/ui/
 The API and the console are one process on one origin. The OpenAPI schema is at `/docs`.
 
 Command-line entry points, the broker connection and the risk configuration are covered in
-[Documentation](./docs/OPERATIONS.md).
+[Documentation](docs/OPERATIONS.md).
 
 <br />
 

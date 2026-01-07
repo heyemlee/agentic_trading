@@ -1,4 +1,4 @@
-[English](./README.md) | 简体中文
+[English](README.md) | 简体中文
 
 # Conservative Trading
 
@@ -8,11 +8,11 @@ AI 研究流水线负责研究标的，确定性风控层决定什么被允许�
 
 `Python 3.12` · `FastAPI` · `仅限本机` · 真金执行默认关闭
 
-[文档](./docs/OPERATIONS.md) · [快速开始](#快速开始) · [前端交接](./docs/FRONTEND_HANDOFF.md)
+[文档](docs/OPERATIONS.md) · [快速开始](#快速开始) · [前端交接](docs/FRONTEND_HANDOFF.md)
 
 <br />
 
-![Conservative Trading — 首页](./docs/screenshots/index.png)
+![Conservative Trading — 首页](docs/screenshots/index.png)
 
 <sub>控制台运行在内置的示例数据上。顶部那条琥珀色提示正是产品在工作：示例数据永远不可能被误认成实时数据。</sub>
 
@@ -44,13 +44,13 @@ Core 和 Sandbox 是概念仓。Micro-Live 是 Robinhood 上的真金，被四�
 
 <br />
 
-![审批详情](./docs/screenshots/approvals.png)
+![审批详情](docs/screenshots/approvals.png)
 
 <sub>一条提案：论据、盲区，以及它必须通过的每一条风控规则。</sub>
 
 <br />
 
-![研究轨迹](./docs/screenshots/research.png)
+![研究轨迹](docs/screenshots/research.png)
 
 <sub>决策强度对照交易门槛，以及全部运行记录。</sub>
 
@@ -164,7 +164,7 @@ http://127.0.0.1:8787/ui/
 
 API 和控制台是同一个进程、同一个源。OpenAPI schema 在 `/docs`。
 
-命令行入口、券商连接和风控配置见[文档](./docs/OPERATIONS.md)。
+命令行入口、券商连接和风控配置见[文档](docs/OPERATIONS.md)。
 
 <br />
 
