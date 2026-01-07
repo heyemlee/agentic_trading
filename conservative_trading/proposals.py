@@ -10,7 +10,9 @@ decay at completely different speeds. Thresholds live in config/risk_profile.yam
 
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -18,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from .profile import Profiles
+from .state_db import StateConflict, StateDB
+from .storage import file_lock
 
 # Lifecycle of the proposal itself
 PROPOSED = "PROPOSED"
@@ -28,6 +32,12 @@ EXPIRED = "EXPIRED"
 INVALIDATED = "INVALIDATED"
 NEEDS_REANALYSIS = "NEEDS_REANALYSIS"
 NO_ACTION = "NO_ACTION"
+SUBMITTING = "SUBMITTING"
+SUBMITTED = "SUBMITTED"
+PARTIALLY_FILLED = "PARTIALLY_FILLED"
+CANCELED = "CANCELED"
+UNKNOWN = "UNKNOWN"
+PENDING_EXECUTION = (SUBMITTING, SUBMITTED, PARTIALLY_FILLED, UNKNOWN)
 
 # Freshness of the world behind it
 VALID = "VALID"
@@ -90,6 +100,8 @@ class Proposal:
     bucket_cash_at_proposal: float | None = None
     positions_fingerprint: str | None = None
     data_quality: str | None = None
+    missing_information: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
     # approval and execution
     requires_human_approval: bool = True
     approved_at: str | None = None
@@ -100,7 +112,19 @@ class Proposal:
     broker_order_id: str | None = None
     executed_notional_usd: float | None = None
     submit_attempts: int = 0
+    sell_quantity: float | None = None
+    order_status: str | None = None
+    order_request: dict[str, Any] | None = None
+    filled_quantity: float = 0.0
+    filled_avg_price: float | None = None
+    reconciled_at: str | None = None
+    reconciliation_error: str | None = None
+    execution_ledger_path: str | None = None
+    approval_request_id: str | None = None
+    approved_version: str | None = None
+    approval_response: dict[str, Any] | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
+    _revision: int = field(default=0, repr=False, compare=False)
 
     # -- freshness -----------------------------------------------------------
     def freshness_class(self, profiles: Profiles) -> str:
@@ -144,7 +168,16 @@ class Proposal:
         self.history.append({"at": _iso(utcnow()), "event": event, "detail": detail, **extra})
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("_revision", None)
+        return data
+
+    def version(self) -> str:
+        """Hash every part of the idea and its lifecycle; polls do not change it."""
+        data = self.as_dict()
+        data.pop("approval_response", None)
+        return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":"),
+                                         allow_nan=False).encode()).hexdigest()
 
 
 def new_proposal(*, run_id: str | None, ticker: str, bucket: str, action: str, strategy: str,
@@ -164,15 +197,47 @@ def new_proposal(*, run_id: str | None, ticker: str, bucket: str, action: str, s
 
 
 class ProposalStore:
-    """Small JSON-file store. A database would be premature for a handful of proposals a week."""
+    """SQLite proposal store with optimistic revisions and a process transition lock."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
+        self.db = StateDB(self.path)
+
+    def locked(self):
+        return file_lock(self.path)
 
     def _load_raw(self) -> dict[str, Any]:
+        conn = self.db.current() or self.db._read()
+        owned = self.db.current() is None
+        if conn is not None:
+            try:
+                # A read-only connection cannot adopt pre-move absolute keys, so the legacy
+                # key is tried only when the current one holds nothing.
+                rows = conn.execute("SELECT payload,revision FROM proposals WHERE namespace=? ORDER BY updated_at",
+                                    (self.db.source_key(self.path),)).fetchall() or conn.execute(
+                    "SELECT payload,revision FROM proposals WHERE namespace=? ORDER BY updated_at",
+                    (str(self.path.resolve()),)).fetchall()
+                if rows or self.db.migrated(self.path):
+                    values = []
+                    for row in rows:
+                        value = json.loads(row[0])
+                        value["_revision"] = row[1]
+                        values.append(value)
+                    return {"proposals": values}
+            except (sqlite3.DatabaseError, json.JSONDecodeError) as exc:
+                # A damaged canonical database must never be hidden by stale legacy JSON.
+                # The only safe fallback is a database that has never had our schema.
+                if not isinstance(exc, sqlite3.OperationalError) or "no such table" not in str(exc):
+                    raise StateConflict(f"proposal database is unavailable or corrupt: {exc}") from exc
+            finally:
+                if owned:
+                    conn.close()
         if not self.path.exists():
             return {"proposals": []}
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise StateConflict(f"legacy proposal state is unavailable or corrupt: {exc}") from exc
 
     def all(self) -> list[Proposal]:
         return [Proposal(**{k: v for k, v in d.items() if k in Proposal.__dataclass_fields__})
@@ -185,16 +250,76 @@ class ProposalStore:
         return matches[0] if matches else None
 
     def save(self, proposal: Proposal) -> Proposal:
-        data = self._load_raw()
-        items = [d for d in data.get("proposals", []) if d.get("proposal_id") != proposal.proposal_id]
-        items.append(proposal.as_dict())
-        data["proposals"] = items[-200:]      # keep the file small; records live in runs/ anyway
-        data["updated_at"] = _iso(utcnow())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-        tmp.replace(self.path)
+        with self.db.transaction() as conn:
+            self._import_legacy(conn)
+            namespace = self.db.source_key(self.path)
+            row = conn.execute("SELECT revision FROM proposals WHERE namespace=? AND proposal_id=?",
+                               (namespace, proposal.proposal_id)).fetchone()
+            if row and row[0] != proposal._revision:
+                raise StateConflict("proposal changed concurrently; reload it before writing")
+            revision = (row[0] if row else 0) + 1
+            payload = proposal.as_dict(); payload.pop("_revision", None)
+            now = _iso(utcnow())
+            try:
+                conn.execute("INSERT INTO proposals VALUES(?,?,?,?,?,?) ON CONFLICT(namespace,proposal_id) DO UPDATE SET "
+                             "payload=excluded.payload,revision=excluded.revision,approval_request_id=excluded.approval_request_id,updated_at=excluded.updated_at",
+                             (namespace, proposal.proposal_id, json.dumps(payload, allow_nan=False), revision,
+                              proposal.approval_request_id, now))
+            except sqlite3.IntegrityError as exc:
+                raise StateConflict("approval request id already exists") from exc
+            proposal._revision = revision
+            if proposal.approval_request_id:
+                approval = (proposal.approval_request_id, proposal.proposal_id, proposal.approved_by or "unknown",
+                            proposal.approved_version or "legacy", json.dumps({
+                                "ticker": proposal.ticker, "bucket": proposal.bucket, "action": proposal.action,
+                                "notional_usd": proposal.notional_usd, "sell_quantity": proposal.sell_quantity,
+                            }, allow_nan=False), proposal.approved_at or now)
+                existing_approval = conn.execute("SELECT * FROM approvals WHERE request_id=?", (approval[0],)).fetchone()
+                if existing_approval and tuple(existing_approval) != approval:
+                    raise StateConflict("an immutable approval record cannot be changed")
+                conn.execute("INSERT OR IGNORE INTO approvals VALUES(?,?,?,?,?,?)", approval)
+            if proposal.client_order_id:
+                account = "micro_live" if proposal.bucket == "micro_live" else "conceptual"
+                conn.execute("INSERT INTO orders VALUES(?,?,?,?,?,?) ON CONFLICT(client_order_id) DO UPDATE SET "
+                             "status=excluded.status,payload=excluded.payload,updated_at=excluded.updated_at",
+                             (proposal.client_order_id, proposal.proposal_id, account,
+                              proposal.order_status or proposal.status, json.dumps(payload, allow_nan=False), now))
+                if proposal.status not in PENDING_EXECUTION:
+                    conn.execute("UPDATE reservations SET state='RELEASED',updated_at=? WHERE client_order_id=?",
+                                 (now, proposal.client_order_id))
         return proposal
+
+    def migrate(self) -> None:
+        """Import the legacy JSON once without changing any proposal revision."""
+        with self.db.transaction() as conn:
+            self._import_legacy(conn)
+
+    def _import_legacy(self, conn):
+        if conn.execute("SELECT 1 FROM migrations WHERE source IN (?,?)",
+                        self.db.source_keys(self.path)).fetchone():
+            return
+        raw = self.path.read_bytes() if self.path.exists() else b""
+        data = json.loads(raw) if raw else {"proposals": []}
+        namespace = self.db.source_key(self.path)
+        for item in data.get("proposals", []):
+            pid = item.get("proposal_id")
+            if pid:
+                conn.execute("INSERT OR IGNORE INTO proposals VALUES(?,?,?,1,?,?)", (
+                    namespace, pid, json.dumps(item, allow_nan=False), item.get("approval_request_id"),
+                    data.get("updated_at") or _iso(utcnow())))
+                if item.get("approval_request_id"):
+                    conn.execute("INSERT OR IGNORE INTO approvals VALUES(?,?,?,?,?,?)", (
+                        item["approval_request_id"], pid, item.get("approved_by") or "legacy",
+                        item.get("approved_version") or "legacy", json.dumps({
+                            "ticker": item.get("ticker"), "bucket": item.get("bucket"), "action": item.get("action"),
+                            "notional_usd": item.get("notional_usd"), "sell_quantity": item.get("sell_quantity"),
+                        }), item.get("approved_at") or _iso(utcnow())))
+                if item.get("client_order_id"):
+                    account = "micro_live" if item.get("bucket") == "micro_live" else "conceptual"
+                    conn.execute("INSERT OR IGNORE INTO orders VALUES(?,?,?,?,?,?)", (
+                        item["client_order_id"], pid, account, item.get("order_status") or item.get("status", "UNKNOWN"),
+                        json.dumps(item, allow_nan=False), item.get("reconciled_at") or _iso(utcnow())))
+        self.db.mark_migrated(conn, self.path, "proposals", raw)
 
     def open_proposals(self, profiles: Profiles) -> list[Proposal]:
         out = []
@@ -208,7 +333,7 @@ class ProposalStore:
 
 def positions_fingerprint(symbols_and_qty: dict[str, float]) -> str:
     """Stable fingerprint of the position book, to detect that it changed under a proposal."""
-    parts = [f"{s.upper()}:{round(q, 6)}" for s, q in sorted(symbols_and_qty.items())]
+    parts = [f"{s.upper()}:{round(float(q), 6)}" for s, q in sorted(symbols_and_qty.items())]
     return "|".join(parts) if parts else "(empty)"
 
 

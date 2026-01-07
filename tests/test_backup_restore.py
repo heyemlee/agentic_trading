@@ -1,0 +1,194 @@
+"""Backup, encrypted second copy, restore, and surviving a move to another directory.
+
+The failure these guard against is not losing the file. It is restoring one and quietly getting
+a portfolio that no longer matches its own ledger, or a session that was signed out months ago,
+or an order the broker settled while the snapshot was cold.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import sqlite3
+import time
+from pathlib import Path
+
+import pytest
+
+from conservative_trading import state_cli
+from conservative_trading.portfolio import load_portfolio, migrate_portfolio
+from conservative_trading.proposals import PROPOSED, ProposalStore
+from conservative_trading.stage3_scenarios import _proposal
+from conservative_trading.state_db import StateDB
+from tests.conftest import ROOT
+
+
+@pytest.fixture
+def project(tmp_path):
+    """A complete state directory: config, a ledger, a proposal and a ladder document."""
+    cfg = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg)
+    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "runs").mkdir()
+    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
+    migrate_portfolio(state / "portfolio.yaml")
+    ProposalStore(state / "proposals.json").save(_proposal(status=PROPOSED))
+    StateDB(state / "proposals.json").write_document(state / "risk_state.json",
+                                                     {"total": {"high_water_mark_usd": 3000.0}})
+    return tmp_path
+
+
+def key_file(tmp_path) -> Path:
+    path = tmp_path / "backup.key"
+    path.write_text("a-passphrase-long-enough-to-matter")
+    path.chmod(0o600)
+    return path
+
+
+def run(argv) -> int:
+    return state_cli.main(argv)
+
+
+def test_state_keys_survive_a_move_to_another_directory(project, tmp_path):
+    """A restored database must still know which ledger its documents belong to.
+
+    Absolute keys made a backup useless anywhere but the directory it was taken in: the ledger
+    would read as missing, and the loader would silently fall back to a stale YAML file.
+    """
+    source_db = StateDB(project / "state" / "proposals.json")
+    assert source_db.source_key(project / "state" / "portfolio.yaml") == "portfolio.yaml"
+
+    elsewhere = tmp_path / "restored-elsewhere"
+    elsewhere.mkdir()
+    shutil.copyfile(source_db.path, elsewhere / "trading_state.sqlite3")
+
+    moved = StateDB(elsewhere / "proposals.json")
+    assert moved.read_document(elsewhere / "portfolio.yaml") is not None
+    assert load_portfolio(elsewhere / "portfolio.yaml").buckets["core"].cash_usd > 0
+    assert len(ProposalStore(elsewhere / "proposals.json").all()) == 1
+
+
+def test_a_database_written_with_absolute_keys_is_adopted_on_first_open(tmp_path):
+    """Databases in the field were written before keys were relative."""
+    state = tmp_path / "state"
+    state.mkdir()
+    db = StateDB(state / "proposals.json")
+    legacy = str((state / "portfolio.yaml").resolve())
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO documents VALUES(?,?,1,'2026-01-01')",
+                     (legacy, json.dumps({"as_of": "2026-01-01", "buckets": {}})))
+        conn.execute("INSERT INTO migrations VALUES(?,?,?,'2026-01-01')",
+                     (legacy, "portfolio", None))
+
+    import conservative_trading.state_db as module
+    module._relinked.clear()               # a fresh process opening the moved database
+
+    reopened = StateDB(state / "proposals.json")
+    assert reopened.read_document(state / "portfolio.yaml") is not None
+    with reopened.transaction() as conn:
+        keys = [row[0] for row in conn.execute("SELECT namespace FROM documents")]
+    assert keys == ["portfolio.yaml"]      # rewritten, not merely readable
+
+
+def test_backup_verifies_the_copy_and_prunes_by_age(project):
+    backups = project / "state" / "backups"
+    backups.mkdir()
+    stale = backups / "trading_state_20200101T000000Z.sqlite3"
+    stale.write_bytes(b"not a database")
+    old = time.time() - 90 * 86400
+    import os
+    os.utime(stale, (old, old))
+
+    assert run(["backup", "--config-dir", str(project / "config"), "--verify",
+                "--retain-days", "30"]) == 0
+    copies = sorted(backups.glob("trading_state_*.sqlite3"))
+    assert len(copies) == 1 and copies[0] != stale        # the aged copy was pruned
+    with sqlite3.connect(copies[0]) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_an_off_machine_copy_is_encrypted_and_needs_the_passphrase(project, tmp_path):
+    """A copy that leaves this Mac protects against losing the Mac, so it travels encrypted."""
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required for the encrypted mirror")
+    mirror = tmp_path / "mirror"
+    assert run(["backup", "--config-dir", str(project / "config"), "--verify",
+                "--mirror-dir", str(mirror), "--key-file", str(key_file(tmp_path))]) == 0
+
+    copies = list(mirror.glob("trading_state_*.sqlite3.enc"))
+    assert len(copies) == 1
+    assert not copies[0].read_bytes().startswith(b"SQLite format 3")
+    assert copies[0].stat().st_mode & 0o077 == 0
+
+
+def test_a_mirror_without_a_passphrase_is_refused(project, tmp_path):
+    with pytest.raises(SystemExit):
+        run(["backup", "--config-dir", str(project / "config"),
+             "--mirror-dir", str(tmp_path / "mirror")])
+
+
+def test_restoring_revokes_sessions_and_names_the_orders_to_check(project, tmp_path, capsys):
+    """A snapshot's sessions and open orders are both stale claims about the present."""
+    db = StateDB(project / "state" / "proposals.json")
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO console_sessions VALUES('hash','owner','csrf','gen',1,1,9e9)")
+    open_order = _proposal(status=PROPOSED)
+    open_order.client_order_id = "ct-open-1"
+    open_order.order_status = "SUBMITTED"
+    ProposalStore(project / "state" / "proposals.json").save(open_order)
+
+    backup = tmp_path / "snapshot.sqlite3"
+    assert run(["backup", "--config-dir", str(project / "config"), "--verify",
+                "--output", str(backup)]) == 0
+
+    target = tmp_path / "recovered"
+    capsys.readouterr()
+    assert run(["restore", "--source", str(backup), "--into", str(target)]) == 0
+    report = json.loads(capsys.readouterr().out)
+
+    assert report["integrity"] == "ok"
+    assert report["console_sessions_revoked"] == 1
+    assert [row["client_order_id"] for row in report["orders_to_verify_at_the_broker"]] == ["ct-open-1"]
+    assert any("sign in again" in step for step in report["next_steps"])
+
+    restored = StateDB(target / "proposals.json")
+    assert restored.status()["counts"]["console_sessions"] == 0
+    # the ledger is still attached to its proposal after the move
+    assert load_portfolio(target / "portfolio.yaml").buckets["core"].cash_usd > 0
+    assert len(ProposalStore(target / "proposals.json").all()) == 2
+
+
+def test_restoring_never_silently_replaces_a_live_database(project, tmp_path):
+    backup = tmp_path / "snapshot.sqlite3"
+    run(["backup", "--config-dir", str(project / "config"), "--output", str(backup)])
+    target = tmp_path / "occupied"
+    target.mkdir()
+    (target / "trading_state.sqlite3").write_bytes(b"existing")
+
+    with pytest.raises(SystemExit):
+        run(["restore", "--source", str(backup), "--into", str(target)])
+    assert (target / "trading_state.sqlite3").read_bytes() == b"existing"
+
+
+def test_a_damaged_backup_is_refused_rather_than_restored(tmp_path):
+    broken = tmp_path / "broken.sqlite3"
+    broken.write_bytes(b"SQLite format 3\x00" + b"\x00" * 200)
+    with pytest.raises(SystemExit):
+        run(["restore", "--source", str(broken), "--into", str(tmp_path / "out")])
+    assert not (tmp_path / "out" / "trading_state.sqlite3").exists()
+
+
+def test_an_encrypted_backup_round_trips_through_restore(project, tmp_path, capsys):
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required for the encrypted mirror")
+    mirror, key = tmp_path / "mirror", key_file(tmp_path)
+    run(["backup", "--config-dir", str(project / "config"), "--verify",
+         "--mirror-dir", str(mirror), "--key-file", str(key)])
+    encrypted = next(iter(mirror.glob("*.enc")))
+
+    capsys.readouterr()
+    assert run(["restore", "--source", str(encrypted), "--into", str(tmp_path / "from-mirror"),
+                "--key-file", str(key)]) == 0
+    assert json.loads(capsys.readouterr().out)["integrity"] == "ok"
+    assert load_portfolio(tmp_path / "from-mirror" / "portfolio.yaml").buckets["core"].cash_usd > 0

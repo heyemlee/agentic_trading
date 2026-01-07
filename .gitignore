@@ -11,8 +11,15 @@ state/risk_state.json
 state/micro_live_risk_state.json
 state/robinhood_token.json
 state/proposals.json
+state/simulated_orders.json
 state/fills.jsonl
 state/HALT
+state/console_auth.json
+state/*.lock
+state/*.sqlite3
+state/*.sqlite3-*
+state/*.execution
+state/backups/
 .DS_Store
 state/portfolio.yaml
 state/micro_live_portfolio.yaml

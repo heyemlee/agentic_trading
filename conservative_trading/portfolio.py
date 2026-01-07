@@ -1,9 +1,9 @@
 """Conceptual portfolio state and mark-to-market snapshot (Stage 2, no broker).
 
-The portfolio lives in a small YAML file the investor edits by hand. Prices,
-instrument identity and sector come from the upstream TradingAgents data layer
-(look-ahead safe, cached, keyless). The snapshot is the single portfolio view
-that the agents' prompts, the policy step and the Hard Risk Layer all consume.
+The portfolio is stored transactionally in SQLite; an existing YAML ledger is imported once.
+Prices, instrument identity and sector come from the upstream TradingAgents data layer
+(look-ahead safe, cached, keyless). The snapshot is the single portfolio view that the agents'
+prompts, the policy step and the Hard Risk Layer all consume.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from .profile import Profiles
+from .state_db import StateDB
 
 
 class PortfolioError(ValueError):
@@ -46,6 +48,21 @@ class RecentOpen(BaseModel):
     date: str
 
 
+class CashFlow(BaseModel):
+    """Money entering or leaving a bucket, which is never a gain or a loss.
+
+    Without this record the only way to explain a rise in equity is to call it performance, and
+    a funded account then reports its own deposits as return.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    date: str
+    bucket: str
+    amount_usd: float                     # positive funds the bucket, negative takes money out
+    kind: str = "deposit"
+    note: str | None = None
+
+
 class PortfolioState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     as_of: str
@@ -53,7 +70,9 @@ class PortfolioState(BaseModel):
     buckets: dict[str, BucketCash]
     positions: list[Position] = Field(default_factory=list)
     recent_opens: list[RecentOpen] = Field(default_factory=list)
+    cash_flows: list[CashFlow] = Field(default_factory=list)
     notes: str | None = None
+    applied_orders: dict[str, Any] = Field(default_factory=dict)
 
     def position(self, symbol: str, bucket: str | None = None) -> Position | None:
         for p in self.positions:
@@ -66,9 +85,13 @@ def load_portfolio(path: str | Path, required_buckets: tuple[str, ...] | None = 
     """Load a bucket ledger. Each venue has its own; the conceptual portfolio and the
     Micro-Live account are never mixed into one cash reconciliation."""
     path = Path(path)
-    if not path.exists():
+    stored = StateDB(path).read_document(path)
+    if stored is not None:
+        data = stored
+    elif path.exists():
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    else:
         raise PortfolioError(f"portfolio state file not found: {path}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise PortfolioError(f"portfolio state is not a mapping: {path}")
     data["as_of"] = str(data.get("as_of", ""))
@@ -91,6 +114,21 @@ def load_portfolio(path: str | Path, required_buckets: tuple[str, ...] | None = 
     return state
 
 
+def migrate_portfolio(path: str | Path) -> PortfolioState:
+    """Copy a legacy YAML ledger into the canonical database once."""
+    path = Path(path)
+    db = StateDB(path)
+    with db.transaction() as conn:
+        stored = db.read_document(path)
+        if stored is not None:
+            return PortfolioState(**stored)
+        state = load_portfolio(path)
+        raw = path.read_bytes() if path.exists() else b""
+        db.write_document(path, state.model_dump(mode="json"), conn)
+        db.mark_migrated(conn, path, "portfolio", raw)
+        return state
+
+
 PriceLookup = Callable[[str, str], tuple[float, str]]
 IdentityLookup = Callable[[str], dict[str, Any]]
 
@@ -109,7 +147,21 @@ def upstream_price_lookup(symbol: str, as_of: str) -> tuple[float, str]:
 def upstream_identity_lookup(symbol: str) -> dict[str, Any]:
     from tradingagents.agents.utils.agent_utils import resolve_instrument_identity
 
-    return resolve_instrument_identity(symbol) or {}
+    identity = dict(resolve_instrument_identity(symbol) or {})
+    # Upstream deliberately returns a compact identity. Product-structure screening also
+    # needs the fund category/name fields from the same underlying yfinance source.
+    try:
+        import yfinance as yf
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        info = yf.Ticker(normalize_symbol(symbol)).info or {}
+        for key in ("longName", "shortName", "category", "fundFamily", "legalType", "quoteType"):
+            if info.get(key) not in (None, ""):
+                identity[key] = info[key]
+        identity.setdefault("quote_type", info.get("quoteType", ""))
+    except Exception:  # noqa: BLE001 - missing metadata becomes unverified or uses the explicit allowlist
+        return identity
+    return identity
 
 
 # Sleeve -> the position-limit class used by the risk profile. Structural, not policy.
@@ -128,6 +180,8 @@ class InstrumentClass:
     sleeve: str | None             # broad_equity_etf | bond_etf | cash_like_etf | satellites | None (crypto)
     limit_class: str               # broad_diversified_etf | bond_or_cash_like_etf | sector_factor_thematic_etf | individual_stock | crypto
     sector: str | None = None
+    product_flags: tuple[str, ...] = ()
+    identity_verified: bool = False
 
 
 def classify_instrument(symbol: str, profiles: Profiles, identity_lookup: IdentityLookup) -> InstrumentClass:
@@ -139,14 +193,45 @@ def classify_instrument(symbol: str, profiles: Profiles, identity_lookup: Identi
     )
     identity = identity_lookup(symbol) or {}
     quote_type = str(identity.get("quote_type", "")).upper()
+    def asserted(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "y")
+        return value is True or isinstance(value, (int, float)) and value != 0
+
+    flags = []
+    for key in ("leveraged", "inverse", "single_stock", "crypto_etf", "commodity_futures", "covered_call"):
+        if asserted(identity.get(key)) or asserted(identity.get("is_" + key)):
+            flags.append(key)
+    identity_text = " ".join(str(identity.get(key, "")) for key in (
+        "company_name", "longName", "shortName", "name", "category", "fundFamily", "legalType", "description"
+    )).lower()
+    text_markers = {
+        "leveraged": ("leveraged", "ultrapro", "2x daily", "3x daily"),
+        "inverse": ("inverse", "ultrashort", "-1x", "-2x", "-3x"),
+        "single_stock": ("single-stock", "single stock"),
+        "crypto_etf": ("digital assets", "bitcoin etf", "ether etf", "ethereum etf"),
+        "commodity_futures": ("commodity futures", "managed futures", "commodities focused"),
+        "covered_call": ("covered call", "derivative income"),
+    }
+    for flag, markers in text_markers.items():
+        if any(marker in identity_text for marker in markers):
+            flags.append(flag)
+    leverage = identity.get("leverage", identity.get("leverage_ratio", 1))
+    try:
+        if abs(float(leverage)) != 1 or float(leverage) < 0:
+            flags.append("leverage")
+    except (TypeError, ValueError):
+        flags.append("unknown_leverage")
     if quote_type == "CRYPTOCURRENCY":
         return InstrumentClass(upper, "crypto", None, None, "crypto")
     if group is not None or quote_type == "ETF":
         sleeve = profiles.sleeve_of_group(group or "unknown_etf")
-        return InstrumentClass(upper, "etf", group, sleeve, LIMIT_CLASS_BY_SLEEVE.get(sleeve, "sector_factor_thematic_etf"))
+        return InstrumentClass(upper, "etf", group, sleeve, LIMIT_CLASS_BY_SLEEVE.get(sleeve, "sector_factor_thematic_etf"),
+                               product_flags=tuple(dict.fromkeys(flags)), identity_verified=group is not None)
     # Unknown identity resolves to the tightest class (stock) on purpose: fail toward caution.
     return InstrumentClass(upper, "stock", None, profiles.sleeve_of_group("individual_stock"),
-                           "individual_stock", identity.get("sector"))
+                           "individual_stock", identity.get("sector"), tuple(dict.fromkeys(flags)),
+                           quote_type in ("EQUITY", "STOCK"))
 
 
 @dataclass
@@ -323,66 +408,128 @@ def snapshot_from_broker(
         prices[symbol] = bp.market_value / bp.quantity if bp.quantity else bp.average_entry_price
     state = PortfolioState(as_of=trade_date, currency=ledger.currency, buckets=ledger.buckets,
                            positions=positions, recent_opens=ledger.recent_opens,
-                           notes="reconciled from broker state")
+                           cash_flows=ledger.cash_flows, notes="reconciled from broker state")
     return build_snapshot(state, profiles, trade_date,
                           price_lookup=lambda sym, _d: (prices[sym.upper()], trade_date),
                           identity_lookup=identity_lookup)
 
 
-def apply_fill_to_ledger(path: str | Path, *, symbol: str, bucket: str, side: str, quantity: float,
-                        price: float, trade_date: str) -> PortfolioState:
-    """Record a fill in the bucket ledger: bucket attribution and cash, written atomically.
+def cash_flow_summary(state: PortfolioState) -> dict[str, float]:
+    """Net deposits per bucket, from the flows actually recorded. Empty when none were."""
+    totals: dict[str, float] = defaultdict(float)
+    for flow in state.cash_flows:
+        totals[flow.bucket] += float(flow.amount_usd)
+    return {bucket: round(value, 2) for bucket, value in totals.items()}
 
-    Quantities and prices are re-read from the broker on every later snapshot, so the ledger's
-    job is only to answer what the broker cannot: which bucket owns the symbol, and how the
-    cash is divided between buckets. Without this step the next revalidation would fail closed
-    on an unattributed position, which is safe but would stop the pipeline after one fill.
-    """
+
+def record_cash_flow(path: str | Path, *, bucket: str, amount_usd: float, kind: str = "deposit",
+                     date: str | None = None, note: str = "") -> PortfolioState:
+    """Fund or defund a bucket in one durable commit, moving cash and recording the reason."""
+    import math
+
     path = Path(path)
-    state = load_portfolio(path)
-    symbol = symbol.upper()
-    notional = quantity * price
-    if bucket not in state.buckets:
-        raise PortfolioError(f"cannot record a fill for unknown bucket {bucket!r}")
+    if kind not in ("deposit", "withdrawal"):
+        raise ValueError("kind must be deposit or withdrawal")
+    if not math.isfinite(amount_usd) or amount_usd <= 0:
+        raise ValueError("amount must be a positive finite number of dollars")
+    signed = amount_usd if kind == "deposit" else -amount_usd
+    db = StateDB(path)
+    with db.transaction() as conn:
+        state = load_portfolio(path)
+        if bucket not in state.buckets:
+            raise KeyError(f"unknown bucket {bucket!r}")
+        moved = round(state.buckets[bucket].cash_usd + signed, 2)
+        if moved < 0:
+            raise ValueError(f"{bucket} holds ${state.buckets[bucket].cash_usd:,.2f}; "
+                             f"cannot withdraw ${amount_usd:,.2f}")
+        state.buckets[bucket].cash_usd = moved
+        state.cash_flows.append(CashFlow(
+            date=date or datetime.now(UTC).date().isoformat(), bucket=bucket,
+            amount_usd=round(signed, 2), kind=kind, note=note or None))
+        state.notes = f"{kind} of ${amount_usd:,.2f} into {bucket}"
+        db.write_document(path, state.model_dump(mode="json"), conn)
+        if not db.migrated(path):
+            raw = path.read_bytes() if path.exists() else b""
+            db.mark_migrated(conn, path, "portfolio", raw)
+        return state
 
-    existing = next((p for p in state.positions if p.symbol.upper() == symbol), None)
-    if side == "buy":
-        state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd - notional, 2)
-        if existing is None:
-            state.positions.append(Position(symbol=symbol, bucket=bucket, quantity=quantity,
-                                            cost_basis_per_share=price, opened_on=trade_date))
-            state.recent_opens.append(RecentOpen(symbol=symbol, bucket=bucket, date=trade_date))
-        else:
-            total = existing.quantity + quantity
-            existing.cost_basis_per_share = round(
-                (existing.quantity * existing.cost_basis_per_share + notional) / total, 6)
-            existing.quantity = round(total, 6)
-    else:
-        if existing is None:
-            raise PortfolioError(f"cannot record a sell of {symbol}: the ledger has no such position")
-        state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd + notional, 2)
-        remaining = round(existing.quantity - quantity, 6)
-        if remaining <= 1e-6:
-            state.positions = [p for p in state.positions if p.symbol.upper() != symbol]
-        else:
-            existing.quantity = remaining
-    if state.buckets[bucket].cash_usd < -1e-6:
-        raise PortfolioError(f"recording this fill would push {bucket} cash negative; refusing to write the ledger")
 
-    state.as_of = trade_date
-    payload = {
-        "as_of": state.as_of, "currency": state.currency,
-        "buckets": {name: {"cash_usd": b.cash_usd} for name, b in state.buckets.items()},
-        "positions": [{"symbol": p.symbol, "bucket": p.bucket, "quantity": p.quantity,
-                       "cost_basis_per_share": p.cost_basis_per_share, **({"opened_on": p.opened_on} if p.opened_on else {})}
-                      for p in state.positions],
-        "recent_opens": [{"symbol": o.symbol, "bucket": o.bucket, "date": o.date} for o in state.recent_opens[-20:]],
-        "notes": f"updated by a {side} fill of {quantity:g} {symbol} @ {price:,.4f} on {trade_date}",
-    }
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    tmp.replace(path)
-    return state
+def apply_fill_to_ledger(path: str | Path, *, symbol: str, bucket: str, side: str, quantity: float,
+                         price: float, trade_date: str, client_order_id: str | None = None) -> PortfolioState:
+    """Apply a fill, or a cumulative order observation, in one durable ledger commit.
+
+    The cumulative cursor, cash and positions live in the same SQLite transaction as the
+    proposal and fill audit event when this is called by the execution reconciler.
+    """
+    import math
+
+    path = Path(path)
+    db = StateDB(path)
+    with db.transaction() as conn:
+        state = load_portfolio(path)
+        symbol = symbol.upper()
+        if side not in ("buy", "sell") or not all(math.isfinite(x) and x > 0 for x in (quantity, price)):
+            raise PortfolioError("fill requires a valid side, positive finite quantity and price")
+        if bucket not in state.buckets:
+            raise PortfolioError(f"cannot record a fill for unknown bucket {bucket!r}")
+        total_quantity, total_notional = quantity, quantity * price
+        previous = state.applied_orders.get(client_order_id, {}) if client_order_id else {}
+        if previous:
+            if (previous["symbol"], previous["bucket"], previous["side"]) != (symbol, bucket, side):
+                raise PortfolioError("order identity changed during reconciliation")
+            quantity -= previous["quantity"]
+            delta_notional = total_notional - previous["notional"]
+            if quantity < -1e-8 or delta_notional < -0.005:
+                raise PortfolioError("broker cumulative fill moved backwards; manual reconciliation required")
+            if quantity <= 1e-8:
+                if abs(delta_notional) > 0.005:
+                    raise PortfolioError("broker corrected a filled price; manual reconciliation required")
+                return state
+            if delta_notional <= 0:
+                raise PortfolioError("additional fill has no positive consideration")
+            price = delta_notional / quantity
+        notional = quantity * price
+        existing = state.position(symbol)
+        if existing is not None and existing.bucket != bucket:
+            raise PortfolioError("fill belongs to a different bucket than the existing position")
+        if side == "buy":
+            state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd - notional, 2)
+            if existing is None:
+                state.positions.append(Position(symbol=symbol, bucket=bucket, quantity=quantity,
+                                                cost_basis_per_share=price, opened_on=trade_date))
+                state.recent_opens.append(RecentOpen(symbol=symbol, bucket=bucket, date=trade_date))
+            else:
+                total = existing.quantity + quantity
+                existing.cost_basis_per_share = round(
+                    (existing.quantity * existing.cost_basis_per_share + notional) / total, 6)
+                existing.quantity = round(total, 8)
+        else:
+            if existing is None or quantity > existing.quantity + 1e-8:
+                raise PortfolioError(f"cannot record sell: insufficient {symbol} held in {bucket}")
+            state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd + notional, 2)
+            remaining = round(existing.quantity - quantity, 8)
+            if remaining <= 1e-8:
+                state.positions = [p for p in state.positions if p.symbol.upper() != symbol]
+            else:
+                existing.quantity = remaining
+        if state.buckets[bucket].cash_usd < -1e-6:
+            raise PortfolioError(f"recording fill would push {bucket} cash negative")
+        if client_order_id:
+            events = list(previous.get("events", []))
+            events.append({"fill_id": f"{client_order_id}:{total_quantity:.8f}",
+                           "quantity": quantity, "price": price, "notional": notional,
+                           "trade_date": trade_date})
+            state.applied_orders[client_order_id] = {
+                "symbol": symbol, "bucket": bucket, "side": side,
+                "quantity": total_quantity, "notional": total_notional, "events": events,
+            }
+        state.as_of = trade_date
+        state.notes = f"updated by {side} fill of {quantity:g} {symbol} @ {price:,.4f}"
+        db.write_document(path, state.model_dump(mode="json"), conn)
+        if not db.migrated(path):
+            raw = path.read_bytes() if path.exists() else b""
+            db.mark_migrated(conn, path, "portfolio", raw)
+        return state
 
 
 def render_snapshot(snap: Snapshot, ladder: dict[str, Any] | None = None, regime: dict[str, Any] | None = None) -> str:
