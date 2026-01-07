@@ -6,6 +6,35 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
+def console_auth(monkeypatch, tmp_path):
+    from importlib import import_module
+
+    from conservative_trading.api.auth import ConsoleAuth, configure_password
+
+    path = tmp_path / "auth.json"
+    configure_password(path, "test-owner", "test-only-password-for-console")
+    auth = ConsoleAuth(path, ["https://testserver"])
+    monkeypatch.setattr(import_module("conservative_trading.api.app"), "_auth", auth)
+    return auth
+
+
+@pytest.fixture
+def auth_client(console_auth):
+    from fastapi.testclient import TestClient
+
+    from conservative_trading.api.app import app
+
+    client = TestClient(app, base_url="https://testserver")
+    client.headers.update({"Origin": "https://testserver", "X-CT-Request": "1"})
+    response = client.post("/auth/login", json={
+        "username": "test-owner", "password": "test-only-password-for-console"})
+    assert response.status_code == 200
+    client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
+    yield client
+    client.close()
+
+
+@pytest.fixture
 def fake_claude(monkeypatch, tmp_path):
     script = ROOT / "tests" / "fake_claude.py"
     script.chmod(0o755)
@@ -49,18 +78,41 @@ def real_audit_guard():
 
 
 @pytest.fixture(autouse=True)
-def real_state_guard():
-    """Offline tests must never write into the real state/ directory.
+def real_state_guard(monkeypatch):
+    """Offline tests must never touch the real state/ directory.
 
     The audit trail behind real money has to be trustworthy, so a test that appends a fake fill
-    or proposal to it is a defect, not an inconvenience.
+    or proposal to it is a defect, not an inconvenience. Two guards, because they fail for
+    different reasons:
+
+    * the live SQLite family is blocked at the point of connection, so the test that reached for
+      it fails there instead of silently succeeding. Comparing bytes afterwards cannot work: a
+      deployed API checkpoints its own WAL while the suite runs, which is not a test writing.
+    * every other file in state/ is compared before and after, which also catches a new file.
     """
-    watched = {p: (p.read_bytes() if p.exists() else None)
-               for p in (ROOT / "state").glob("*") if p.is_file()}
+    from conservative_trading import state_db
+
+    live_directory = (ROOT / "state").resolve()
+
+    def refuse(database: state_db.StateDB):
+        raise AssertionError(
+            f"an offline test opened the real state database at {database.path}; "
+            "point the fixture at tmp_path instead")
+
+    for name in ("_connect", "_read"):
+        original = getattr(state_db.StateDB, name)
+        monkeypatch.setattr(state_db.StateDB, name, (
+            lambda self, _original=original: refuse(self)
+            if self.path.parent == live_directory else _original(self)))
+
+    def guarded(path: Path) -> bool:
+        return path.is_file() and not path.name.startswith("trading_state.sqlite3")
+
+    watched = {p: p.read_bytes() for p in (ROOT / "state").glob("*") if guarded(p)}
     yield
     for path, before in watched.items():
         after = path.read_bytes() if path.exists() else None
         assert after == before, f"an offline test modified the real state file {path.name}"
     for path in (ROOT / "state").glob("*"):
-        if path.is_file() and path not in watched:
+        if guarded(path) and path not in watched:
             raise AssertionError(f"an offline test created the real state file {path.name}")
