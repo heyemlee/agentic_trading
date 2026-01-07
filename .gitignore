@@ -14,3 +14,5 @@ state/proposals.json
 state/fills.jsonl
 state/HALT
 .DS_Store
+state/portfolio.yaml
+state/micro_live_portfolio.yaml

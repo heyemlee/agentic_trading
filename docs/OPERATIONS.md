@@ -44,7 +44,7 @@ uv run ct-scenarios                               # Hard Risk validation scenari
 uv run ct-stage3                                  # proposal / approval / execution validation
 ```
 
-State files: `state/portfolio.yaml` is the bucket ledger (one symbol belongs to one bucket;
+State files (all untracked): `state/portfolio.yaml` is the bucket ledger (one symbol belongs to one bucket;
 the sandbox never draws on core cash). From Stage 3 the broker is the source of truth for
 cash, quantities and prices, and the ledger supplies the bucket attribution the broker does
 not have; execution updates it after every fill. `state/risk_state.json` holds the ladder
@@ -210,7 +210,12 @@ Check your login before running: `claude auth status` should report
 
 ```bash
 uv sync
+cp state/portfolio.example.yaml state/portfolio.yaml
+cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
+
+Both ledgers are untracked, because they record real positions and real cash. The
+repository carries only the all-cash `*.example.yaml` templates.
 
 Optional data keys go in `.env` (see `.env.example`). FRED is free and
 improves macro context; nothing else is required.

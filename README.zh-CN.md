@@ -144,7 +144,11 @@ uv sync
 
 ```bash
 cp .env.example .env
+cp state/portfolio.example.yaml state/portfolio.yaml
+cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
+
+两个台账文件不纳入版本控制：它们记录的是你真实的持仓，仓库里只保留全现金的模板。
 
 里面所有的 key 都是可选的。不要设置 `ANTHROPIC_API_KEY` —— LLM 层跑在你的订阅上，设了 API key 会把计费切换成按量付费。
 

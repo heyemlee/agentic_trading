@@ -157,7 +157,12 @@ uv sync
 
 ```bash
 cp .env.example .env
+cp state/portfolio.example.yaml state/portfolio.yaml
+cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
+
+The two ledgers are untracked: they record what you actually hold, so only the
+all-cash templates are in the repository.
 
 Every key in it is optional. Do not set `ANTHROPIC_API_KEY` — the LLM layer runs on your
 subscription, and an API key would switch billing to pay-as-you-go.

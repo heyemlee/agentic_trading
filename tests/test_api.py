@@ -41,8 +41,8 @@ def sandbox_service(tmp_path):
     shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     state = tmp_path / "state"
     state.mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.yaml", state / "portfolio.yaml")
-    shutil.copy(ROOT / "state" / "micro_live_portfolio.yaml", state / "micro_live_portfolio.yaml")
+    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
+    shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     (tmp_path / "runs").mkdir()
     return Service(cfg)
 

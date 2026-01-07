@@ -1,4 +1,5 @@
-# state/portfolio.yaml
+# state/portfolio.example.yaml
+# Template. Copy to state/portfolio.yaml, which is untracked because it records real positions.
 # Conceptual portfolio and bucket ledger. From Stage 3 the broker is the source of truth for
 # cash, quantities and prices; this file answers what the broker cannot: which bucket owns a
 # symbol, and how cash is divided between buckets. Execution updates it after every fill.
