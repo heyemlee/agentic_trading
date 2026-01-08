@@ -1,0 +1,159 @@
+"""Notification collection, deduplication, retry and the boundary on what may be sent.
+
+Offline: the only channel exercised is the local file. No message leaves the machine, and the
+webhook path is tested by asserting it refuses to send rather than by contacting anything.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from conservative_trading import notify
+from conservative_trading.api.service import Service
+from conservative_trading.proposals import PROPOSED, ProposalStore
+from conservative_trading.stage3_scenarios import _proposal
+from tests.conftest import ROOT
+
+
+@pytest.fixture
+def service(tmp_path):
+    cfg = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg)
+    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "runs").mkdir()
+    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
+    shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml",
+                state / "micro_live_portfolio.yaml")
+    return Service(cfg)
+
+
+def file_settings(service, **overrides):
+    profiles = service.profiles()
+    profiles.risk["notifications"].update({"channel": "file", **overrides})
+    return notify.Settings.load(profiles)
+
+
+def delivered(service):
+    path = service.profiles().project_dir / "runs" / "notifications.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_nothing_is_sent_until_a_channel_is_configured(service):
+    """The default must be silence: configuring a channel is how sending is authorised."""
+    settings = notify.Settings.load(service.profiles())
+    assert settings.channel == "none" and settings.configured() is False
+    assert "authorise" in settings.why_not_configured()
+
+    event = notify.Event(key="k", kind="proposal_waiting", title="t")
+    with pytest.raises(notify.DeliveryError):
+        notify.send(settings, event)
+
+    result = notify.dispatch(service.state_db(), settings, [event])
+    assert result["sent"] == [] and result["configured"] is False
+    assert delivered(service) == []
+
+
+def test_an_unconfigured_webhook_never_falls_back_to_sending_somewhere_else(service, monkeypatch):
+    monkeypatch.delenv("CT_NOTIFY_WEBHOOK", raising=False)
+    settings = file_settings(service, channel="webhook")
+    assert settings.configured() is False
+    with pytest.raises(notify.DeliveryError, match="CT_NOTIFY_WEBHOOK"):
+        notify.send(settings, notify.Event(key="k", kind="proposal_waiting", title="t"))
+
+
+def test_a_plaintext_endpoint_is_refused(service, monkeypatch):
+    monkeypatch.setenv("CT_NOTIFY_WEBHOOK", "http://example.invalid/hook")
+    settings = file_settings(service, channel="webhook")
+    with pytest.raises(notify.DeliveryError, match="https"):
+        notify.send(settings, notify.Event(key="k", kind="proposal_waiting", title="t"))
+
+
+def test_a_waiting_proposal_is_announced_once_per_quiet_period(service):
+    profiles = service.profiles()
+    profiles.risk["broker"]["state_file"] = "state/proposals.json"
+    ProposalStore(profiles.project_dir / "state" / "proposals.json").save(_proposal(status=PROPOSED))
+
+    events = service.collect_notifications()
+    waiting = [e for e in events if e.kind == "proposal_waiting"]
+    assert len(waiting) == 1 and "approval" in waiting[0].title
+
+    settings = file_settings(service, min_interval_seconds=900)
+    db = service.state_db()
+    assert notify.dispatch(db, settings, waiting)["sent"] == [waiting[0].key]
+    assert notify.dispatch(db, settings, waiting)["sent"] == []      # still waiting, not resent
+    assert len(delivered(service)) == 1
+
+    later = datetime.now(UTC) + timedelta(seconds=901)
+    assert notify.dispatch(db, settings, waiting, now=later)["sent"] == [waiting[0].key]
+    assert len(delivered(service)) == 2
+
+
+def test_a_failed_delivery_is_retried_with_backoff_and_then_given_up(service, monkeypatch):
+    settings = file_settings(service, max_attempts=2, retry_backoff_seconds=60)
+    db = service.state_db()
+    event = notify.Event(key="k", kind="research_failed", title="failed")
+    monkeypatch.setattr(notify, "send", lambda *a: (_ for _ in ()).throw(
+        notify.DeliveryError("endpoint unreachable (URLError)")))
+
+    now = datetime.now(UTC)
+    assert notify.dispatch(db, settings, [event], now=now)["failed"][0]["key"] == "k"
+    # the retry is not attempted before its backoff has elapsed
+    assert notify.dispatch(db, settings, [event], now=now + timedelta(seconds=30))["held"] == ["k"]
+    assert notify.dispatch(db, settings, [event], now=now + timedelta(seconds=90))["failed"]
+
+    entry = notify.pending(db)["events"]["k"]
+    assert entry["state"] == "GAVE_UP" and entry["attempts"] == 2
+    # a dead endpoint must not be retried forever
+    assert notify.dispatch(db, settings, [event], now=now + timedelta(hours=5))["failed"] == []
+
+
+def test_a_message_carries_no_credential_or_account_number(service):
+    """A notification travels through infrastructure this system does not control."""
+    profiles = service.profiles()
+    profiles.risk["broker"]["state_file"] = "state/proposals.json"
+    ProposalStore(profiles.project_dir / "state" / "proposals.json").save(_proposal(status=PROPOSED))
+
+    blob = json.dumps([event.payload() for event in service.collect_notifications()]).lower()
+    for secret in ("access_token", "refresh_token", "bearer", "password", "csrf",
+                   "account_number", "client_secret", "api_key"):
+        assert secret not in blob
+
+
+def test_only_configured_event_kinds_are_delivered(service):
+    settings = file_settings(service, events=["research_failed"])
+    db = service.state_db()
+    result = notify.dispatch(db, settings, [
+        notify.Event(key="a", kind="proposal_waiting", title="ignored"),
+        notify.Event(key="b", kind="research_failed", title="sent"),
+    ])
+    assert result["sent"] == ["b"]
+    assert [row["key"] for row in delivered(service)] == ["b"]
+
+
+def test_an_overdue_backup_is_something_a_person_is_told_about(service):
+    kinds = {event.kind for event in service.collect_notifications()}
+    assert "backup_overdue" in kinds       # nothing has ever run in a fresh state directory
+
+
+def test_the_heartbeat_is_silent_until_an_external_watcher_is_configured(service, monkeypatch):
+    monkeypatch.delenv("CT_HEARTBEAT_URL", raising=False)
+    result = service.send_heartbeat()
+    assert result["sent"] is False and "CT_HEARTBEAT_URL" in result["reason"]
+
+
+def test_a_quiet_pass_writes_nothing_to_disk(service):
+    """This shares the fifteen-second loop, and a quiet system is the normal case."""
+    settings = file_settings(service)
+    db = service.state_db()
+    event = notify.Event(key="k", kind="research_failed", title="failed")
+
+    assert notify.dispatch(db, settings, [event])["recorded"] is True
+    before = db.read_meta(notify.RECORD, {})
+    assert notify.dispatch(db, settings, [event])["recorded"] is False
+    assert db.read_meta(notify.RECORD, {}) == before
+    assert notify.dispatch(db, settings, [])["recorded"] is False

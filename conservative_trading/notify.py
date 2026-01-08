@@ -1,0 +1,256 @@
+"""Notifications for the events a person would want to know about without opening the console.
+
+Two rules shape this module.
+
+The first is that it sends nothing until a channel is configured. The default channel is
+``none``: events are still collected and recorded, so the behaviour can be inspected and the
+delivery record reviewed, but nothing leaves the machine. Choosing a channel and supplying its
+credentials is how a person authorises sending, and that decision is not made in code.
+
+The second is that a notification carries no credential and no position detail beyond what the
+console already shows. A message travels through somebody else's infrastructure, so it says
+what happened and where to look, never the account, the token or the quote.
+
+Delivery is deduplicated by event key and retried with backoff, and every attempt is recorded
+durably. A condition that persists — an unapproved proposal, a broken credential — notifies once
+per quiet period rather than on every poll.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import ssl
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+RECORD = "notifications"
+MAX_RECORDS = 200
+TIMEOUT_SECONDS = 10
+
+#: Every event this system can raise, and how urgent it is for a person. The set is closed:
+#: an unknown key is a bug, not a new notification.
+EVENTS = {
+    "proposal_waiting": "a proposal is waiting for your approval",
+    "research_failed": "a research run failed",
+    "research_limit": "the Claude subscription limit stopped research",
+    "fill_recorded": "an order filled",
+    "reconciliation_error": "an order could not be reconciled with the broker",
+    "credential_invalid": "a stored credential no longer works",
+    "risk_level_changed": "the drawdown ladder changed level",
+    "backup_overdue": "a background activity has not run when expected",
+}
+
+
+@dataclass
+class Event:
+    """One thing worth telling a person about, identified so it is sent once."""
+
+    key: str
+    kind: str
+    title: str
+    detail: str = ""
+    link: str = ""
+    urgent: bool = False
+
+    def payload(self) -> dict[str, Any]:
+        return {"key": self.key, "kind": self.kind, "title": self.title,
+                "detail": self.detail, "link": self.link, "urgent": self.urgent,
+                "at": datetime.now(UTC).isoformat()}
+
+
+@dataclass
+class Settings:
+    channel: str = "none"
+    file_path: str = "runs/notifications.jsonl"
+    webhook_url_env: str = "CT_NOTIFY_WEBHOOK"
+    webhook_token_env: str = "CT_NOTIFY_TOKEN"
+    events: tuple[str, ...] = tuple(EVENTS)
+    min_interval_seconds: int = 900
+    max_attempts: int = 5
+    retry_backoff_seconds: int = 60
+    heartbeat_url_env: str = "CT_HEARTBEAT_URL"
+    heartbeat_every_minutes: int = 15
+    project_dir: Path = field(default_factory=Path)
+
+    @classmethod
+    def load(cls, profiles) -> Settings:
+        cfg = dict(profiles.risk.get("notifications") or {})
+        heartbeat = dict(cfg.get("heartbeat") or {})
+        events = tuple(cfg.get("events") or EVENTS)
+        return cls(
+            channel=str(cfg.get("channel", "none")),
+            file_path=str(cfg.get("file_path", "runs/notifications.jsonl")),
+            webhook_url_env=str(cfg.get("webhook_url_env", "CT_NOTIFY_WEBHOOK")),
+            webhook_token_env=str(cfg.get("webhook_token_env", "CT_NOTIFY_TOKEN")),
+            events=tuple(name for name in events if name in EVENTS),
+            min_interval_seconds=int(cfg.get("min_interval_seconds", 900)),
+            max_attempts=int(cfg.get("max_attempts", 5)),
+            retry_backoff_seconds=int(cfg.get("retry_backoff_seconds", 60)),
+            heartbeat_url_env=str(heartbeat.get("url_env", "CT_HEARTBEAT_URL")),
+            heartbeat_every_minutes=int(heartbeat.get("every_minutes", 15)),
+            project_dir=Path(profiles.project_dir),
+        )
+
+    def configured(self) -> bool:
+        if self.channel == "file":
+            return True
+        if self.channel == "webhook":
+            return bool(os.environ.get(self.webhook_url_env, "").strip())
+        return False
+
+    def why_not_configured(self) -> str:
+        if self.channel == "none":
+            return ("no channel is configured, so nothing is sent. Set notifications.channel and "
+                    "supply its credentials to authorise sending.")
+        if self.channel == "webhook":
+            return (f"channel is webhook but {self.webhook_url_env} is not set in the service "
+                    "environment, so nothing is sent.")
+        return f"unknown notification channel {self.channel!r}"
+
+
+class DeliveryError(RuntimeError):
+    """The channel refused or could not be reached; the event stays pending."""
+
+
+def _https(url: str) -> str:
+    if not url.startswith("https://"):
+        raise DeliveryError("a notification endpoint must be https")
+    return url
+
+
+def _post(url: str, body: dict[str, Any], token: str | None) -> None:
+    request = urllib.request.Request(      # https-only: _https rejects anything else
+        _https(url), data=json.dumps(body).encode(), method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "conservative-trading/1"})
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS,
+                                    context=ssl.create_default_context()) as response:
+            if response.status >= 400:
+                raise DeliveryError(f"endpoint returned {response.status}")
+    except urllib.error.HTTPError as exc:
+        raise DeliveryError(f"endpoint returned {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        # Deliberately not including the URL: it may embed a routing secret.
+        raise DeliveryError(f"endpoint unreachable ({type(exc).__name__})") from exc
+
+
+def send(settings: Settings, event: Event) -> None:
+    """Deliver one event through the configured channel, or raise DeliveryError."""
+    if not settings.configured():
+        raise DeliveryError(settings.why_not_configured())
+    if settings.channel == "file":
+        path = settings.project_dir / settings.file_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(event.payload()) + "\n")
+        path.chmod(0o600)
+        return
+    _post(os.environ[settings.webhook_url_env].strip(), event.payload(),
+          os.environ.get(settings.webhook_token_env, "").strip() or None)
+
+
+def heartbeat(settings: Settings) -> dict[str, Any]:
+    """Tell an external watcher this machine is alive.
+
+    Nothing running on this Mac can report that this Mac is gone. A watcher elsewhere that
+    expects a regular ping is the only way an outage reaches a phone, so the payload is
+    deliberately contentless: its arrival is the whole message.
+    """
+    url = os.environ.get(settings.heartbeat_url_env, "").strip()
+    if not url:
+        return {"sent": False, "reason": f"{settings.heartbeat_url_env} is not set"}
+    _post(url, {"at": datetime.now(UTC).isoformat(), "source": "conservative-trading"}, None)
+    return {"sent": True, "at": datetime.now(UTC).isoformat()}
+
+
+def dispatch(db, settings: Settings, events: list[Event], *,
+             now: datetime | None = None) -> dict[str, Any]:
+    """Send what is due, honouring the quiet period, the retry budget and the event filter."""
+    now = now or datetime.now(UTC)
+    record = db.read_meta(RECORD, {}) or {}
+    entries = dict(record.get("events") or {})
+    sent, held, failed = [], [], []
+    # This runs on the same fifteen-second loop as reconciliation, and a quiet system is the
+    # normal case, so a pass that neither sent nor learned anything must not write to disk.
+    changed = False
+
+    for event in events:
+        if event.kind not in settings.events:
+            continue
+        entry = dict(entries.get(event.key) or {})
+        if not entry:
+            changed = True
+        entry.setdefault("first_seen_at", now.isoformat())
+        entry.update({"kind": event.kind, "title": event.title, "detail": event.detail,
+                      "last_seen_at": now.isoformat()})
+        if not _due(entry, settings, now):
+            held.append(event.key)
+            entries[event.key] = entry
+            continue
+        try:
+            send(settings, event)
+        except DeliveryError as exc:
+            entry["attempts"] = int(entry.get("attempts", 0)) + 1
+            entry["state"] = "PENDING" if entry["attempts"] < settings.max_attempts else "GAVE_UP"
+            entry["error"] = str(exc)
+            entry["next_attempt_at"] = (
+                now + timedelta(seconds=settings.retry_backoff_seconds * entry["attempts"])
+            ).isoformat()
+            failed.append({"key": event.key, "error": str(exc)})
+            changed = True
+        else:
+            entry.update({"state": "SENT", "sent_at": now.isoformat(), "error": None,
+                          "attempts": int(entry.get("attempts", 0)) + 1,
+                          "next_attempt_at": None})
+            sent.append(event.key)
+            changed = True
+        entries[event.key] = entry
+
+    if changed:
+        record["events"] = _trim(entries)
+        record["last_dispatch_at"] = now.isoformat()
+        db.write_meta(RECORD, record)
+    return {"sent": sent, "held": held, "failed": failed, "recorded": changed,
+            "channel": settings.channel, "configured": settings.configured()}
+
+
+def _due(entry: dict[str, Any], settings: Settings, now: datetime) -> bool:
+    state = entry.get("state")
+    if state == "GAVE_UP":
+        return False
+    if state == "SENT":
+        sent_at = _parse(entry.get("sent_at"))
+        # A condition that persists is worth repeating, but not on every poll.
+        return sent_at is None or (now - sent_at).total_seconds() >= settings.min_interval_seconds
+    scheduled = _parse(entry.get("next_attempt_at"))
+    return scheduled is None or now >= scheduled
+
+
+def _parse(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        stamp = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+def _trim(entries: dict[str, Any]) -> dict[str, Any]:
+    if len(entries) <= MAX_RECORDS:
+        return entries
+    ordered = sorted(entries.items(), key=lambda item: item[1].get("last_seen_at") or "")
+    return dict(ordered[-MAX_RECORDS:])
+
+
+def pending(db) -> dict[str, Any]:
+    record = db.read_meta(RECORD, {}) or {}
+    return {"last_dispatch_at": record.get("last_dispatch_at"),
+            "events": record.get("events") or {}}
