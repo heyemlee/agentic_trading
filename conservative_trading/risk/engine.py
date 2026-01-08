@@ -11,6 +11,7 @@ config/risk_profile.yaml.
 
 from __future__ import annotations
 
+import math
 import traceback
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -42,6 +43,8 @@ class Proposal:
     # Strategy tag drives the deterministic strategy policy (HR15/HR16). Core accepts only
     # conservative long-only strategies; some sandbox strategies are permanently human-gated.
     strategy: str = "long_only_diversified"
+    sell_quantity: float | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +76,7 @@ class HardRiskResult:
     # confirmation. No autonomy setting in any later stage may clear it.
     requires_human_approval: bool = True
     human_approval_reason: str = "stage 2 produces recommendations only; nothing is executable"
+    proposed_quantity: float | None = None
 
     @property
     def failed_rules(self) -> list[RuleResult]:
@@ -211,11 +215,28 @@ class HardRiskEngine:
             has = snap.has_position(ticker, prop.bucket)
             rule("HR14", "position exists for reduction", has,
                  f"{ticker} {'is' if has else 'is not'} held in {prop.bucket}")
-            verdict = "APPROVE" if has and not fail_closed else "REJECT"
+            position = snap.state.position(ticker, prop.bucket)
+            quantity = 0.0
+            if position:
+                # REDUCE means half the current holding unless an already-approved
+                # quantity is being revalidated. SELL means the full holding.
+                requested = prop.sell_quantity
+                if requested is None:
+                    requested = position.quantity * (1.0 if prop.action == "SELL" else 0.5)
+                valid_quantity = math.isfinite(requested) and requested > 0
+                rule("HR14b", "valid reduction quantity", valid_quantity, f"requested shares: {requested}")
+                if valid_quantity:
+                    quantity = min(requested, position.quantity)
+            verdict = "APPROVE" if has and not fail_closed and all(r.passed or not r.blocking for r in rules) else "REJECT"
             action = prop.action if verdict == "APPROVE" else "NO_TRADE"
-            return self._stamp(HardRiskResult(verdict, action, ticker, prop.bucket, 0.0, 0.0,
-                                              snap.buckets[prop.bucket].weight_of(ticker), rules, ladder_view, reg,
-                                              advisories, list(self.p.defaults_used), fail_closed), prop)
+            bucket = snap.buckets[prop.bucket]
+            current = bucket.market_value_of(ticker)
+            notional = current * quantity / position.quantity if position and verdict == "APPROVE" else 0.0
+            remaining_weight = max(0.0, current - notional) / bucket.allocation_usd * 100.0
+            return self._stamp(HardRiskResult(verdict, action, ticker, prop.bucket, notional,
+                                              remaining_weight, remaining_weight, rules, ladder_view, reg,
+                                              advisories, list(self.p.defaults_used), fail_closed,
+                                              proposed_quantity=quantity if verdict == "APPROVE" else None), prop)
 
         # ---------------- opening actions ----------------
         bucket = snap.buckets[prop.bucket]
@@ -227,8 +248,10 @@ class HardRiskEngine:
         size_cap_small = False
         if prop.bucket != "core":
             blocked = ladder_level != "NORMAL"
+            if prop.bucket == "sandbox":
+                blocked = blocked or ladders.total.level != "NORMAL"
             rule("HR02", f"drawdown ladder ({prop.bucket})", not blocked,
-                 f"{prop.bucket} ladder level {ladder_level}")
+                 f"{prop.bucket} ladder level {ladder_level}; total ladder level {ladders.total.level}")
         else:
             if ladder_level in ("RISK_REDUCTION", "HARD_HALT", "EMERGENCY"):
                 rule("HR02", "drawdown ladder (core)", False, f"level {ladder_level}: no opening positions in any bucket"
@@ -265,6 +288,12 @@ class HardRiskEngine:
         rule("HR04", "instrument permission", perm_ok, perm_detail)
 
         # HR05 confidence and data quality
+        from ..evidence import check_evidence
+
+        evidence_ok, evidence_detail = check_evidence(prop.evidence, ticker, prop.trade_date, max_age)
+        rule("HR05c", "required market evidence", evidence_ok, evidence_detail)
+        rule("HR05d", "missing material information", not prop.missing_information,
+             "; ".join(prop.missing_information) or "no unresolved material information")
         conf = prop.confidence
         floor_small = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "small")
         floor_normal = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "normal")
@@ -281,7 +310,7 @@ class HardRiskEngine:
             size_cap_small = True
             rule("HR05b", "data quality", True, "partial evidence: size capped small", blocking=False)
         else:
-            rule("HR05b", "data quality", True, f"data quality {prop.data_quality or 'unrated'}")
+            rule("HR05b", "data quality", prop.data_quality == "good", f"data quality {prop.data_quality or 'unrated'}")
 
         # HR06 deterministic sizing
         effective_hint = prop.size_hint
@@ -435,6 +464,10 @@ class HardRiskEngine:
 
     def _permission(self, prop: Proposal) -> tuple[bool, str]:
         perms = self.p.risk.get("permissions") or {}
+        if prop.cls.product_flags:
+            return False, "excluded or unverified product structure: " + ", ".join(prop.cls.product_flags)
+        if prop.cls.instrument_type in ("etf", "stock") and not prop.cls.identity_verified:
+            return False, "unverified instrument: ETFs must belong to the explicit configured universe"
 
         def allowed(name: str) -> bool:
             node = (perms.get(name) or {}).get(prop.bucket, False)

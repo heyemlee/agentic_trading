@@ -402,16 +402,32 @@ class RobinhoodBroker:
         return out
 
     def get_quote(self, symbol: str) -> Quote:
+        def market_time(value):
+            if not isinstance(value, str):
+                return None
+            try:
+                stamp = datetime.fromisoformat(value)
+                return stamp if stamp.tzinfo is not None else None
+            except ValueError:
+                return None
+
         rows = _rows(self._call("quotes", {"symbols": [symbol.upper()]}), "quotes")
         for row in rows:
             if str(_first(row, "symbol", "ticker", default=symbol)).upper() != symbol.upper():
                 continue
             bid, ask = _num(_first(row, "bid_price", "bid")), _num(_first(row, "ask_price", "ask"))
             last = _num(_first(row, "last_trade_price", "last_price", "price", "mark_price"))
+            received = datetime.now(UTC)
+            traded = market_time(_first(row, "last_trade_at", "last_trade_time", "last_trade_timestamp"))
+            quoted = market_time(_first(row, "quote_timestamp", "updated_at", "timestamp"))
+            if bid and ask and quoted:
+                return Quote(symbol.upper(), (bid + ask) / 2, quoted, "last_quote_mid",
+                             bid=bid, ask=ask, received_at=received)
             if last:
-                return Quote(symbol.upper(), last, datetime.now(UTC), "last_trade", bid=bid, ask=ask)
+                return Quote(symbol.upper(), last, traded, "last_trade", bid=bid, ask=ask, received_at=received)
             if bid and ask and bid > 0 and ask > 0:
-                return Quote(symbol.upper(), (bid + ask) / 2, datetime.now(UTC), "last_quote_mid", bid=bid, ask=ask)
+                return Quote(symbol.upper(), (bid + ask) / 2, quoted, "last_quote_mid",
+                             bid=bid, ask=ask, received_at=received)
         raise BrokerUnavailable(f"Robinhood returned no usable quote for {symbol}")
 
     def get_open_orders(self) -> list[BrokerOrder]:

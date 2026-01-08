@@ -9,9 +9,14 @@ credentials. The Alpaca adapter implements the same protocol against the real pa
 from __future__ import annotations
 
 import itertools
-from dataclasses import replace
+import json
+from contextlib import nullcontext
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
 
+from ..storage import atomic_write, file_lock
 from .base import (
     Account,
     BrokerOrder,
@@ -33,7 +38,7 @@ class SimulatedBroker:
                  prices: dict[str, float] | None = None, market_open: bool = True,
                  fill_mode: str = "full", reject_reason: str | None = None,
                  unavailable: bool = False, trading_blocked: bool = False, now: datetime | None = None,
-                 autoprice: bool = False):
+                 autoprice: bool = False, order_state_path: str | Path | None = None):
         self._cash = cash
         self._positions = {s.upper(): (q, p) for s, (q, p) in (positions or {}).items()}
         self._prices = {s.upper(): p for s, p in (prices or {}).items()}
@@ -46,6 +51,21 @@ class SimulatedBroker:
         self._now = now or datetime.now(UTC)
         self._orders: dict[str, BrokerOrder] = {}
         self._ids = itertools.count(1)
+        self._order_state_path = Path(order_state_path) if order_state_path else None
+        self._load_orders()
+
+    def _load_orders(self):
+        if self._order_state_path and self._order_state_path.exists():
+            rows = json.loads(self._order_state_path.read_text())
+            for row in rows:
+                if row.get("submitted_at"):
+                    row["submitted_at"] = datetime.fromisoformat(row["submitted_at"])
+            self._orders = {row["client_order_id"]: BrokerOrder(**row) for row in rows}
+
+    def _save_orders(self):
+        if self._order_state_path:
+            atomic_write(self._order_state_path, json.dumps(
+                [asdict(order) for order in self._orders.values()], default=str, allow_nan=False))
 
     # -- test controls -------------------------------------------------------
     def set_price(self, symbol: str, price: float) -> None:
@@ -82,10 +102,12 @@ class SimulatedBroker:
 
     def get_open_orders(self) -> list[BrokerOrder]:
         self._guard()
+        self._load_orders()
         return [o for o in self._orders.values() if o.is_open]
 
     def get_order_by_client_id(self, client_order_id: str) -> BrokerOrder | None:
         self._guard()
+        self._load_orders()
         return self._orders.get(client_order_id)
 
     def get_clock(self) -> Clock:
@@ -99,6 +121,11 @@ class SimulatedBroker:
                      bid=round(price * 0.9995, 4), ask=round(price * 1.0005, 4))
 
     def submit_order(self, request: OrderRequest) -> BrokerOrder:
+        with file_lock(self._order_state_path) if self._order_state_path else nullcontext():
+            self._load_orders()
+            return self._submit_order(request)
+
+    def _submit_order(self, request: OrderRequest) -> BrokerOrder:
         self._guard()
         if request.client_order_id in self._orders:
             raise DuplicateOrder(f"client_order_id {request.client_order_id} already exists",
@@ -122,7 +149,7 @@ class SimulatedBroker:
                 raise BrokerRejection(f"cannot sell {qty:.4f} of {request.symbol}: only {held:.4f} held "
                                       "(shorting disabled)", code="insufficient_position")
 
-        order_id = f"sim-{next(self._ids):04d}"
+        order_id = f"sim-{uuid4().hex}" if self._order_state_path else f"sim-{next(self._ids):04d}"
         filled = {"full": qty, "partial": round(qty / 2, 6), "none": 0.0}[self._fill_mode]
         status = "filled" if filled >= qty - 1e-9 else ("partially_filled" if filled > 0 else "new")
         order = BrokerOrder(order_id=order_id, client_order_id=request.client_order_id, symbol=request.symbol.upper(),
@@ -130,12 +157,15 @@ class SimulatedBroker:
                             status=status, filled_quantity=filled, filled_avg_price=price if filled else None,
                             limit_price=request.limit_price, submitted_at=self._now)
         self._orders[request.client_order_id] = order
+        self._save_orders()  # a simulated venue must survive a crash before ledger accounting
         if filled:
             self._apply_fill(order.symbol, request.side, filled, price)
         return order
 
     def poll_order(self, order_id: str, timeout_seconds: float = 30.0,
                    interval_seconds: float = 2.0) -> BrokerOrder:
+        self._guard()
+        self._load_orders()
         for order in self._orders.values():
             if order.order_id == order_id:
                 return order
@@ -143,9 +173,15 @@ class SimulatedBroker:
 
     def cancel_order(self, order_id: str) -> None:
         self._guard()
+        with file_lock(self._order_state_path) if self._order_state_path else nullcontext():
+            self._load_orders()
+            self._cancel_order(order_id)
+
+    def _cancel_order(self, order_id: str):
         for key, order in self._orders.items():
             if order.order_id == order_id and order.is_open:
                 self._orders[key] = replace(order, status="canceled")
+                self._save_orders()
                 return
 
     # -- internals -----------------------------------------------------------

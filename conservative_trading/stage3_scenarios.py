@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from .broker import SimulatedBroker
+from .evidence import collect_evidence
 from .execution import execute
 from .profile import Profiles, load_profiles
 from .proposals import APPROVED, PROPOSED, Proposal, ProposalStore, new_proposal, utcnow
@@ -67,7 +68,9 @@ def _proposal(*, ticker: str = "VTI", bucket: str = "core", action: str = "BUY",
                      confidence=confidence, notional_usd=notional, target_weight_pct=35.0,
                      trade_date=TRADE_DATE, reference_price=price if price is not None else PRICES[ticker],
                      reference_price_date=TRADE_DATE, ladder_level_at_proposal=ladder,
-                     regime_at_proposal=regime, positions_fingerprint=fingerprint, data_quality="good")
+                     regime_at_proposal=regime, positions_fingerprint=fingerprint, data_quality="good",
+                     evidence=collect_evidence(ticker, TRADE_DATE,
+                         price_lookup=lambda *_: (price if price is not None else PRICES[ticker], TRADE_DATE)))
     p.created_at = (utcnow() - timedelta(minutes=age_minutes)).isoformat()
     p.status = status
     if status == APPROVED:

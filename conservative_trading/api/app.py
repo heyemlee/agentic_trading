@@ -12,19 +12,70 @@ execution-time revalidation, the Micro-Live capital boundary or the venue's own 
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
-from .service import Service, ServiceError
+from ..state_db import StateConflict
+from .auth import COOKIE, SESSION_SECONDS, ConsoleAuth
+from .service import Service, ServiceConflict, ServiceError
 
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app):
+    async def reconcile_loop():
+        while True:
+            try:
+                await asyncio.to_thread(_service.reconcile_orders)
+            except Exception:
+                logger.exception("background order reconciliation failed")
+            try:
+                await asyncio.to_thread(_service.recover_research_jobs)
+            except Exception:
+                logger.exception("background research recovery failed")
+            try:
+                await asyncio.to_thread(_service.dispatch_notifications)
+            except Exception:
+                logger.exception("notification dispatch failed")
+            await asyncio.sleep(15)
+
+    async def heartbeat_loop():
+        """An outage cannot be reported from inside the outage, so a watcher elsewhere is
+        told this machine is alive and infers the opposite from silence."""
+        while True:
+            minutes = 15
+            try:
+                result = await asyncio.to_thread(_service.send_heartbeat)
+                minutes = int(result.get("every_minutes") or 15)
+            except Exception:
+                logger.exception("external heartbeat failed")
+            await asyncio.sleep(max(60, minutes * 60))
+
+    tasks = [asyncio.create_task(reconcile_loop()), asyncio.create_task(heartbeat_loop())]
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Conservative Trading Backend",
     version="0.1.0",
     summary="Product interface for a conservative, human-approved investment system.",
@@ -37,16 +88,103 @@ app = FastAPI(
     ),
 )
 _service = Service("config")
+_auth = ConsoleAuth()
+
+
+@app.middleware("http")
+async def security_boundary(request: Request, call_next):
+    path = request.url.path
+    response = None
+    if not _auth.allowed_host(request.headers.get("host", "")):
+        response = JSONResponse({"detail": "untrusted host"}, status_code=400)
+    unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
+    if response is None and unsafe and (
+                not _auth.allowed_origin(request.headers.get("origin"))
+                or request.headers.get("sec-fetch-site") == "cross-site"
+                or request.headers.get("x-ct-request") != "1"
+                or request.headers.get("content-type", "").split(";")[0] != "application/json"):
+        response = JSONResponse({"detail": "same-origin JSON request required"}, status_code=403)
+    session = _auth.session(request.cookies.get(COOKIE)) if response is None else None
+    public = (path in ("/auth/login", "/auth/session", "/ui/login.html")
+              or path.startswith("/ui/assets/")
+              or (path.startswith("/ui/") and request.query_params.get("demo") == "1" and not unsafe))
+    if response is None and not public and session is None:
+        if path.startswith("/ui"):
+            response = RedirectResponse("/ui/login.html", status_code=303)
+        else:
+            configured = _auth.credentials() is not None
+            response = JSONResponse({"detail": "login required" if configured else
+                                     "console credentials not configured; run ct-auth locally"},
+                                    status_code=401 if configured else 503)
+    if (response is None and unsafe and path != "/auth/login" and (
+            session is None or not hmac.compare_digest(request.headers.get("x-csrf-token", ""), session.csrf))):
+        response = JSONResponse({"detail": "invalid session or CSRF token"}, status_code=403)
+    if response is None:
+        request.state.identity = session.username if session else None
+        response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    # The console uses external scripts only. Swagger's vendor-rendered documentation
+    # needs its own CDN/inline policy; all business pages retain the strict policy.
+    scripts = "'self'" if path not in ("/docs", "/redoc") else "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src " + scripts + "; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+        "frame-ancestors 'none'; form-action 'self'")
+    return response
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+@app.post("/auth/login", tags=["authentication"])
+def login(body: LoginRequest, request: Request):
+    token, status = _auth.login(body.username, body.password)
+    if token is None:
+        codes = {"unconfigured": 503, "rate_limited": 429, "invalid": 401}
+        raise HTTPException(codes[status], "console credentials not configured; run ct-auth locally" if status == "unconfigured"
+                            else "try again in five minutes" if status == "rate_limited" else "invalid credentials")
+    _auth.logout(request.cookies.get(COOKIE))
+    session = _auth.session(token)
+    response = JSONResponse({"authenticated": True, "username": session.username, "csrf_token": session.csrf})
+    response.set_cookie(COOKIE, token, max_age=SESSION_SECONDS, httponly=True,
+                        secure=request.url.scheme == "https", samesite="strict", path="/")
+    return response
+
+
+@app.get("/auth/session", tags=["authentication"])
+def session_status(request: Request):
+    session = _auth.session(request.cookies.get(COOKIE))
+    return {"authenticated": session is not None, "configured": _auth.credentials() is not None,
+            "username": session.username if session else None,
+            "csrf_token": session.csrf if session else None}
+
+
+@app.post("/auth/logout", tags=["authentication"])
+def logout(request: Request):
+    _auth.logout(request.cookies.get(COOKIE))
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(COOKIE, path="/")
+    return response
 
 
 def _ok(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
+    except ServiceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StateConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("unhandled error in %s", getattr(fn, "__name__", fn))
-        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
+        raise HTTPException(status_code=500, detail="internal error; inspect the local server log") from exc
 
 
 # ----------------------------------------------------------------- system
@@ -63,6 +201,24 @@ def claude_status() -> dict[str, Any]:
 @app.get("/system/market", tags=["system"], summary="Market session from the exchange calendar")
 def market_status() -> dict[str, Any]:
     return _ok(_service.market_status)
+
+
+@app.get("/system/notifications", tags=["system"],
+         summary="Notification channel, what is enabled, and the delivery record")
+def notification_status() -> dict[str, Any]:
+    return _ok(_service.notification_status)
+
+
+@app.get("/system/operations", tags=["system"],
+         summary="Background activities, disk headroom and retention")
+def operations() -> dict[str, Any]:
+    return _ok(_service.operations)
+
+
+@app.get("/system/schedule", tags=["system"],
+         summary="Next scheduled research, the last result, and why a run was skipped")
+def schedule_status() -> dict[str, Any]:
+    return _ok(_service.schedule_status)
 
 
 class PauseRequest(BaseModel):
@@ -110,6 +266,23 @@ def start_research(body: ResearchRequest) -> dict[str, Any]:
                instrument_type=body.instrument_type, trade_date=body.trade_date, trigger=body.trigger)
 
 
+@app.get("/research/jobs", tags=["research"], summary="Persistent research queue, newest first")
+def research_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50) -> list[dict[str, Any]]:
+    return _ok(_service.research_jobs, limit)
+
+
+class CancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str | None = Field(None, max_length=500)
+
+
+@app.post("/research/{run_key}/cancel", tags=["research"],
+          summary="Stop a queued or running research job")
+def cancel_research(run_key: str, body: CancelRequest | None = None) -> dict[str, Any]:
+    return _ok(_service.cancel_research, run_key,
+               (body.reason if body and body.reason else "cancelled from the console"))
+
+
 @app.get("/research/{run_key}", tags=["research"], summary="Progress of one research run")
 def research_run(run_key: str) -> dict[str, Any]:
     return _ok(_service.research_run, run_key)
@@ -146,17 +319,27 @@ def revalidate(proposal_id: str) -> dict[str, Any]:
 
 
 class ApproveRequest(BaseModel):
-    note: str | None = Field(None, description="Why you approved it. Kept in the audit trail.")
-    confirm: bool = Field(True, description="Must be true. A guard against an accidental POST.")
+    model_config = ConfigDict(extra="forbid")
+    note: str | None = Field(None, max_length=2000)
+    confirm: StrictBool
+    version: str = Field(pattern=r"^[a-f0-9]{64}$")
+    idempotency_key: UUID
+    ticker: str = Field(min_length=1, max_length=32)
+    bucket: Literal["core", "sandbox", "micro_live"]
+    action: Literal["BUY", "ADD", "SELL", "REDUCE"]
+    notional_usd: float = Field(gt=0, allow_inf_nan=False)
+    sell_quantity: float | None = Field(None, gt=0, allow_inf_nan=False)
 
 
 @app.post("/proposals/{proposal_id}/approve", tags=["proposals"],
-          summary="Authorise the idea; execute only if current conditions still support it")
-def approve(proposal_id: str, body: ApproveRequest | None = None) -> dict[str, Any]:
-    body = body or ApproveRequest()
-    if not body.confirm:
-        raise HTTPException(status_code=400, detail="approval requires confirm=true")
-    return _ok(_service.approve, proposal_id, body.note)
+          summary="Authorise this version; execute only if current conditions still support it")
+def approve(proposal_id: str, body: ApproveRequest, request: Request) -> dict[str, Any]:
+    if body.confirm is not True:
+        raise HTTPException(status_code=400, detail="approval requires explicit confirm=true")
+    return _ok(_service.approve, proposal_id, body.note,
+               identity=request.state.identity, version=body.version,
+               request_id=str(body.idempotency_key),
+               terms=body.model_dump(include={"ticker", "bucket", "action", "notional_usd", "sell_quantity"}))
 
 
 class RejectRequest(BaseModel):

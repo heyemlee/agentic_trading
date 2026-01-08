@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .evidence import collect_evidence
 from .portfolio import PortfolioState, build_snapshot, classify_instrument
 from .profile import Profiles, load_profiles
 from .risk import HardRiskEngine, LadderStates, Proposal, RegimeResult, evaluate_ladders
@@ -160,7 +161,8 @@ def run_scenario(sc: Scenario, profiles: Profiles) -> Outcome:
     cls = classify_instrument(sc.ticker, profiles, identity_lookup)
     proposal = Proposal(ticker=sc.ticker, bucket=sc.bucket, action=sc.action, size_hint=sc.size_hint,
                         confidence=sc.confidence, trade_date=TRADE_DATE, cls=cls, data_quality=sc.data_quality,
-                        missing_information=list(sc.missing), source="scenario", strategy=sc.strategy)
+                        missing_information=list(sc.missing), source="scenario", strategy=sc.strategy,
+                        evidence=collect_evidence(sc.ticker, TRADE_DATE, price_lookup=price_lookup))
     engine = HardRiskEngine(profiles, halt_file="/nonexistent/HALT",
                             stock_info_lookup=lambda s: sc.stock_info or {})
     result = engine.evaluate(proposal, snap, ladders, regime(sc.regime_level))

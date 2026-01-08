@@ -13,14 +13,19 @@ from typing import Any
 
 from ..proposals import (
     APPROVED,
+    CANCELED,
     EXECUTED,
     EXPIRED,
     INVALIDATED,
     NEEDS_REANALYSIS,
     NO_ACTION,
+    PARTIALLY_FILLED,
     PROPOSED,
     REJECTED,
     STALE,
+    SUBMITTED,
+    SUBMITTING,
+    UNKNOWN,
     VALID,
     Proposal,
 )
@@ -51,11 +56,18 @@ class MicroLiveStatus(str, Enum):
     HARD_RISK_REJECTED = "HARD_RISK_REJECTED"
     BROKER_REVIEW_REJECTED = "BROKER_REVIEW_REJECTED"
     EXECUTED = "EXECUTED"
+    SUBMITTED = "SUBMITTED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    UNKNOWN = "UNKNOWN"
+    CANCELED = "CANCELED"
 
 
 class ProposalStatus(str, Enum):
     """One proposal's product state."""
 
+    SUBMITTED = "SUBMITTED"
+    UNKNOWN = "UNKNOWN"
+    CANCELED = "CANCELED"
     WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"
     APPROVED_AWAITING_EXECUTION = "APPROVED_AWAITING_EXECUTION"
     EXECUTED = "EXECUTED"
@@ -71,8 +83,8 @@ class ProposalStatus(str, Enum):
 
 # Execution outcomes -> the product state a frontend should show.
 OUTCOME_TO_PROPOSAL_STATUS = {
-    "SUBMITTED": ProposalStatus.EXECUTED,
-    "DUPLICATE_PREVENTED": ProposalStatus.EXECUTED,
+    "SUBMITTED": ProposalStatus.SUBMITTED,
+    "DUPLICATE_PREVENTED": ProposalStatus.UNKNOWN,  # a duplicate alone proves no fill
     "ALREADY_EXECUTED": ProposalStatus.EXECUTED,
     "STALE": ProposalStatus.STALE,
     "REANALYZE": ProposalStatus.REANALYSIS_REQUIRED,
@@ -83,15 +95,26 @@ OUTCOME_TO_PROPOSAL_STATUS = {
     "PREFLIGHT_FAILED": ProposalStatus.HARD_RISK_REJECTED,
     "REVIEW_FAILED": ProposalStatus.BROKER_REVIEW_REJECTED,
     "BROKER_UNAVAILABLE": ProposalStatus.INVALIDATED,
-    "SUBMIT_UNCERTAIN": ProposalStatus.INVALIDATED,
+    "SUBMIT_UNCERTAIN": ProposalStatus.UNKNOWN,
+    "RECONCILIATION_REQUIRED": ProposalStatus.UNKNOWN,
     "ATTEMPTS_EXHAUSTED": ProposalStatus.INVALIDATED,
 }
 
 
 def proposal_status(proposal: Proposal, profiles: Any) -> ProposalStatus:
     """Map a stored proposal onto the vocabulary above, freshness included."""
+    if proposal.reconciliation_error or proposal.status in (SUBMITTING, UNKNOWN):
+        return ProposalStatus.UNKNOWN
+    if proposal.status == SUBMITTED:
+        return ProposalStatus.SUBMITTED
+    if proposal.status == PARTIALLY_FILLED:
+        return ProposalStatus.PARTIALLY_FILLED
+    if proposal.status == CANCELED:
+        return ProposalStatus.CANCELED
     if proposal.status == EXECUTED:
-        filled = proposal.executed_notional_usd
+        if proposal.order_status is not None:
+            return ProposalStatus.EXECUTED  # authoritative terminal status, not price/notional inference
+        filled = proposal.executed_notional_usd  # legacy display compatibility only
         if filled is not None and proposal.notional_usd and filled < proposal.notional_usd * 0.99:
             return ProposalStatus.PARTIALLY_FILLED
         return ProposalStatus.EXECUTED
@@ -130,7 +153,10 @@ def micro_live_status(*, enabled: bool, connected: bool, preflight_ready: bool,
             ProposalStatus.HARD_RISK_REJECTED: MicroLiveStatus.HARD_RISK_REJECTED,
             ProposalStatus.BROKER_REVIEW_REJECTED: MicroLiveStatus.BROKER_REVIEW_REJECTED,
             ProposalStatus.EXECUTED: MicroLiveStatus.EXECUTED,
-            ProposalStatus.PARTIALLY_FILLED: MicroLiveStatus.EXECUTED,
+            ProposalStatus.PARTIALLY_FILLED: MicroLiveStatus.PARTIALLY_FILLED,
+            ProposalStatus.SUBMITTED: MicroLiveStatus.SUBMITTED,
+            ProposalStatus.UNKNOWN: MicroLiveStatus.UNKNOWN,
+            ProposalStatus.CANCELED: MicroLiveStatus.CANCELED,
         }.get(status)
         if mapped is not None:
             return mapped

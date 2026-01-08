@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from conservative_trading.portfolio import PortfolioError, build_snapshot, load_portfolio
+from conservative_trading.evidence import collect_evidence
+from conservative_trading.portfolio import (
+    PortfolioError,
+    build_snapshot,
+    classify_instrument,
+    load_portfolio,
+)
+from conservative_trading.risk import HardRiskEngine, Proposal
 from conservative_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
 from conservative_trading.scenarios import (
     TRADE_DATE,
@@ -12,6 +19,7 @@ from conservative_trading.scenarios import (
     identity_lookup,
     make_state,
     price_lookup,
+    regime,
     run_scenario,
 )
 
@@ -30,6 +38,23 @@ def test_acceptable_buy_is_sized_from_the_baseline(profiles):
     outcome = run_scenario(sc, profiles)
     assert outcome.verdict == "APPROVE" and outcome.final_action == "BUY"
     assert outcome.notional == pytest.approx(2500 * 0.35, abs=0.01)  # VTI baseline 35% of core
+
+
+@pytest.mark.parametrize('action,quantity', [('SELL', 2.0), ('REDUCE', 1.0)])
+def test_risk_engine_generates_nonzero_exit_size(profiles, action, quantity):
+    from conservative_trading.risk import HardRiskEngine, Proposal
+    from conservative_trading.scenarios import make_ladders, regime
+
+    state = make_state(core_cash=1700, positions=[
+        {'symbol': 'VTI', 'bucket': 'core', 'quantity': 2, 'cost_basis_per_share': 370}])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = make_ladders(snap.total_equity, snap.buckets['core'].equity,
+                           snap.buckets['sandbox'].equity, profiles)
+    prop = Proposal('VTI', 'core', action, 'normal', 80, TRADE_DATE, snap.buckets['core'].positions[0].cls)
+    result = HardRiskEngine(profiles).evaluate(prop, snap, ladders, regime())
+    assert result.verdict == 'APPROVE'
+    assert result.proposed_quantity == quantity
+    assert result.proposed_notional_usd == pytest.approx(quantity * price_lookup('VTI', TRADE_DATE)[0])
 
 
 def test_defaults_used_are_recorded(profiles):
@@ -83,3 +108,60 @@ def test_sandbox_ladder_halts_at_minus_20(profiles):
     ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0))
     evaluate_ladders(ladders, profiles, "2026-09-01", 2900.0, 2500.0, 400.0)   # sandbox -20%, total -3.3%
     assert ladders.sandbox.level == "HALT" and ladders.total.level == "NORMAL"
+
+
+def _opening(profiles, *, bucket="core", identity=None, evidence=True, missing=()):
+    cls = classify_instrument("VTI", profiles, lambda _: identity or {"quote_type": "ETF"})
+    return Proposal(
+        "VTI", bucket, "BUY", "small", 80, TRADE_DATE, cls, data_quality="good",
+        missing_information=list(missing), evidence=(collect_evidence(
+            "VTI", TRADE_DATE, price_lookup=price_lookup) if evidence else {}),
+    )
+
+
+def test_sandbox_open_is_blocked_by_total_portfolio_warning(profiles):
+    state = make_state()
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000, level="WARNING"), LadderState(2500), LadderState(500))
+    result = HardRiskEngine(profiles).evaluate(_opening(profiles, bucket="sandbox"), snap, ladders, regime())
+    failed = {rule.rule_id for rule in result.failed_rules}
+    assert result.verdict == "REJECT" and "HR02" in failed
+    assert "total ladder level WARNING" in next(r.detail for r in result.rules if r.rule_id == "HR02")
+
+
+@pytest.mark.parametrize("missing_evidence,missing_info,rule_id", [
+    (True, (), "HR05c"),
+    (False, ("current fund holdings are unavailable",), "HR05d"),
+])
+def test_open_requires_verifiable_evidence_and_no_material_gaps(
+        profiles, missing_evidence, missing_info, rule_id):
+    state = make_state()
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000), LadderState(2500), LadderState(500))
+    prop = _opening(profiles, evidence=not missing_evidence, missing=missing_info)
+    result = HardRiskEngine(profiles).evaluate(prop, snap, ladders, regime())
+    assert result.verdict == "REJECT" and rule_id in {r.rule_id for r in result.failed_rules}
+
+
+@pytest.mark.parametrize("identity,expected_flag", [
+    ({"quote_type": "ETF", "leveraged": True}, "leveraged"),
+    ({"quote_type": "ETF", "inverse": True}, "inverse"),
+    ({"quote_type": "ETF", "name": "Example Single-Stock Daily ETF"}, "single_stock"),
+    ({"quote_type": "ETF", "category": "Digital Assets"}, "crypto_etf"),
+    ({"quote_type": "ETF", "category": "Managed Futures"}, "commodity_futures"),
+    ({"quote_type": "ETF", "category": "Derivative Income"}, "covered_call"),
+])
+def test_excluded_etf_structures_fail_closed(profiles, identity, expected_flag):
+    prop = _opening(profiles, identity=identity)
+    assert expected_flag in prop.cls.product_flags
+    allowed, detail = HardRiskEngine(profiles)._permission(prop)
+    assert allowed is False and expected_flag in detail
+
+
+def test_unknown_etf_is_not_treated_as_a_plain_safe_etf(profiles):
+    cls = classify_instrument("MYSTERY", profiles, lambda _: {"quote_type": "ETF"})
+    assert cls.instrument_type == "etf" and cls.identity_verified is False
+    prop = Proposal("MYSTERY", "sandbox", "BUY", "small", 80, TRADE_DATE, cls,
+                    data_quality="good", evidence={})
+    allowed, detail = HardRiskEngine(profiles)._permission(prop)
+    assert allowed is False and "unverified" in detail

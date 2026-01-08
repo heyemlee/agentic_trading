@@ -7,6 +7,7 @@ from pathlib import Path
 from conservative_trading import cli, scenarios
 from conservative_trading.portfolio import build_snapshot
 from conservative_trading.profile import load_profiles
+from conservative_trading.state_db import StateDB
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_IDENTITY = {"company_name": "Test Fund", "quote_type": "ETF", "exchange": "PCX"}
@@ -49,7 +50,7 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     # the fake reviewer returns confidence 0 -> policy NO_TRADE -> Hard Risk NO_ACTION, never an approval
     assert rec["policy"]["final_action"] == "NO_TRADE" and rec["hard_risk"]["verdict"] == "NO_ACTION"
     assert rec["final_recommendation"]["action"] == "NO_TRADE"
-    assert (state_dir / "risk_state.json").exists()
+    assert StateDB(state_dir / "risk_state.json").read_document(state_dir / "risk_state.json") is not None
 
 
 def _cfg(profiles, tmp_path):

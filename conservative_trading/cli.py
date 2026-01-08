@@ -21,6 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .broker import make_broker
+from .evidence import collect_evidence
 from .execution import execute as execute_proposal
 from .execution import revalidate
 from .graph import ConservativeTradingGraph, classify_instrument
@@ -56,6 +57,7 @@ from .risk import (
     load_ladder_states,
     save_ladder_states,
 )
+from .state_db import StateDB
 
 
 def _print(msg: str) -> None:
@@ -88,14 +90,15 @@ def portfolio_context(profiles: Profiles, trade_date: str,
     state = load_portfolio(profiles.project_dir / ledger_file, required_buckets=required)
     snap = build_snapshot(state, profiles, trade_date)
     ladder_path = profiles.project_dir / ladder_file
-    ladders = load_ladder_states(ladder_path, profiles)
-    micro_equity = snap.buckets[MICRO_BUCKET].equity if MICRO_BUCKET in snap.buckets else None
-    evaluate_ladders(ladders, profiles, trade_date,
-                     snap.total_equity if "core" in snap.buckets else (micro_equity or snap.total_equity),
-                     snap.buckets["core"].equity if "core" in snap.buckets else (micro_equity or 0.0),
-                     snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else 0.0,
-                     micro_live_equity=micro_equity)
-    save_ladder_states(ladder_path, ladders)
+    with StateDB(ladder_path).transaction():
+        ladders = load_ladder_states(ladder_path, profiles)
+        micro_equity = snap.buckets[MICRO_BUCKET].equity if MICRO_BUCKET in snap.buckets else None
+        evaluate_ladders(ladders, profiles, trade_date,
+                         snap.total_equity if "core" in snap.buckets else (micro_equity or snap.total_equity),
+                         snap.buckets["core"].equity if "core" in snap.buckets else (micro_equity or 0.0),
+                         snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else 0.0,
+                         micro_live_equity=micro_equity)
+        save_ladder_states(ladder_path, ladders)
     regime = assess_regime(profiles, trade_date)
     governing = ladders.for_bucket(bucket) if bucket != "core" else ladders.total
     text = render_snapshot(snap, {"total": {"level": governing.level, "drawdown_pct": governing.drawdown_pct}},
@@ -104,13 +107,19 @@ def portfolio_context(profiles: Profiles, trade_date: str,
 
 
 def hard_risk_for(profiles: Profiles, policy: PolicyDecision, ticker: str, bucket: str, trade_date: str,
-                  snap: Snapshot, ladders: LadderStates, regime) -> tuple[Proposal, object]:
+                  snap: Snapshot, ladders: LadderStates, regime, final_state=None) -> tuple[Proposal, object]:
     cls = classify_holding(ticker, profiles, upstream_identity_lookup)
+    evidence = {}
+    if policy.final_action in ("BUY", "ADD"):
+        keys = {"market": "market_report", "news": "news_report", "fundamentals": "fundamentals_report", "social": "sentiment_report"}
+        required = [keys[name] for name in profiles.analysts_for(cls.instrument_type) if name in keys]
+        evidence = collect_evidence(ticker, trade_date, reports=final_state, required_reports=required)
     proposal = Proposal(
         ticker=ticker.upper(), bucket=bucket, action=policy.final_action, size_hint=policy.size_hint,
         confidence=policy.confidence, trade_date=trade_date, cls=cls,
         data_quality=(policy.proposal or {}).get("data_quality"),
         missing_information=list((policy.proposal or {}).get("missing_information") or []),
+        evidence=evidence,
     )
     return proposal, HardRiskEngine(profiles).evaluate(proposal, snap, ladders, regime)
 
@@ -133,7 +142,7 @@ def _final(result, proposal: Proposal) -> dict:
 
 
 def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instrument_type: str,
-            runs_dir: Path, debug: bool) -> int:
+            runs_dir: Path, debug: bool, *, run_id: str | None = None) -> int:
     reset_usage_log()
     started = time.time()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -141,7 +150,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         instrument_type = classify_instrument(ticker)
     asset_type = "crypto" if instrument_type == "crypto" else "stock"
     analysts = profiles.analysts_for(instrument_type)
-    run_id = f"{trade_date}_{ticker.upper().replace('/', '-')}_{uuid.uuid4().hex[:8]}"
+    run_id = run_id or f"{trade_date}_{ticker.upper().replace('/', '-')}_{uuid.uuid4().hex[:8]}"
     run_dir = runs_dir / run_id
     _print(f"[{ticker}] {instrument_type} | bucket={bucket} | analysts={analysts} | run={run_id}")
 
@@ -180,7 +189,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         _print(f"[{ticker}] STOPPED during policy step: {exc}")
         return 3
 
-    proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders, regime)
+    proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders, regime, final_state)
     final = _final(result, proposal_obj)
 
     record = build_record(
@@ -200,14 +209,16 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
             strategy=proposal_obj.strategy, instrument_type=instrument_type,
             limit_class=proposal_obj.cls.limit_class, size_hint=policy.size_hint,
             confidence=policy.confidence, notional_usd=result.proposed_notional_usd,
+            sell_quantity=result.proposed_quantity,
             target_weight_pct=result.target_weight_pct_of_allocation, trade_date=trade_date,
             requires_human_approval=result.requires_human_approval,
-            reference_price=_reference_price(snap, ticker, trade_date),
-            reference_price_date=trade_date, ladder_level_at_proposal=ladders.total.level,
+            reference_price=proposal_obj.evidence.get("price") or _reference_price(snap, ticker, trade_date),
+            reference_price_date=proposal_obj.evidence.get("price_date", trade_date), ladder_level_at_proposal=ladders.total.level,
             regime_at_proposal=regime.level, portfolio_equity_at_proposal=snap.total_equity,
             bucket_cash_at_proposal=snap.buckets[bucket].cash_usd,
             positions_fingerprint=positions_fingerprint({p.symbol: p.quantity for p in snap.state.positions}),
             data_quality=(policy.proposal or {}).get("data_quality"),
+            evidence=proposal_obj.evidence, missing_information=proposal_obj.missing_information,
         )
         store.save(proposal)
         record["proposal_id"] = proposal.proposal_id
@@ -329,9 +340,10 @@ def risk_check_main(argv: list[str] | None = None) -> int:
         return 2
     _print(text)
     cls = classify_holding(args.ticker, profiles, upstream_identity_lookup)
+    evidence = collect_evidence(args.ticker, args.date) if args.action in ("BUY", "ADD") else {}
     proposal = Proposal(ticker=args.ticker.upper(), bucket=args.bucket, action=args.action, size_hint=args.size,
                         confidence=args.confidence, trade_date=args.date, cls=cls, data_quality=args.data_quality,
-                        source="ct-risk-check")
+                        source="ct-risk-check", evidence=evidence)
     result = HardRiskEngine(profiles).evaluate(proposal, snap, ladders, regime)
     _print("")
     _print(f"proposal: {args.action} {args.ticker.upper()} ({cls.limit_class}) in {args.bucket}, size {args.size}, confidence {args.confidence}")

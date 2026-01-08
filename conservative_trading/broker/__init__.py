@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from .base import (
     Account,
@@ -46,6 +47,8 @@ def make_broker(profiles, **kwargs) -> BrokerAdapter:
             except Exception as exc:  # noqa: BLE001 - an unreadable ledger leaves the simulator empty
                 logging.getLogger(__name__).debug("simulator could not seed from the ledger: %s", exc)
         kwargs.setdefault("autoprice", True)
+        state_file = profiles.project_dir / str(cfg.get("state_file", "state/proposals.json"))
+        kwargs.setdefault("order_state_path", Path(state_file).with_name("simulated_orders.json"))
         return SimulatedBroker(**kwargs)
     if name == "robinhood":
         from .robinhood import RobinhoodBroker

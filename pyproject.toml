@@ -32,7 +32,12 @@ ct-approve = "conservative_trading.cli:approve_main"
 ct-proposals = "conservative_trading.cli:proposals_main"
 ct-robinhood = "conservative_trading.robinhood_cli:main"
 ct-api = "conservative_trading.api.app:main"
+ct-auth = "conservative_trading.api.auth:main"
+ct-reconcile = "conservative_trading.reconciliation:main"
 ct-trigger = "conservative_trading.triggers:main"
+ct-state = "conservative_trading.state_cli:main"
+ct-ops = "conservative_trading.operations:main"
+ct-notify = "conservative_trading.notify_cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.5"]

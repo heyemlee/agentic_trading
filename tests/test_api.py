@@ -10,9 +10,7 @@ import shutil
 from datetime import timedelta
 
 import pytest
-from fastapi.testclient import TestClient
 
-from conservative_trading.api.app import app
 from conservative_trading.api.service import Service, ServiceError
 from conservative_trading.api.status import (
     MicroLiveStatus,
@@ -141,24 +139,41 @@ def test_real_money_broker_is_refused_while_micro_live_is_disabled(sandbox_servi
         sandbox_service._broker(profiles, "micro_live")
 
 
-def test_openapi_schema_is_published_for_frontend_generation():
-    client = TestClient(app)
+def test_openapi_schema_is_published_for_frontend_generation(auth_client):
+    client = auth_client
     schema = client.get("/openapi.json").json()
     paths = set(schema["paths"])
     for required in ("/health", "/portfolio", "/risk", "/micro-live", "/proposals",
-                     "/proposals/{proposal_id}", "/proposals/{proposal_id}/approve", "/research", "/orders"):
+                     "/proposals/{proposal_id}", "/proposals/{proposal_id}/approve", "/research",
+                     "/research/jobs", "/orders"):
         assert required in paths, required
     approve = schema["paths"]["/proposals/{proposal_id}/approve"]["post"]
     assert "current conditions" in approve["summary"]
 
 
-def test_scheduled_trigger_refuses_to_run_while_paused(sandbox_service):
+def test_pausing_stops_orders_while_research_keeps_running(sandbox_service, monkeypatch):
+    """One answer for the whole system: the kill switch is about orders, not about analysis.
+
+    The trigger used to decline while paused, which contradicted both the API's own description
+    of the kill switch and the operations guide. It now runs, and only a status that makes
+    research impossible stops it.
+    """
     from conservative_trading.triggers import scheduled_review
 
+    started = []
+    monkeypatch.setattr(sandbox_service, "start_research",
+                        lambda ticker, **kw: started.append(ticker) or {"run_key": ticker})
     sandbox_service.pause("test")
+    assert sandbox_service.health()["status"] == "PAUSED"
+
     result = scheduled_review(sandbox_service)
-    assert result["skipped"] is True and "PAUSED" in result["reason"]
-    assert result["started"] == []
+    assert result["skipped"] is False and started
+
+    profiles = sandbox_service.profiles()
+    monkeypatch.setattr(sandbox_service, "profiles", lambda: profiles)
+    profiles.risk["research_schedule"]["run_while_paused"] = False
+    withheld = scheduled_review(sandbox_service, force=True)
+    assert withheld["skipped"] is True and "paused" in withheld["reason"]
 
 
 def test_freshness_is_exposed_with_the_numbers_a_screen_needs(sandbox_service):
@@ -174,3 +189,44 @@ def test_freshness_is_exposed_with_the_numbers_a_screen_needs(sandbox_service):
     assert row["freshness"]["ttl_minutes"] == 90
     assert row["freshness"]["state"] == "STALE"          # past the 30 minute mark, inside the 90 minute life
     assert row["freshness"]["max_price_drift_pct"] == 1.5
+
+
+def test_accounts_are_reported_separately_and_never_summed_into_one_drawdown(sandbox_service):
+    """The paper book and the funded account keep separate equity and high-water marks."""
+    portfolio = sandbox_service.portfolio()
+    conceptual, micro = portfolio["accounts"]["conceptual"], portfolio["accounts"]["micro_live"]
+
+    assert conceptual["buckets"] == ["core", "sandbox"] and micro["buckets"] == ["micro_live"]
+    assert conceptual["is_real_money"] is False and micro["is_real_money"] is True
+    assert conceptual["equity_usd"] == sum(
+        portfolio["buckets"][b]["equity_usd"] for b in ("core", "sandbox"))
+    # each account's equity belongs to its own ladder, and neither to the other's
+    assert conceptual["high_water_mark_usd"] != micro["high_water_mark_usd"]
+    assert portfolio["combined"]["mixes_real_and_conceptual"] is True
+    assert portfolio["combined"]["equity_usd"] == round(
+        conceptual["equity_usd"] + micro["equity_usd"], 2)
+    for bucket, expected in (("core", "conceptual"), ("micro_live", "micro_live")):
+        assert portfolio["buckets"][bucket]["account"] == expected
+
+
+def test_a_deposit_is_funding_and_never_a_return(sandbox_service):
+    """Paying money in must move equity and funding by the same amount, leaving result alone."""
+    from conservative_trading.portfolio import record_cash_flow
+
+    ledger = sandbox_service.profiles().project_dir / "state" / "portfolio.yaml"
+    before = sandbox_service.portfolio()["accounts"]["conceptual"]
+
+    record_cash_flow(ledger, bucket="core", amount_usd=250.0, kind="deposit", date="2026-09-03")
+    after = sandbox_service.portfolio()["accounts"]["conceptual"]
+
+    assert after["equity_usd"] == before["equity_usd"] + 250.0
+    assert after["net_deposits_usd"] == before["net_deposits_usd"] + 250.0
+    assert after["recorded_flows_usd"] == 250.0
+    assert after["opening_allocation_usd"] == before["opening_allocation_usd"]
+    assert after["investment_pnl_usd"] == before["investment_pnl_usd"] == 0.0
+    assert after["return_pct"] == 0.0
+
+    record_cash_flow(ledger, bucket="core", amount_usd=100.0, kind="withdrawal", date="2026-09-03")
+    out = sandbox_service.portfolio()["accounts"]["conceptual"]
+    assert out["recorded_flows_usd"] == 150.0
+    assert out["investment_pnl_usd"] == 0.0

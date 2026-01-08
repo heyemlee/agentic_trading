@@ -96,10 +96,11 @@ class Quote:
 
     symbol: str
     price: float
-    as_of: datetime
+    as_of: datetime | None
     source: str                # last_trade | last_quote_mid | position_mark
     bid: float | None = None
     ask: float | None = None
+    received_at: datetime | None = None
 
     @property
     def spread_pct(self) -> float | None:

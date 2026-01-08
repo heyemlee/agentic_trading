@@ -470,6 +470,85 @@ broker:
   state_file: state/proposals.json
   fills_file: state/fills.jsonl
 
+# Research requests are durable jobs. Identical active requests collapse to one run; workers
+# survive an API restart, and an orphaned worker resumes the same run/checkpoint at most once.
+research_jobs:
+  max_concurrent: 2
+  timeout_seconds: 5400
+  max_attempts: 2
+  # A subscription limit is a recoverable condition, not a permanent failure, so a job that hit
+  # one is requeued after the reset window instead of needing a person. Bounded, because an
+  # unbounded retry would spend the whole subscription on one ticker.
+  claude_limit_retry_after_hours: 6
+  max_limit_recoveries: 2
+
+# When scheduled research runs, what it analyses, and when it declines to run at all. The
+# operating system's scheduler (launchd here) only decides when this command is invoked; every
+# decision about whether that invocation should do anything is made from this section, so a
+# holiday, a restart catch-up, a repeat trigger and an exhausted budget all have one answer.
+research_schedule:
+  enabled: true
+  period: weekly                           # one execution per period; a catch-up run after a
+                                           # restart resumes the same period, never repeats it
+  launchd:                                 # mirrored into the launchd job by deploy/macos
+    weekday: 5                             # 1=Monday .. 5=Friday, in the Mac's local time
+    hour: 13
+    minute: 30
+  calendar: XNYS                           # sessions, holidays and half days, not a hand-kept list
+  market_timezone: America/New_York        # the market's clock; never the laptop's current zone
+  on_non_session_day: previous_session     # skip | previous_session, when the day is a holiday
+  tickers: []                              # empty: one representative per core exposure group
+  max_tickers_per_run: 3
+  max_analyses_per_day: 6                  # counts every entry point, manual runs included
+  run_while_paused: true                   # the kill switch stops orders; research continues
+
+# Unattended operation. The failures that matter on a machine nobody watches are quiet ones:
+# a loop that stopped, a backup that has not run, a disk that filled with run artefacts. Each
+# activity records when it last succeeded and how often it is expected to, so "nothing has
+# happened" can be told apart from "nothing is running".
+operations:
+  runs_retention_days: 120                 # decision records and reports older than this are removed
+  log_max_mb: 32                           # a service log is rotated once it passes this size
+  log_keep: 5                              # rotations kept per log file
+  backup_retention_days: 30
+  low_disk_free_gb: 10                     # below this, the console raises it as a warning
+  expected_every_minutes:                  # how stale each activity may become before it is late
+    reconciliation: 5
+    research_dispatch: 5
+    backup: 1440
+    maintenance: 1440
+    schedule: 10080                        # weekly, with a day of slack
+
+# What a person is told about without opening the console, and through what.
+#
+# Nothing is sent while channel is `none`: events are still collected, deduplicated and
+# recorded, so the delivery record can be reviewed, but nothing leaves the machine. Choosing a
+# channel and supplying its credentials in the service environment is how sending is authorised.
+# A message never carries a credential, an account number or a quote; it says what happened and
+# which screen to open.
+notifications:
+  channel: none                            # none | file | webhook
+  file_path: runs/notifications.jsonl      # channel: file — a local trail, useful to verify shape
+  webhook_url_env: CT_NOTIFY_WEBHOOK       # channel: webhook — https endpoint, read from the env
+  webhook_token_env: CT_NOTIFY_TOKEN       # optional bearer token for that endpoint
+  min_interval_seconds: 900                # a standing condition notifies at most this often
+  max_attempts: 5
+  retry_backoff_seconds: 60
+  events:
+    - proposal_waiting                     # something needs a human decision
+    - research_failed
+    - research_limit                       # the subscription stopped the work
+    - fill_recorded
+    - reconciliation_error                 # the broker and the ledger disagree
+    - credential_invalid
+    - risk_level_changed
+    - backup_overdue                       # a background activity stopped running
+  heartbeat:
+    # Nothing running on this Mac can report that this Mac is gone. An external watcher that
+    # expects a regular ping is the only way an outage reaches a phone.
+    url_env: CT_HEARTBEAT_URL
+    every_minutes: 15
+
 # Freshness is per strategy, not one universal number. The window is set by how fast the
 # thesis can decay, the drift band by how much price movement changes the decision.
 proposal_freshness:
@@ -521,6 +600,7 @@ proposal_freshness:
 data_freshness:
   fast:                                    # re-read on every execution attempt
     max_age_seconds: 120
+    max_spread_pct: 0.5                    # missing/crossed/wider venue books block submission
     fields: [price, account, cash, buying_power, positions, open_orders, exposure, drawdown, market_session]
   medium:
     max_age_minutes: 1440                  # news and company developments

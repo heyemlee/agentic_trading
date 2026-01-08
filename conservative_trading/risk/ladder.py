@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ..profile import Profiles
+from ..state_db import StateDB
 
 ORDER = ["NORMAL", "WARNING", "RISK_REDUCTION", "HARD_HALT", "EMERGENCY"]
 SANDBOX_ORDER = ["NORMAL", "WARNING", "HALT"]
@@ -59,10 +60,14 @@ def load_ladder_states(path: str | Path, profiles: Profiles) -> LadderStates:
     core0 = profiles.capital_allocation("core")
     sandbox0 = profiles.capital_allocation("sandbox")
     micro0 = profiles.capital_allocation("micro_live")
-    if not path.exists():
+    stored = StateDB(path).read_document(path)
+    if stored is not None:
+        raw = stored
+    elif path.exists():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    else:
         return LadderStates(LadderState(total0), LadderState(core0), LadderState(sandbox0),
                             LadderState(micro0) if micro0 else None)
-    raw = json.loads(path.read_text(encoding="utf-8"))
 
     def mk(key: str, default_hwm: float) -> LadderState:
         d = dict(raw.get(key) or {})
@@ -75,8 +80,12 @@ def load_ladder_states(path: str | Path, profiles: Profiles) -> LadderStates:
 
 def save_ladder_states(path: str | Path, states: LadderStates) -> None:
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(states.as_dict(), indent=2), encoding="utf-8")
+    db = StateDB(path)
+    with db.transaction() as conn:
+        raw = path.read_bytes() if path.exists() else b""
+        db.write_document(path, states.as_dict(), conn)
+        if not db.migrated(path):
+            db.mark_migrated(conn, path, "drawdown_ladder", raw)
 
 
 def _thresholds(profiles: Profiles, section: str) -> list[tuple[str, float]]:

@@ -7,6 +7,7 @@ boundary, the real-money master switch, and the bucket-to-venue binding.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -36,7 +37,8 @@ PORTFOLIO = {"data": {"total_value": "100", "equity_value": "0", "cash": "100", 
 EMPTY_POSITIONS = {"data": {"positions": []}}
 EMPTY_ORDERS = {"data": {"orders": []}}
 QUOTES = {"data": {"quotes": [{"symbol": "VTI", "last_trade_price": "376.88",
-                               "bid_price": "376.86", "ask_price": "376.90"}]}}
+                               "bid_price": "376.86", "ask_price": "376.90",
+                               "last_trade_at": datetime.now(UTC).isoformat()}]}}
 
 
 class FakeMCP:
@@ -164,10 +166,22 @@ def test_positions_from_other_accounts_are_excluded(profiles):
 
 
 def test_quote_mapping_prefers_last_trade(profiles):
+    stamp = datetime.now(UTC).replace(microsecond=0)
     quotes = {"data": {"quotes": [{"symbol": "VTI", "last_trade_price": "380.93", "bid_price": "380.90", "ask_price": "380.96"}]}}
+    quotes["data"]["quotes"][0]["last_trade_at"] = stamp.isoformat()
     broker = make_broker(profiles, FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_equity_quotes": quotes}))
     q = broker.get_quote("VTI")
     assert q.price == 380.93 and q.source == "last_trade" and q.spread_pct is not None
+    assert q.as_of == stamp and q.received_at >= stamp
+
+
+def test_quote_never_substitutes_local_receipt_time_for_missing_market_time(profiles):
+    quotes = {"data": {"quotes": [{"symbol": "VTI", "last_trade_price": "380.93",
+                                      "bid_price": "380.90", "ask_price": "380.96"}]}}
+    broker = make_broker(profiles, FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS,
+                                                           "get_equity_quotes": quotes}))
+    q = broker.get_quote("VTI")
+    assert q.as_of is None and q.received_at is not None
 
 
 def test_real_money_is_blocked_while_the_master_switch_is_off(profiles):
@@ -317,9 +331,11 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     assert sent["time_in_force"] == "gfd" and sent["market_hours"] == "regular_hours"
     assert "ref_id" in sent
     assert any(n == "review_equity_order" for n, _ in fake.calls), "the venue pre-trade review must run first"
-    updated = yaml.safe_load(ledger.read_text())
-    assert updated["positions"][0]["symbol"] == "VTI"
-    assert updated["buckets"]["micro_live"]["cash_usd"] < 100.0
+    from conservative_trading.portfolio import load_portfolio
+
+    updated = load_portfolio(ledger)
+    assert updated.positions[0].symbol == "VTI"
+    assert updated.buckets["micro_live"].cash_usd < 100.0
 
     second = execute(profiles, store.get(proposal.proposal_id), broker, store, ledger_path=str(ledger))
     assert second.submitted is False and second.duplicate_prevented
@@ -412,9 +428,11 @@ def test_partial_fill_reconciles_only_what_filled(profiles, tmp_path, monkeypatc
     assert result.order["status"] == "partially_filled"
     saved = store.get(proposal.proposal_id)
     assert any(h["event"] == "pending" for h in saved.history), "a partial fill must be flagged as pending"
-    updated = yaml.safe_load(ledger.read_text())
-    assert updated["positions"][0]["quantity"] == 0.04, "only the filled quantity is recorded"
-    assert updated["buckets"]["micro_live"]["cash_usd"] == pytest.approx(100 - 0.04 * 378.39, abs=0.01)
+    from conservative_trading.portfolio import load_portfolio
+
+    updated = load_portfolio(ledger)
+    assert updated.positions[0].quantity == 0.04, "only the filled quantity is recorded"
+    assert updated.buckets["micro_live"].cash_usd == pytest.approx(100 - 0.04 * 378.39, abs=0.01)
 
 
 def test_unacknowledged_risk_defaults_block_real_money(profiles):
