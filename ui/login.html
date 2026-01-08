@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>登录 · Conservative Trading</title>
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+<main class="container section">
+<h1>登录 / Sign in</h1>
+<p class="body-muted">Conservative Trading · 个人控制台</p>
+<form id="login-form" class="card stack stack-4" style="margin-top:24px;">
+<label class="field">账号 / Username<input class="input" name="username" value="owner" autocomplete="username" required maxlength="100" /></label>
+<label class="field">密码 / Password<input class="input" type="password" name="password" autocomplete="current-password" required maxlength="1024" /></label>
+<button class="btn btn-green" type="submit">登录 / Sign in</button>
+<p id="login-result" role="status" aria-live="polite"></p>
+</form>
+<p style="margin-top:20px;">首次使用请在运行后端的电脑执行 <code>uv run ct-auth</code> 设置密码。</p>
+<a href="index.html?demo=1">查看演示 / View demo</a>
+</main>
+<script src="assets/login.js"></script>
+</body>
+</html>
