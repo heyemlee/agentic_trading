@@ -4,6 +4,10 @@ Deliberately not a scheduler platform. The mature scheduler on this machine is t
 system's own (launchd on macOS, cron elsewhere), so this module provides the command those
 schedulers call and nothing more. Every trigger enters the same pipeline as a manual run, so
 none of them can bypass Policy, Hard Risk, approval or execution-time revalidation.
+
+Whether a given invocation should do anything at all is decided in :mod:`schedule`, from the
+exchange calendar, the period already executed and the day's budget. This module carries out
+that decision and records what came of it.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from . import operations, schedule
 from .api.service import Service, ServiceError
 
 logger = logging.getLogger(__name__)
@@ -23,31 +28,61 @@ TRIGGERS = ("scheduled", "manual", "event")
 
 
 def scheduled_review(service: Service, *, tickers: list[str] | None = None,
-                     bucket: str = "core") -> dict[str, Any]:
+                     bucket: str = "core", now: datetime | None = None,
+                     force: bool = False) -> dict[str, Any]:
     """A periodic portfolio review.
 
-    Refuses to start when the system is paused, halted or out of Claude budget, so a cron entry
-    firing into a halted system does nothing rather than piling up work.
+    Claims the period before starting anything, so a repeated trigger, a launchd catch-up after
+    a restart and a manual rerun all resume the same execution instead of analysing the same
+    week twice. A skip is recorded with its reason, because "why did nothing run on Friday" has
+    to be answerable from the phone.
     """
-    health = service.health()
-    if health["status"] in ("PAUSED", "HALTED", "CLAUDE_LIMIT_REACHED", "CONFIG_ERROR"):
-        return {"started": [], "skipped": True, "reason": f"system status is {health['status']}",
-                "at": datetime.now(UTC).isoformat()}
-
     profiles = service.profiles()
-    if tickers is None:
-        watch = profiles.investor_cfg("universe", "core", "etf_exposure_groups", default={}) or {}
-        # One representative per exposure group, so a review never analyses overlapping funds.
-        tickers = [group[0] for group in watch.values() if group][:3]
-    started = [service.start_research(t, bucket=bucket, trigger="scheduled") for t in tickers]
-    return {"started": started, "skipped": False, "at": datetime.now(UTC).isoformat()}
+    db = service.state_db(profiles)
+    health = service.health()
+    decision = schedule.decide(
+        profiles, health_status=health["status"], paused=bool(health.get("paused")),
+        executed=db.read_meta(schedule.EXECUTIONS, {}) or {},
+        jobs=service.research_jobs(limit=200), now=now, force=force)
+    if tickers:
+        decision.tickers = [t.upper() for t in tickers]
+
+    if not decision.run:
+        schedule.record_skip(db, decision, now=now)
+        # A skip is the schedule working, so it counts as the activity having run.
+        operations.record(db, "schedule", f"skipped: {decision.reason}", min_interval_seconds=0)
+        return {"started": [], "skipped": True, "reason": decision.reason,
+                "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
+    if not force and not schedule.claim(db, decision, now=now):
+        decision.run = False
+        decision.reason = f"another invocation already claimed {decision.period_key}"
+        return {"started": [], "skipped": True, "reason": decision.reason,
+                "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
+
+    started, errors = [], []
+    for ticker in decision.tickers:
+        try:
+            started.append(service.start_research(ticker, bucket=bucket, trigger="scheduled",
+                                                  trade_date=decision.trade_date))
+        except ServiceError as exc:      # one refused ticker must not lose the others
+            errors.append({"ticker": ticker, "error": str(exc)})
+    schedule.record_result(db, decision.period_key, state="STARTED",
+                           run_keys=[run["run_key"] for run in started], errors=errors,
+                           finished_at=datetime.now(UTC).isoformat())
+    operations.record(db, "schedule", f"{len(started)} run(s) started for {decision.trade_date}",
+                      min_interval_seconds=0)
+    return {"started": started, "skipped": False, "errors": errors,
+            "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
 
 
 def event_analysis(service: Service, ticker: str, *, bucket: str = "core",
                    reason: str = "external event") -> dict[str, Any]:
     """Analysis triggered by something that happened, rather than by the clock."""
     health = service.health()
-    if health["status"] in ("PAUSED", "HALTED", "CLAUDE_LIMIT_REACHED", "CONFIG_ERROR"):
+    profiles = service.profiles()
+    cfg = schedule.settings(profiles)
+    if health["status"] in schedule.BLOCKING_STATUS or (
+            health.get("paused") and not cfg.get("run_while_paused", True)):
         return {"started": None, "skipped": True, "reason": f"system status is {health['status']}"}
     run = service.start_research(ticker, bucket=bucket, trigger="event")
     run["event_reason"] = reason
@@ -60,15 +95,20 @@ def main(argv: list[str] | None = None) -> int:
         prog="ct-trigger",
         description="Start a research run from a scheduler, a person, or an event. "
                     "Never bypasses Policy, Hard Risk, approval or revalidation.",
-        epilog="macOS: schedule with launchd. Linux: a crontab line calling this command. "
-               "Example crontab entry for a weekday review at 16:30 New York time:\n"
-               "  30 16 * * 1-5 cd /path/to/agentic_trading && .venv/bin/ct-trigger scheduled",
+        epilog="macOS: schedule with launchd (deploy/macos/install.sh). Linux: a crontab line "
+               "calling this command. The command re-checks the exchange calendar, the period "
+               "already executed and the daily budget, so firing it more often than needed is "
+               "safe and simply records why it declined.",
     )
     parser.add_argument("kind", choices=TRIGGERS)
     parser.add_argument("--ticker", action="append", dest="tickers",
                         help="repeatable; defaults to one representative per core exposure group")
     parser.add_argument("--bucket", choices=["core", "sandbox", "micro_live"], default="core")
     parser.add_argument("--reason", default="external event", help="event triggers only")
+    parser.add_argument("--force", action="store_true",
+                        help="scheduled triggers only: run again inside an executed period")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="scheduled triggers only: report the decision without starting work")
     parser.add_argument("--config-dir", default="config")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -76,7 +116,11 @@ def main(argv: list[str] | None = None) -> int:
     service = Service(args.config_dir)
     try:
         if args.kind == "scheduled":
-            result = scheduled_review(service, tickers=args.tickers, bucket=args.bucket)
+            if args.dry_run:
+                result = service.schedule_status()
+            else:
+                result = scheduled_review(service, tickers=args.tickers, bucket=args.bucket,
+                                          force=args.force)
         elif args.kind == "event":
             if not args.tickers:
                 parser.error("an event trigger needs at least one --ticker")
@@ -101,6 +145,8 @@ def _append_trigger_log(service: Service, kind: str, result: dict[str, Any]) -> 
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"at": datetime.now(UTC).isoformat(), "kind": kind,
-                                 "skipped": result.get("skipped"), "reason": result.get("reason")}) + "\n")
+                                 "skipped": result.get("skipped"), "reason": result.get("reason"),
+                                 "period_key": (result.get("schedule") or {}).get("period_key"),
+                                 }) + "\n")
     except (OSError, ServiceError):
         pass  # a trigger must never fail because its own log could not be written
