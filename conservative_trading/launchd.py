@@ -1,0 +1,193 @@
+"""launchd job definitions for the macOS deployment.
+
+The installer is a shell script, but what it writes into ``~/Library/LaunchAgents`` decides
+whether the phone can still reach the console afterwards. That decision is made here instead,
+in one testable place, because the failure it prevents is silent: a plain rerun of the
+installer used to reset ``CT_ALLOWED_ORIGINS`` to loopback and the private HTTPS entry point
+started answering ``untrusted host`` with nothing in the log to explain why.
+"""
+
+from __future__ import annotations
+
+import argparse
+import plistlib
+import sys
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+API = "com.local.agentic-trading.api"
+RESEARCH = "com.local.agentic-trading.research-weekly"
+BACKUP = "com.local.agentic-trading.backup-daily"
+MAINTENANCE = "com.local.agentic-trading.maintenance-daily"
+LABELS = (API, RESEARCH, BACKUP, MAINTENANCE)
+
+LOOPBACK = ("http://127.0.0.1:8787", "http://localhost:8787")
+
+
+def installed_origins(launch_agents: Path) -> list[str]:
+    """Remote origins the currently installed API job already trusts."""
+    try:
+        with (Path(launch_agents) / f"{API}.plist").open("rb") as stream:
+            payload = plistlib.load(stream)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return []
+    raw = (payload.get("EnvironmentVariables") or {}).get("CT_ALLOWED_ORIGINS", "")
+    return [origin for origin in (x.strip().rstrip("/") for x in str(raw).split(","))
+            if origin and urlsplit(origin).scheme == "https"]
+
+
+def check_origin(origin: str) -> str:
+    origin = origin.rstrip("/")
+    parsed = urlsplit(origin)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
+        raise ValueError("remote origin must look like https://device.tailnet.ts.net")
+    return origin
+
+
+def allowed_origins(*, origin: str | None, keep: list[str]) -> list[str]:
+    """Loopback, plus the remote origin being set, or the ones already installed.
+
+    ``origin`` replaces; an empty ``origin`` with an empty ``keep`` is the deliberate
+    loopback-only case, which is why "keep" is passed in rather than discovered here.
+    """
+    out = list(LOOPBACK)
+    for remote in ([check_origin(origin)] if origin else keep):
+        if remote not in out:
+            out.append(remote)
+    return out
+
+
+def research_interval(data_dir: Path) -> dict[str, int]:
+    """When the weekly research job fires, read from the same config the console reports from.
+
+    Two copies of a schedule drift, and the one a screen shows is the one a person plans around,
+    so the plist is generated from the configuration rather than repeating it.
+    """
+    default = {"Weekday": 5, "Hour": 13, "Minute": 30}
+    try:
+        from .profile import load_profiles
+
+        cfg = (load_profiles(Path(data_dir) / "config").risk.get("research_schedule") or {})
+        launchd = dict(cfg.get("launchd") or {})
+        interval = {"Hour": int(launchd.get("hour", 13)), "Minute": int(launchd.get("minute", 30))}
+        if str(cfg.get("period", "weekly")) != "daily" and launchd.get("weekday") is not None:
+            interval["Weekday"] = int(launchd["weekday"])
+        return interval
+    except Exception:  # noqa: BLE001 - an unreadable profile must not block reinstalling
+        return default
+
+
+def render(*, data_dir: Path, release_dir: Path | None = None, home: Path,
+           origins: list[str]) -> dict[str, dict[str, Any]]:
+    """Jobs for one deployment.
+
+    ``data_dir`` owns config, state and runs; ``release_dir`` owns the code and its virtual
+    environment. They are the same directory in a single-checkout install and different ones
+    once :file:`deploy/macos/release.sh` is used, which is what lets the service keep running a
+    fixed version while the checkout it was cut from carries on being edited.
+    """
+    data_dir = Path(data_dir).resolve()
+    release_dir = Path(release_dir).resolve() if release_dir else data_dir
+    home = Path(home)
+    logs = data_dir / "runs/service"
+    environment = {
+        "HOME": str(home),
+        "PATH": ":".join((str(home / ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin",
+                          "/usr/bin", "/bin")),
+        "PYTHONUNBUFFERED": "1",
+        "CT_AUTH_FILE": str(data_dir / "state/console_auth.json"),
+        "CT_CLAUDE_BIN": str(home / ".local/bin/claude"),
+        "CT_CONFIG_DIR": str(data_dir / "config"),
+        "CT_DATA_DIR": str(data_dir),
+        "CT_RELEASE_DIR": str(release_dir),
+        "CT_ALLOWED_ORIGINS": ",".join(origins),
+    }
+    common = {
+        "WorkingDirectory": str(data_dir),
+        "EnvironmentVariables": environment,
+        "ProcessType": "Background",
+        "Umask": 0o077,
+    }
+    return {
+        API: {
+            **common,
+            "ProgramArguments": [str(release_dir / "deploy/macos/run_api.sh")],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "ThrottleInterval": 10,
+            "ExitTimeOut": 30,
+            "StandardOutPath": str(logs / "api.stdout.log"),
+            "StandardErrorPath": str(logs / "api.stderr.log"),
+        },
+        RESEARCH: {
+            **common,
+            "ProgramArguments": [str(release_dir / "deploy/macos/run_scheduled_research.sh")],
+            # In the Mac's local time, from risk_profile.research_schedule.launchd. The trigger
+            # itself re-checks the exchange calendar, the period already executed and the daily
+            # budget, so an extra firing records why it declined rather than repeating work.
+            "StartCalendarInterval": research_interval(data_dir),
+            "StandardOutPath": str(logs / "research.stdout.log"),
+            "StandardErrorPath": str(logs / "research.stderr.log"),
+        },
+        BACKUP: {
+            **common,
+            "ProgramArguments": [str(release_dir / "deploy/macos/backup_state.sh")],
+            "StartCalendarInterval": {"Hour": 3, "Minute": 15},
+            "LowPriorityIO": True,
+            "StandardOutPath": str(logs / "backup.stdout.log"),
+            "StandardErrorPath": str(logs / "backup.stderr.log"),
+        },
+        MAINTENANCE: {
+            **common,
+            "ProgramArguments": [str(release_dir / "deploy/macos/maintenance.sh")],
+            "StartCalendarInterval": {"Hour": 3, "Minute": 45},
+            "LowPriorityIO": True,
+            "StandardOutPath": str(logs / "maintenance.stdout.log"),
+            "StandardErrorPath": str(logs / "maintenance.stderr.log"),
+        },
+    }
+
+
+def write(destination: Path, jobs: dict[str, dict[str, Any]]) -> list[Path]:
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    written = []
+    for label, payload in jobs.items():
+        target = destination / f"{label}.plist"
+        with target.open("wb") as stream:
+            plistlib.dump({"Label": label, **payload}, stream, sort_keys=False)
+        target.chmod(0o600)
+        written.append(target)
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m conservative_trading.launchd``: render the deployment's launchd jobs."""
+    parser = argparse.ArgumentParser(
+        prog="ct-launchd", description="Write the macOS launchd jobs for this deployment.")
+    parser.add_argument("--data-dir", required=True, type=Path,
+                        help="owns config/, state/ and runs/")
+    parser.add_argument("--release-dir", type=Path,
+                        help="owns the code and .venv; defaults to --data-dir")
+    parser.add_argument("--launch-agents", required=True, type=Path)
+    parser.add_argument("--home", type=Path, default=Path.home())
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--https-origin", default="", help="set the remote origin")
+    group.add_argument("--clear-origins", action="store_true",
+                       help="deliberately drop every remote origin and serve loopback only")
+    args = parser.parse_args(argv)
+
+    keep = [] if (args.https_origin or args.clear_origins) else installed_origins(args.launch_agents)
+    try:
+        origins = allowed_origins(origin=args.https_origin or None, keep=keep)
+    except ValueError as exc:
+        parser.error(str(exc))
+    write(args.launch_agents, render(data_dir=args.data_dir, release_dir=args.release_dir,
+                                     home=args.home, origins=origins))
+    print("allowed origins: " + ", ".join(origins))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
