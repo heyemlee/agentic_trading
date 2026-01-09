@@ -154,7 +154,8 @@ def test_a_scheduled_run_claims_its_period_then_records_the_runs_it_started(sand
     service, db = sandbox
     monkeypatch.setattr(service, "health", lambda: {"status": "READY", "paused": False})
     monkeypatch.setattr(service, "start_research",
-                        lambda ticker, **kw: {"run_key": f"key-{ticker}", "ticker": ticker})
+                        lambda ticker, **kw: {"run_key": f"key-{ticker}", "ticker": ticker,
+                                              "trade_date": "2026-09-03"})
 
     result = scheduled_review(service, now=FRIDAY_AFTER_CLOSE)
     assert result["skipped"] is False and len(result["started"]) >= 1
@@ -164,3 +165,29 @@ def test_a_scheduled_run_claims_its_period_then_records_the_runs_it_started(sand
 
     repeat = scheduled_review(service, now=FRIDAY_AFTER_CLOSE)
     assert repeat["skipped"] is True and repeat["started"] == []
+
+
+def test_the_run_anchors_to_a_session_with_data_not_to_the_calendar_date(sandbox, monkeypatch):
+    """A session closes hours before its prices are published.
+
+    Forcing the calendar's date on the run produced an UNKNOWN market regime, which lowers
+    confidence and prefers NO_TRADE — a run that looks healthy while reasoning from evidence it
+    does not have. The calendar decides whether to run; the data layer decides what to read.
+    """
+    service, db = sandbox
+    monkeypatch.setattr(service, "health", lambda: {"status": "READY", "paused": False})
+    passed = []
+
+    def start_research(ticker, **kwargs):
+        passed.append(kwargs)
+        # what the service resolves to, which is a session earlier than the calendar's
+        return {"run_key": f"key-{ticker}", "ticker": ticker, "trade_date": "2026-09-03"}
+
+    monkeypatch.setattr(service, "start_research", start_research)
+    result = scheduled_review(service, now=FRIDAY_AFTER_CLOSE)
+
+    assert result["schedule"]["trade_date"] == "2026-09-04"      # the calendar's session
+    assert all(kwargs.get("trade_date") is None for kwargs in passed)
+    record = db.read_meta(schedule.EXECUTIONS, {})["periods"][result["schedule"]["period_key"]]
+    assert record["calendar_session"] == "2026-09-04"
+    assert record["analysed_sessions"] == ["2026-09-03"]         # what was actually read

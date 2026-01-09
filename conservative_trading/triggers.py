@@ -62,12 +62,19 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
     started, errors = [], []
     for ticker in decision.tickers:
         try:
-            started.append(service.start_research(ticker, bucket=bucket, trigger="scheduled",
-                                                  trade_date=decision.trade_date))
+            # The calendar decides whether to run and which period this is; it does not decide
+            # which session to analyse. A session can be closed hours before its prices are
+            # published, and anchoring to a date with no data yields an UNKNOWN regime and a
+            # run that looks healthy while reasoning from evidence it does not have. The
+            # service picks the newest session that actually has data.
+            started.append(service.start_research(ticker, bucket=bucket, trigger="scheduled"))
         except ServiceError as exc:      # one refused ticker must not lose the others
             errors.append({"ticker": ticker, "error": str(exc)})
+    # Bookkeeping must not be able to fail a run that already started.
+    analysed = sorted({run["trade_date"] for run in started if run.get("trade_date")})
     schedule.record_result(db, decision.period_key, state="STARTED",
                            run_keys=[run["run_key"] for run in started], errors=errors,
+                           calendar_session=decision.trade_date, analysed_sessions=analysed,
                            finished_at=datetime.now(UTC).isoformat())
     operations.record(db, "schedule", f"{len(started)} run(s) started for {decision.trade_date}",
                       min_interval_seconds=0)

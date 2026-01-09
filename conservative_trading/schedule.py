@@ -28,7 +28,13 @@ MAX_RECORDS = 60
 
 @dataclass
 class Decision:
-    """Whether to run, what to run, and a reason a person can act on either way."""
+    """Whether to run, what to run, and a reason a person can act on either way.
+
+    ``trade_date`` is the calendar's answer to "which session has closed", used to decide
+    whether running now makes sense at all. It is not the session the research anchors to: a
+    session closes hours before its prices are published, so the run asks the data layer for
+    the newest session that actually has data.
+    """
 
     run: bool
     reason: str
