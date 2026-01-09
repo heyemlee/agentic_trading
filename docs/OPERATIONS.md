@@ -5,16 +5,16 @@ A conservative, portfolio-aware wrapper around the open-source
 Principles: reuse mature upstream software, keep personal preferences in
 configuration, use the LLM for intelligence and deterministic code for safety.
 
-Current state: **backend complete, frontend not started**. Research, policy, risk, approval,
-revalidation and the Robinhood connection all work. Real-money execution is disabled by its own
-master switch and has never been enabled; the $100 Micro-Live account sits in cash.
+Current state: the backend and responsive web console are implemented. Research, policy, risk,
+approval, revalidation and the Robinhood connection all work. Real-money execution is disabled
+by its own master switch and has never been enabled; the $100 Micro-Live account sits in cash.
 
 Frontend teams start at [`docs/FRONTEND_HANDOFF.md`](docs/FRONTEND_HANDOFF.md).
 
 ## What runs
 
 ```
-Trigger (manual today; scheduled or event-driven later)
+Trigger (manual, scheduled or event-driven)
   -> portfolio context: bucket ledger + broker state, drawdown ladders, market regime
   -> TradingAgents (unmodified) on the Claude Max subscription
   -> Conservative Policy: mandate-format proposal, confidence, deterministic action mapping
@@ -42,14 +42,19 @@ uv run ct-approve <proposal-id>                   # approve, revalidate, then su
 uv run ct-risk-check VTI --confidence 80          # what-if check, no model call
 uv run ct-scenarios                               # Hard Risk validation scenarios
 uv run ct-stage3                                  # proposal / approval / execution validation
+uv run ct-state status                            # integrity, record counts, unsettled orders
+uv run ct-state backup --verify                   # consistent SQLite backup, integrity-checked
+uv run ct-state sessions                          # persistent console logins and their expiry
+uv run ct-state cashflow --bucket core --amount 500   # record a deposit (never a gain)
+uv run ct-ops status                              # background activity heartbeats and free disk
+uv run ct-notify status                           # notification channel; sends nothing
 ```
 
-State files (all untracked): `state/portfolio.yaml` is the bucket ledger (one symbol belongs to one bucket;
-the sandbox never draws on core cash). From Stage 3 the broker is the source of truth for
-cash, quantities and prices, and the ledger supplies the bucket attribution the broker does
-not have; execution updates it after every fill. `state/risk_state.json` holds the ladder
-(high-water marks, level, manual-reset flag), `state/proposals.json` the proposal lifecycle,
-and `state/fills.jsonl` one line per fill. An empty `state/HALT` file is the kill switch.
+`state/trading_state.sqlite3` is the authoritative store for proposals, approvals, orders,
+fills, reservations, research jobs, drawdown ladders and portfolio ledgers. The old proposal,
+fill and ladder JSON plus portfolio YAML files are imported once and retained as migration
+sources. An empty `state/HALT` file is the kill switch. Use `ct-state migrate`, `ct-state status`
+and `ct-state backup`; never copy a live SQLite file as a backup.
 
 ## Brokers
 
@@ -117,31 +122,53 @@ scheduler / frontend / manual trigger
 
 ```bash
 uv sync
+uv run ct-auth                         # create or rotate the console password locally
 uv run ct-api                          # backend on http://127.0.0.1:8787, schema at /docs
 ```
 
-Bind to localhost only: this process holds the Robinhood token and the Claude session, and has
-no authentication because it is a single-user local service.
+For an always-on Mac, phone access, launchd supervision, scheduled research and verified daily
+backups, follow [`MACOS_DEPLOYMENT.md`](MACOS_DEPLOYMENT.md).
 
-### Triggers
+Bind to localhost only: this process holds the Robinhood token and the Claude session. The
+console and API require a password-backed session and CSRF protection. Sessions use hashed
+server-side tokens in SQLite and remain valid across API restarts for up to 30 days. For phone access, keep
+Uvicorn on loopback and put a private-network or HTTPS reverse proxy in front of it; keep the
+frontend and API on the same origin and add that exact HTTPS origin to `CT_ALLOWED_ORIGINS`.
+Run one application worker because login rate limits are process-local.
+
+### Triggers and the schedule
 
 Three kinds, all entering the same pipeline:
 
 ```bash
 uv run ct-trigger manual --ticker VTI          # analyse one security now
-uv run ct-trigger scheduled                    # periodic review, one per exposure group
+uv run ct-trigger scheduled                    # the periodic review
+uv run ct-trigger scheduled --dry-run          # what it would decide, starting nothing
 uv run ct-trigger event --ticker VTI --reason "earnings release"
 ```
 
-Scheduling uses the operating system's own scheduler rather than a bundled one. A weekday
-review after the close, via crontab:
+Scheduling uses the operating system's own scheduler rather than a bundled one. It decides only
+*when the command is invoked*; whether that invocation should do anything is decided from
+`risk_profile.research_schedule`, so a holiday, a catch-up run after a restart, a repeated
+trigger and an exhausted budget all get the same answer whichever entry point fires:
 
-```
-30 16 * * 1-5 cd /path/to/agentic_trading && .venv/bin/ct-trigger scheduled
-```
+| Situation | What happens |
+| --- | --- |
+| The day is a market holiday or a weekend | Steps back to the last completed session, or skips outright, per `on_non_session_day`. The exchange calendar decides, not a hand-kept list. |
+| Today's session has not closed | Analyses the previous completed session. |
+| The period already ran | Skipped. The period key (`weekly:2026-W36`) is claimed *before* any research starts, so a machine that reboots and fires the job again resumes the same period instead of analysing the week twice. |
+| Two invocations race | One claims the period; the other records that it lost the race. |
+| The day's analyses are spent | Skipped, with the count. `max_analyses_per_day` covers every entry point, manual runs included: the subscription is one pool. |
+| The system is paused | **Research still runs.** The kill switch is about orders. Set `run_while_paused: false` to change that. |
+| The system is halted, out of Claude budget, or misconfigured | Skipped, naming the status. |
 
-A trigger firing into a paused, halted or usage-limited system does nothing and says so, rather
-than queueing work.
+Every skip is recorded with its reason and shown on the console's System screen next to the
+next scheduled time, so "why did nothing run on Friday" is answerable from a phone.
+
+A run that is going nowhere can be stopped from the Research screen or through
+`POST /research/{run_key}/cancel`; it otherwise holds a concurrency slot until its timeout. A
+run stopped by the subscription limit is requeued automatically once the reset window passes,
+at most `max_limit_recoveries` times.
 
 ### Approval
 
@@ -162,8 +189,14 @@ uv run ct-approve <id>                         # authorise, revalidate, then may
 uv run python -c "from conservative_trading.api.service import Service; Service().pause('reason')"
 ```
 
-or `POST /system/pause`, or simply create the file `state/HALT`. Research continues; no order
-can be submitted. Remove the file or call `/system/resume` to release it.
+or `POST /system/pause`, or simply create the file `state/HALT`. Remove the file or call
+`/system/resume` to release it.
+
+**Pausing stops orders, not research.** Analysis is how the system notices that conditions
+changed while it was paused, and a proposal produced during a pause still cannot be executed:
+Hard Risk checks the kill switch again at execution time. If you would rather stop everything,
+set `research_schedule.run_while_paused: false`; the schedule then records "system is paused"
+as its skip reason. One setting, one behaviour, in the code and here.
 
 ### Real money
 
@@ -233,6 +266,16 @@ uv run ct-risk-check VTI --confidence 80       # what-if against the portfolio, 
 uv run ct-robinhood status|preflight|connect   # the real-money venue
 uv run ct-scenarios                            # Hard Risk validation scenarios
 uv run ct-stage3                               # proposal, approval and execution validation
+uv run ct-state migrate                         # one-time import of legacy state
+uv run ct-state backup --verify                 # consistent SQLite backup, integrity-checked
+uv run ct-state restore --source <f> --into <d> # restore, revoke sessions, list orders to check
+uv run ct-state sessions                        # persistent console logins and their expiry
+uv run ct-state cashflow --bucket core --amount 500 --kind deposit
+uv run ct-ops maintain                          # rotate logs, prune run artefacts, check disk
+uv run ct-notify status|pending|test            # notification channel and delivery record
+uv run ct-trigger scheduled --dry-run           # the schedule's decision, starting nothing
+deploy/checks.sh                                # lint, tests, frontend cases, secret scan
+deploy/macos/selfcheck.sh                       # verify an unattended deployment came back up
 ```
 
 Each research run writes to `runs/<date>_<ticker>_<id>/`: a `decision_record.json` with the
@@ -246,7 +289,7 @@ These four are deliberately distinct and must never be conflated:
 | Term | Meaning | Status |
 |---|---|---|
 | Research run on real market data | The model analyses current market data. No broker, no orders, no money. | Stage 2, what runs today |
-| Paper trading | Simulated orders on a broker's paper account. Fake money, real order plumbing. | Stage 3, not built |
+| Paper trading | Simulated orders with durable order plumbing. Fake money. | Built |
 | Micro-Live | Up to $100 of real capital at Robinhood, genuinely pursuing risk-adjusted return. Not disposable test money. | Built, disabled |
 | Live trading | Normal real-money trading at full size. | Not planned for the near term |
 
@@ -286,6 +329,58 @@ uv run pytest
 The suite runs offline against `tests/fake_claude.py`, which fails if an API
 key ever reaches the CLI or built-in tools are left enabled.
 
+## Money paid in is not money made
+
+Each account reports its funding and its result separately, because a system that shows only
+equity turns a deposit into a return the moment it lands.
+
+- **Opening allocation** is the bucket's configured capital.
+- **Recorded flows** are deposits and withdrawals since, entered with
+  `ct-state cashflow --bucket core --amount 500 --kind deposit`. They move cash and funding by
+  the same amount and never touch the result.
+- **Money paid in (net)** is the two added together, and the **investment result** is equity
+  minus that. The **return** is stated against money paid in, never against equity.
+
+The console reports these per account, never across accounts: the conceptual core/sandbox book
+and the real-money Micro-Live account keep separate ledgers and separate high-water marks, so a
+combined total cannot be compared against either mark. Where the portfolio screen does show a
+combined figure it says, on the same line, that it spans two kinds of money.
+
+## Unattended operation
+
+Every background activity records when it last succeeded, and the System screen compares that
+against how often it is expected. An activity that has *never* run counts as overdue, because a
+job that was never loaded looks exactly like a healthy idle one until the day it is needed.
+
+| Activity | Runs | Expected |
+| --- | --- | --- |
+| `reconciliation` | in the API process, every 15s | every 5 min |
+| `research_dispatch` | in the API process, every 15s | every 5 min |
+| `backup` | `backup_state.sh`, 03:15 local | daily |
+| `maintenance` | `maintenance.sh`, 03:45 local | daily |
+| `schedule` | `run_scheduled_research.sh` | weekly |
+
+`maintenance` rotates the launchd logs (which otherwise append forever), drops report bodies
+from runs past `operations.runs_retention_days` while keeping every `decision_record.json`, and
+exits non-zero when free disk falls under `low_disk_free_gb`.
+
+## Notifications
+
+Nothing is sent while `notifications.channel` is `none`, which is the default. Events are still
+collected, deduplicated and recorded, so the delivery record can be reviewed with
+`ct-notify status` — but choosing a channel and supplying its credentials is how sending is
+authorised, and that decision is not made in code.
+
+A message says what happened and which screen to open. It never carries a credential, an
+account number or a quote, because it travels through infrastructure this system does not
+control. A standing condition (an unapproved proposal, a broken credential) notifies once per
+`min_interval_seconds` rather than on every poll; a failing endpoint is retried with backoff and
+then given up on.
+
+Nothing running on this Mac can report that this Mac is gone. Set `CT_HEARTBEAT_URL` to an
+external watcher that expects a regular ping and alerts on its absence; that is the only path by
+which a power cut or a network outage reaches a phone.
+
 ## Capital boundaries
 
 Three buckets, three ledgers, three drawdown ladders. They never fund each other.
@@ -302,6 +397,5 @@ before every order, and an outright refusal to trade if that account holds more 
 
 ## Not built, by design
 
-Frontend, evaluation harness and benchmark comparison, autonomy of any kind, additional brokers,
-additional model providers, backtesting platform. The trading engine is deliberately finished;
-further work belongs in the interface, not in more strategy machinery.
+Evaluation harness and benchmark comparison, autonomy of any kind, additional brokers,
+additional model providers, backtesting platform, and multi-host high availability.

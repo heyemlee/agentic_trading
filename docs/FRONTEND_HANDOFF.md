@@ -111,6 +111,9 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/health` | system status, market session, Claude state, warnings |
 | GET | `/system/claude` | subscription runtime state, calls today |
 | GET | `/system/market` | session open/closed, next open or close |
+| GET | `/system/schedule` | next scheduled research, the last run, and why a run was skipped |
+| GET | `/system/operations` | background activity heartbeats, free disk, retention windows |
+| GET | `/system/notifications` | notification channel, what is enabled, delivery record |
 | GET | `/portfolio` | all buckets, positions, cash, sleeves |
 | GET | `/risk` | drawdown ladders and market regime |
 | GET | `/micro-live` | real-money status, preflight gates, capital boundary |
@@ -118,6 +121,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/proposals/{id}` | full proposal: research, bull/bear, Hard Risk rules, history |
 | GET | `/proposals/{id}/revalidate` | dry-run of the approval check; changes nothing |
 | GET | `/research?limit=` | completed decision records, newest first |
+| GET | `/research/jobs?limit=` | persistent queue, including queued/running/failed jobs |
 | GET | `/research/{run_key}` | one run's progress |
 | GET | `/orders?limit=` | recorded fills and live open orders |
 
@@ -125,10 +129,11 @@ for a product-level refusal and 500 for an unexpected fault.
 
 | Method | Path | Body | Effect |
 |---|---|---|---|
-| POST | `/research` | `{ticker, bucket, instrument_type, trade_date, trigger}` | starts a background run, returns `run_key` |
+| POST | `/research` | `{ticker, bucket, instrument_type, trade_date, trigger}` | enqueues a durable run; an identical active request returns its existing `run_key` |
 | POST | `/proposals/{id}/approve` | `{note?, confirm}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute |
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |
+| POST | `/research/{run_key}/cancel` | `{reason?}` | stops a queued or running job; 409 if it already finished |
 | POST | `/system/pause` | `{reason?}` | kill switch on |
 | POST | `/system/resume` | none | kill switch off |
 
@@ -215,10 +220,29 @@ amount, but never below half the approved size. That surfaces as `EXECUTED` with
 
 ## 7. Portfolio data
 
-`GET /portfolio` returns `buckets` keyed by `core`, `sandbox`, `micro_live`. Each has
-`allocation_usd`, `cash_usd`, `positions_value_usd`, `equity_usd`, `position_count`,
-`is_real_money`, `venue`, `sleeves_pct`, and `positions[]` with symbol, quantity, price, market
-value, cost basis, unrealized percent, weight, classification and exposure group.
+`GET /portfolio` returns three things.
+
+`buckets`, keyed by `core`, `sandbox`, `micro_live`. Each has `account`, `allocation_usd`,
+`cash_usd`, `positions_value_usd`, `equity_usd`, `position_count`, `is_real_money`, `venue`,
+`sleeves_pct`, and `positions[]` with symbol, quantity, price, market value, cost basis,
+unrealized percent, weight, classification and exposure group.
+
+`accounts`, keyed by `conceptual` (core + sandbox) and `micro_live`. **This is what a screen
+should lead with.** Each carries its own `equity_usd`, `net_deposits_usd`,
+`opening_allocation_usd`, `recorded_flows_usd`, `investment_pnl_usd`, `return_pct`,
+`high_water_mark_usd`, `drawdown_pct`, `ladder_level`, `as_of`, `priced_for` and `source`.
+
+`combined`, with `equity_usd`, `complete` and `mixes_real_and_conceptual`.
+
+Two rules follow from the shape:
+
+- **Never compare a combined total against one account's high-water mark.** The paper book and
+  the funded account keep separate ledgers and separate marks; a sum across them misstates both
+  the assets and the drawdown. When `mixes_real_and_conceptual` is true, say so wherever the
+  combined figure appears.
+- **Money paid in is not money made.** `net_deposits_usd` is the opening allocation plus every
+  recorded deposit and withdrawal; `investment_pnl_usd` is equity minus that, and `return_pct`
+  is measured against money paid in. Showing equity alone turns a deposit into a return.
 
 `is_real_money` is the flag that should drive any visual distinction. Only `micro_live` is true.
 
@@ -294,7 +318,8 @@ failures:
 
 ## 12. Actions the frontend may invoke
 
-Start research · approve · reject · request reanalysis · pause · resume · read anything.
+Start research · cancel a running research job · approve · reject · request reanalysis · pause ·
+resume · read anything.
 
 That is the complete set. Anything else is out of bounds.
 
@@ -359,6 +384,7 @@ that moves is a quote.
 | `/proposals` while one is open | 15s (freshness is a countdown) |
 | `/portfolio`, `/risk` | 60s |
 | `/research/{run_key}` during a run | 5s |
+| `/research/jobs` | 10s; use it to resume an active run after page reload |
 | `/orders` when an order is open | 10s |
 
 Recompute `freshness.age_minutes` client-side between polls so a countdown stays smooth. Always

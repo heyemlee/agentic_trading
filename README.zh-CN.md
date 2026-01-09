@@ -90,7 +90,8 @@ TradingAgents · Claude Code CLI · Model Context Protocol
 Robinhood Agentic Trading（官方 MCP）· 模拟适配器
 
 **存储**
-纯文件 —— YAML 账本、JSON 风控状态、JSONL 成交记录。没有数据库。
+SQLite 事务保存组合、风险、提案、审批、订单、成交与研究任务。
+现有 YAML/JSON 文件只作为一次性迁移来源保留。
 
 **控制台**
 静态 HTML、CSS 和 JavaScript。无框架，无构建步骤。
@@ -113,7 +114,7 @@ flowchart TD
     R --> P(Conservative Policy + Hard Risk)
     P --> H{Human approval}
     H --> E[(Execution · Robinhood official MCP)]
-    E --> S[(State + audit files)]
+    E --> S[(事务状态与审计)]
     A --> S
 ```
 
@@ -148,9 +149,9 @@ cp state/portfolio.example.yaml state/portfolio.yaml
 cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
 
-两个台账文件不纳入版本控制：它们记录的是你真实的持仓，仓库里只保留全现金的模板。
+`.env` 里所有的 key 都是可选的。不要设置 `ANTHROPIC_API_KEY` —— LLM 层跑在你的订阅上，设了 API key 会把计费切换成按量付费。
 
-里面所有的 key 都是可选的。不要设置 `ANTHROPIC_API_KEY` —— LLM 层跑在你的订阅上，设了 API key 会把计费切换成按量付费。
+两个台账文件不纳入版本控制：它们记录的是你真实的持仓，仓库里只保留全现金的模板。
 
 ### 运行
 

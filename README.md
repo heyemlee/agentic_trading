@@ -102,7 +102,8 @@ TradingAgents · Claude Code CLI · Model Context Protocol
 Robinhood Agentic Trading (official MCP) · simulated adapter
 
 **Storage**
-Plain files — YAML ledger, JSON risk state, JSONL fills. No database.
+SQLite transactions for portfolio, risk, proposals, approvals, orders, fills and research jobs.
+Existing YAML/JSON files are retained as one-time migration sources.
 
 **Console**
 Static HTML, CSS and JavaScript. No framework, no build step.
@@ -125,7 +126,7 @@ flowchart TD
     R --> P(Conservative Policy + Hard Risk)
     P --> H{Human approval}
     H --> E[(Execution · Robinhood official MCP)]
-    E --> S[(State + audit files)]
+    E --> S[(Transactional state + audit)]
     A --> S
 ```
 
@@ -161,11 +162,11 @@ cp state/portfolio.example.yaml state/portfolio.yaml
 cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
 
-The two ledgers are untracked: they record what you actually hold, so only the
-all-cash templates are in the repository.
-
-Every key in it is optional. Do not set `ANTHROPIC_API_KEY` — the LLM layer runs on your
+Every key in `.env` is optional. Do not set `ANTHROPIC_API_KEY` — the LLM layer runs on your
 subscription, and an API key would switch billing to pay-as-you-go.
+
+The two ledgers are untracked: they record what you actually hold, so only the all-cash
+templates are in the repository.
 
 ### Run
 
