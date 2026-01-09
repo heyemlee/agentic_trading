@@ -141,3 +141,125 @@ def test_the_deployment_scripts_do_not_hard_code_a_checkout(tmp_path):
         # install.sh, uninstall.sh and release.sh manage the layout rather than run inside it.
         if script.name not in ("common.sh", "install.sh", "uninstall.sh", "release.sh"):
             assert 'source "$(dirname "$0")/common.sh"' in text, script.name
+
+
+def command_lines(text: str) -> list[str]:
+    """Shell commands, with line continuations joined, so a flag split across lines is seen."""
+    joined = text.replace("\\\n", " ")
+    return [line.strip() for line in joined.splitlines()
+            # A comment or a message that merely names a command is not an invocation.
+            if line.strip() and not line.strip().startswith(("#", "print", "echo"))]
+
+
+#: Which argument parser serves each command the deployment scripts invoke.
+PARSERS = {
+    "conservative_trading.launchd": "conservative_trading.launchd",
+    "ct-ops": "conservative_trading.operations",
+    "conservative_trading.operations": "conservative_trading.operations",
+    "ct-state": "conservative_trading.state_cli",
+    "ct-trigger": "conservative_trading.triggers",
+    "ct-notify": "conservative_trading.notify_cli",
+    "ct-api": "conservative_trading.api.app",
+}
+
+
+def parser_options(module_name: str) -> set[str]:
+    """The long options a command's parser accepts, without running the command."""
+    import argparse
+    import importlib
+    from unittest.mock import patch
+
+    module = importlib.import_module(module_name)
+    captured: set[str] = set()
+    real_add = argparse.ArgumentParser.add_argument
+
+    def record(self, *args, **kwargs):
+        captured.update(arg for arg in args if str(arg).startswith("--"))
+        return real_add(self, *args, **kwargs)
+
+    class Stop(Exception):
+        pass
+
+    with patch.object(argparse.ArgumentParser, "add_argument", record), \
+            patch.object(argparse.ArgumentParser, "parse_args",
+                         side_effect=Stop), patch.object(argparse.ArgumentParser, "error"):
+        for call in (lambda: module.main([]), module.main):   # some mains take no argv
+            try:
+                call()
+            except TypeError:
+                continue
+            except (Stop, SystemExit, Exception):    # noqa: BLE001 - only the flags matter
+                break
+            break
+    return captured
+
+
+def test_every_flag_the_deployment_scripts_pass_is_actually_accepted():
+    """The installer once passed --project-dir to a parser that had renamed it --data-dir.
+
+    Nothing failed until it was run on a real machine, because no test connected what the
+    scripts type to what the commands accept. This is that connection.
+    """
+    checked = 0
+    for script in sorted((ROOT / "deploy").rglob("*.sh")):
+        for line in command_lines(script.read_text()):
+            for token, module_name in PARSERS.items():
+                if token not in line:
+                    continue
+                accepted = parser_options(module_name)
+                assert accepted, f"could not read the parser for {token}"
+                used = {word.split("=")[0] for word in line.split()
+                        if word.startswith("--") and word != "--"}   # -- ends options
+                unknown = used - accepted
+                assert not unknown, (
+                    f"{script.name} passes {sorted(unknown)} to {token}, "
+                    f"which accepts {sorted(accepted)}")
+                checked += 1
+    assert checked >= 8, f"only {checked} invocations were checked; the scan missed some"
+
+
+def test_a_script_run_by_hand_checks_the_deployment_not_the_checkout(tmp_path):
+    """After a release install, "is the service healthy" is about the release.
+
+    launchd exports the layout when it starts a job. Run from a terminal there is no such
+    environment, and falling back to the script's own checkout made selfcheck.sh report on
+    whatever the developer was editing while claiming to describe the running service.
+    """
+    import subprocess
+
+    if not (shutil.which("zsh") and shutil.which("plutil")):
+        pytest.skip("zsh and plutil are required for the deployment scripts")
+
+    home = tmp_path / "home"
+    data, release = tmp_path / "service-data", tmp_path / "releases" / "r1"
+    (data / "config").mkdir(parents=True)
+    (release / ".venv" / "bin").mkdir(parents=True)
+    (release / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
+    (release / ".venv" / "bin" / "python").chmod(0o755)
+    launchd.write(home / "Library" / "LaunchAgents",
+                  launchd.render(data_dir=data, release_dir=release, home=home,
+                                 origins=list(launchd.LOOPBACK)))
+
+    # A script living in the checkout, invoked with no CT_* environment at all.
+    checkout = tmp_path / "checkout" / "deploy" / "macos"
+    checkout.mkdir(parents=True)
+    shutil.copy(ROOT / "deploy" / "macos" / "common.sh", checkout / "common.sh")
+    probe = checkout / "probe.sh"
+    probe.write_text('#!/bin/zsh\nset -euo pipefail\nsource "$(dirname "$0")/common.sh"\n'
+                     'print -r -- "$release_dir"\nprint -r -- "$data_dir"\n')
+    probe.chmod(0o755)
+
+    environment = {"HOME": str(home), "PATH": os.environ["PATH"]}
+    result = subprocess.run(["zsh", str(probe)], capture_output=True, text=True,
+                            env=environment, check=True, timeout=30)
+    assert result.stdout.split() == [str(release.resolve()), str(data.resolve())]
+
+    # With no installed job the old behaviour stands: the script's own checkout.
+    shutil.rmtree(home / "Library" / "LaunchAgents")
+    (tmp_path / "checkout" / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / "checkout" / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
+    (tmp_path / "checkout" / ".venv" / "bin" / "python").chmod(0o755)
+    (tmp_path / "checkout" / "config").mkdir()
+    fallback = subprocess.run(["zsh", str(probe)], capture_output=True, text=True,
+                              env=environment, check=True, timeout=30)
+    assert fallback.stdout.split()[0] == str((tmp_path / "checkout").resolve())

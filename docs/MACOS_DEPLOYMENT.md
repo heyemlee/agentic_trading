@@ -77,6 +77,7 @@ says which one the launchd jobs run. **Config, state and runs stay in the data d
 never copied into a release**, so publishing and rolling back never touch a ledger.
 
 ```bash
+uv sync                                   # after any change to [project.scripts]
 deploy/checks.sh                          # lint, tests, frontend cases, secret scan
 deploy/macos/release.sh publish           # from a committed tree; --data-dir if it differs
 deploy/macos/release.sh list              # * marks the running release
@@ -93,6 +94,10 @@ To develop while the service runs, keep editing the git checkout: the running re
 separate copy and is unaffected until the next `publish`.
 
 ## Operations
+
+Run by hand, these read the deployed layout from the installed launchd job rather than from
+the checkout they happen to live in, so they describe the running service and not whatever is
+currently being edited.
 
 ```bash
 deploy/macos/selfcheck.sh                 # after a reboot: jobs, API, database, Tailscale

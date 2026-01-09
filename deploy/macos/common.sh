@@ -8,6 +8,19 @@
 # before release.sh existed. launchd exports CT_RELEASE_DIR and CT_DATA_DIR once a release
 # layout is in use.
 
+# launchd exports both when it starts a job. Run by hand there is no such environment, and a
+# script that then fell back to its own checkout would check the wrong thing entirely: after a
+# release install, "is the service healthy" is a question about the release, not about whatever
+# the developer is editing. The installed job is the record of what is actually deployed, so
+# that is where the layout is read from.
+installed_plist="$HOME/Library/LaunchAgents/com.local.agentic-trading.api.plist"
+if [[ -r "$installed_plist" ]]; then
+  : ${CT_RELEASE_DIR:=$(plutil -extract EnvironmentVariables.CT_RELEASE_DIR raw -o - \
+      "$installed_plist" 2>/dev/null || true)}
+  : ${CT_DATA_DIR:=$(plutil -extract EnvironmentVariables.CT_DATA_DIR raw -o - \
+      "$installed_plist" 2>/dev/null || true)}
+fi
+
 release_dir="${CT_RELEASE_DIR:-$(cd "$(dirname "$0")/../.." && pwd -P)}"
 data_dir="${CT_DATA_DIR:-$release_dir}"
 

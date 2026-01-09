@@ -31,7 +31,7 @@ chmod 700 "$project_dir/runs/service" "$project_dir/state/backups"
 [[ ! -f "$project_dir/state/robinhood_token.json" ]] || chmod 600 "$project_dir/state/robinhood_token.json"
 
 "$project_dir/.venv/bin/python" -m conservative_trading.launchd \
-  --project-dir "$project_dir" --launch-agents "$launch_agents" "${origin_args[@]}"
+  --data-dir "$project_dir" --launch-agents "$launch_agents" "${origin_args[@]}"
 
 chmod 700 "$project_dir/deploy/macos/"*.sh
 for label in \
