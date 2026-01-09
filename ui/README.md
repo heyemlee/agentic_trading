@@ -26,11 +26,18 @@ when it exists, so the console is same-origin with the API and no CORS
 middleware is needed.
 
 ```bash
+uv run ct-auth         # set your own password locally (14+ characters)
 uv run ct-api          # http://127.0.0.1:8787/ui/
 ```
 
-Opened from any other origin, every request is blocked by the browser and the
-console falls back to fixtures behind an amber "Sample data" banner.
+Open `/ui/login.html` and sign in as `owner`. The server refuses business API
+requests until credentials are configured. All API calls use the page's origin.
+See [the setup and recovery guide](../docs/CONSOLE_SETUP_AND_RECOVERY.md) for the
+session model, HTTPS settings and order recovery.
+
+Use `/ui/index.html?demo=1` for a public, read-only demo. Demo navigation preserves
+this flag, shows a permanent banner, and makes **no API requests**. Live pages
+start empty and never fall back to fixtures.
 
 ## Live data
 
@@ -44,9 +51,12 @@ Each screen declares what it reads:
 C.live(['health', 'portfolio', 'risk'], render);
 ```
 
-`render()` runs on first paint and after every poll. When the API is
-unreachable the last-known values stay on screen and the banner appears —
-sample data can never be mistaken for live data.
+Each resource has its own success time and error. A failure or a timestamp older
+than twice its polling interval marks that resource unavailable/stale. The page
+waits for its initial data, then can display last-known values with this warning.
+One healthy endpoint cannot clear another endpoint's error. Order responses can
+still show local records when the venue portion fails, with an incomplete-data
+warning. Approval requires all of its critical resources to be current.
 
 ## Agent trace
 
@@ -57,16 +67,18 @@ a run on the Research screen opens that trace as an expandable sequence.
 
 ## Writes
 
-Every action calls its real endpoint: approve, reject, reanalyze, pause,
-resume. `CT_API.post()` is gated by `CT_API.writesEnabled`, which ships
-**`false`** — a prototype must not be able to fire `POST /approve` at a live
-account by accident. Arm it in `assets/api.js`:
+Authenticated live pages can approve, reject, reanalyze, pause and resume. The
+server verifies the session, Origin and CSRF token. No JavaScript flag grants
+access. Real-money execution remains separately disabled by the risk profile.
 
-```js
-writesEnabled: true,
-```
+Approval requires `confirm: true`, the exact proposal version and terms, and an
+idempotency key. The confirmation dialog captures these when it opens. A changed
+queue or stale critical resource disables confirmation; a repeated request cannot
+create another order. A transport failure shows an uncertain result and links to
+Activity. Submission, partial fill and completion are distinct states.
 
-Reads need no flag; `GET /proposals/{id}/revalidate` runs for real either way.
+`GET /proposals/{id}/revalidate` previews the approval-time checks without saving
+approval or risk state. It does not place an order.
 
 ## Language
 

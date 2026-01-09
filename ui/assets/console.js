@@ -1,9 +1,8 @@
 /* ─────────────────────────────────────────────────────────────────────────
  * Conservative Trading console — shared chrome and helpers.
  *
- * The prototype reads window.CT (assets/data.js), which holds the sanitized
- * fixture payloads. In the built frontend each read below becomes a fetch()
- * against http://127.0.0.1:8787 on the intervals in FRONTEND_HANDOFF.md §15.
+ * Reads window.CT: live pages receive same-origin API data; explicit demo
+ * pages receive fixtures. The API layer tracks freshness independently.
  * ───────────────────────────────────────────────────────────────────── */
 
 (function () {
@@ -18,7 +17,7 @@
   const LOADED_AT = Date.now();
   /* Against fixtures, "now" is the snapshot instant plus elapsed page time so
      a countdown still behaves. Once real data is arriving, "now" is now. */
-  const snapshotNow = () => (window.CT_API && CT_API.isLive())
+  const snapshotNow = () => !window.CT_DEMO
     ? Date.now()
     : SNAPSHOT_AT + (Date.now() - LOADED_AT);
 
@@ -70,20 +69,15 @@
   };
 
   /* ─── kill switch — POST /system/pause | /system/resume ───────────── */
-  const PAUSE_KEY = 'ct.paused';
-  let pausedMemo = null;                 /* fallback when storage is unavailable */
-  const store = (fn, fallback) => { try { return fn(); } catch (e) { return fallback; } };
-  const isPaused = () => {
-    const stored = store(() => localStorage.getItem(PAUSE_KEY), null);
-    if (stored !== null) return stored === '1';
-    return pausedMemo === null ? D.health.paused : pausedMemo;
+  const isPaused = () => D.health.paused === true;
+  const setPaused = (value) => {
+    D.health.paused = value;
+    document.dispatchEvent(new CustomEvent('ct:pause-changed', { detail: { paused: value } }));
   };
-  const setPaused = (v) => {
-    pausedMemo = v;
-    store(() => localStorage.setItem(PAUSE_KEY, v ? '1' : '0'), null);
-    document.dispatchEvent(new CustomEvent('ct:pause-changed', { detail: { paused: v } }));
+  const systemStatus = () => {
+    if (!window.CT_DEMO && !CT_API.isLive('health')) return 'UNKNOWN';
+    return isPaused() ? 'PAUSED' : D.health.status;
   };
-  const systemStatus = () => (isPaused() ? 'PAUSED' : D.health.status);
 
   /* ─── proposal freshness, recomputed client-side between polls ────── */
   function freshnessNow(proposal) {
@@ -180,7 +174,7 @@
     if (!el) return;
     const s = systemStatus();
     const tone = s === 'READY' ? 'dot-ok' : (s === 'PAUSED' ? 'dot-warn' : 'dot-bad');
-    el.innerHTML = '<span class="dot ' + tone + '"></span><span>' + code(s) + '</span>';
+    el.innerHTML = '<span class="dot ' + tone + '"></span><span>' + escapeHtml(code(s)) + '</span>';
     el.title = sysCopy(s);
   }
 
@@ -194,6 +188,10 @@
   function paintFoot() {
     const el = document.getElementById('foot-stamp');
     if (!el) return;
+    if (!window.CT_DEMO) {
+      el.textContent = D.health.checked_at ? 'Health · ' + dateTime(D.health.checked_at) : '—';
+      return;
+    }
     const live = window.CT_API && CT_API.isLive();
     el.textContent = t(live ? 'foot.read' : 'foot.snapshot',
       { t: dateTime(D.health.checked_at), d: dateOnly(D.portfolio.as_of) });
@@ -203,20 +201,39 @@
   function paintConnection() {
     const bar = document.getElementById('conn-bar');
     if (!bar || !window.CT_API) return;
-    const st = CT_API.state;
-    if (st.online === true) { bar.hidden = true; return; }
     bar.hidden = false;
-    if (st.online === null) {
-      bar.className = 'conn-bar';
-      bar.innerHTML = '<span class="dot"></span><span>' +
-        t('conn.connecting', { base: CT_API.BASE }) + '</span>';
+    bar.className = 'conn-bar is-offline';
+    const zh = window.I18N.lang === 'zh';
+    if (CT_API.state.demo) {
+      bar.textContent = zh ? '演示模式 · 全部为示例数据 · 所有操作关闭' : 'DEMO · Sample data only · All actions disabled';
       return;
     }
-    /* One line. The full reason lives in the title attribute; the fix lives
-       in the README, not on every screen the investor opens. */
-    bar.className = 'conn-bar is-offline';
-    bar.title = t('conn.detail', { base: CT_API.BASE, err: st.lastError || '—' });
-    bar.innerHTML = '<span class="dot dot-warn"></span><span>' + t('conn.sample') + '</span>';
+    const rows = Object.entries(CT_API.state.resources).filter(([key]) => CT_API.SOURCES[key].path());
+    const missing = rows.filter(([key]) => !CT_API.isLive(key));
+    if (!CT_API.authenticated) {
+      bar.textContent = zh ? '未登录 · 请登录后查看账户或操作' : 'Not signed in · Sign in to view your account or act';
+    } else if (!rows.length) {
+      bar.textContent = zh ? '正在读取真实数据…' : 'Loading account data…';
+    } else if (missing.length || !CT_API.state.online) {
+      bar.textContent = (zh ? '数据不完整或已过期：' : 'Data unavailable or stale: ') +
+        missing.map(([key, item]) => key + (item.error ? ' — ' + item.error : '')).join('; ');
+    } else {
+      bar.className = 'conn-bar';
+      bar.textContent = zh ? '真实数据 · 以下为各模块最近读取时间' : 'Account data · Last successful read by resource';
+    }
+    let details = document.getElementById('resource-status');
+    if (!details) {
+      details = document.createElement('details'); details.id = 'resource-status'; details.className = 'container body-sm';
+      const summary = document.createElement('summary'); summary.textContent = zh ? '数据来源与更新时间' : 'Data sources and timestamps';
+      details.appendChild(summary); bar.after(details);
+    }
+    details.querySelectorAll('p').forEach(node => node.remove());
+    rows.forEach(([key, item]) => {
+      const row = document.createElement('p');
+      row.textContent = key + ' · ' + (CT_API.isLive(key) ? (zh ? '实时' : 'current') : (zh ? '过期/不可用' : 'stale/unavailable')) +
+        ' · ' + (item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—');
+      details.appendChild(row);
+    });
   }
 
   /* The switch shows the language you would move to, not the current one. */
@@ -236,6 +253,31 @@
     if (header) header.insertAdjacentHTML('afterend', '<div class="conn-bar" id="conn-bar" hidden></div>');
     window.I18N.applyStatic();
     paintLang();
+    const sessionLink = document.createElement('a');
+    sessionLink.href = 'login.html'; sessionLink.className = 'body-sm linkish session-link';
+    const paintSession = () => {
+      sessionLink.textContent = window.I18N.lang === 'zh'
+        ? (CT_API.authenticated ? '退出' : '登录') : (CT_API.authenticated ? 'Sign out' : 'Sign in');
+    };
+    paintSession();
+    document.querySelector('.topnav-inner').appendChild(sessionLink);
+    document.addEventListener('ct:auth', paintSession);
+    document.addEventListener('ct:lang', paintSession);
+    sessionLink.addEventListener('click', async event => {
+      if (CT_API.authenticated) {
+        event.preventDefault();
+        await CT_API.post('/auth/logout', {});
+        window.location.assign('login.html');
+      }
+    });
+    if (window.CT_DEMO) document.addEventListener('click', event => {
+      const link = event.target.closest('a[href]');
+      if (!link) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin === window.location.origin && /\.html$/.test(url.pathname) && !url.pathname.endsWith('/login.html')) {
+        url.searchParams.set('demo', '1'); link.href = url.href;
+      }
+    });
     document.getElementById('lang-switch').addEventListener('click', () => {
       const keys = Object.keys(window.I18N.LANGS);
       window.I18N.set(keys[(keys.indexOf(window.I18N.lang) + 1) % keys.length]);
@@ -266,11 +308,14 @@
 
   /* ─── live(): bind a screen to the polling layer ──────────────────
      Pass the CT keys this screen reads and a render function. render()
-     runs once immediately against whatever is loaded (fixtures on first
-     paint) and again after every poll cycle. */
+     waits for initial live data (or explicit demo fixtures) and runs again
+     after each resource update. */
   function live(keys, render) {
+    keys = [...new Set(['health', ...keys])];
     const draw = () => {
-      try { render(); } catch (e) { console.error('[console] render failed', e); }
+      const loaded = CT_API.loaded(keys);
+      document.getElementById('content').hidden = !loaded;
+      if (loaded) { try { render(); } catch (e) { console.error('[console] render failed', e); } }
       paintNavStatus(); paintFoot(); paintConnection();
     };
     draw();
@@ -340,7 +385,8 @@
      The agent's reports are model output, so everything is escaped first and
      only then given structure. No HTML from the model ever reaches the DOM. */
   const escapeHtml = (t) => String(t)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
   function md(text) {
     const lines = escapeHtml(text || '').split('\n');
@@ -382,23 +428,29 @@
       '<span class="ladder-step' + (i <= idx ? ' is-on' + (tone ? ' is-on-' + tone : '') : '') + '"></span>'
     ).join('');
     return '<div class="ladder" role="img" aria-label="' +
-      t('rk.level', { i: idx + 1, n: steps.length, l: code(level) }) + '">' + bars + '</div>' +
+      escapeHtml(t('rk.level', { i: idx + 1, n: steps.length, l: code(level) })) + '">' + bars + '</div>' +
       '<p class="ladder-caption">' +
-        t('rk.level', { i: idx + 1, n: steps.length, l: code(level) }) + '</p>';
+        escapeHtml(t('rk.level', { i: idx + 1, n: steps.length, l: code(level) })) + '</p>';
   }
 
   /* one list row: title/sub on the left, value/note on the right,
      plus a chevron when the row navigates somewhere */
+  function safeHref(href) {
+    try { const url = new URL(href, window.location.href);
+      return url.origin === window.location.origin && /^https?:$/.test(url.protocol) ? url.href : '#';
+    } catch (e) { return '#'; }
+  }
+
   function listRow(o) {
     const tag = o.href ? 'a' : 'div';
-    const vals = (o.value ? '<span class="list-value">' + o.value + '</span>' : '') +
-                 (o.note ? '<span class="list-note">' + o.note + '</span>' : '');
-    return '<' + tag + ' class="list-row"' + (o.href ? ' href="' + o.href + '"' : '') +
-      (o.trace ? ' data-trace="' + o.trace + '"' : '') +
-      (o.id ? ' data-od-id="' + o.id + '"' : '') + '>' +
+    const vals = (o.value ? '<span class="list-value">' + escapeHtml(o.value) + '</span>' : '') +
+                 (o.note ? '<span class="list-note">' + escapeHtml(o.note) + '</span>' : '');
+    return '<' + tag + ' class="list-row"' + (o.href ? ' href="' + escapeHtml(safeHref(o.href)) + '"' : '') +
+      (o.trace ? ' data-trace="' + escapeHtml(o.trace) + '"' : '') +
+      (o.id ? ' data-od-id="' + escapeHtml(o.id) + '"' : '') + '>' +
       '<span class="list-main">' +
-        '<span class="list-title">' + o.title + '</span>' +
-        (o.sub ? '<span class="list-sub">' + o.sub + '</span>' : '') +
+        '<span class="list-title">' + escapeHtml(o.title) + '</span>' +
+        (o.sub ? '<span class="list-sub">' + escapeHtml(o.sub) + '</span>' : '') +
       '</span>' +
       (vals || o.href
         ? '<span class="list-side">' +
@@ -410,13 +462,13 @@
   }
 
   function gateRow(g, kind) {
-    const cls = kind || (g.passed ? 'is-pass' : 'is-fail');
+    const cls = ['is-pass', 'is-fail', 'is-warn'].includes(kind) ? kind : (g.passed ? 'is-pass' : 'is-fail');
     const mark = cls === 'is-pass' ? ICON.check : ICON.cross;
-    return '<div class="gate ' + cls + '"' + (g.id ? ' data-od-id="gate-' + g.id.toLowerCase() + '"' : '') + '>' +
+    return '<div class="gate ' + cls + '"' + (g.id ? ' data-od-id="gate-' + escapeHtml(String(g.id).toLowerCase()) + '"' : '') + '>' +
       '<span class="gate-mark">' + mark + '</span>' +
       '<div class="gate-body">' +
-        '<div class="gate-name">' + (g.id ? '<span class="gate-id">' + g.id + '</span>' : '') + g.name + '</div>' +
-        '<p class="gate-detail">' + g.detail + '</p>' +
+        '<div class="gate-name">' + (g.id ? '<span class="gate-id">' + escapeHtml(g.id) + '</span>' : '') + escapeHtml(g.name) + '</div>' +
+        '<p class="gate-detail">' + escapeHtml(g.detail) + '</p>' +
       '</div></div>';
   }
 

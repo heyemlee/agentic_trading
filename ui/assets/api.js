@@ -1,178 +1,175 @@
-/* ─────────────────────────────────────────────────────────────────────────
- * Conservative Trading console — live data layer.
- *
- * Reads http://127.0.0.1:8787 on the polling cadence fixed in
- * FRONTEND_HANDOFF.md §15. There is no websocket and none is needed; the
- * fastest thing that moves is a quote, and this console never shows one
- * outside an approval check.
- *
- * Degradation contract: when the backend is unreachable the sanitized
- * fixtures already in window.CT stay on screen and the UI says so loudly.
- * It must never be possible to mistake fixture data for live data.
- *
- * WRITES ARE OFF BY DEFAULT. Approve / reject / pause are real money and
- * real state; a design prototype must not be able to fire them by accident.
- * Set CT_API.writesEnabled = true only in the built app.
- *
- * Same-origin note: the API declares no CORS middleware, so a page served
- * from any other origin has every request blocked by the browser. Serve this
- * console from the API itself (see the note in the delivery summary) or add
- * CORSMiddleware on the backend.
- * ───────────────────────────────────────────────────────────────────── */
-
+/* Same-origin API with authenticated writes and independent freshness per resource. */
 window.CT_API = (function () {
   'use strict';
-
-  const BASE = 'http://127.0.0.1:8787';
-  const TIMEOUT_MS = 4000;
-
-  /* key → where it comes from and how often, per handoff §15.
-     `key` matches the property name on window.CT so a successful read can be
-     written straight back onto the object every page already reads from. */
+  const BASE = '';
+  const demo = window.CT_DEMO === true;
+  const TIMEOUT_MS = 15000;
+  let activeRun = null;
+  let wanted = [];
+  let auth = { authenticated: false, csrf_token: null };
   const SOURCES = {
-    health:     { path: () => '/health',            ms: 30000 },
-    portfolio:  { path: () => '/portfolio',         ms: 60000 },
-    risk:       { path: () => '/risk',              ms: 60000 },
-    microLive:  { path: () => '/micro-live',        ms: 60000 },
-    proposals:  { path: () => '/proposals',         ms: 15000 },
-    orders:     { path: () => '/orders',            ms: 10000 },
-    research:   { path: () => '/research?limit=20', ms: 60000 },
-    /* A research run in flight. The backend streams the agent's own stdout as
-       `log_tail`, so this is the live view of what the agent is doing. */
-    researchRun: {
-      ms: 5000,
-      path: () => (activeRun ? '/research/' + encodeURIComponent(activeRun) : null),
-    },
-    /* one open proposal at a time; the detail follows whatever is in the queue */
+    health: { path: () => '/health', ms: 30000 },
+    schedule: { path: () => '/system/schedule', ms: 60000 },
+    operations: { path: () => '/system/operations', ms: 60000 },
+    notifications: { path: () => '/system/notifications', ms: 120000 },
+    portfolio: { path: () => '/portfolio', ms: 60000 },
+    risk: { path: () => '/risk', ms: 60000 },
+    microLive: { path: () => '/micro-live', ms: 60000 },
+    proposals: { path: () => '/proposals', ms: 15000 },
+    orders: { path: () => '/orders', ms: 10000 },
+    research: { path: () => '/research?limit=20', ms: 60000 },
+    researchJobs: { path: () => '/research/jobs?limit=20', ms: 10000 },
+    researchRun: { path: () => activeRun ? '/research/' + encodeURIComponent(activeRun) : null, ms: 5000 },
     proposalDetail: {
       ms: 15000,
-      clearWhenAbsent: true,
       path: () => {
         const open = (window.CT.proposals || [])[0];
         return open ? '/proposals/' + encodeURIComponent(open.proposal_id) : null;
       },
     },
   };
-
-  let activeRun = null;              /* run_key of the run being watched */
-
-  const state = {
-    online: null,          /* null = not tried yet, true = live, false = fixture */
-    lastOkAt: null,
-    lastErrorAt: null,
-    lastError: null,
-    live: {},              /* key → true once that key has come from the API */
-  };
-
+  const state = { online: null, demo, resources: {}, live: {}, lastOkAt: null, lastError: null };
   const timers = [];
-  let announced = null;
+  const inFlight = new Map();
 
+  function isLive(key) {
+    if (demo) return false;
+    if (!key) return wanted.every(k => !SOURCES[k].path() || isLive(k));
+    const item = state.resources[key];
+    return !!(item && !item.error && item.lastOkAt && Date.now() - item.lastOkAt <= SOURCES[key].ms * 2);
+  }
   function announce() {
-    if (state.online !== announced) {
-      announced = state.online;
-      document.dispatchEvent(new CustomEvent('ct:connection', { detail: state }));
-    }
+    state.online = !demo && wanted.length > 0 && isLive();
+    Object.keys(SOURCES).forEach(key => { state.live[key] = isLive(key); });
+    document.dispatchEvent(new CustomEvent('ct:connection', { detail: state }));
     document.dispatchEvent(new CustomEvent('ct:data', { detail: state }));
   }
-
-  async function fetchJSON(path) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    try {
-      const res = await fetch(BASE + path, {
-        signal: ctrl.signal,
-        headers: { Accept: 'application/json' },
-      });
-      if (!res.ok) {
-        let detail = res.status + ' ' + res.statusText;
-        try { const body = await res.json(); if (body && body.detail) detail = body.detail; } catch (e) {}
-        throw new Error(detail);
-      }
-      return await res.json();
-    } finally {
-      clearTimeout(timer);
-    }
+  function unauthorized() {
+    auth = { authenticated: false, csrf_token: null };
+    Object.keys(state.resources).forEach(key => { state.resources[key].error = 'login required'; });
+    document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
   }
+  async function request(path, options = {}, timeout = TIMEOUT_MS) {
+    if (demo) throw new Error('Demo mode has no API access.');
+    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('API path must be same-origin.');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const res = await fetch(BASE + path, { ...options, credentials: 'same-origin', cache: 'no-store',
+        signal: ctrl.signal, headers: { Accept: 'application/json', ...(options.headers || {}) } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 503 && path === '/auth/session') unauthorized();
+        throw new Error(typeof body.detail === 'string' ? body.detail : res.status + ' ' + res.statusText);
+      }
+      return body;
+    } catch (error) {
+      if (error.name === 'AbortError') throw new Error('Request timed out. Check the order state before retrying.');
+      throw error;
+    } finally { clearTimeout(timer); }
+  }
+  const fetchJSON = path => request(path);
 
   async function readOnce(key) {
     const src = SOURCES[key];
-    if (!src) return;
+    if (demo || !src) return;
+    if (inFlight.has(key)) return inFlight.get(key);
     const path = src.path();
     if (!path) {
-      /* Nothing to ask for. If we are live, whatever is cached under this key
-         is a fixture and must go — otherwise it reads as real data. */
-      if (src.clearWhenAbsent && state.online === true && window.CT[key] != null) {
-        window.CT[key] = null;
-        announce();
-      }
+      if (key === 'proposalDetail') window.CT.proposalDetail = null;
+      state.resources[key] = { lastOkAt: Date.now(), error: null, absent: true };
+      announce();
       return;
     }
-    try {
-      const data = await fetchJSON(path);
-      window.CT[key] = data;               /* mutate in place — pages hold this object */
-      state.live[key] = true;
-      state.online = true;
-      state.lastOkAt = Date.now();
-      state.lastError = null;
-    } catch (err) {
-      state.online = false;
-      state.lastErrorAt = Date.now();
-      state.lastError = err && err.name === 'AbortError'
-        ? 'the request timed out after ' + (TIMEOUT_MS / 1000) + 's'
-        : (err && err.message) || 'the request failed';
+    const pending = (async () => {
+      try {
+        const data = await fetchJSON(path);
+        // Never attach a late detail response to a newly selected proposal/run.
+        if (src.path() !== path) return;
+        if (key === 'proposalDetail') {
+          const current = (window.CT.proposals || [])[0];
+          if (!current || data.proposal_id !== current.proposal_id || data.version !== current.version) {
+            throw new Error('Proposal changed while its detail was loading. Refreshing the queue.');
+          }
+        }
+        const payloadError = data && !Array.isArray(data) &&
+          (data.error || data.errors && Object.keys(data.errors).length && JSON.stringify(data.errors));
+        if (payloadError) {
+          // Orders include local records even if the venue is unavailable. Keep those
+          // records visible while explicitly marking the resource as incomplete.
+          if (key === 'orders' && Array.isArray(data.fills) && Array.isArray(data.open_orders)) {
+            window.CT[key] = data;
+            state.resources[key] = { ...(state.resources[key] || {}), receivedAt: Date.now(), error: String(payloadError), path };
+            return;
+          }
+          throw new Error(String(payloadError));
+        }
+        window.CT[key] = data;
+        state.resources[key] = { lastOkAt: Date.now(), error: null, path };
+        state.lastOkAt = Date.now();
+        if (key === 'proposals') {
+          const current = data[0];
+          const detail = window.CT.proposalDetail;
+          if (!current || detail && (detail.proposal_id !== current.proposal_id || detail.version !== current.version)) {
+            window.CT.proposalDetail = null;
+            state.resources.proposalDetail = { lastOkAt: null, error: 'proposal detail needs refresh' };
+          }
+          if (wanted.includes('proposalDetail')) Promise.resolve().then(() => readOnce('proposalDetail'));
+        }
+      } catch (error) {
+        state.resources[key] = { ...(state.resources[key] || {}), error: error.message };
+        state.lastError = error.message;
+      } finally { announce(); }
+    })();
+    inFlight.set(key, pending);
+    try { return await pending; }
+    finally {
+      inFlight.delete(key);
+      if (src.path() !== path) readOnce(key);
     }
-    announce();
   }
-
-  /* Start polling only what the current screen actually reads. */
+  function stop() { while (timers.length) clearInterval(timers.pop()); }
+  async function loadSession() {
+    if (demo) return;
+    try {
+      auth = await fetchJSON('/auth/session');
+      if (!auth.authenticated) unauthorized();
+    } catch (e) { unauthorized(); }
+    document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
+  }
   function start(keys) {
     stop();
-    const wanted = (keys || []).filter((k) => SOURCES[k]);
-    if (!wanted.length) return;
-    wanted.forEach((key) => {
-      readOnce(key);
-      timers.push(setInterval(() => readOnce(key), SOURCES[key].ms));
+    wanted = [...new Set((keys || []).filter(key => SOURCES[key]))];
+    wanted.forEach(key => { state.resources[key] ||= { lastOkAt: null, error: 'loading' }; });
+    if (wanted.includes('proposalDetail') && !wanted.includes('proposals')) wanted.push('proposals');
+    if (demo) { announce(); return; }
+    loadSession().then(() => {
+      wanted.forEach(key => { if (key !== 'proposalDetail') readOnce(key); });
     });
-    /* Stop burning requests while the tab is hidden; catch up on return. */
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) wanted.forEach(readOnce);
-    });
+    wanted.forEach(key => timers.push(setInterval(() => { if (!document.hidden) readOnce(key); }, SOURCES[key].ms)));
+    timers.push(setInterval(announce, 1000));
   }
-
-  function stop() {
-    while (timers.length) clearInterval(timers.pop());
-  }
-
-  /* Writes. Deliberately inert until the built app opts in. */
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !demo) { loadSession(); wanted.forEach(readOnce); }
+  });
   async function post(path, body) {
-    if (!api.writesEnabled) {
-      console.warn('[CT_API] write blocked — CT_API.writesEnabled is false:', path, body);
-      return { blocked: true, reason: 'writes are disabled in this build' };
-    }
-    const res = await fetch(BASE + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || res.status + ' ' + res.statusText);
-    return data;
+    if (demo) return { blocked: true, reason: 'Demo mode cannot change state.' };
+    if (!auth.authenticated || !auth.csrf_token) throw new Error('Sign in before performing this action.');
+    return request(path, { method: 'POST', headers: {
+      'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': auth.csrf_token,
+    }, body: JSON.stringify(body || {}) }, 60000);
   }
-
-  /* Point the researchRun poller at a run and read it immediately. */
   function watchRun(runKey) {
     activeRun = runKey || null;
     window.CT.researchRun = null;
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-
-  const api = {
-    BASE, SOURCES, state, watchRun,
+  return { BASE, SOURCES, state, watchRun, fetchJSON, readOnce, start, stop, post, isLive,
     get activeRun() { return activeRun; },
-    writesEnabled: false,
-    fetchJSON, readOnce, start, stop, post,
-    isLive: (key) => (key ? !!state.live[key] : state.online === true),
+    get writesEnabled() { return !demo && auth.authenticated === true; },
+    get authenticated() { return auth.authenticated === true; },
+    loaded: keys => demo || keys.every(key => !SOURCES[key].path() || !!(state.resources[key]?.lastOkAt || state.resources[key]?.receivedAt)),
+    canAct: keys => !demo && auth.authenticated === true && keys.every(isLive),
   };
-  return api;
 })();

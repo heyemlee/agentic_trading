@@ -183,6 +183,13 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
   font-size: var(--text-sm); font-weight: 500; color: var(--muted); white-space: nowrap;
 }
 .nav-status:hover { color: var(--fg); }
+.session-link { flex: none; white-space: nowrap; }
+@media (max-width: 540px) {
+  .topnav-inner { gap: 8px; }
+  .topnav-inner .spacer { display: none; }
+  .brand { flex: 1; min-width: 0; }
+  .brand > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
 
 /* ─── bottom tab bar — at every width, this is an app ───────────────── */
 body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }

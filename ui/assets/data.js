@@ -7,7 +7,15 @@
  * http://127.0.0.1:8787 on the polling intervals in FRONTEND_HANDOFF.md §15.
  * ───────────────────────────────────────────────────────────────────── */
 
+window.CT_DEMO = new URLSearchParams(window.location.search).get("demo") === "1";
 window.CT = (function () {
+  if (!window.CT_DEMO) return {
+    health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
+    portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
+    schedule: null, operations: null, notifications: null,
+    proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
+    orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
+  };
   const health = {
     status: "READY",
     detail: "able to research and to accept approvals",
@@ -38,23 +46,49 @@ window.CT = (function () {
     as_of: "2026-09-02",
     buckets: {
       core: {
+        account: "conceptual",
         allocation_usd: 2500.0, cash_usd: 2500.0, positions_value_usd: 0.0,
         equity_usd: 2500.0, position_count: 0, is_real_money: false,
         venue: null, positions: [], sleeves_pct: { cash: 100.0 },
       },
       sandbox: {
+        account: "conceptual",
         allocation_usd: 500.0, cash_usd: 500.0, positions_value_usd: 0.0,
         equity_usd: 500.0, position_count: 0, is_real_money: false,
         venue: null, positions: [], sleeves_pct: { cash: 100.0 },
       },
       micro_live: {
+        account: "micro_live",
         allocation_usd: 100.0, cash_usd: 100.0, positions_value_usd: 0.0,
         equity_usd: 100.0, position_count: 0, is_real_money: true,
         venue: "robinhood", positions: [], sleeves_pct: { cash: 100.0 },
       },
     },
+    accounts: {
+      conceptual: {
+        buckets: ["core", "sandbox"], is_real_money: false, venue: null,
+        source: "local conceptual ledger", as_of: "2026-09-02", priced_for: "2026-09-02",
+        equity_usd: 3000.0, cash_usd: 3000.0, positions_value_usd: 0.0,
+        net_deposits_usd: 3000.0, opening_allocation_usd: 3000.0, recorded_flows_usd: 0.0,
+        net_deposits_basis: "configured allocation plus recorded deposits and withdrawals",
+        investment_pnl_usd: 0.0, return_pct: 0.0,
+        high_water_mark_usd: 3000.0, drawdown_pct: 0.0, ladder_level: "NORMAL",
+      },
+      micro_live: {
+        buckets: ["micro_live"], is_real_money: true, venue: "robinhood",
+        source: "robinhood account, reconciled", as_of: "2026-09-02", priced_for: "2026-09-02",
+        equity_usd: 100.0, cash_usd: 100.0, positions_value_usd: 0.0,
+        net_deposits_usd: 100.0, opening_allocation_usd: 100.0, recorded_flows_usd: 0.0,
+        net_deposits_basis: "configured allocation plus recorded deposits and withdrawals",
+        investment_pnl_usd: 0.0, return_pct: 0.0,
+        high_water_mark_usd: 100.0, drawdown_pct: 0.0, ladder_level: "NORMAL",
+      },
+    },
     errors: {},
-    total_equity_usd: 3100.0,
+    combined: {
+      equity_usd: 3100.0, accounts: ["conceptual", "micro_live"],
+      complete: true, mixes_real_and_conceptual: true,
+    },
   };
 
   const risk = {
@@ -279,10 +313,57 @@ window.CT = (function () {
     { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
   ];
 
+  const schedule = {
+    enabled: true, period: "weekly", calendar: "XNYS", market_timezone: "America/New_York",
+    on_non_session_day: "previous_session", run_while_paused: true,
+    tickers: ["VTI", "BND", "BIL"],
+    next_run_at: "2026-09-11T13:30:00-07:00",
+    current_period: "weekly:2026-W36", would_run_now: false,
+    reason: "already executed for weekly:2026-W36 at 2026-09-04T20:30:11+00:00",
+    analyses_today: 1, daily_budget: 6,
+    last_period: "weekly:2026-W36",
+    last_run: {
+      at: "2026-09-04T20:30:11+00:00", trade_date: "2026-09-03",
+      tickers: ["VTI", "BND", "BIL"], state: "STARTED",
+      run_keys: ["2026-09-03_VTI_2bf5a8b5"], errors: [],
+    },
+    last_skip: {
+      at: "2026-08-28T20:30:07+00:00", period_key: "weekly:2026-W35",
+      reason: "2026-08-28 is not a trading session for XNYS",
+    },
+  };
+
+  const operations = {
+    checked_at: "2026-09-04T20:32:16+00:00",
+    activities: [
+      { id: "reconciliation", last_success_at: "2026-09-04T20:32:01+00:00", age_minutes: 0.3,
+        expected_every_minutes: 5, overdue: false, detail: "background loop in the API process" },
+      { id: "research_dispatch", last_success_at: "2026-09-04T20:32:01+00:00", age_minutes: 0.3,
+        expected_every_minutes: 5, overdue: false, detail: "queue drained, 0 waiting" },
+      { id: "backup", last_success_at: "2026-09-04T10:15:04+00:00", age_minutes: 617.2,
+        expected_every_minutes: 1440, overdue: false, detail: "5 local copies, integrity ok" },
+      { id: "maintenance", last_success_at: null, age_minutes: null,
+        expected_every_minutes: 1440, overdue: true, detail: "has not run since installation" },
+    ],
+    disk: { free_gb: 214.7, free_pct: 43.0, low: false },
+    retention: { runs_days: 120, logs_mb: 32, backups_days: 30 },
+  };
+
+  const notifications = {
+    channel: "none", configured: false,
+    detail: "no channel is configured, so nothing is sent. Set notifications.channel and supply its credentials to authorise sending.",
+    events_enabled: ["proposal_waiting", "research_failed", "research_limit", "fill_recorded",
+                     "reconciliation_error", "credential_invalid", "risk_level_changed",
+                     "backup_overdue"],
+    min_interval_seconds: 900, heartbeat_configured: false,
+    last_dispatch_at: "2026-09-04T20:32:01+00:00", events: {},
+  };
+
   const orders = { fills: [], open_orders: [], error: null };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
-    approveExecuted, approveReanalysis, research, orders,
+    approveExecuted, approveReanalysis, research, researchJobs: [], orders,
+    schedule, operations, notifications,
   };
 })();
