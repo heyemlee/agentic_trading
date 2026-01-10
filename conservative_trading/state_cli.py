@@ -217,19 +217,24 @@ def _sessions(profiles) -> int:
     """Persistent console sessions, so a phone login can be confirmed without a device UI."""
     proposal, *_ = _sources(profiles)
     db = ProposalStore(proposal).db
+    db.ensure_schema()      # a database written by an older release lacks the newer columns
     conn = db._read()
     if conn is None:
         print(json.dumps({"sessions": []}, indent=2))
         return 0
     try:
-        rows = conn.execute("SELECT username,created_at,last_seen_at,expires_at "
+        rows = conn.execute("SELECT session_id,label,username,created_at,last_seen_at,expires_at "
                             "FROM console_sessions ORDER BY created_at").fetchall()
-    except sqlite3.OperationalError:
-        rows = []
+    except sqlite3.OperationalError as exc:
+        # An empty list here would read as "signed out everywhere"; say what actually happened.
+        raise SystemExit(f"the session table could not be read: {exc}") from exc
     finally:
         conn.close()
     now = datetime.now(UTC).timestamp()
     print(json.dumps({"now": datetime.now(UTC).isoformat(), "sessions": [{
+        # The opaque id is what the console revokes by; the token hash never leaves the database.
+        "session_id": row["session_id"] or "(assigned on next use)",
+        "device": row["label"] or "unknown device",
         "username": row["username"],
         "created_at": datetime.fromtimestamp(row["created_at"], UTC).isoformat(),
         "last_seen_at": datetime.fromtimestamp(row["last_seen_at"], UTC).isoformat(),

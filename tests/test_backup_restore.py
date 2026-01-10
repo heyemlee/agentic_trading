@@ -132,7 +132,9 @@ def test_restoring_revokes_sessions_and_names_the_orders_to_check(project, tmp_p
     """A snapshot's sessions and open orders are both stale claims about the present."""
     db = StateDB(project / "state" / "proposals.json")
     with db.transaction() as conn:
-        conn.execute("INSERT INTO console_sessions VALUES('hash','owner','csrf','gen',1,1,9e9)")
+        # named columns, so adding one later cannot silently break this
+        conn.execute("INSERT INTO console_sessions(token_hash,username,csrf,generation,"
+                     "created_at,last_seen_at,expires_at) VALUES('hash','owner','csrf','gen',1,1,9e9)")
     open_order = _proposal(status=PROPOSED)
     open_order.client_order_id = "ct-open-1"
     open_order.order_status = "SUBMITTED"

@@ -12,7 +12,7 @@ window.CT = (function () {
   if (!window.CT_DEMO) return {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
-    schedule: null, operations: null, notifications: null,
+    schedule: null, operations: null, notifications: null, authSessions: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
     orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
   };
@@ -359,11 +359,23 @@ window.CT = (function () {
     last_dispatch_at: "2026-09-04T20:32:01+00:00", events: {},
   };
 
+  const authSessions = {
+    max_age_days: 30,
+    sessions: [
+      { session_id: "a1b2c3d4e5f60718", label: "Mac · Chrome", current: true,
+        created_at: "2026-09-04T23:20:54+00:00", last_seen_at: "2026-09-04T20:32:10+00:00",
+        expires_at: "2026-10-04T23:20:54+00:00", days_left: 29.95 },
+      { session_id: "99aa88bb77cc66dd", label: "iPhone · Safari", current: false,
+        created_at: "2026-09-02T15:04:11+00:00", last_seen_at: "2026-09-04T18:47:02+00:00",
+        expires_at: "2026-10-02T15:04:11+00:00", days_left: 27.6 },
+    ],
+  };
+
   const orders = { fills: [], open_orders: [], error: null };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications,
+    schedule, operations, notifications, authSessions,
   };
 })();

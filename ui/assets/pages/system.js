@@ -29,6 +29,7 @@
 
     renderSchedule();
     renderOperations();
+    renderDevices();
 
     document.getElementById('warn-count').textContent = C.t('common.open', { n: warnings.length });
     document.getElementById('warning-list').innerHTML = warnings.length
@@ -122,6 +123,88 @@
     $('nt-detail').textContent = n.detail || '';
   }
 
+  /* ── signed-in devices ───────────────────────────────────────────
+     A 30-day session is what keeps the phone from asking for a password
+     every day. The cost is that a device left behind stays signed in, so
+     each one is listed with when it was last used and can be signed out on
+     its own — without changing the password and taking every other device
+     down with it. */
+  function renderDevices() {
+    const $ = (id) => document.getElementById(id);
+    const data = D.authSessions;
+    const others = $('dev-revoke-others');
+    if (!data) {
+      $('dev-count').textContent = C.t('sy.unknown');
+      $('device-list').innerHTML = '';
+      $('dev-note').textContent = '';
+      others.hidden = true;
+      return;
+    }
+    const rows = data.sessions || [];
+    $('dev-count').textContent = C.t('sy.deviceCount', { n: rows.length });
+    $('device-list').innerHTML = rows.map((row) => {
+      const idle = (Date.now() - Date.parse(row.last_seen_at)) / 60000;
+      return '<div class="list-row" data-od-id="device-' + C.escapeHtml(row.session_id) + '">' +
+        '<span class="list-main">' +
+          '<span class="list-title">' + C.escapeHtml(row.label) +
+            (row.current ? ' <span class="chip chip-accent">' + C.t('sy.thisDevice') + '</span>' : '') +
+          '</span>' +
+          '<span class="list-sub">' +
+            C.escapeHtml(idle < 2 ? C.t('sy.justUsed')
+                                  : C.t('sy.lastUsed', { d: C.duration(idle) })) + ' · ' +
+            C.escapeHtml(C.t('sy.expiresIn', { d: Math.max(0, row.days_left).toFixed(0) })) +
+          '</span>' +
+        '</span>' +
+        '<span class="list-side">' +
+          '<button class="btn btn-secondary btn-sm" type="button" data-revoke="' +
+            C.escapeHtml(row.session_id) + '">' + C.t('sy.signOut') + '</button>' +
+        '</span></div>';
+    }).join('');
+    $('dev-note').textContent = C.t('sy.deviceNote');
+    others.textContent = C.t('sy.revokeOthers');
+    others.hidden = rows.filter((row) => !row.current).length === 0;
+
+    $('device-list').querySelectorAll('[data-revoke]').forEach((button) => {
+      button.addEventListener('click', () => revoke(button.getAttribute('data-revoke'), button));
+    });
+  }
+
+  /* POST /auth/sessions/{id}/revoke — signing out the device you are holding
+     ends this session too, so the page goes back to the login screen rather
+     than polling with a cookie the server has already forgotten. */
+  async function revoke(sessionId, button) {
+    const mine = (((D.authSessions || {}).sessions) || [])
+      .some((row) => row.session_id === sessionId && row.current);
+    button.disabled = true;
+    button.textContent = C.t('sy.signingOut');
+    try {
+      const res = await CT_API.post('/auth/sessions/' + encodeURIComponent(sessionId) + '/revoke', {});
+      if (res.blocked) { button.textContent = C.t('sy.switchWritesOff'); return; }
+      if (mine) { window.location.assign('login.html'); return; }
+      CT_API.readOnce('authSessions');
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = C.t('sy.deviceFailed', { err: err.message });
+    }
+  }
+
+  document.getElementById('dev-revoke-others').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const res = await CT_API.post('/auth/sessions/revoke-others', {});
+      if (!res.blocked) {
+        document.getElementById('dev-note').textContent =
+          C.t('sy.revokedOthers', { n: res.revoked });
+        CT_API.readOnce('authSessions');
+      }
+    } catch (err) {
+      document.getElementById('dev-note').textContent = C.t('sy.deviceFailed', { err: err.message });
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   /* ── kill switch: POST /system/pause | /system/resume ────────────── */
   const pill = document.getElementById('switch-pill');
   const title = document.getElementById('switch-title');
@@ -179,5 +262,6 @@
     }
   });
 
-  C.live(['health', 'microLive', 'schedule', 'operations', 'notifications'], renderHealth);
+  C.live(['health', 'microLive', 'schedule', 'operations', 'notifications', 'authSessions'],
+         renderHealth);
 })();

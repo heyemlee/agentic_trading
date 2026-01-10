@@ -55,6 +55,7 @@ class StateDB:
         conn.execute("PRAGMA synchronous=FULL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
+        self._add_columns(conn)
         self._relink(conn)
         self.path.chmod(0o600)
         return conn
@@ -88,6 +89,34 @@ class StateDB:
 
     def current(self):
         return getattr(_local, "connections", {}).get(str(self.path))
+
+    #: Columns added after a table shipped. CREATE TABLE IF NOT EXISTS cannot add them to a
+    #: database that already exists, and a deployed console must keep its sessions across the
+    #: upgrade rather than signing every device out.
+    ADDED_COLUMNS: ClassVar = (
+        ("console_sessions", "session_id", "TEXT"),
+        ("console_sessions", "label", "TEXT"),
+    )
+
+    def _add_columns(self, conn) -> None:
+        for table, column, kind in self.ADDED_COLUMNS:
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if existing and column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+    def ensure_schema(self) -> bool:
+        """Bring the database up to date before a read-only caller queries it.
+
+        A read-only connection cannot add a column, so a reader that asks for one added after
+        the database was created gets an error. Swallowing that error would report an empty
+        result, which for a device list reads as "you are signed out everywhere" — the most
+        alarming possible way to say "this process has not written yet".
+        """
+        try:
+            with self.transaction():
+                return True
+        except sqlite3.DatabaseError:
+            return False
 
     #: Every table keyed by a state file. A key is rewritten in all of them at once.
     KEYED: ClassVar = (("migrations", "source"), ("documents", "namespace"), ("proposals", "namespace"))
@@ -312,7 +341,7 @@ class StateDB:
             return None
         try:
             row = conn.execute(
-                "SELECT username,csrf,generation,created_at,last_seen_at,expires_at "
+                "SELECT session_id,label,username,csrf,generation,created_at,last_seen_at,expires_at "
                 "FROM console_sessions WHERE token_hash=?", (token_hash,)).fetchone()
             return dict(row) if row else None
         except sqlite3.OperationalError:

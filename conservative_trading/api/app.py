@@ -144,7 +144,8 @@ class LoginRequest(BaseModel):
 
 @app.post("/auth/login", tags=["authentication"])
 def login(body: LoginRequest, request: Request):
-    token, status = _auth.login(body.username, body.password)
+    token, status = _auth.login(body.username, body.password,
+                                user_agent=request.headers.get("user-agent"))
     if token is None:
         codes = {"unconfigured": 503, "rate_limited": 429, "invalid": 401}
         raise HTTPException(codes[status], "console credentials not configured; run ct-auth locally" if status == "unconfigured"
@@ -171,6 +172,34 @@ def logout(request: Request):
     response = JSONResponse({"authenticated": False})
     response.delete_cookie(COOKIE, path="/")
     return response
+
+
+@app.get("/auth/sessions", tags=["authentication"],
+         summary="Devices signed in, with when each was last used")
+def sessions(request: Request) -> dict[str, Any]:
+    return {"sessions": _auth.sessions(request.cookies.get(COOKIE)),
+            "max_age_days": SESSION_SECONDS // 86400}
+
+
+@app.post("/auth/sessions/{session_id}/revoke", tags=["authentication"],
+          summary="Sign one device out")
+def revoke_session(session_id: str, request: Request) -> dict[str, Any]:
+    token = request.cookies.get(COOKIE)
+    revoked = _auth.revoke(session_id, current_token=token)
+    if not revoked:
+        raise HTTPException(status_code=404, detail="no such session; it may already be signed out")
+    response = JSONResponse({"revoked": True, "session_id": session_id})
+    # Revoking the device you are holding signs it out here too, rather than leaving a cookie
+    # that will be rejected on its next request without explanation.
+    if not any(item["current"] for item in _auth.sessions(token)):
+        response.delete_cookie(COOKIE, path="/")
+    return response
+
+
+@app.post("/auth/sessions/revoke-others", tags=["authentication"],
+          summary="Sign out every device except this one")
+def revoke_other_sessions(request: Request) -> dict[str, Any]:
+    return {"revoked": _auth.revoke_others(request.cookies.get(COOKIE))}
 
 
 def _ok(fn, *args, **kwargs):
@@ -376,7 +405,12 @@ def main() -> None:
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    uvicorn.run("conservative_trading.api.app:app", host=args.host, port=args.port, reload=args.reload)
+    # The private HTTPS entry point terminates TLS on this machine and forwards to loopback, so
+    # the request arrives as plain HTTP and the protocol is only knowable from a forwarded
+    # header. Trust that header from loopback and nowhere else: otherwise anything that could
+    # reach this port could claim HTTPS and the session cookie would lose its Secure flag.
+    uvicorn.run("conservative_trading.api.app:app", host=args.host, port=args.port,
+                reload=args.reload, proxy_headers=True, forwarded_allow_ips="127.0.0.1")
 
 
 # ---------------------------------------------------------------------------

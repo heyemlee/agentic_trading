@@ -193,3 +193,43 @@ test('an unreadable account degrades to an explicit gap, not a zero', () => {
   assert.equal(c.element('equity-value').textContent, '—');
   assert.ok(c.element('equity-source').textContent.includes('not found'));
 });
+
+function systemPage(overrides) {
+  const c = context(true); c.run('console.js');
+  Object.assign(c.CT, overrides || {});
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.posted = [];
+  c.CT_API = { canAct: () => true, isLive: () => true,
+    readOnce: async () => {},
+    post: async (url, body) => { c.posted.push({ url, body }); return { revoked: 1 }; } };
+  c.run('pages/system.js');
+  return c;
+}
+
+test('each signed-in device is listed with its own sign-out control', () => {
+  const c = systemPage();
+  const html = c.element('device-list').innerHTML;
+  assert.ok(html.includes('Mac · Chrome'));
+  assert.ok(html.includes('iPhone · Safari'));
+  assert.ok(html.includes('sy.thisDevice'));                 // the current one is marked
+  assert.ok(html.includes('data-revoke="a1b2c3d4e5f60718"'));
+  assert.ok(html.includes('data-revoke="99aa88bb77cc66dd"'));
+  // no token or hash is ever rendered, only the opaque session id
+  assert.ok(!html.toLowerCase().includes('token'));
+  assert.equal(c.element('dev-revoke-others').hidden, false);
+});
+
+test('the device list survives an endpoint that has not answered yet', () => {
+  const c = systemPage({ authSessions: null });
+  assert.equal(c.element('device-list').innerHTML, '');
+  assert.equal(c.element('dev-revoke-others').hidden, true);
+});
+
+test('sign-out is hidden when this is the only device', () => {
+  const c = systemPage({ authSessions: { max_age_days: 30, sessions: [
+    { session_id: 'only', label: 'Mac · Chrome', current: true, days_left: 30,
+      created_at: '2026-09-04T23:20:54+00:00', last_seen_at: '2026-09-04T23:20:54+00:00',
+      expires_at: '2026-10-04T23:20:54+00:00' }] } });
+  assert.equal(c.element('dev-revoke-others').hidden, true);
+});

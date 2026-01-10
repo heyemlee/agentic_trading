@@ -12,6 +12,7 @@ window.CT_API = (function () {
     schedule: { path: () => '/system/schedule', ms: 60000 },
     operations: { path: () => '/system/operations', ms: 60000 },
     notifications: { path: () => '/system/notifications', ms: 120000 },
+    authSessions: { path: () => '/auth/sessions', ms: 60000 },
     portfolio: { path: () => '/portfolio', ms: 60000 },
     risk: { path: () => '/risk', ms: 60000 },
     microLive: { path: () => '/micro-live', ms: 60000 },

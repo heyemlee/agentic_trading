@@ -114,6 +114,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/system/schedule` | next scheduled research, the last run, and why a run was skipped |
 | GET | `/system/operations` | background activity heartbeats, free disk, retention windows |
 | GET | `/system/notifications` | notification channel, what is enabled, delivery record |
+| GET | `/auth/sessions` | devices signed in: opaque id, device label, created/last-used/expiry |
 | GET | `/portfolio` | all buckets, positions, cash, sleeves |
 | GET | `/risk` | drawdown ladders and market regime |
 | GET | `/micro-live` | real-money status, preflight gates, capital boundary |
@@ -134,6 +135,8 @@ for a product-level refusal and 500 for an unexpected fault.
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |
 | POST | `/research/{run_key}/cancel` | `{reason?}` | stops a queued or running job; 409 if it already finished |
+| POST | `/auth/sessions/{session_id}/revoke` | none | signs one device out; 404 if it is already gone |
+| POST | `/auth/sessions/revoke-others` | none | signs out every device except this one |
 | POST | `/system/pause` | `{reason?}` | kill switch on |
 | POST | `/system/resume` | none | kill switch off |
 
@@ -319,7 +322,11 @@ failures:
 ## 12. Actions the frontend may invoke
 
 Start research · cancel a running research job · approve · reject · request reanalysis · pause ·
-resume · read anything.
+resume · sign a device out · read anything.
+
+A session is identified to the interface by an opaque id. The token hash never leaves the
+database, so listing devices can never yield a way to impersonate one. Using a session records
+the time; it never extends the 30-day deadline.
 
 That is the complete set. Anything else is out of bounds.
 

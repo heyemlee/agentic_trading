@@ -17,6 +17,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,6 +27,31 @@ from ..storage import atomic_write
 COOKIE = "ct_session"
 SESSION_SECONDS = 30 * 24 * 3600
 MAX_SESSIONS = 32
+#: How stale "last seen" may become before it is written again. The console polls several
+#: endpoints every ten to sixty seconds, so recording every request would mean a durable write
+#: per poll to store a fact nobody reads that precisely.
+TOUCH_SECONDS = 60
+
+
+def device_label(user_agent: str | None) -> str:
+    """A readable name for the device that signed in.
+
+    Only ever displayed. The browser supplies this string, so it is treated as decoration: no
+    decision anywhere depends on it, and it is truncated rather than parsed strictly.
+    """
+    agent = (user_agent or "").strip()
+    if not agent:
+        return "unknown device"
+    platform = next((name for token, name in (
+        ("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"),
+        ("Macintosh", "Mac"), ("Windows", "Windows"), ("Linux", "Linux"),
+    ) if token in agent), "unknown device")
+    # Order matters: Chrome and Edge both claim Safari, and Edge also claims Chrome.
+    browser = next((name for token, name in (
+        ("Edg/", "Edge"), ("CriOS", "Chrome"), ("Chrome/", "Chrome"),
+        ("FxiOS", "Firefox"), ("Firefox/", "Firefox"), ("Safari/", "Safari"),
+    ) if token in agent), None)
+    return f"{platform} · {browser}" if browser else platform
 
 
 def password_hash(password: str, salt: str) -> str:
@@ -53,6 +79,8 @@ class Session:
     generation: str
     created: float
     expires: float
+    session_id: str = ""
+    label: str = ""
 
 
 class ConsoleAuth:
@@ -89,7 +117,7 @@ class ConsoleAuth:
     def allowed_origin(self, origin: str | None) -> bool:
         return origin is not None and origin in self.origins
 
-    def login(self, username: str, password: str) -> tuple[str | None, str]:
+    def login(self, username: str, password: str, user_agent: str | None = None) -> tuple[str | None, str]:
         with self._lock:
             monotonic_now = time.monotonic()
             self._failures = [stamp for stamp in self._failures if monotonic_now - stamp < 300]
@@ -119,9 +147,12 @@ class ConsoleAuth:
                     (MAX_SESSIONS - 1,),
                 )
                 connection.execute(
-                    "INSERT INTO console_sessions VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO console_sessions(token_hash,username,csrf,generation,"
+                    "created_at,last_seen_at,expires_at,session_id,label) "
+                    "VALUES(?,?,?,?,?,?,?,?,?)",
                     (self._key(token), credentials["username"], secrets.token_urlsafe(32),
-                     credentials["generation"], now, now, now + SESSION_SECONDS),
+                     credentials["generation"], now, now, now + SESSION_SECONDS,
+                     secrets.token_hex(8), device_label(user_agent)),
                 )
             return token, "ok"
 
@@ -144,8 +175,19 @@ class ConsoleAuth:
                     with self.db.transaction() as connection:
                         connection.execute("DELETE FROM console_sessions WHERE token_hash=?", (key,))
                 return None
+            session_id = row["session_id"] or secrets.token_hex(8)
+            # Activity is recorded; it never buys time. Extending the expiry on use would let a
+            # console left polling in a browser tab keep a session alive forever, which is the
+            # opposite of what a 30-day limit is for.
+            stale = now - float(row["last_seen_at"] or 0) >= TOUCH_SECONDS
+            if stale or not row["session_id"]:
+                with self.db.transaction() as connection:
+                    connection.execute(
+                        "UPDATE console_sessions SET last_seen_at=?,session_id=? WHERE token_hash=?",
+                        (now, session_id, key))
             return Session(row["username"], row["csrf"], row["generation"],
-                           row["created_at"], row["expires_at"])
+                           row["created_at"], row["expires_at"], session_id,
+                           row["label"] or "unknown device")
 
     def logout(self, token: str | None) -> None:
         with self._lock:
@@ -153,6 +195,59 @@ class ConsoleAuth:
                 with self.db.transaction() as connection:
                     connection.execute("DELETE FROM console_sessions WHERE token_hash=?",
                                        (self._key(token),))
+
+    def sessions(self, current_token: str | None = None) -> list[dict]:
+        """Every device signed in, newest first, without exposing any token.
+
+        A session is identified to the interface by an opaque id. The token hash stays in the
+        database precisely so that reading this list can never yield a way to impersonate one.
+        """
+        current = self._key(current_token) if current_token else None
+        self.db.ensure_schema()
+        connection = self.db._read()
+        if connection is None:
+            return []
+        try:
+            # A failure here is deliberately not caught. Reporting "no devices" because the
+            # query failed would tell the owner they had been signed out everywhere, which is
+            # the most alarming possible way to describe a broken read.
+            rows = connection.execute(
+                "SELECT token_hash,session_id,label,created_at,last_seen_at,expires_at "
+                "FROM console_sessions ORDER BY created_at DESC").fetchall()
+        finally:
+            connection.close()
+        def stamp(value: float) -> str:
+            return datetime.fromtimestamp(float(value), UTC).isoformat()
+
+        now = time.time()
+        return [{
+            "session_id": row["session_id"] or "",
+            "label": row["label"] or "unknown device",
+            "created_at": stamp(row["created_at"]),
+            "last_seen_at": stamp(row["last_seen_at"]),
+            "expires_at": stamp(row["expires_at"]),
+            "days_left": round((float(row["expires_at"]) - now) / 86400, 2),
+            "current": current is not None and hmac.compare_digest(row["token_hash"], current),
+        } for row in rows if row["session_id"]]
+
+    def revoke(self, session_id: str, *, current_token: str | None = None) -> bool:
+        """Sign one device out. Refuses an empty id, which would otherwise match a backfill."""
+        if not session_id:
+            return False
+        with self._lock, self.db.transaction() as connection:
+            changed = connection.execute(
+                "DELETE FROM console_sessions WHERE session_id=?", (session_id,))
+            return changed.rowcount > 0
+
+    def revoke_others(self, current_token: str | None) -> int:
+        """Sign out every device except this one, without needing the password."""
+        with self._lock, self.db.transaction() as connection:
+            if current_token:
+                changed = connection.execute(
+                    "DELETE FROM console_sessions WHERE token_hash<>?", (self._key(current_token),))
+            else:
+                changed = connection.execute("DELETE FROM console_sessions")
+            return changed.rowcount
 
 
 def main(argv=None) -> int:
