@@ -12,6 +12,7 @@ from typing import ClassVar
 
 _local = threading.local()
 _relinked: set[str] = set()
+_schema_ready: set[str] = set()
 _relink_guard = threading.Lock()
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS migrations(source TEXT PRIMARY KEY, kind TEXT NOT NULL, sha256 TEXT, imported_at TEXT NOT NULL);
@@ -67,9 +68,22 @@ class StateDB:
     def _read(self):
         if not self.path.exists():
             return None
+        # A read-only connection cannot create a table or add a column, so a database written
+        # by an earlier release would fail any query touching something added since. Bring it
+        # up to date here, once per process, rather than at each call site: fixing this one
+        # reader at a time is how `ct-state status` came to crash on a missing events table
+        # after the session list had already been patched for the same reason.
+        self._ensure_schema_once()
         conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _ensure_schema_once(self) -> None:
+        key = str(self.path)
+        if key in _schema_ready:
+            return
+        if self.ensure_schema():
+            _schema_ready.add(key)
 
     @contextmanager
     def transaction(self, immediate=True):
@@ -380,7 +394,14 @@ class StateDB:
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             tables = ("documents", "proposals", "orders", "approvals", "fills", "reservations",
                       "research_jobs", "console_sessions", "events", "migrations")
-            counts = {name: conn.execute(f"SELECT count(*) FROM {name}").fetchone()[0] for name in tables}
+            counts = {}
+            for name in tables:
+                try:
+                    counts[name] = conn.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
+                except sqlite3.OperationalError as exc:
+                    # Status is what a person runs when something is already wrong. It reports
+                    # the gap rather than raising and telling them nothing else about the state.
+                    counts[name] = f"unavailable: {exc}"
             return {"path": str(self.path), "exists": True, "integrity": integrity, "counts": counts}
         finally:
             conn.close()

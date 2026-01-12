@@ -217,7 +217,6 @@ def _sessions(profiles) -> int:
     """Persistent console sessions, so a phone login can be confirmed without a device UI."""
     proposal, *_ = _sources(profiles)
     db = ProposalStore(proposal).db
-    db.ensure_schema()      # a database written by an older release lacks the newer columns
     conn = db._read()
     if conn is None:
         print(json.dumps({"sessions": []}, indent=2))

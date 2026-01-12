@@ -203,7 +203,6 @@ class ConsoleAuth:
         database precisely so that reading this list can never yield a way to impersonate one.
         """
         current = self._key(current_token) if current_token else None
-        self.db.ensure_schema()
         connection = self.db._read()
         if connection is None:
             return []

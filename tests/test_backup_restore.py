@@ -194,3 +194,49 @@ def test_an_encrypted_backup_round_trips_through_restore(project, tmp_path, caps
                 "--key-file", str(key)]) == 0
     assert json.loads(capsys.readouterr().out)["integrity"] == "ok"
     assert load_portfolio(tmp_path / "from-mirror" / "portfolio.yaml").buckets["core"].cash_usd > 0
+
+
+def test_every_read_path_works_against_a_database_from_an_older_release(tmp_path):
+    """Tables and columns added later must not break a reader on an existing database.
+
+    A read-only connection cannot create either. Patching one reader at a time is how
+    `ct-state status` came to crash on a missing events table after the session list had already
+    been fixed for exactly the same reason, so the schema is brought up to date in `_read`.
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    database = state / "trading_state.sqlite3"
+    with sqlite3.connect(database) as connection:      # a database with none of the later tables
+        connection.execute("CREATE TABLE documents(namespace TEXT PRIMARY KEY, payload TEXT "
+                           "NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL)")
+        connection.execute("INSERT INTO documents VALUES('portfolio.yaml','{}',1,'2026-01-01')")
+
+    import conservative_trading.state_db as module
+    module._schema_ready.clear()
+    module._relinked.clear()
+
+    db = StateDB(state / "proposals.json")
+    status = db.status()
+    assert status["integrity"] == "ok"
+    assert all(isinstance(count, int) for count in status["counts"].values()), status["counts"]
+    assert status["counts"]["documents"] == 1        # the pre-existing row is untouched
+
+    # the readers that query tables and columns added after the database was created
+    assert db.read_document(state / "portfolio.yaml") == {}
+    assert db.fills() == []
+    assert db.research_jobs() == []
+    assert db.console_session("absent") is None
+    assert state_cli.unsettled_orders(db) == []
+
+
+def test_status_reports_a_table_it_cannot_count_rather_than_raising(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    db = StateDB(state / "proposals.json")
+    with db.transaction() as conn:
+        conn.execute("DROP TABLE events")
+    monkeypatch.setattr(db, "_ensure_schema_once", lambda: None)
+
+    counts = db.status()["counts"]
+    assert isinstance(counts["events"], str) and "unavailable" in counts["events"]
+    assert counts["proposals"] == 0        # everything else still reports
