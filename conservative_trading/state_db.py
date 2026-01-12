@@ -29,6 +29,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_active_order_per_account ON reservations(a
 CREATE TABLE IF NOT EXISTS research_jobs(run_key TEXT PRIMARY KEY, dedupe_key TEXT NOT NULL, payload TEXT NOT NULL,
  state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_research_key ON research_jobs(dedupe_key) WHERE state IN ('QUEUED','RUNNING');
+CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL,
+ subject TEXT, actor TEXT, version TEXT, outcome TEXT, detail TEXT);
+CREATE INDEX IF NOT EXISTS events_subject ON events(subject);
+CREATE INDEX IF NOT EXISTS events_kind ON events(kind);
 CREATE TABLE IF NOT EXISTS console_sessions(token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, csrf TEXT NOT NULL,
  generation TEXT NOT NULL, created_at REAL NOT NULL, last_seen_at REAL NOT NULL, expires_at REAL NOT NULL);
 """
@@ -253,6 +257,13 @@ class StateDB:
             self.import_fills(conn, source)
         cur = conn.execute("INSERT OR IGNORE INTO fills VALUES(?,?,?,?)", (
             fill["fill_id"], fill["proposal_id"], json.dumps(fill, allow_nan=False), fill["at"]))
+        if cur.rowcount == 1:
+            from . import events
+
+            events.record(conn, kind="order_filled", subject=fill.get("proposal_id"),
+                          at=fill.get("at"), outcome="FILLED",
+                          detail={k: fill.get(k) for k in
+                                  ("symbol", "side", "quantity", "price", "notional", "bucket")})
         return cur.rowcount == 1
 
     def import_fills(self, conn, source):
@@ -368,7 +379,7 @@ class StateDB:
         try:
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             tables = ("documents", "proposals", "orders", "approvals", "fills", "reservations",
-                      "research_jobs", "console_sessions", "migrations")
+                      "research_jobs", "console_sessions", "events", "migrations")
             counts = {name: conn.execute(f"SELECT count(*) FROM {name}").fetchone()[0] for name in tables}
             return {"path": str(self.path), "exists": True, "integrity": integrity, "counts": counts}
         finally:

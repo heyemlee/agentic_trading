@@ -13,6 +13,7 @@ window.CT = (function () {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
     schedule: null, operations: null, notifications: null, authSessions: null,
+    activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
     orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
   };
@@ -371,11 +372,30 @@ window.CT = (function () {
     ],
   };
 
+  const activity = {
+    next_cursor: 41,
+    events: [
+      { id: 44, at: "2026-09-04T01:33:01.850146+00:00", kind: "proposal_created",
+        subject: "2026-09-08-VTI-f4c6ec7f", actor: "system", version: null,
+        outcome: "PROPOSED", description: "a proposal was created",
+        detail: { ticker: "VTI", bucket: "micro_live", action: "BUY", notional_usd: 35.0 } },
+      { id: 43, at: "2026-09-04T00:09:52.569799+00:00", kind: "research_completed",
+        subject: "2026-09-02_VTI_2bf5a8b5", actor: "system", version: null,
+        outcome: "COMPLETE", description: "a research run finished",
+        detail: { ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-02",
+                  trigger: "scheduled", proposal_id: null } },
+      { id: 42, at: "2026-09-03T22:14:00.000000+00:00", kind: "system_resumed",
+        subject: null, actor: "owner", version: null, outcome: null,
+        description: "the kill switch was released", detail: {} },
+    ],
+    kinds: {},
+  };
+
   const orders = { fills: [], open_orders: [], error: null };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications, authSessions,
+    schedule, operations, notifications, authSessions, activity,
   };
 })();

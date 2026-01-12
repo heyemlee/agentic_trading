@@ -116,6 +116,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/system/notifications` | notification channel, what is enabled, delivery record |
 | GET | `/auth/sessions` | devices signed in: opaque id, device label, created/last-used/expiry |
 | GET | `/evaluation` | the forward record against a passive benchmark, including what it did not do |
+| GET | `/activity?kind=&subject=&cursor=&limit=` | the audit journal, newest first, with `next_cursor` |
 | GET | `/portfolio` | all buckets, positions, cash, sleeves |
 | GET | `/risk` | drawdown ladders and market regime |
 | GET | `/micro-live` | real-money status, preflight gates, capital boundary |
@@ -287,6 +288,17 @@ shows its own blind spots. Give it real space in the UI.
 ---
 
 ## 10. Execution data
+
+`GET /activity` is the audit journal: one ordered record of every proposal transition, fill,
+research outcome and kill-switch change, across all proposals rather than the one that happens
+to be open. Filter with repeated `kind=` parameters and/or a `subject` (a proposal id or run
+key). Page with `cursor`, which is the id of the last row you received; a response carrying
+`next_cursor: null` is the last page.
+
+Page by the cursor, never by timestamp: several entries can share an instant, and a time-based
+cursor drops or repeats them at the page boundary. Entries carry `actor`, `version` and
+`outcome`; approval notes and anything credential-shaped are deliberately absent, so the
+journal can be shown without redacting it again.
 
 `GET /orders` returns `fills[]` (recorded locally at fill time) and `open_orders[]` (live from
 the venue). Order status values, mapped from the venue: `new`, `accepted`, `partially_filled`,

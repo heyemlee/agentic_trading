@@ -846,6 +846,24 @@ class Service:
             **pending(self.state_db(profiles)),
         }
 
+    # ---------------------------------------------------------------- activity
+    def activity(self, *, kinds: tuple[str, ...] = (), subject: str | None = None,
+                 cursor: int | None = None, limit: int = 50) -> dict[str, Any]:
+        """One page of the audit journal, newest first.
+
+        The console used to build a timeline from the research list plus the history of
+        whichever proposal happened to be open, which could show one proposal's story and never
+        the system's. This is the whole record, in one order, and it survives a refresh, a
+        different device and a proposal leaving the queue.
+        """
+        from .. import events
+
+        profiles = self.profiles()
+        db = self.state_db(profiles)
+        # Proposals that closed before the journal existed still carry their own history.
+        events.backfill(db, self._store(profiles).all())
+        return events.query(db, kinds=kinds, subject=subject, cursor=cursor, limit=limit)
+
     # ---------------------------------------------------------------- evaluation
     def evaluation_report(self) -> dict[str, Any]:
         """The forward record, assembled from the sources that already hold it.
@@ -1063,20 +1081,34 @@ class Service:
         return {"fills": list(reversed(fills)), "open_orders": live, "tracked_orders": tracked, "error": error}
 
     # ---------------------------------------------------------------- controls
-    def pause(self, reason: str = "paused through the application interface") -> dict[str, Any]:
+    def _journal(self, profiles: Profiles, **fields: Any) -> None:
+        """Append to the audit journal. A failure here must not block the action it describes."""
+        from .. import events
+
+        try:
+            events.emit(self.state_db(profiles), **fields)
+        except Exception:
+            logger.exception("could not journal %s", fields.get("kind"))
+
+    def pause(self, reason: str = "paused through the application interface",
+              identity: str | None = None) -> dict[str, Any]:
         """Engage the kill switch. Research continues; no order can be submitted."""
         profiles = self.profiles()
         halt = profiles.project_dir / str(
             profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
         halt.parent.mkdir(parents=True, exist_ok=True)
         halt.write_text(f"{utcnow().isoformat()} {reason}\n", encoding="utf-8")
+        # The halt file is deleted on resume, so without this the pause leaves no trace at all.
+        self._journal(profiles, kind="system_paused", actor=identity or "console",
+                      detail={"reason": reason[:200]})
         return {"paused": True, "reason": reason, "status": SystemStatus.PAUSED}
 
-    def resume(self) -> dict[str, Any]:
+    def resume(self, identity: str | None = None) -> dict[str, Any]:
         profiles = self.profiles()
         halt = profiles.project_dir / str(
             profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
         halt.unlink(missing_ok=True)
+        self._journal(profiles, kind="system_resumed", actor=identity or "console")
         return {"paused": False, "status": SystemStatus.READY}
 
 

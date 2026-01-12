@@ -45,16 +45,17 @@
   <section class="section" data-od-id="audit">
     <div class="container">
       <div class="section-head">
-        <h2 data-i18n="ac.audit">Audit trail</h2></div>
-      <div class="tabs" data-tabs role="tablist" aria-label="Filter the audit trail">
-          <button class="tab" role="tab" id="tab-audit-all"       aria-controls="panel-audit-all"       aria-selected="true" data-i18n="ac.everything">Everything</button>
-          <button class="tab" role="tab" id="tab-audit-decisions" aria-controls="panel-audit-decisions" aria-selected="false" data-i18n="ac.decisions">Decisions</button>
-          <button class="tab" role="tab" id="tab-audit-proposals" aria-controls="panel-audit-proposals" aria-selected="false" data-i18n="ac.proposals">Proposals</button>
-        </div>
+        <h2 data-i18n="ac.audit">Audit trail</h2>
+        <span class="chip" id="audit-scope">—</span>
+      </div>
+      <div class="row row-wrap" style="margin-bottom:12px;" id="audit-filters"></div>
       <div class="card">
-        <div class="tabpanel" role="tabpanel" id="panel-audit-all" aria-labelledby="tab-audit-all"></div>
-        <div class="tabpanel" role="tabpanel" id="panel-audit-decisions" aria-labelledby="tab-audit-decisions" hidden></div>
-        <div class="tabpanel" role="tabpanel" id="panel-audit-proposals" aria-labelledby="tab-audit-proposals" hidden></div>
+        <div class="list list-inset" id="audit-list"></div>
+        <div class="btn-row" style="margin-top:16px;">
+          <button class="btn btn-secondary btn-sm" type="button" id="audit-more"
+                  data-od-id="cta-audit-more" hidden>—</button>
+        </div>
+        <p class="body-sm body-muted" style="margin-top:12px;" id="audit-note"></p>
       </div>
     </div>
   </section>

@@ -233,3 +233,55 @@ test('sign-out is hidden when this is the only device', () => {
       expires_at: '2026-10-04T23:20:54+00:00' }] } });
   assert.equal(c.element('dev-revoke-others').hidden, true);
 });
+
+function activityPage(fetchImpl) {
+  const c = context(true); c.run('console.js');
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.requested = [];
+  c.CT_API = { canAct: () => true, isLive: () => true, readOnce: async () => {},
+    fetchJSON: async (path) => { c.requested.push(path); return fetchImpl(path); } };
+  c.CT_DEMO = false;
+  c.run('pages/activity.js');
+  return c;
+}
+
+const page = (ids, next) => ({
+  next_cursor: next,
+  events: ids.map(id => ({ id, at: '2026-09-04T01:33:01.850146+00:00', kind: 'proposal_created',
+    subject: 'p' + id, actor: 'system', outcome: 'PROPOSED',
+    description: 'a proposal was created', detail: { ticker: 'VTI', notional_usd: 35 } })),
+});
+
+test('the audit trail pages by row id and never repeats an entry', async () => {
+  const seen = [];
+  const c = activityPage(path => { seen.push(path); return page(path.includes('cursor=43') ? [42, 41] : [44, 43], path.includes('cursor=43') ? null : 43); });
+  await flush();
+  assert.ok(seen[0].includes('/activity?limit=25'));
+  assert.equal(c.element('audit-more').hidden, false);
+
+  await c.element('audit-more').events.click();
+  await flush();
+  assert.ok(seen[1].includes('cursor=43'));
+  const rendered = c.element('audit-list').innerHTML;
+  for (const id of [44, 43, 42, 41]) assert.ok(rendered.includes('event-' + id), 'missing ' + id);
+  assert.equal(c.element('audit-more').hidden, true);       // the last page ends
+});
+
+test('every filter is offered and the first request of one starts from the newest entry', async () => {
+  const seen = [];
+  const c = activityPage(path => { seen.push(path); return page([44], null); });
+  await flush();
+  for (const group of ['all', 'proposals', 'fills', 'research', 'system']) {
+    assert.ok(c.element('audit-filters').innerHTML.includes('data-group="' + group + '"'), group);
+  }
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0].includes('/activity?limit=25'));
+  assert.ok(!seen[0].includes('cursor='));     // a fresh filter never resumes an old cursor
+});
+
+test('an audit trail that cannot be read says so instead of showing nothing', async () => {
+  const c = activityPage(() => { throw new Error('login required'); });
+  await flush();
+  assert.ok(c.element('audit-note').textContent.includes('login required'));
+});

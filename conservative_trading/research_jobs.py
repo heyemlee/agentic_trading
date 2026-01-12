@@ -68,15 +68,29 @@ class ResearchJobStore:
         return self.db.research_jobs(states=states, limit=limit)
 
     def update(self, run_key: str, changes: dict[str, Any], *, expected_states=()) -> dict[str, Any] | None:
+        from . import events
+
         with self.db.transaction() as conn:
             row = conn.execute("SELECT payload,state FROM research_jobs WHERE run_key=?", (run_key,)).fetchone()
             if row is None or (expected_states and row[1] not in expected_states):
                 return None
             job = json.loads(row[0])
+            was = job["state"]
             job.update(changes)
             job["updated_at"] = _now()
             conn.execute("UPDATE research_jobs SET payload=?,state=?,updated_at=? WHERE run_key=?", (
                 json.dumps(job, allow_nan=False), job["state"], job["updated_at"], run_key))
+            # A job row holds only its current state, so a run that finished and was later
+            # requeued would otherwise leave no trace of having finished at all.
+            if job["state"] != was and job["state"] in TERMINAL_STATES:
+                events.record(
+                    conn, kind="research_completed" if job["state"] == "COMPLETE"
+                    else "research_failed",
+                    subject=run_key, outcome=job["state"],
+                    detail={"ticker": job.get("ticker"), "bucket": job.get("bucket"),
+                            "trade_date": job.get("trade_date"), "trigger": job.get("trigger"),
+                            "proposal_id": job.get("proposal_id"),
+                            "error": str(job.get("error") or "")[:300]})
             return job
 
     def claim(self, max_concurrent: int) -> list[dict[str, Any]]:

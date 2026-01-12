@@ -3,8 +3,8 @@
   C.mount('activity');
   C.wireTabs();
 
-  /* Everything below is re-run on every poll cycle. */
-  function render() {
+  /* ── orders: the venue side, re-read on every poll cycle ─────────── */
+  function renderOrders() {
 
     const o = D.orders;
     document.getElementById('tracked-body').innerHTML = (o.tracked_orders || []).map(x => C.listRow({
@@ -39,32 +39,105 @@
             '<p class="empty-title">' + C.t('ac.venueError') + '</p><p>' + C.escapeHtml(o.error) + '</p></div>'
         : '<div class="empty" data-od-id="empty-open">' +
             '<p class="empty-title">' + C.t('ac.noOpen') + '</p></div>';
-
-
-    /* ── audit trail ─────────────────────────────────────────────────── */
-    const events = [];
-    D.research.forEach((r) => events.push({
-      at: r.created_at, kind: 'decision',
-      title: (r.final_action ? C.code(r.final_action) : C.t('ac.incomplete')) + ' · ' + r.ticker,
-      sub: 'Rating ' + r.portfolio_manager_rating + ', strength ' + r.confidence + ', hard risk ' +
-           (r.hard_risk_verdict || 'not reached') + ' · ' + r.run_id,
-    }));
-    ((D.proposalDetail || {}).history || []).forEach((h) => events.push({
-      at: h.at, kind: 'proposal',
-      title: C.titleise(h.event) + ' · ' + D.proposalDetail.ticker,
-      sub: h.detail + ' · ' + D.proposalDetail.proposal_id,
-    }));
-    events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-
-    const auditList = (rows) => '<div class="list list-inset">' + rows.map((e) => C.listRow({
-      title: e.title, sub: e.sub, note: C.dateTime(e.at),
-    })).join('') + '</div>';
-    document.getElementById('panel-audit-all').innerHTML = auditList(events);
-    document.getElementById('panel-audit-decisions').innerHTML =
-      auditList(events.filter((e) => e.kind === 'decision'));
-    document.getElementById('panel-audit-proposals').innerHTML =
-      auditList(events.filter((e) => e.kind === 'proposal'));
   }
 
-  C.live(['orders', 'research', 'proposalDetail'], render);
+  /* ── the audit journal ───────────────────────────────────────────
+     Read from the server, one page at a time, rather than assembled here
+     from the research list and whichever proposal happens to be open. That
+     older approach could show one proposal's story and never the system's,
+     and it lost everything as soon as the queue moved on.
+
+     Paging is by row id, not by time: several entries can share an instant,
+     and a timestamp cursor would drop or repeat them at the boundary. */
+  const GROUPS = {
+    all: [],
+    proposals: ['proposal_created', 'proposal_approved', 'proposal_rejected',
+                'proposal_invalidated', 'proposal_reanalysis', 'proposal_executed'],
+    fills: ['order_filled'],
+    research: ['research_completed', 'research_failed'],
+    system: ['system_paused', 'system_resumed'],
+  };
+  let group = 'all';
+  let rows = [];
+  let cursor = null;
+  let loading = false;
+
+  function query(reset) {
+    if (reset) { rows = []; cursor = null; }
+    const kinds = GROUPS[group].map((k) => 'kind=' + encodeURIComponent(k)).join('&');
+    return '/activity?limit=25' + (kinds ? '&' + kinds : '') +
+           (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+  }
+
+  async function load(reset) {
+    if (loading) return;
+    loading = true;
+    const more = document.getElementById('audit-more');
+    more.disabled = true;
+    try {
+      const page = await CT_API.fetchJSON(query(reset));
+      rows = reset ? page.events : rows.concat(page.events);
+      cursor = page.next_cursor;
+      paint();
+    } catch (err) {
+      document.getElementById('audit-note').textContent =
+        C.t('ac.auditFailed', { err: err.message });
+    } finally {
+      loading = false;
+      more.disabled = false;
+    }
+  }
+
+  function paint() {
+    const list = document.getElementById('audit-list');
+    const more = document.getElementById('audit-more');
+    document.getElementById('audit-scope').textContent = C.t('ac.entries', { n: rows.length });
+    list.innerHTML = rows.length ? rows.map((e) => {
+      const detail = e.detail || {};
+      const parts = [e.subject, detail.ticker, detail.action,
+                     detail.notional_usd != null ? C.usd(detail.notional_usd) : null,
+                     e.actor && e.actor !== 'system' ? e.actor : null,
+                     detail.error || detail.reason || null].filter(Boolean);
+      return C.listRow({
+        id: 'event-' + e.id,
+        title: C.t('ev.' + e.kind) === 'ev.' + e.kind ? e.description : C.t('ev.' + e.kind),
+        sub: parts.join(' · '),
+        value: C.dateTime(e.at),
+        note: e.outcome ? C.code(e.outcome) : '',
+      });
+    }).join('') : '<div class="empty" data-od-id="empty-audit">' +
+        '<p class="empty-title">' + C.t('ac.noEvents') + '</p></div>';
+    more.hidden = !cursor;
+    more.textContent = C.t('ac.loadMore');
+    /* The journal is the whole record; the page is only what has been fetched. */
+    document.getElementById('audit-note').textContent =
+      cursor ? C.t('ac.morePages') : C.t('ac.allLoaded');
+  }
+
+  function renderFilters() {
+    document.getElementById('audit-filters').innerHTML = Object.keys(GROUPS).map((key) =>
+      '<button class="chip' + (key === group ? ' chip-accent' : '') + '" type="button" ' +
+        'data-group="' + key + '" data-od-id="audit-filter-' + key + '">' +
+        C.t('ac.filter.' + key) + '</button>').join('');
+    document.getElementById('audit-filters').querySelectorAll('[data-group]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        group = chip.getAttribute('data-group');
+        renderFilters();
+        load(true);
+      });
+    });
+  }
+
+  document.getElementById('audit-more').addEventListener('click', () => load(false));
+
+  C.live(['orders'], renderOrders);
+  renderFilters();
+  if (window.CT_DEMO) {
+    rows = (D.activity || {}).events || [];
+    cursor = (D.activity || {}).next_cursor || null;
+    paint();
+  } else {
+    load(true);
+  }
+  document.addEventListener('ct:lang', () => { renderFilters(); paint(); });
 })();

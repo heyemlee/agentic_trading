@@ -261,13 +261,13 @@ class PauseRequest(BaseModel):
 
 
 @app.post("/system/pause", tags=["system"], summary="Engage the kill switch: no orders may be submitted")
-def pause(body: PauseRequest | None = None) -> dict[str, Any]:
-    return _ok(_service.pause, (body or PauseRequest()).reason)
+def pause(request: Request, body: PauseRequest | None = None) -> dict[str, Any]:
+    return _ok(_service.pause, (body or PauseRequest()).reason, identity=request.state.identity)
 
 
 @app.post("/system/resume", tags=["system"], summary="Release the kill switch")
-def resume() -> dict[str, Any]:
-    return _ok(_service.resume)
+def resume(request: Request) -> dict[str, Any]:
+    return _ok(_service.resume, identity=request.state.identity)
 
 
 # ----------------------------------------------------------------- portfolio and risk
@@ -393,6 +393,16 @@ def reanalyze(proposal_id: str) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------- orders
+@app.get("/activity", tags=["orders"],
+         summary="The audit journal: every proposal, fill, run and kill-switch change, paged")
+def activity(kind: Annotated[list[str] | None, Query()] = None,
+             subject: Annotated[str | None, Query(max_length=128)] = None,
+             cursor: Annotated[int | None, Query(ge=1)] = None,
+             limit: Annotated[int, Query(ge=1, le=200)] = 50) -> dict[str, Any]:
+    return _ok(_service.activity, kinds=tuple(kind or ()), subject=subject,
+               cursor=cursor, limit=limit)
+
+
 @app.get("/orders", tags=["orders"], summary="Recorded fills and live open orders")
 def orders(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> dict[str, Any]:
     return _ok(_service.orders, limit)

@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import events
 from .profile import Profiles
 from .state_db import StateConflict, StateDB
 from .storage import file_lock
@@ -278,6 +279,9 @@ class ProposalStore:
                 if existing_approval and tuple(existing_approval) != approval:
                     raise StateConflict("an immutable approval record cannot be changed")
                 conn.execute("INSERT OR IGNORE INTO approvals VALUES(?,?,?,?,?,?)", approval)
+            # The journal is appended inside this transaction, so it can never claim a
+            # transition the proposal record does not also show.
+            events.from_history(conn, proposal)
             if proposal.client_order_id:
                 account = "micro_live" if proposal.bucket == "micro_live" else "conceptual"
                 conn.execute("INSERT INTO orders VALUES(?,?,?,?,?,?) ON CONFLICT(client_order_id) DO UPDATE SET "
