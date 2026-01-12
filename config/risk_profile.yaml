@@ -549,6 +549,24 @@ notifications:
     url_env: CT_HEARTBEAT_URL
     every_minutes: 15
 
+# A forward record of what this system decides, and what a passive alternative would have done.
+#
+# The test suite proves the software behaves; it says nothing about whether multi-agent research
+# is worth its cost. Only a continuous sample, declared before it runs, can answer that. The
+# record counts NO_TRADE decisions, rejected proposals and failed runs as well as trades: a
+# record of trades alone would describe only the occasions this system chose to act, which is a
+# biased sample of its own judgement.
+evaluation:
+  enabled: true
+  benchmark:                               # bought once at the study's start date and held,
+    VTI: 60                                # receiving the same deposits on the same days
+    BND: 40
+  observation_days: 30                     # before the record is worth reading at all
+  minimum_days_for_judgement: 180          # before it can support a judgement about the strategy
+  stop_rules:                              # declared in advance, reported on every run
+    max_drawdown_pct: -15
+    trails_benchmark_pct_points: -10
+
 # Freshness is per strategy, not one universal number. The window is set by how fast the
 # thesis can decay, the drift band by how much price movement changes the decision.
 proposal_freshness:

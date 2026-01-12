@@ -244,6 +244,12 @@ def operations() -> dict[str, Any]:
     return _ok(_service.operations)
 
 
+@app.get("/evaluation", tags=["system"],
+         summary="The forward record against a passive benchmark, including what it did not do")
+def evaluation_report() -> dict[str, Any]:
+    return _ok(_service.evaluation_report)
+
+
 @app.get("/system/schedule", tags=["system"],
          summary="Next scheduled research, the last result, and why a run was skipped")
 def schedule_status() -> dict[str, Any]:

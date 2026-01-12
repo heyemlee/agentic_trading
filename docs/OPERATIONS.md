@@ -381,6 +381,48 @@ Nothing running on this Mac can report that this Mac is gone. Set `CT_HEARTBEAT_
 external watcher that expects a regular ping and alerts on its absence; that is the only path by
 which a power cut or a network outage reaches a phone.
 
+## Does any of this work?
+
+The test suite proves the software behaves. It says nothing about whether multi-agent research
+is worth its cost, and no amount of engineering evidence ever will. Only a continuous sample,
+declared before it runs, can answer that.
+
+```bash
+uv run ct-evaluate start --note "why this study exists"   # once, freezing the rules
+uv run ct-evaluate snapshot                                # daily; the maintenance job does it
+uv run ct-evaluate report                                  # any time
+uv run ct-evaluate stop --reason "..."                     # ends it; keep the report
+```
+
+Three properties make the record worth reading.
+
+**It is declared before it runs.** Paper capital, universe, schedule, risk profile and model
+settings are fingerprinted when the study starts, and every report says whether that
+fingerprint has changed since. Choosing the rules after seeing the outcome is how a strategy is
+talked into looking good; a drifted sample is reported as not homogeneous rather than quietly
+averaged.
+
+**It counts what the system did not do.** NO_TRADE decisions, rejected and expired proposals,
+failed runs, runs stopped by the subscription limit, and the share of runs that concluded on
+incomplete evidence are all in the report. A record of trades alone would describe only the
+occasions this system chose to act — a biased sample of its own judgement.
+
+**It excludes deposits from return.** Both the strategy and the benchmark are converted to a
+unit value that stays continuous across a cash flow, so money paid in never registers as a gain
+and a deposit made while under water does not repair the drawdown. The benchmark is bought once
+at the study's start date, held, and receives the same deposits on the same days at those days'
+prices, which is what makes the two returns comparable at all.
+
+The report also carries what it cost: model calls, research seconds, the median minutes between
+a proposal appearing and a person deciding, turnover, and realised slippage in basis points
+against the price the analysis used. `observation_days` is how long before the record is worth
+reading; `minimum_days_for_judgement` is how long before it can support a judgement. Until then
+every report says so in its own text.
+
+Stop rules are declared in `evaluation.stop_rules` and reported when they trigger. They do not
+halt anything by themselves: deciding to stop is a person's call, and the point of declaring the
+threshold in advance is to make that call before the loss has had time to argue with it.
+
 ## Capital boundaries
 
 Three buckets, three ledgers, three drawdown ladders. They never fund each other.

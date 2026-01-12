@@ -38,6 +38,7 @@ ct-trigger = "conservative_trading.triggers:main"
 ct-state = "conservative_trading.state_cli:main"
 ct-ops = "conservative_trading.operations:main"
 ct-notify = "conservative_trading.notify_cli:main"
+ct-evaluate = "conservative_trading.evaluate_cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.5"]

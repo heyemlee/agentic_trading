@@ -115,6 +115,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/system/operations` | background activity heartbeats, free disk, retention windows |
 | GET | `/system/notifications` | notification channel, what is enabled, delivery record |
 | GET | `/auth/sessions` | devices signed in: opaque id, device label, created/last-used/expiry |
+| GET | `/evaluation` | the forward record against a passive benchmark, including what it did not do |
 | GET | `/portfolio` | all buckets, positions, cash, sleeves |
 | GET | `/risk` | drawdown ladders and market regime |
 | GET | `/micro-live` | real-money status, preflight gates, capital boundary |

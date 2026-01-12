@@ -140,9 +140,20 @@ def main(argv: list[str] | None = None) -> int:
                           keep=int(cfg.get("log_keep", 5)))
     pruned = prune_runs(profiles.project_dir / "runs",
                         retention_days=int(cfg.get("runs_retention_days", 120)))
+    # The forward record is only worth anything if it is unbroken, so the daily job marks it
+    # rather than relying on somebody remembering to.
+    marked: dict[str, Any] = {"recorded": False, "reason": "no study is running"}
+    try:
+        from .api.service import Service
+
+        marked = Service(args.config_dir).evaluation_snapshot()
+    except Exception as exc:  # noqa: BLE001 - housekeeping continues even if the study cannot
+        marked = {"recorded": False, "reason": f"{type(exc).__name__}: {exc}"}
+
     detail = f"{len(rotated)} log(s) rotated, {len(pruned)} run(s) pruned, {free['free_gb']} GB free"
     record(db, "maintenance", detail, min_interval_seconds=0)
-    print(json.dumps({"rotated": rotated, "pruned": pruned, "disk": free}, indent=2))
+    print(json.dumps({"rotated": rotated, "pruned": pruned, "disk": free,
+                      "evaluation": marked}, indent=2))
     # A full disk stops the database, the logs and the backups at once, so it is worth an
     # exit code the scheduler's own log will show.
     return 1 if free["low"] else 0

@@ -846,6 +846,36 @@ class Service:
             **pending(self.state_db(profiles)),
         }
 
+    # ---------------------------------------------------------------- evaluation
+    def evaluation_report(self) -> dict[str, Any]:
+        """The forward record, assembled from the sources that already hold it.
+
+        Nothing is duplicated into a separate ledger of its own: the decisions, jobs, proposals
+        and fills are read where they live, so the report cannot drift away from what happened.
+        """
+        from .. import evaluation
+
+        profiles = self.profiles()
+        return evaluation.report(
+            self.state_db(profiles), profiles,
+            research=self.research_history(limit=500),
+            jobs=self.research_jobs(limit=500),
+            proposals=self.proposals(include_closed=True),
+            fills=self.orders(limit=200)["fills"])
+
+    def evaluation_snapshot(self, on: str | None = None) -> dict[str, Any]:
+        """Mark the study to market for one session. Called daily by the maintenance job."""
+        from .. import evaluation
+
+        profiles = self.profiles()
+        portfolio = self.portfolio()
+        account = (portfolio.get("accounts") or {}).get("conceptual")
+        if account is None:
+            raise ServiceError("the conceptual account could not be read")
+        return evaluation.snapshot(
+            self.state_db(profiles), profiles, on=on or portfolio["as_of"],
+            equity_usd=account["equity_usd"], net_deposits_usd=account["net_deposits_usd"])
+
     # ---------------------------------------------------------------- schedule
     def schedule_status(self) -> dict[str, Any]:
         """What the schedule will do next, what it last did, and why it last did nothing."""
@@ -982,6 +1012,10 @@ class Service:
                 "trade_date": d.get("trade_date"), "created_at": d.get("created_at"),
                 "portfolio_manager_rating": (d.get("upstream_decision") or {}).get("portfolio_manager_signal"),
                 "policy_action": policy.get("final_action"), "confidence": policy.get("confidence"),
+                # Evidence quality travels with the decision: a run that concluded without the
+                # macro context is not the same kind of result as one that had it.
+                "data_quality": (policy.get("proposal") or {}).get("data_quality"),
+                "missing_information": len((policy.get("proposal") or {}).get("missing_information") or []),
                 "hard_risk_verdict": (d.get("hard_risk") or {}).get("verdict"),
                 "final_action": (d.get("final_recommendation") or {}).get("action"),
                 "proposal_id": d.get("proposal_id"),
