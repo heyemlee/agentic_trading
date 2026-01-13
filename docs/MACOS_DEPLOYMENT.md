@@ -93,6 +93,28 @@ it must be restored with `ct-state restore` before an older release can read it.
 To develop while the service runs, keep editing the git checkout: the running release is a
 separate copy and is unaffected until the next `publish`.
 
+**Publishing rarely and in bursts can trip a macOS throttle, not a bug in this tool.** The
+launchd jobs reference the `current` symlink rather than a specific release, so an ordinary
+publish (same origins, same schedule) does not touch the plist at all — only the symlink moves,
+and `launchctl kickstart` restarts the already-registered job onto it. If the plist *does* need
+to change (a new Tailscale origin, an edited schedule), `publish`/`install.sh` re-register only
+the jobs that actually changed. Registering an unchanged LaunchAgent anyway is what trips it:
+macOS's `backgroundtaskmanagementd` silently stops honouring further updates to a background
+item that has been re-registered too many times in a short window. `launchctl bootstrap` keeps
+reporting success — the failure is invisible except in the unified log:
+
+```bash
+log show --last 1h --predicate 'eventMessage CONTAINS "Exceeded max notifications"'
+```
+
+If that shows entries for `run_api.sh` or the other scripts, the fix is patience, not another
+publish: retrying immediately re-triggers the same throttle. Wait — community reports put the
+reset anywhere from tens of minutes to needing a logout — or fold the retry into a planned
+reboot, which clears it. This happened for real during this project's own P1 rollout on
+2026-09-05: two publishes inside an hour, on top of the day's install and manual testing, threw
+`launchctl bootstrap` into that state on all four jobs at once, even though every command
+reported success. The already-running process was never affected; only starting a *new* one was.
+
 ## Operations
 
 Run by hand, these read the deployed layout from the installed launchd job rather than from

@@ -24,6 +24,11 @@ LABELS = (API, RESEARCH, BACKUP, MAINTENANCE)
 
 LOOPBACK = ("http://127.0.0.1:8787", "http://localhost:8787")
 
+#: The symlink release.sh keeps beside its release directories, flipped to the active one on
+#: every publish or rollback. Referencing it here rather than a release's own timestamped path
+#: is what keeps an ordinary publish from touching the plist at all — see render()'s docstring.
+CURRENT_LINK_NAME = "current"
+
 
 def installed_origins(launch_agents: Path) -> list[str]:
     """Remote origins the currently installed API job already trusts."""
@@ -86,9 +91,22 @@ def render(*, data_dir: Path, release_dir: Path | None = None, home: Path,
     environment. They are the same directory in a single-checkout install and different ones
     once :file:`deploy/macos/release.sh` is used, which is what lets the service keep running a
     fixed version while the checkout it was cut from carries on being edited.
+
+    When a release layout is in use, the jobs reference the ``current`` symlink beside the
+    release directories rather than the specific release passed in — so two calls for
+    different releases (same data directory and origins) render byte-identical output. That
+    property is not cosmetic: a plist that changes on every publish is, to macOS, a LaunchAgent
+    being re-registered on every publish. Do that enough times in a short window and
+    ``backgroundtaskmanagementd`` throttles it — ``launchctl bootstrap`` keeps reporting
+    success while the job silently never starts, logging only "Exceeded max notifications for
+    <script>" to the unified log. Publishing new code should mean flipping the symlink and
+    restarting the running process (``launchctl kickstart``, which touches no registration),
+    not re-registering the LaunchAgent — this is what makes that possible.
     """
     data_dir = Path(data_dir).resolve()
-    release_dir = Path(release_dir).resolve() if release_dir else data_dir
+    resolved_release = Path(release_dir).resolve() if release_dir else data_dir
+    release_dir = (resolved_release.parent / CURRENT_LINK_NAME
+                  if resolved_release != data_dir else resolved_release)
     home = Path(home)
     logs = data_dir / "runs/service"
     environment = {

@@ -115,13 +115,44 @@ def test_a_release_layout_runs_pinned_code_against_the_service_data(tmp_path):
     data, release = tmp_path / "data", tmp_path / "releases" / "2026-09-04"
     jobs = launchd.render(data_dir=data, release_dir=release, home=tmp_path,
                           origins=list(launchd.LOOPBACK))
+    current = release.parent / "current"
     api = jobs[launchd.API]
     assert api["WorkingDirectory"] == str(data.resolve())
-    assert api["ProgramArguments"] == [str((release / "deploy/macos/run_api.sh").resolve())]
+    assert api["ProgramArguments"] == [str(current / "deploy/macos/run_api.sh")]
     assert api["EnvironmentVariables"]["CT_DATA_DIR"] == str(data.resolve())
-    assert api["EnvironmentVariables"]["CT_RELEASE_DIR"] == str(release.resolve())
+    assert api["EnvironmentVariables"]["CT_RELEASE_DIR"] == str(current)
     assert api["EnvironmentVariables"]["CT_CONFIG_DIR"] == str((data / "config").resolve())
     assert set(jobs) == set(launchd.LABELS)
+
+
+def test_two_releases_render_byte_identical_jobs_through_the_current_symlink(tmp_path):
+    """A routine publish must not look like re-registering the LaunchAgent to macOS.
+
+    release.sh publishes a new, differently-named release directory every time. Pointing the
+    job at that specific path meant every publish produced a different plist, which macOS's
+    background-task manager treats as the LaunchAgent being re-registered. Enough of those in
+    a short span trips its notification throttle: `launchctl bootstrap` keeps reporting success
+    while the job silently never starts (`log show` records "Exceeded max notifications for
+    run_api.sh"). This happened for real on 2026-09-05, on all four jobs at once, after two
+    publishes inside an hour. Referencing the stable `current` symlink instead means an ordinary
+    publish (same data directory, same origins) changes nothing about the plist at all — only
+    the symlink's target moves, and a restart (`launchctl kickstart`) is what makes the new code
+    active without touching launchd's registration.
+    """
+    data = tmp_path / "data"
+    releases = tmp_path / "releases"
+    jobs_a = launchd.render(data_dir=data, release_dir=releases / "20260101T000000Z-aaa1111",
+                            home=tmp_path, origins=list(launchd.LOOPBACK))
+    jobs_b = launchd.render(data_dir=data, release_dir=releases / "20260102T000000Z-bbb2222",
+                            home=tmp_path, origins=list(launchd.LOOPBACK))
+    assert jobs_a == jobs_b
+    for jobs in (jobs_a, jobs_b):
+        for label in launchd.LABELS:
+            assert str(releases / "current") in jobs[label]["ProgramArguments"][0]
+
+    # a single-checkout install (no release layout) keeps referencing its own directory
+    single = launchd.render(data_dir=data, home=tmp_path, origins=list(launchd.LOOPBACK))
+    assert single[launchd.API]["ProgramArguments"] == [str(data / "deploy/macos/run_api.sh")]
 
 
 def test_an_invalid_remote_origin_is_refused_rather_than_installed():
@@ -232,10 +263,12 @@ def test_a_script_run_by_hand_checks_the_deployment_not_the_checkout(tmp_path):
 
     home = tmp_path / "home"
     data, release = tmp_path / "service-data", tmp_path / "releases" / "r1"
+    current = release.parent / "current"
     (data / "config").mkdir(parents=True)
     (release / ".venv" / "bin").mkdir(parents=True)
     (release / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (release / ".venv" / "bin" / "python").chmod(0o755)
+    current.symlink_to(release)             # release.sh always flips this before common.sh runs
     launchd.write(home / "Library" / "LaunchAgents",
                   launchd.render(data_dir=data, release_dir=release, home=home,
                                  origins=list(launchd.LOOPBACK)))
@@ -252,7 +285,9 @@ def test_a_script_run_by_hand_checks_the_deployment_not_the_checkout(tmp_path):
     environment = {"HOME": str(home), "PATH": os.environ["PATH"]}
     result = subprocess.run(["zsh", str(probe)], capture_output=True, text=True,
                             env=environment, check=True, timeout=30)
-    assert result.stdout.split() == [str(release.resolve()), str(data.resolve())]
+    # The plist carries the stable symlink, not the specific release, so that a routine publish
+    # does not change it (see test_two_releases_render_byte_identical_jobs_through_the_current_symlink).
+    assert result.stdout.split() == [str(current), str(data.resolve())]
 
     # With no installed job the old behaviour stands: the script's own checkout.
     shutil.rmtree(home / "Library" / "LaunchAgents")

@@ -47,21 +47,36 @@
 1–7 项的代码已经落地并通过测试。下面是无法在这里代劳的部分，逐项的记录表在
 [docs/ACCEPTANCE_P1.md](docs/ACCEPTANCE_P1.md)。
 
-- [ ] **0. 发布两个修复，并重跑一次定时研究**（2026-09-05 遗留）
-  当前运行的 release 是 `24426db`，其后有两个未发布的修复：`1d8edd6`（脚本手动运行时从已安装的
-  launchd 任务读取部署布局）和 `0298614`（定时研究锚定到**有数据**的交易日）。
-  2026-09-05 00:35 用 `launchctl kickstart` 触发的那次验证，跑的是修复前的代码，三个任务
-  （VTI / VXUS / BND）分析的是 `2026-09-04` —— 日历上已收盘，但价格数据尚未发布，因此
-  `regime=UNKNOWN`，结论偏向 NO_TRADE（VXUS 已完成，proposal=None，符合预期）。
-  链路本身（launchd 启动、Claude 认证、取数、写报告、生成决策记录、并发上限、周期键去重、
-  额度计数）已经验证通过；缺的是一次**市场环境完整**的运行。
+- [ ] **0. 发布修复，并重跑一次定时研究**（2026-09-05 遗留，两轮更新）
+  当前运行的 release 是 `24426db`。其后累计的修复：`1d8edd6`（脚本手动运行时从已安装的
+  launchd 任务读取部署布局）、`0298614`（定时研究锚定到**有数据**的交易日）、
+  `719d8ac`（只读路径缺表/缺列时不再崩溃，见下）、以及本轮的
+  **launchd 插件路径改用稳定的 `current` 软链**（避免下面这个坑）。
+
+  **2026-09-05 20:44/20:47（太平洋时间）两次 `release.sh publish` 都在 10 秒健康检查内失败并自动回滚。**
+  排查：统一日志里 `backgroundtaskmanagementd` 在两次尝试期间都精确打出
+  `Exceeded max notifications for run_api.sh`（四个 job 全中）——这是 **macOS 自己的限流**，
+  不是这段代码的 bug：`release.sh` 每次发布都把 plist 指向新 release 的具体路径，
+  内容因此每次都变，macOS 把这当成"重新注册 LaunchAgent"；短时间内注册太多次，
+  `launchctl bootstrap` 继续报成功，但任务被静默拒绝启动。当时运行中的旧进程完全没受影响
+  （curl 一直 200），只是新版起不来。
+  **已修复根因**：plist 现在引用 `releases/current` 软链而不是具体 release 的时间戳路径，
+  两个不同 release 渲染出的 job 定义现在逐字节相同（`test_two_releases_render_byte_identical_jobs_through_the_current_symlink`）；
+  常规发布不再重写 plist，只翻转软链 + `launchctl kickstart` 重启进程，不再触碰 launchd 注册。
+  `release.sh` / `install.sh` 也都加了"重写前后哈希对比，没变就跳过 bootout/bootstrap"的保护。
+
+  **但今天已经触发过的限流不会因为这次修复立刻解除**——它是按时间窗口计数的，不是按内容。
+  **不要连续重试 publish**；等一段时间（论坛经验从几十分钟到需要重新登录不等，Apple 未公开具体窗口），
+  或者干脆留到下面第 7 项"整机重启演练"时一起验证（重启必然会清空这个计数）。
   ```bash
-  uv run ct-state status | head -20        # 先确认没有未结订单
+  log show --last 1h --predicate 'eventMessage CONTAINS "Exceeded max notifications"'  # 确认已经解除
+  uv run ct-state status | head -20        # 确认没有未结订单
   deploy/macos/release.sh publish
   uv run ct-trigger scheduled --force      # 本周期已被占用，需要 --force
   ```
-  **完成标准：** worker 日志里 `regime=` 不是 UNKNOWN；三个任务都到达终态；
-  `ct-trigger scheduled --dry-run` 的 `last_run.analysed_sessions` 是有数据的那个交易日。
+  **完成标准：** publish 成功且不再触发限流；worker 日志里 `regime=` 不是 UNKNOWN；
+  三个任务都到达终态；`ct-trigger scheduled --dry-run` 的 `last_run.analysed_sessions`
+  是有数据的那个交易日。
 
 - [ ] **1. 手机 30 天登录与实际操作验收** — 新版部署后重新登录、关页面重开、切换 Wi-Fi/蜂窝、无任务窗口重启 API 后仍是同一会话；在模拟券商上跑完"启动研究 → 看报告 → 拒绝 → 批准 → 查结果 → 重复点击"。用 `ct-state sessions` 确认服务端确实建了持久会话。
   **进度（2026-09-05）：** 数据库中已有一条 `owner` 持久会话（创建于 23:20:54 UTC，剩余 29.95 天），并且扛过了 install 与 publish 两次 API 重启 —— 这一条已经支撑验收 1.5。但它创建于本轮改造之前，**无法确认是手机建的**；仍需在手机上登录一次，看到第二条会话出现。另注意 `last_seen_at` 目前恒等于 `created_at`（P2 第 9 项的已知缺口），该字段暂时没有参考价值。

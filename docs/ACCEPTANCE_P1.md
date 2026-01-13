@@ -148,7 +148,9 @@ returns 200 is not this check: it proves nothing about the worker, the data sour
 
 ## 7. The reboot drill
 
-Choose a time with no open order and no running research.
+Choose a time with no open order and no running research. If item 0 is still blocked on macOS's
+background-task throttle ("Exceeded max notifications", see `MACOS_DEPLOYMENT.md`), do this
+drill first: the reboot clears it, and `release.sh publish` can be retried right after 7.2.
 
 | # | Step | Record |
 |---|---|---|

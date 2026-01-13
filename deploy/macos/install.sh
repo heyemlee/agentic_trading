@@ -30,16 +30,34 @@ chmod 700 "$project_dir/runs/service" "$project_dir/state/backups"
 [[ ! -f "$project_dir/state/console_auth.json" ]] || chmod 600 "$project_dir/state/console_auth.json"
 [[ ! -f "$project_dir/state/robinhood_token.json" ]] || chmod 600 "$project_dir/state/robinhood_token.json"
 
+labels=(
+  com.local.agentic-trading.api
+  com.local.agentic-trading.research-weekly
+  com.local.agentic-trading.backup-daily
+  com.local.agentic-trading.maintenance-daily
+)
+
+# Snapshot each plist before rewriting. A plain rerun with no origin change produces byte-
+# identical files, and reloading a job whose plist did not change is not free: re-registering
+# an unchanged LaunchAgent trains macOS's background-task manager to throttle it — a later
+# `launchctl bootstrap` keeps reporting success while the job silently never starts, visible
+# only via `log show --predicate 'eventMessage CONTAINS "Exceeded max notifications"'`. Enough
+# reruns in a short window (which is exactly what iterating on this script looks like) trips it.
+typeset -A before_reload
+for label in "${labels[@]}"; do
+  before_reload[$label]="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
+done
+
 "$project_dir/.venv/bin/python" -m conservative_trading.launchd \
   --data-dir "$project_dir" --launch-agents "$launch_agents" "${origin_args[@]}"
 
 chmod 700 "$project_dir/deploy/macos/"*.sh
-for label in \
-  com.local.agentic-trading.api \
-  com.local.agentic-trading.research-weekly \
-  com.local.agentic-trading.backup-daily \
-  com.local.agentic-trading.maintenance-daily; do
+for label in "${labels[@]}"; do
   target="$launch_agents/$label.plist"
+  after_reload="$(shasum -a 256 "$target" 2>/dev/null || true)"
+  if [[ "$after_reload" == "${before_reload[$label]}" ]]; then
+    continue                                # unchanged: the loaded job already matches
+  fi
   plutil -lint "$target"
   launchctl bootout "gui/$UID/$label" 2>/dev/null || true
   loaded=false
@@ -56,6 +74,8 @@ for label in \
   fi
   launchctl enable "gui/$UID/$label"
 done
+# Restarts the running process without touching launchd's registration, so a rerun that
+# changed nothing still picks up new code without contributing to the throttle above.
 launchctl kickstart -k "gui/$UID/com.local.agentic-trading.api"
 
 ready=false

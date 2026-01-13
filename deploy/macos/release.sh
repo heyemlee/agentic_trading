@@ -56,14 +56,36 @@ venv_for() { print -r -- "$1/.venv/bin" }
 activate() {                              # point launchd at a release and prove it came up
   local release="$1"
   local previous="${2:-}"
+  local labels=(
+    com.local.agentic-trading.api
+    com.local.agentic-trading.research-weekly
+    com.local.agentic-trading.backup-daily
+    com.local.agentic-trading.maintenance-daily
+  )
+
+  # Snapshot each plist before rewriting. render() points every job at the `current` symlink
+  # rather than this specific release, so an ordinary publish (same origins, same schedule)
+  # produces byte-identical files and nothing here needs to change. That distinction matters:
+  # re-registering an unchanged LaunchAgent trains macOS's background-task manager to throttle
+  # it — `launchctl bootstrap` keeps reporting success while the job silently never starts,
+  # only `log show --predicate 'eventMessage CONTAINS "Exceeded max notifications"'` shows it.
+  # This is what actually happened here on 2026-09-05: two publishes in under an hour, on top
+  # of the earlier install, was enough to trip it on all four jobs at once.
+  typeset -A before
+  for label in "${labels[@]}"; do
+    before[$label]="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
+  done
+
   ln -sfn "$release" "$current_link"
   "$(venv_for "$release")/python" -m conservative_trading.launchd \
     --data-dir "$data_dir" --release-dir "$release" --launch-agents "$launch_agents"
-  for label in \
-    com.local.agentic-trading.api \
-    com.local.agentic-trading.research-weekly \
-    com.local.agentic-trading.backup-daily \
-    com.local.agentic-trading.maintenance-daily; do
+
+  for label in "${labels[@]}"; do
+    local after
+    after="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
+    if [[ "$after" == "${before[$label]}" ]]; then
+      continue                              # unchanged: the loaded job already matches
+    fi
     plutil -lint "$launch_agents/$label.plist" >/dev/null
     launchctl bootout "gui/$UID/$label" 2>/dev/null || true
     for attempt in {1..10}; do
@@ -72,6 +94,10 @@ activate() {                              # point launchd at a release and prove
     done
     launchctl enable "gui/$UID/$label"
   done
+
+  # The symlink flip is what makes the new code active; the already-running process only picks
+  # it up on its next exec. This restarts it without touching launchd's registration, so it
+  # never contributes to the throttle above.
   launchctl kickstart -k "gui/$UID/com.local.agentic-trading.api"
 
   for attempt in {1..40}; do
