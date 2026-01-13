@@ -113,6 +113,7 @@ def test_an_off_machine_copy_is_encrypted_and_needs_the_passphrase(project, tmp_
     if shutil.which("openssl") is None:
         pytest.skip("openssl is required for the encrypted mirror")
     mirror = tmp_path / "mirror"
+    mirror.mkdir()                 # the destination must already exist; see the unmounted case
     assert run(["backup", "--config-dir", str(project / "config"), "--verify",
                 "--mirror-dir", str(mirror), "--key-file", str(key_file(tmp_path))]) == 0
 
@@ -185,6 +186,7 @@ def test_an_encrypted_backup_round_trips_through_restore(project, tmp_path, caps
     if shutil.which("openssl") is None:
         pytest.skip("openssl is required for the encrypted mirror")
     mirror, key = tmp_path / "mirror", key_file(tmp_path)
+    mirror.mkdir()
     run(["backup", "--config-dir", str(project / "config"), "--verify",
          "--mirror-dir", str(mirror), "--key-file", str(key)])
     encrypted = next(iter(mirror.glob("*.enc")))
@@ -251,3 +253,24 @@ def test_status_reports_a_table_it_cannot_count_rather_than_raising(tmp_path):
     counts = db.status()["counts"]
     assert isinstance(counts["events"], str) and "unavailable" in counts["events"]
     assert counts["proposals"] == 0        # everything else still reports
+
+
+def test_an_unmounted_mirror_destination_is_refused_not_created(project, tmp_path):
+    """A copy on the internal disk is not an off-machine copy, however much it looks like one.
+
+    Pointing the mirror at /Volumes/Something and running with the disk unplugged used to
+    create that path on the boot volume, so the backup meant to survive losing this Mac landed
+    on the Mac. It has to fail loudly instead.
+    """
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is required for the encrypted mirror")
+    absent = tmp_path / "Volumes" / "BackupDisk"      # a mount point that is not mounted
+
+    with pytest.raises(SystemExit) as raised:
+        run(["backup", "--config-dir", str(project / "config"), "--verify",
+             "--mirror-dir", str(absent), "--key-file", str(key_file(tmp_path))])
+    assert "does not exist" in str(raised.value)
+    assert not absent.exists()                        # and nothing was created in its place
+
+    # the local copy still succeeded, so the failure costs the mirror and nothing else
+    assert list((project / "state" / "backups").glob("trading_state_*.sqlite3"))

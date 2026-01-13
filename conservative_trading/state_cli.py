@@ -88,7 +88,15 @@ def _encrypt(source: Path, destination: Path, key_file: Path) -> None:
         raise RuntimeError(f"passphrase file {key_file} is missing or too short (16+ bytes)")
     if key_file.stat().st_mode & 0o077:
         raise RuntimeError(f"passphrase file {key_file} must not be group or world readable")
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Deliberately not created. A mirror directory under /Volumes exists only while the disk is
+    # mounted, and creating it would put the copy on the internal disk under the unmounted
+    # volume's name — an "off-machine" backup silently written to the machine it protects
+    # against, which is worse than no copy at all because it looks like one.
+    if not destination.parent.is_dir():
+        raise RuntimeError(
+            f"mirror directory {destination.parent} does not exist. If it is an external disk "
+            "or a synced folder, make sure it is mounted and available; this is not created "
+            "for you, because a copy on the internal disk is not an off-machine copy.")
     result = subprocess.run(
         ["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "600000", "-salt",
          "-in", str(source), "-out", str(destination), "-pass", f"file:{key_file}"],
@@ -141,7 +149,13 @@ def _backup(profiles, args, parser) -> int:
         if not args.key_file:
             parser.error("--mirror-dir also needs --key-file: an off-machine copy is encrypted")
         mirror = Path(args.mirror_dir) / f"{destination.name}.enc"
-        _encrypt(destination, mirror, Path(args.key_file))
+        try:
+            _encrypt(destination, mirror, Path(args.key_file))
+        except RuntimeError as exc:
+            # The local copy is already written and verified, so the mirror failing costs the
+            # off-machine copy and nothing else. Say so plainly rather than as a traceback.
+            raise SystemExit(f"local backup kept at {destination}, but the off-machine copy "
+                             f"failed: {exc}") from exc
         report["mirror"] = str(mirror.resolve())
         if args.retain_days:
             report["mirror_pruned"] = _prune(Path(args.mirror_dir),
