@@ -40,15 +40,25 @@ see a *new* session created by the phone against the deployed release, and to se
 
 | # | Step | Record |
 |---|---|---|
-| 1.1 | Sign in on the phone at `https://<device>.<tailnet>.ts.net/ui/`. Note device, OS version, browser. | |
-| 1.2 | `uv run ct-state sessions` on the Mac. A new row, ~30 days left. | |
-| 1.3 | Close the tab, reopen it after 10+ minutes. Still signed in? | |
-| 1.4 | Switch Wi-Fi → cellular → Wi-Fi. Still signed in? Does the console reconnect on its own? | |
-| 1.5 | Pick a window with **no research running and no open order**. Restart the API (`launchctl kickstart -k gui/$UID/com.local.agentic-trading.api`). Phone still signed in without retyping the password? | |
-| 1.6 | `ct-state sessions` again: same session, not a new one. | |
+| 1.1 | Sign in on the phone at `https://<device>.<tailnet>.ts.net/ui/`. Note device, OS version, browser. | ✅ 2026-09-05 06:03:35Z — `POST /auth/login` 200 from 100.124.169.97 (phone, over Tailscale) |
+| 1.2 | `uv run ct-state sessions` on the Mac. A new row, ~30 days left. | ✅ one row, `days_left: 30.0`, expires 2026-10-05 |
+| 1.3 | Close the tab, reopen it after 10+ minutes. Still signed in? | ✅ |
+| 1.4 | Switch Wi-Fi → cellular → Wi-Fi. Still signed in? Does the console reconnect on its own? | ✅ |
+| 1.5 | Pick a window with **no research running and no open order**. Restart the API (`launchctl kickstart -k gui/$UID/com.local.agentic-trading.api`). Phone still signed in without retyping the password? | ✅ the previous session survived four API restarts (install + three publish/rollback cycles) without a re-login. Not yet re-confirmed for the session created at 06:03; the next publish will do that. |
+| 1.6 | `ct-state sessions` again: same session, not a new one. | ✅ a signed-in phone reuses its session; a new row appeared only after a deliberate sign-out and sign-in |
 
 **Passes when** the phone stays signed in across a close/reopen, a network change and an API
 restart, and step 1.6 shows the same session rather than a replacement.
+
+**2026-09-05 result: passed**, with one caveat carried forward. The sign-out/sign-in was done
+deliberately because the login path had been broken and repaired earlier that evening (a read
+migrated the live database ahead of the running release; see TODO item 0), so it needed proving
+rather than assuming. It works. What is still unproven is 1.5 for the *current* session, which
+the next publish will exercise on its own.
+
+Device: iPhone over Tailscale. The console is reachable only from inside the tailnet — the API
+listens on 127.0.0.1 alone and Tailscale Serve is marked "tailnet only", so there is no public
+entry point at all. Turning Tailscale off makes the console unreachable by design.
 
 ## 2. The full loop, on simulated money only
 
