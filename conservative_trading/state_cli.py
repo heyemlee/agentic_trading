@@ -222,18 +222,25 @@ def _sessions(profiles) -> int:
         print(json.dumps({"sessions": []}, indent=2))
         return 0
     try:
-        rows = conn.execute("SELECT session_id,label,username,created_at,last_seen_at,expires_at "
-                            "FROM console_sessions ORDER BY created_at").fetchall()
+        # Selected wholesale: this command has to work against a state directory served by an
+        # older release, which has neither of the device-management columns. Naming them would
+        # make the command fail precisely when it is being used to check on that deployment.
+        rows = conn.execute("SELECT * FROM console_sessions ORDER BY created_at").fetchall()
     except sqlite3.OperationalError as exc:
         # An empty list here would read as "signed out everywhere"; say what actually happened.
         raise SystemExit(f"the session table could not be read: {exc}") from exc
     finally:
         conn.close()
     now = datetime.now(UTC).timestamp()
+    columns = set(rows[0].keys()) if rows else set()
+
+    def optional(row, column: str) -> str:
+        return (row[column] if column in columns else "") or ""
+
     print(json.dumps({"now": datetime.now(UTC).isoformat(), "sessions": [{
         # The opaque id is what the console revokes by; the token hash never leaves the database.
-        "session_id": row["session_id"] or "(assigned on next use)",
-        "device": row["label"] or "unknown device",
+        "session_id": optional(row, "session_id") or "(assigned on next use)",
+        "device": optional(row, "label") or "unknown device",
         "username": row["username"],
         "created_at": datetime.fromtimestamp(row["created_at"], UTC).isoformat(),
         "last_seen_at": datetime.fromtimestamp(row["last_seen_at"], UTC).isoformat(),

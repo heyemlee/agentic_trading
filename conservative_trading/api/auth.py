@@ -207,27 +207,39 @@ class ConsoleAuth:
         if connection is None:
             return []
         try:
-            # A failure here is deliberately not caught. Reporting "no devices" because the
-            # query failed would tell the owner they had been signed out everywhere, which is
-            # the most alarming possible way to describe a broken read.
+            # Selected wholesale rather than by name: a database written before device
+            # management has neither column, and naming them would raise. A failure that does
+            # get through is deliberately not caught — reporting "no devices" because the query
+            # failed would tell the owner they had been signed out everywhere, which is the most
+            # alarming possible way to describe a broken read.
             rows = connection.execute(
-                "SELECT token_hash,session_id,label,created_at,last_seen_at,expires_at "
-                "FROM console_sessions ORDER BY created_at DESC").fetchall()
+                "SELECT * FROM console_sessions ORDER BY created_at DESC").fetchall()
         finally:
             connection.close()
+
         def stamp(value: float) -> str:
             return datetime.fromtimestamp(float(value), UTC).isoformat()
 
+        # sqlite3.Row has no membership test, so the shape is read once from the result.
+        columns = set(rows[0].keys()) if rows else set()
+
+        def optional(row, column: str) -> str:
+            return (row[column] if column in columns else "") or ""
+
         now = time.time()
+        # A session with no id yet predates this release and cannot be revoked individually
+        # until it is next used. It is still listed: hiding it would under-report how many
+        # devices are signed in, which is the one thing this list exists to answer.
         return [{
-            "session_id": row["session_id"] or "",
-            "label": row["label"] or "unknown device",
+            "session_id": optional(row, "session_id"),
+            "label": optional(row, "label") or "unknown device",
             "created_at": stamp(row["created_at"]),
             "last_seen_at": stamp(row["last_seen_at"]),
             "expires_at": stamp(row["expires_at"]),
             "days_left": round((float(row["expires_at"]) - now) / 86400, 2),
+            "revocable": bool(optional(row, "session_id")),
             "current": current is not None and hmac.compare_digest(row["token_hash"], current),
-        } for row in rows if row["session_id"]]
+        } for row in rows]
 
     def revoke(self, session_id: str, *, current_token: str | None = None) -> bool:
         """Sign one device out. Refuses an empty id, which would otherwise match a backfill."""

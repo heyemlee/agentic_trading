@@ -12,7 +12,6 @@ from typing import ClassVar
 
 _local = threading.local()
 _relinked: set[str] = set()
-_schema_ready: set[str] = set()
 _relink_guard = threading.Lock()
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS migrations(source TEXT PRIMARY KEY, kind TEXT NOT NULL, sha256 TEXT, imported_at TEXT NOT NULL);
@@ -66,24 +65,25 @@ class StateDB:
         return conn
 
     def _read(self):
+        """A read never changes the schema.
+
+        It is tempting to bring an old database up to date here, so that a reader touching a
+        table or column added since cannot fail. That is what this did, and it broke the
+        running deployment: a CLI run from a development checkout migrated the live database
+        while an older API was serving it, and the older code — inserting a session with
+        positional values — then found a table with two more columns than it knew about, so
+        every new login failed. The database was ahead of the process using it.
+
+        Schema changes therefore belong to the code that needs them, applied on a write
+        connection (:meth:`_connect`) or explicitly by ``ct-state migrate``. Readers here
+        tolerate what is missing instead: :meth:`status` reports a table it cannot count, and
+        the session queries fall back when a column is not there yet.
+        """
         if not self.path.exists():
             return None
-        # A read-only connection cannot create a table or add a column, so a database written
-        # by an earlier release would fail any query touching something added since. Bring it
-        # up to date here, once per process, rather than at each call site: fixing this one
-        # reader at a time is how `ct-state status` came to crash on a missing events table
-        # after the session list had already been patched for the same reason.
-        self._ensure_schema_once()
         conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
-
-    def _ensure_schema_once(self) -> None:
-        key = str(self.path)
-        if key in _schema_ready:
-            return
-        if self.ensure_schema():
-            _schema_ready.add(key)
 
     @contextmanager
     def transaction(self, immediate=True):
@@ -121,20 +121,6 @@ class StateDB:
             existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
             if existing and column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
-
-    def ensure_schema(self) -> bool:
-        """Bring the database up to date before a read-only caller queries it.
-
-        A read-only connection cannot add a column, so a reader that asks for one added after
-        the database was created gets an error. Swallowing that error would report an empty
-        result, which for a device list reads as "you are signed out everywhere" — the most
-        alarming possible way to say "this process has not written yet".
-        """
-        try:
-            with self.transaction():
-                return True
-        except sqlite3.DatabaseError:
-            return False
 
     #: Every table keyed by a state file. A key is rewritten in all of them at once.
     KEYED: ClassVar = (("migrations", "source"), ("documents", "namespace"), ("proposals", "namespace"))
@@ -217,6 +203,8 @@ class StateDB:
                 "SELECT payload FROM documents WHERE namespace=?",
                 (str(Path(namespace).resolve()),)).fetchone()
             return json.loads(row[0]) if row else None
+        except sqlite3.OperationalError:
+            return None
         finally:
             if owned:
                 conn.close()
@@ -311,6 +299,8 @@ class StateDB:
         try:
             return [json.loads(r[0]) for r in conn.execute(
                 "SELECT payload FROM fills ORDER BY created_at DESC LIMIT ?", (limit,))]
+        except sqlite3.OperationalError:
+            return []          # a database from before this table existed holds no fills
         finally:
             if current is None:
                 conn.close()
@@ -325,6 +315,8 @@ class StateDB:
             if active_only:
                 sql += " WHERE state='ACTIVE'"
             return [dict(row) for row in conn.execute(sql + " ORDER BY updated_at")]
+        except sqlite3.OperationalError:
+            return []
         finally:
             if current is None:
                 conn.close()
@@ -343,6 +335,8 @@ class StateDB:
             sql += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
             return [json.loads(row[0]) for row in conn.execute(sql, params)]
+        except sqlite3.OperationalError:
+            return []
         finally:
             if current is None:
                 conn.close()
@@ -355,6 +349,8 @@ class StateDB:
         try:
             row = conn.execute("SELECT payload FROM research_jobs WHERE run_key=?", (run_key,)).fetchone()
             return json.loads(row[0]) if row else None
+        except sqlite3.OperationalError:
+            return None
         finally:
             if current is None:
                 conn.close()

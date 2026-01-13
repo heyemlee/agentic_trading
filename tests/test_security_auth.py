@@ -215,7 +215,8 @@ def test_a_session_predating_device_management_still_works_and_becomes_revocable
     with console_auth.db.transaction() as connection:
         connection.execute('UPDATE console_sessions SET session_id=NULL,label=NULL '
                            'WHERE token_hash=?', (console_auth._key(token),))
-    assert console_auth.sessions() == []           # nothing to revoke until it is seen again
+    before = console_auth.sessions()
+    assert len(before) == 1 and before[0]['revocable'] is False   # listed, not yet revocable
 
     assert client.get('/auth/session').json()['authenticated'] is True   # still signed in
     listed = console_auth.sessions(token)
@@ -253,20 +254,69 @@ def test_upgrading_a_deployed_database_keeps_its_sessions(tmp_path):
                            ('hash', 'test-owner', 'csrf', 'gen', 1.0, 1.0, time.time() + 9999))
 
     auth = ConsoleAuth(path, ['https://testserver'])
-    assert auth.sessions() == []          # not yet revocable, and not an error either
+    listed = auth.sessions()
+    # Listed, so the device count is truthful, but not yet revocable individually.
+    assert len(listed) == 1
+    assert listed[0]['revocable'] is False and listed[0]['session_id'] == ''
+    assert listed[0]['label'] == 'unknown device'
+
+    # and reading it changed nothing: the running API may still be the older release
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute('PRAGMA table_info(console_sessions)')}
-    assert {'session_id', 'label'} <= columns
-    assert connection.execute('SELECT count(*) FROM console_sessions').fetchone()[0] == 1
+        assert {'session_id', 'label'}.isdisjoint(columns)
+        assert connection.execute('SELECT count(*) FROM console_sessions').fetchone()[0] == 1
 
 
-def test_an_unreadable_session_table_is_an_error_not_an_empty_device_list(console_auth, monkeypatch):
+def test_an_unreadable_session_table_is_an_error_not_an_empty_device_list(console_auth):
+    """An empty device list reads as "you are signed out everywhere". Never say that by mistake."""
     import sqlite3
 
     sign_in(console_auth, LAPTOP)
     with console_auth.db.transaction() as connection:
-        connection.execute('ALTER TABLE console_sessions DROP COLUMN label')
-    monkeypatch.setattr(console_auth.db, 'ensure_schema', lambda: False)
+        connection.execute('DROP TABLE console_sessions')
 
     with pytest.raises(sqlite3.OperationalError):
         console_auth.sessions()
+
+
+def test_a_migrated_database_still_accepts_a_login_from_the_release_before_it(console_auth):
+    """The schema must never get ahead of the process using it.
+
+    This is the failure it prevents, exactly as it happened: a CLI run from a development
+    checkout added the two device-management columns to the live database while the older
+    released API was still serving it. That API inserted sessions with positional values, so
+    the next login failed with "table console_sessions has 9 columns but 7 values were
+    supplied" — the console could still be browsed on an existing cookie, but nobody could sign
+    in again. Named columns on the write side make the older shape keep working.
+    """
+    import sqlite3
+
+    sign_in(console_auth, LAPTOP)             # migrates the table to the current shape
+    with console_auth.db.transaction() as connection:
+        columns = [row[1] for row in connection.execute('PRAGMA table_info(console_sessions)')]
+        assert {'session_id', 'label'} <= set(columns)
+
+        # what the previous release's login did, verbatim: positional values, seven of them
+        with pytest.raises(sqlite3.OperationalError, match='columns'):
+            connection.execute('INSERT INTO console_sessions VALUES(?,?,?,?,?,?,?)',
+                               ('older', 'test-owner', 'csrf', 'gen', 1.0, 1.0, 9e9))
+
+    # and what this release does instead, which survives any further column being added
+    assert console_auth.login('test-owner', 'test-only-password-for-console')[1] == 'ok'
+    assert len(console_auth.sessions()) == 2
+
+
+def test_every_write_to_a_migrated_table_names_its_columns():
+    """A positional INSERT is what breaks the moment a column is added. Ban it at the source."""
+    import re
+
+    from tests.conftest import ROOT
+
+    migrated = {table for table, _column, _kind in
+                __import__('conservative_trading.state_db', fromlist=['StateDB']).StateDB.ADDED_COLUMNS}
+    offenders = []
+    for path in sorted((ROOT / 'conservative_trading').rglob('*.py')):
+        for table in migrated:
+            if re.search(rf'INSERT\s+INTO\s+{table}\s+VALUES', path.read_text()):
+                offenders.append(f'{path.name}: positional INSERT into {table}')
+    assert not offenders, offenders

@@ -80,8 +80,9 @@ activate() {                              # point launchd at a release and prove
   "$(venv_for "$release")/python" -m conservative_trading.launchd \
     --data-dir "$data_dir" --release-dir "$release" --launch-agents "$launch_agents"
 
+  local after
   for label in "${labels[@]}"; do
-    local after
+    # declared once above: in zsh, `local` on an already-set name prints its current value
     after="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
     if [[ "$after" == "${before[$label]}" ]]; then
       continue                              # unchanged: the loaded job already matches

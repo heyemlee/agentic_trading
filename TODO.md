@@ -47,7 +47,12 @@
 1–7 项的代码已经落地并通过测试。下面是无法在这里代劳的部分，逐项的记录表在
 [docs/ACCEPTANCE_P1.md](docs/ACCEPTANCE_P1.md)。
 
-- [ ] **0. 发布修复，并重跑一次定时研究**（2026-09-05 遗留，两轮更新）
+- [ ] **0. 发布修复，并重跑一次定时研究**（2026-09-05 遗留，三轮更新）
+
+  **⚠️ 在发布成功之前，不要用工作区的 `uv run` 跑任何会写状态库的命令**
+  （`ct-state migrate` / `ct-evaluate` / `ct-notify dispatch` / `ct-ops maintain`）。
+  只读命令（`ct-state status` / `ct-state sessions` / `ct-trigger scheduled --dry-run`）已经安全：
+  读取路径不再改 schema。原因见下面 2026-09-05 05:0x 那一段。
   当前运行的 release 是 `24426db`。其后累计的修复：`1d8edd6`（脚本手动运行时从已安装的
   launchd 任务读取部署布局）、`0298614`（定时研究锚定到**有数据**的交易日）、
   `719d8ac`（只读路径缺表/缺列时不再崩溃，见下）、以及本轮的
@@ -74,9 +79,26 @@
   deploy/macos/release.sh publish
   uv run ct-trigger scheduled --force      # 本周期已被占用，需要 --force
   ```
+  **2026-09-05 05:0x（UTC）第三次尝试 + 一次我造成的登录中断。**
+  我用工作区的新代码跑了只读命令 `ct-state status`，当时的实现会在**读取路径**上自动补 schema，
+  于是给 `console_sessions` 加了 `session_id` / `label` 两列。但运行中的旧版 release 写会话用的是
+  **位置参数**（7 个值），表变成 9 列后每次登录都失败：
+  `table console_sessions has 9 columns but 7 values were supplied`。
+  已有会话靠 cookie 还能用，所以表面看不出来——但谁都登不进去。
+  **已修复（`8bab08a`）**：读取路径永不改 schema；schema 变更只由写连接或 `ct-state migrate` 施加；
+  各个 reader 改为容忍缺表缺列（设备列表用 `SELECT *`，旧库里的会话照常列出，只标记为暂不可单独撤销）。
+  新增两个测试：一个直接用上一版的位置 INSERT 打到迁移后的表上断言失败、再断言本版命名列写入成功；
+  另一个扫描源码，禁止对任何"后加过列"的表使用位置 INSERT。
+  **现场已恢复**：先用旧 release 的 `ct-state` 备份，再把那两列删掉，让运行中的旧版重新能写会话
+  （会话记录 1 条，完好保留）。登录现在应该正常了。
+
+  第三次 publish 仍然失败并自动回滚——**但这次确认了新代码本身没问题**：
+  把新 release 的 `ct-api` 手动跑在 8788 端口，`GET /ui/login.html` 返回 200。
+  失败纯粹是 launchd/BTM 侧仍在限流，不肯启动这个 job。
+
   **完成标准：** publish 成功且不再触发限流；worker 日志里 `regime=` 不是 UNKNOWN；
   三个任务都到达终态；`ct-trigger scheduled --dry-run` 的 `last_run.analysed_sessions`
-  是有数据的那个交易日。
+  是有数据的那个交易日。发布成功后 `session_id` / `label` 两列会由新代码自己加回来。
 
 - [ ] **1. 手机 30 天登录与实际操作验收** — 新版部署后重新登录、关页面重开、切换 Wi-Fi/蜂窝、无任务窗口重启 API 后仍是同一会话；在模拟券商上跑完"启动研究 → 看报告 → 拒绝 → 批准 → 查结果 → 重复点击"。用 `ct-state sessions` 确认服务端确实建了持久会话。
   **进度（2026-09-05）：** 数据库中已有一条 `owner` 持久会话（创建于 23:20:54 UTC，剩余 29.95 天），并且扛过了 install 与 publish 两次 API 重启 —— 这一条已经支撑验收 1.5。但它创建于本轮改造之前，**无法确认是手机建的**；仍需在手机上登录一次，看到第二条会话出现。另注意 `last_seen_at` 目前恒等于 `created_at`（P2 第 9 项的已知缺口），该字段暂时没有参考价值。
