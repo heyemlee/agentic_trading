@@ -527,7 +527,10 @@ operations:
 # A message never carries a credential, an account number or a quote; it says what happened and
 # which screen to open.
 notifications:
-  channel: none                            # none | file | webhook | wecom | wechat
+  # webpush is the one channel with nobody in between: the payload is encrypted to a key the
+  # phone generated, and Apple's push service carries a sealed envelope. Nothing is sent until
+  # a device subscribes by tapping "allow" in the console opened from its home-screen icon.
+  channel: webpush                         # none | file | webhook | wecom | wechat | webpush
   file_path: runs/notifications.jsonl      # channel: file — a local trail, useful to verify shape
   webhook_url_env: CT_NOTIFY_WEBHOOK       # channel: webhook — https endpoint, read from the env
   webhook_token_env: CT_NOTIFY_TOKEN       # optional bearer token for that endpoint

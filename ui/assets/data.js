@@ -12,7 +12,7 @@ window.CT = (function () {
   if (!window.CT_DEMO) return {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
-    schedule: null, operations: null, notifications: null, authSessions: null,
+    schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
     orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
@@ -396,6 +396,7 @@ window.CT = (function () {
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications, authSessions, activity,
+    schedule, operations, notifications,
+    pushDevices: { devices: [] }, authSessions, activity,
   };
 })();

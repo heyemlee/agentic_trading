@@ -105,8 +105,12 @@ async def security_boundary(request: Request, call_next):
                 or request.headers.get("content-type", "").split(";")[0] != "application/json"):
         response = JSONResponse({"detail": "same-origin JSON request required"}, status_code=403)
     session = _auth.session(request.cookies.get(COOKIE)) if response is None else None
-    public = (path in ("/auth/login", "/auth/session", "/ui/login.html")
-              or path.startswith("/ui/assets/")
+    # The app shell is static and says nothing the login page does not already say. It has to
+    # be reachable unauthenticated or "Add to Home Screen" from the login screen gets no icon,
+    # and iOS only delivers push to an app added from that icon.
+    public = (path in ("/auth/login", "/auth/session", "/ui/login.html",
+                       "/ui/manifest.webmanifest", "/ui/sw.js")
+              or path.startswith(("/ui/assets/", "/ui/icons/"))
               or (path.startswith("/ui/") and request.query_params.get("demo") == "1" and not unsafe))
     if response is None and not public and session is None:
         if path.startswith("/ui"):
@@ -230,6 +234,43 @@ def claude_status() -> dict[str, Any]:
 @app.get("/system/market", tags=["system"], summary="Market session from the exchange calendar")
 def market_status() -> dict[str, Any]:
     return _ok(_service.market_status)
+
+
+class PushSubscription(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription: dict[str, Any]
+    label: str = Field("", max_length=100)
+    renewed: bool = False
+
+
+@app.get("/notifications/key", tags=["system"],
+         summary="The public VAPID key a browser needs to subscribe")
+def push_key() -> dict[str, Any]:
+    return _ok(_service.push_key)
+
+
+@app.post("/notifications/subscribe", tags=["system"],
+          summary="Record this device's push subscription")
+def push_subscribe(body: PushSubscription) -> dict[str, Any]:
+    return _ok(_service.push_subscribe, body.subscription, body.label)
+
+
+@app.get("/notifications/devices", tags=["system"],
+         summary="Devices subscribed to push, without exposing any endpoint")
+def push_devices() -> dict[str, Any]:
+    return _ok(_service.push_devices)
+
+
+@app.post("/notifications/devices/{device_id}/unsubscribe", tags=["system"],
+          summary="Stop pushing to one device")
+def push_unsubscribe(device_id: str) -> dict[str, Any]:
+    return _ok(_service.push_unsubscribe, device_id)
+
+
+@app.post("/notifications/test", tags=["system"],
+          summary="Send one notification now, to prove the path works")
+def push_test() -> dict[str, Any]:
+    return _ok(_service.push_test)
 
 
 @app.get("/system/notifications", tags=["system"],

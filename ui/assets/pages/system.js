@@ -104,6 +104,7 @@
       : C.t('sy.disk', { f: disk.free_gb.toFixed(1), p: disk.free_pct.toFixed(0),
                          r: (ops.retention || {}).runs_days });
     renderNotifications();
+    renderPush();
   }
 
   /* Whether anything would actually reach a phone. Silence has two causes —
@@ -204,6 +205,77 @@
       button.disabled = false;
     }
   });
+
+  /* ── notifications on this device ────────────────────────────────
+     iOS delivers web push only to a page opened from its home-screen icon,
+     and only after an explicit tap grants permission. Both fail quietly, so
+     every state here says what it is and what to do about it. */
+  async function renderPush() {
+    const $ = (id) => document.getElementById(id);
+    const chip = $('push-state'), detail = $('push-detail');
+    const enable = $('push-enable'), test = $('push-test'), off = $('push-disable');
+    if (!chip || !window.CT_PUSH) return;
+
+    const blocked = CT_PUSH.why();
+    const subscription = blocked ? null : await CT_PUSH.current().catch(() => null);
+    const devices = (D.pushDevices || {}).devices || [];
+
+    chip.textContent = C.t(blocked ? 'sy.pushBlocked' : subscription ? 'sy.pushOn' : 'sy.pushOff');
+    chip.className = 'chip' + (subscription ? ' chip-accent' : blocked ? ' chip-warn' : '');
+    detail.textContent = blocked ? blocked
+      : subscription ? C.t('sy.pushReady') : C.t('sy.pushIdle');
+
+    enable.hidden = Boolean(blocked) || Boolean(subscription);
+    test.hidden = !subscription;
+    off.hidden = !subscription;
+    enable.textContent = C.t('sy.pushEnable');
+    test.textContent = C.t('sy.pushTest');
+    off.textContent = C.t('sy.pushDisable');
+
+    $('push-devices').innerHTML = devices.map((device) => C.listRow({
+      id: 'push-device-' + device.device_id,
+      title: device.label,
+      sub: C.t('sy.pushDevice', { d: C.dateOnly(device.created_at) }),
+      value: device.last_sent_at ? C.dateTime(device.last_sent_at) : '—',
+    })).join('');
+  }
+
+  function wirePush() {
+    const $ = (id) => document.getElementById(id);
+    if (!$('push-enable') || !window.CT_PUSH) return;
+    const detail = $('push-detail');
+
+    $('push-enable').addEventListener('click', async () => {
+      const button = $('push-enable');
+      button.disabled = true;
+      button.textContent = C.t('sy.pushWorking');
+      try {
+        await CT_PUSH.enable();
+        CT_API.readOnce('pushDevices');
+      } catch (err) {
+        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+      } finally {
+        button.disabled = false;
+        renderPush();
+      }
+    });
+
+    $('push-test').addEventListener('click', async () => {
+      try {
+        await CT_API.post('/notifications/test', {});
+        detail.textContent = C.t('sy.pushSent');
+      } catch (err) {
+        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+      }
+    });
+
+    $('push-disable').addEventListener('click', async () => {
+      await CT_PUSH.disable().catch(() => {});
+      CT_API.readOnce('pushDevices');
+      renderPush();
+    });
+  }
+  wirePush();
 
   /* ── kill switch: POST /system/pause | /system/resume ────────────── */
   const pill = document.getElementById('switch-pill');

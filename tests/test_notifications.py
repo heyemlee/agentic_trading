@@ -43,19 +43,27 @@ def delivered(service):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def test_nothing_is_sent_until_a_channel_is_configured(service):
-    """The default must be silence: configuring a channel is how sending is authorised."""
-    settings = notify.Settings.load(service.profiles())
-    assert settings.channel == "none" and settings.configured() is False
-    assert "authorise" in settings.why_not_configured()
+def test_nothing_is_sent_until_a_device_has_actually_subscribed(service):
+    """The shipped channel is webpush, and it reaches nobody until a device opts in.
+
+    Turning the channel on is not what authorises sending: a person tapping "allow" on the
+    device is. Until then there is no subscription to send to and the pass is a no-op.
+    """
+    settings = service.notification_settings()
+    assert settings.channel == "webpush" and settings.configured() is False
+    assert "home-screen icon" in settings.why_not_configured()
 
     event = notify.Event(key="k", kind="proposal_waiting", title="t")
     with pytest.raises(notify.DeliveryError):
         notify.send(settings, event)
 
-    result = notify.dispatch(service.state_db(), settings, [event])
+    result = notify.dispatch(settings._db, settings, [event])
     assert result["sent"] == [] and result["configured"] is False
     assert delivered(service) == []
+
+    # and with the channel explicitly off, the same holds for a different reason
+    off = file_settings(service, channel="none")
+    assert off.configured() is False and "authorise" in off.why_not_configured()
 
 
 def test_an_unconfigured_webhook_never_falls_back_to_sending_somewhere_else(service, monkeypatch):

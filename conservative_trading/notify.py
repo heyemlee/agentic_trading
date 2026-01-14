@@ -72,6 +72,9 @@ class Settings:
     wecom_url_env: str = "CT_WECOM_WEBHOOK"
     wechat_url_env: str = "CT_WECHAT_WEBHOOK"
     console_url: str = ""
+    state_dir: Path = field(default_factory=Path)
+    #: Set by the service so a webpush channel can see whether a device is subscribed.
+    _db: Any = None
     events: tuple[str, ...] = tuple(EVENTS)
     min_interval_seconds: int = 900
     max_attempts: int = 5
@@ -93,6 +96,7 @@ class Settings:
             wecom_url_env=str(cfg.get("wecom_url_env", "CT_WECOM_WEBHOOK")),
             wechat_url_env=str(cfg.get("wechat_url_env", "CT_WECHAT_WEBHOOK")),
             console_url=str(cfg.get("console_url", "")).rstrip("/"),
+            state_dir=Path(profiles.project_dir) / "state",
             events=tuple(name for name in events if name in EVENTS),
             min_interval_seconds=int(cfg.get("min_interval_seconds", 900)),
             max_attempts=int(cfg.get("max_attempts", 5)),
@@ -111,6 +115,11 @@ class Settings:
             return bool(os.environ.get(self.wecom_url_env, "").strip())
         if self.channel == "wechat":
             return bool(os.environ.get(self.wechat_url_env, "").strip())
+        if self.channel == "webpush":
+            # Configured means a device has actually subscribed. Keys alone reach nobody.
+            from . import webpush
+
+            return bool(webpush.devices(self._db) if self._db is not None else False)
         return False
 
     def why_not_configured(self) -> str:
@@ -126,6 +135,9 @@ class Settings:
         if self.channel == "wechat":
             return (f"channel is wechat but {self.wechat_url_env} is not set in the service "
                     "environment, so nothing is sent.")
+        if self.channel == "webpush":
+            return ("channel is webpush but no device has subscribed. Open the console from its "
+                    "home-screen icon and allow notifications; a Safari tab cannot receive them.")
         return f"unknown notification channel {self.channel!r}"
 
 
@@ -227,6 +239,11 @@ def send(settings: Settings, event: Event) -> None:
             raise DeliveryError(
                 f"WeCom refused the message (errcode {reply.get('errcode')}: "
                 f"{reply.get('errmsg', 'no reason given')})")
+        return
+    if settings.channel == "webpush":
+        from . import webpush
+
+        webpush.deliver(settings._db, settings.state_dir, event.payload())
         return
     if settings.channel == "wechat":
         reply = _post(os.environ[settings.wechat_url_env].strip(),

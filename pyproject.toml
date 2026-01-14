@@ -21,6 +21,7 @@ dependencies = [
     # frontend is generated against.
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
+    "pywebpush>=2.5.0",
 ]
 
 [project.scripts]

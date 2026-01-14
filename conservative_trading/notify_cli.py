@@ -12,7 +12,7 @@ import json
 import sys
 
 from .api.service import Service, ServiceError
-from .notify import DeliveryError, Event, Settings, heartbeat, send
+from .notify import DeliveryError, Event, heartbeat, send
 from .profile import load_profiles
 
 
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - a configuration error is the answer here
         print(json.dumps({"error": str(exc)}, indent=2))
         return 2
-    settings = Settings.load(profiles)
+    settings = service.notification_settings(profiles)
 
     if args.action == "status":
         print(json.dumps(service.notification_status(), indent=2))

@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>System · Conservative Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
 <link rel="stylesheet" href="assets/console.css" />
 </head>
 <body>
@@ -123,6 +129,25 @@
     </div>
   </section>
 
+  <!-- ── notifications on this device ──────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="push">
+    <div class="container">
+      <div class="card">
+        <div class="section-head">
+          <p class="eyebrow" data-i18n="sy.push">Notifications on this device</p>
+          <span class="chip" id="push-state">—</span>
+        </div>
+        <p class="body-sm body-muted" style="margin-top:6px;" id="push-detail">—</p>
+        <div class="btn-row" style="margin-top:16px;">
+          <button class="btn btn-dark" id="push-enable" hidden>—</button>
+          <button class="btn btn-secondary" id="push-test" hidden>—</button>
+          <button class="btn btn-secondary" id="push-disable" hidden>—</button>
+        </div>
+        <div class="list list-inset" style="margin-top:16px;" id="push-devices"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── notices ───────────────────────────────────────────────────── -->
   <section class="section" data-od-id="warnings">
     <div class="container">
@@ -154,6 +179,7 @@
 <script src="assets/data.js"></script>
 <script src="assets/api.js"></script>
 <script src="assets/console.js"></script>
+<script src="assets/push.js"></script>
 <script src="assets/pages/system.js"></script>
 </body>
 </html>

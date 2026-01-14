@@ -812,13 +812,27 @@ class Service:
                     link="/ui/system.html", urgent=activity["id"] == "backup"))
         return events
 
+    def notification_settings(self, profiles: Profiles | None = None):
+        """Notification settings with the state database bound.
+
+        The webpush channel answers "is this configured" by looking for a subscribed device, so
+        every caller has to hand it the same database or they disagree about whether anything
+        would be sent.
+        """
+        from ..notify import Settings
+
+        profiles = profiles or self.profiles()
+        settings = Settings.load(profiles)
+        settings._db = self.state_db(profiles)
+        return settings
+
     def dispatch_notifications(self) -> dict[str, Any]:
         """Collect and deliver. A no-op that records nothing sent while no channel is set."""
-        from ..notify import Settings, dispatch
+        from ..notify import dispatch
 
         profiles = self.profiles()
-        settings = Settings.load(profiles)
-        return dispatch(self.state_db(profiles), settings, self.collect_notifications())
+        settings = self.notification_settings(profiles)
+        return dispatch(settings._db, settings, self.collect_notifications())
 
     def send_heartbeat(self) -> dict[str, Any]:
         """Ping an external watcher, if one is configured. Never raises into the caller."""
@@ -830,11 +844,54 @@ class Service:
         except (DeliveryError, ServiceError) as exc:
             return {"sent": False, "reason": str(exc), "every_minutes": 15}
 
-    def notification_status(self) -> dict[str, Any]:
-        from ..notify import EVENTS, Settings, pending
+    # ---------------------------------------------------------------- push devices
+    def push_key(self) -> dict[str, Any]:
+        """The public half of this deployment's VAPID identity, for the browser to subscribe."""
+        from .. import webpush
 
         profiles = self.profiles()
-        settings = Settings.load(profiles)
+        return {"public_key": webpush.public_key(profiles.project_dir / "state")}
+
+    def push_subscribe(self, subscription: dict[str, Any], label: str = "") -> dict[str, Any]:
+        from .. import webpush
+
+        profiles = self.profiles()
+        try:
+            return webpush.subscribe(self.state_db(profiles), subscription, label=label)
+        except webpush.PushError as exc:
+            raise ServiceError(str(exc)) from exc
+
+    def push_unsubscribe(self, device_id: str) -> dict[str, Any]:
+        from .. import webpush
+
+        removed = webpush.unsubscribe(self.state_db(self.profiles()), device_id)
+        if not removed:
+            raise ServiceError(f"no subscribed device {device_id!r}")
+        return {"unsubscribed": True, "device_id": device_id}
+
+    def push_devices(self) -> dict[str, Any]:
+        from .. import webpush
+
+        return {"devices": webpush.devices(self.state_db(self.profiles()))}
+
+    def push_test(self) -> dict[str, Any]:
+        """Send one notification on request, so a person can prove the path before relying on it."""
+        from .. import webpush
+
+        profiles = self.profiles()
+        try:
+            return webpush.deliver(self.state_db(profiles), profiles.project_dir / "state", {
+                "title": "Conservative Trading",
+                "detail": "Notifications reach this device.",
+                "link": "index.html", "key": "test", "urgent": False})
+        except webpush.PushError as exc:
+            raise ServiceError(str(exc)) from exc
+
+    def notification_status(self) -> dict[str, Any]:
+        from ..notify import EVENTS, pending
+
+        profiles = self.profiles()
+        settings = self.notification_settings(profiles)
         return {
             "channel": settings.channel,
             "configured": settings.configured(),
