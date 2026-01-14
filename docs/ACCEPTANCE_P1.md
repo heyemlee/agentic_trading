@@ -40,7 +40,7 @@ see a *new* session created by the phone against the deployed release, and to se
 
 | # | Step | Record |
 |---|---|---|
-| 1.1 | Sign in on the phone at `https://<device>.<tailnet>.ts.net/ui/`. Note device, OS version, browser. | ✅ 2026-09-05 06:03:35Z — `POST /auth/login` 200 from 100.124.169.97 (phone, over Tailscale) |
+| 1.1 | Sign in on the phone at `https://<device>.<tailnet>.ts.net/ui/`. Note device, OS version, browser. | ✅ 2026-09-05 06:03:35Z — `POST /auth/login` 200 from the phone, over Tailscale |
 | 1.2 | `uv run ct-state sessions` on the Mac. A new row, ~30 days left. | ✅ one row, `days_left: 30.0`, expires 2026-10-05 |
 | 1.3 | Close the tab, reopen it after 10+ minutes. Still signed in? | ✅ |
 | 1.4 | Switch Wi-Fi → cellular → Wi-Fi. Still signed in? Does the console reconnect on its own? | ✅ |
