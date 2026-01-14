@@ -107,7 +107,24 @@ This one takes calendar time. Start it and come back.
 **Passes when** 4.4 shows a complete run started by launchd rather than by your terminal, and
 every skip states a reason you can act on.
 
-## 5. Notifications — your decision first
+## 5. Notifications — deferred by decision (2026-09-05)
+
+**Not enabled, deliberately.** Research runs weekly; four runs so far have all been NO_TRADE,
+real money is off, and a proposal stays valid for two days — so looking at the console over the
+weekend covers it, and the cost of missing one is a wasted quota slot rather than money. The
+WeChat route would also hand a third-party relay the knowledge of what is being researched,
+which is not worth it at this level of benefit.
+
+Revisit when any of these becomes true: real money is switched on, proposals start arriving
+often enough that one gets missed, or you need to know the Mac itself has gone offline (which
+only the external heartbeat can tell you — a dead machine sends nothing).
+
+When revisited, prefer PWA + Web Push over any WeChat relay: the notification goes from this Mac
+to Apple, encrypted end to end, with nobody in between able to read it.
+
+The steps below are kept for that day.
+
+### The original checklist
 
 Nothing is sent until you choose a channel. **Pick one before doing anything here**, and do not
 put its credentials in the repository.
