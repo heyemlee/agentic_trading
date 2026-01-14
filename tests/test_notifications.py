@@ -157,3 +157,105 @@ def test_a_quiet_pass_writes_nothing_to_disk(service):
     assert notify.dispatch(db, settings, [event])["recorded"] is False
     assert db.read_meta(notify.RECORD, {}) == before
     assert notify.dispatch(db, settings, [])["recorded"] is False
+
+
+def wecom_settings(service, monkeypatch, **overrides):
+    monkeypatch.setenv('CT_WECOM_WEBHOOK', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=k')
+    return file_settings(service, channel='wecom', **overrides)
+
+
+def test_a_wecom_message_says_what_happened_and_links_to_the_right_screen(service, monkeypatch):
+    settings = wecom_settings(service, monkeypatch,
+                              console_url='https://mac.tail1234.ts.net')
+    body = notify.wecom_message(settings, notify.Event(
+        key='k', kind='proposal_waiting', title='BUY VTI needs your approval',
+        detail='$35.00 in micro_live (real money)', link='/ui/approvals.html'))
+
+    assert body['msgtype'] == 'markdown'
+    content = body['markdown']['content']
+    assert 'BUY VTI needs your approval' in content
+    assert '$35.00' in content
+    assert 'https://mac.tail1234.ts.net/ui/approvals.html' in content
+
+
+def test_a_link_is_omitted_rather_than_sent_as_an_unusable_relative_path(service, monkeypatch):
+    settings = wecom_settings(service, monkeypatch)          # no console_url configured
+    content = notify.wecom_message(settings, notify.Event(
+        key='k', kind='proposal_waiting', title='t', link='/ui/approvals.html'))['markdown']['content']
+    assert '/ui/approvals.html' not in content and 't' in content
+
+
+def test_wecom_refusing_a_message_is_a_failure_even_though_it_answers_200(service, monkeypatch):
+    """WeCom reports a bad key or a revoked bot inside a 200 response.
+
+    Reading only the status code would record a message nobody received as delivered, which is
+    the worst possible failure for a notification channel: silent and confident.
+    """
+    settings = wecom_settings(service, monkeypatch)
+    monkeypatch.setattr(notify, '_post',
+                        lambda *a, **k: {'errcode': 93000, 'errmsg': 'invalid webhook url'})
+    with pytest.raises(notify.DeliveryError, match='93000'):
+        notify.send(settings, notify.Event(key='k', kind='research_failed', title='t'))
+
+    monkeypatch.setattr(notify, '_post', lambda *a, **k: {'errcode': 0, 'errmsg': 'ok'})
+    notify.send(settings, notify.Event(key='k', kind='research_failed', title='t'))
+
+
+def test_an_unconfigured_wecom_channel_sends_nothing(service, monkeypatch):
+    monkeypatch.delenv('CT_WECOM_WEBHOOK', raising=False)
+    settings = file_settings(service, channel='wecom')
+    assert settings.configured() is False
+    with pytest.raises(notify.DeliveryError, match='CT_WECOM_WEBHOOK'):
+        notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))
+
+
+def wechat_settings(service, monkeypatch, **overrides):
+    monkeypatch.setenv('CT_WECHAT_WEBHOOK', 'https://sctapi.ftqq.com/SCTxxxx.send')
+    return file_settings(service, channel='wechat', **overrides)
+
+
+def test_a_wechat_message_fits_the_relay_and_keeps_the_full_title_in_the_body(service, monkeypatch):
+    settings = wechat_settings(service, monkeypatch, console_url='https://mac.tail1234.ts.net')
+    long_title = 'BUY VTI 需要你审批，金额 35 美元，实盘账户，请尽快处理这条提案'
+    body = notify.wechat_message(settings, notify.Event(
+        key='k', kind='proposal_waiting', title=long_title,
+        detail='$35.00 in micro_live', link='/ui/approvals.html'))
+
+    assert len(body['title']) <= notify.WECHAT_TITLE_CHARS
+    assert long_title in body['desp']          # nothing is lost, only moved
+    assert '$35.00 in micro_live' in body['desp']
+    assert 'https://mac.tail1234.ts.net/ui/approvals.html' in body['desp']
+
+
+def test_the_wechat_relay_refusing_a_message_is_a_failure_despite_the_200(service, monkeypatch):
+    """A spent free quota comes back as HTTP 200 with a non-zero code."""
+    settings = wechat_settings(service, monkeypatch)
+    monkeypatch.setattr(notify, '_post',
+                        lambda *a, **k: {'code': 40001, 'message': 'quota exceeded'})
+    with pytest.raises(notify.DeliveryError, match='40001'):
+        notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))
+
+    monkeypatch.setattr(notify, '_post', lambda *a, **k: {'code': 0, 'message': ''})
+    notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))
+
+
+def test_a_wechat_message_carries_nothing_the_relay_should_not_read(service, monkeypatch):
+    """The relay is a third party that reads everything passing through it."""
+    profiles = service.profiles()
+    profiles.risk['broker']['state_file'] = 'state/proposals.json'
+    ProposalStore(profiles.project_dir / 'state' / 'proposals.json').save(_proposal(status=PROPOSED))
+    settings = wechat_settings(service, monkeypatch, console_url='https://mac.tail1234.ts.net')
+
+    blob = json.dumps([notify.wechat_message(settings, event)
+                       for event in service.collect_notifications()]).lower()
+    for secret in ('access_token', 'refresh_token', 'bearer', 'password', 'csrf',
+                   'account_number', 'client_secret', 'api_key', 'sctxxxx'):
+        assert secret not in blob
+
+
+def test_an_unconfigured_wechat_channel_sends_nothing(service, monkeypatch):
+    monkeypatch.delenv('CT_WECHAT_WEBHOOK', raising=False)
+    settings = file_settings(service, channel='wechat')
+    assert settings.configured() is False
+    with pytest.raises(notify.DeliveryError, match='CT_WECHAT_WEBHOOK'):
+        notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))

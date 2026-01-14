@@ -69,6 +69,9 @@ class Settings:
     file_path: str = "runs/notifications.jsonl"
     webhook_url_env: str = "CT_NOTIFY_WEBHOOK"
     webhook_token_env: str = "CT_NOTIFY_TOKEN"
+    wecom_url_env: str = "CT_WECOM_WEBHOOK"
+    wechat_url_env: str = "CT_WECHAT_WEBHOOK"
+    console_url: str = ""
     events: tuple[str, ...] = tuple(EVENTS)
     min_interval_seconds: int = 900
     max_attempts: int = 5
@@ -87,6 +90,9 @@ class Settings:
             file_path=str(cfg.get("file_path", "runs/notifications.jsonl")),
             webhook_url_env=str(cfg.get("webhook_url_env", "CT_NOTIFY_WEBHOOK")),
             webhook_token_env=str(cfg.get("webhook_token_env", "CT_NOTIFY_TOKEN")),
+            wecom_url_env=str(cfg.get("wecom_url_env", "CT_WECOM_WEBHOOK")),
+            wechat_url_env=str(cfg.get("wechat_url_env", "CT_WECHAT_WEBHOOK")),
+            console_url=str(cfg.get("console_url", "")).rstrip("/"),
             events=tuple(name for name in events if name in EVENTS),
             min_interval_seconds=int(cfg.get("min_interval_seconds", 900)),
             max_attempts=int(cfg.get("max_attempts", 5)),
@@ -101,6 +107,10 @@ class Settings:
             return True
         if self.channel == "webhook":
             return bool(os.environ.get(self.webhook_url_env, "").strip())
+        if self.channel == "wecom":
+            return bool(os.environ.get(self.wecom_url_env, "").strip())
+        if self.channel == "wechat":
+            return bool(os.environ.get(self.wechat_url_env, "").strip())
         return False
 
     def why_not_configured(self) -> str:
@@ -109,6 +119,12 @@ class Settings:
                     "supply its credentials to authorise sending.")
         if self.channel == "webhook":
             return (f"channel is webhook but {self.webhook_url_env} is not set in the service "
+                    "environment, so nothing is sent.")
+        if self.channel == "wecom":
+            return (f"channel is wecom but {self.wecom_url_env} is not set in the service "
+                    "environment, so nothing is sent.")
+        if self.channel == "wechat":
+            return (f"channel is wechat but {self.wechat_url_env} is not set in the service "
                     "environment, so nothing is sent.")
         return f"unknown notification channel {self.channel!r}"
 
@@ -123,7 +139,12 @@ def _https(url: str) -> str:
     return url
 
 
-def _post(url: str, body: dict[str, Any], token: str | None) -> None:
+def _post(url: str, body: dict[str, Any], token: str | None) -> dict[str, Any]:
+    """POST JSON and return the parsed reply.
+
+    The reply matters: WeCom answers a rejected message with HTTP 200 and an error code in the
+    body, so a delivery that never reaches anyone would otherwise be recorded as sent.
+    """
     request = urllib.request.Request(      # https-only: _https rejects anything else
         _https(url), data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "conservative-trading/1"})
@@ -134,11 +155,56 @@ def _post(url: str, body: dict[str, Any], token: str | None) -> None:
                                     context=ssl.create_default_context()) as response:
             if response.status >= 400:
                 raise DeliveryError(f"endpoint returned {response.status}")
+            raw = response.read(8192)
     except urllib.error.HTTPError as exc:
         raise DeliveryError(f"endpoint returned {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         # Deliberately not including the URL: it may embed a routing secret.
         raise DeliveryError(f"endpoint unreachable ({type(exc).__name__})") from exc
+    try:
+        parsed = json.loads(raw or b"{}")
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def wecom_message(settings: Settings, event: Event) -> dict[str, Any]:
+    """One event as a WeCom group-bot message.
+
+    Written for a person glancing at a phone: what happened, one line of detail, and a link
+    that opens the right screen. The link is only included when a console URL is configured,
+    because a relative path is not tappable and a wrong absolute one is worse than none.
+    """
+    lines = [f"**{event.title}**"]
+    if event.detail:
+        lines.append(event.detail)
+    if settings.console_url and event.link:
+        lines.append(f"[打开控制台]({settings.console_url}{event.link})")
+    return {"msgtype": "markdown", "markdown": {"content": "\n".join(lines)}}
+
+
+#: Server酱 truncates a longer title itself, but silently. Doing it here keeps what a person
+#: sees on the lock screen under our control rather than the relay's.
+WECHAT_TITLE_CHARS = 32
+
+
+def wechat_message(settings: Settings, event: Event) -> dict[str, Any]:
+    """One event as a Server酱 message, which forwards into personal WeChat.
+
+    Personal WeChat has no interface a program may send to; every route into it goes through
+    somebody's verified service account. That relay therefore reads whatever is sent, which is
+    why these messages carry what happened and where to look, and never a credential, an
+    account number or a quote.
+    """
+    title = event.title[:WECHAT_TITLE_CHARS]
+    lines = []
+    if len(event.title) > WECHAT_TITLE_CHARS:
+        lines.append(event.title)          # the full title survives in the body
+    if event.detail:
+        lines.append(event.detail)
+    if settings.console_url and event.link:
+        lines.append(f"[打开控制台]({settings.console_url}{event.link})")
+    return {"title": title, "desp": "\n\n".join(lines)}
 
 
 def send(settings: Settings, event: Event) -> None:
@@ -151,6 +217,25 @@ def send(settings: Settings, event: Event) -> None:
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event.payload()) + "\n")
         path.chmod(0o600)
+        return
+    if settings.channel == "wecom":
+        reply = _post(os.environ[settings.wecom_url_env].strip(),
+                      wecom_message(settings, event), None)
+        # WeCom rejects a bad key, a revoked bot or a rate-limited burst with HTTP 200 and an
+        # error code in the body. Treating that as delivered would record a message nobody got.
+        if int(reply.get("errcode", 0) or 0) != 0:
+            raise DeliveryError(
+                f"WeCom refused the message (errcode {reply.get('errcode')}: "
+                f"{reply.get('errmsg', 'no reason given')})")
+        return
+    if settings.channel == "wechat":
+        reply = _post(os.environ[settings.wechat_url_env].strip(),
+                      wechat_message(settings, event), None)
+        # Server酱 answers a spent quota or a revoked key with HTTP 200 and a non-zero code.
+        if int(reply.get("code", 0) or 0) != 0:
+            raise DeliveryError(
+                f"the WeChat relay refused the message (code {reply.get('code')}: "
+                f"{reply.get('message') or 'no reason given'})")
         return
     _post(os.environ[settings.webhook_url_env].strip(), event.payload(),
           os.environ.get(settings.webhook_token_env, "").strip() or None)

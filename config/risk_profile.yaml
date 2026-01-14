@@ -527,10 +527,19 @@ operations:
 # A message never carries a credential, an account number or a quote; it says what happened and
 # which screen to open.
 notifications:
-  channel: none                            # none | file | webhook
+  channel: none                            # none | file | webhook | wecom | wechat
   file_path: runs/notifications.jsonl      # channel: file — a local trail, useful to verify shape
   webhook_url_env: CT_NOTIFY_WEBHOOK       # channel: webhook — https endpoint, read from the env
   webhook_token_env: CT_NOTIFY_TOKEN       # optional bearer token for that endpoint
+  wecom_url_env: CT_WECOM_WEBHOOK          # channel: wecom — 企业微信群机器人 webhook, from the env
+  # channel: wechat — personal WeChat has no interface a program may send to, so every route
+  # into it goes through somebody's verified service account (Server酱 here). That relay reads
+  # what passes through it, which is why a message names what happened and never an account,
+  # a credential or a quote.
+  wechat_url_env: CT_WECHAT_WEBHOOK
+  # Where the console lives, so a notification can carry a link that actually opens. Left empty
+  # the message still says what happened; it just cannot be tapped through to the right screen.
+  console_url: ""
   min_interval_seconds: 900                # a standing condition notifies at most this often
   max_attempts: 5
   retry_backoff_seconds: 60
