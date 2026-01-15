@@ -6,6 +6,7 @@ Offline. No broker session, no model call, no writes to the real state directory
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import timedelta
 
@@ -42,14 +43,31 @@ def sandbox_service(tmp_path):
     shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
     shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     (tmp_path / "runs").mkdir()
+    disarm(cfg / "risk_profile.yaml")
     return Service(cfg)
+
+
+def disarm(risk_profile):
+    """Force real-money execution off in a copied config.
+
+    The sandbox copies the deployment's own config, which is what makes these tests exercise the
+    real rules rather than a fixture nobody maintains. It also means the suite inherits whatever
+    the machine is currently set to, and on the day the micro-live switch was armed for real,
+    three tests that read "real money is off" as a fact started failing. Whether this deployment
+    is trading is an operational decision; it is not something a test may depend on either way.
+    """
+    text = risk_profile.read_text()
+    text, count = re.subn(r"(micro_live_execution:\n(?:.*\n)*?  enabled: )true",
+                          r"\1false", text, count=1)
+    risk_profile.write_text(text)
+    return count
 
 
 def test_health_reports_a_product_status(sandbox_service):
     health = sandbox_service.health()
     assert health["status"] in set(SystemStatus)
     assert isinstance(health["warnings"], list)
-    assert health["micro_live_enabled"] is False
+    assert health["micro_live_enabled"] is False        # the sandbox is always disarmed
     assert "claude" in health and health["claude"]["billing"] == "claude_subscription_no_api_charges"
 
 
@@ -135,8 +153,20 @@ def test_approving_an_unknown_proposal_is_a_clean_error(sandbox_service):
 
 def test_real_money_broker_is_refused_while_micro_live_is_disabled(sandbox_service):
     profiles = sandbox_service.profiles()
+    assert (profiles.risk["micro_live_execution"]["enabled"]) is False
     with pytest.raises(ServiceError, match="disabled"):
         sandbox_service._broker(profiles, "micro_live")
+
+
+def test_a_sandbox_never_inherits_an_armed_deployment(tmp_path):
+    """The guard for the fixture above: an armed config must not reach a test unchanged."""
+    armed = tmp_path / "risk_profile.yaml"
+    armed.write_text("robinhood:\n  enabled: true\n"
+                     "micro_live_execution:\n  enabled: true\n  max_capital_usd: 100\n")
+    assert disarm(armed) == 1
+    text = armed.read_text()
+    assert "micro_live_execution:\n  enabled: false" in text
+    assert "robinhood:\n  enabled: true" in text          # only the one switch is touched
 
 
 def test_openapi_schema_is_published_for_frontend_generation(auth_client):

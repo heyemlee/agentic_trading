@@ -707,7 +707,17 @@ robinhood:
   use_broker_pretrade_review: true
 
 micro_live_execution:
-  enabled: false                             # master switch for real-money orders
+  enabled: true                              # master switch for real-money orders
+  # Armed 2026-09-08 on the owner's explicit instruction, after the release carrying the
+  # cross-bucket evidence check went out and the preflight passed 15 of 16 gates with
+  # PF00, this switch, the only failure.
+  #
+  # Arming submits nothing by itself. The weekly schedule researches the core bucket, so a
+  # micro_live run has to be started deliberately, it has to survive Hard Risk, and the
+  # order still waits for a human approval in the console and is revalidated at execution
+  # time. The kill switch (/system/pause) stops all orders and can be reached from the
+  # phone; this file cannot — the console has no endpoint that writes configuration, by
+  # design, so turning this back off means editing it here.
   bucket_name: micro_live
   ledger_file: state/micro_live_portfolio.yaml   # reconciles against the Robinhood Agentic account, separate from the conceptual portfolio
   risk_state_file: state/micro_live_risk_state.json   # its own drawdown high-water mark

@@ -252,6 +252,10 @@ def test_only_the_micro_live_bucket_reaches_the_real_money_venue(profiles):
 
 
 def test_preflight_blocks_while_the_switch_is_off_and_lists_why(profiles):
+    # Stated here rather than read from the deployment: whether this machine is currently
+    # trading real money is an operational decision, and this test is about the gate, not
+    # about today's setting.
+    profiles.risk["micro_live_execution"]["enabled"] = False
     pf = run_preflight(profiles, broker=None)
     assert pf.ready is False
     ids = {c.check_id for c in pf.failures}
