@@ -21,7 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .broker import make_broker
-from .evidence import collect_evidence
+from .evidence import collect_evidence, foreign_bucket_mentions
 from .execution import execute as execute_proposal
 from .execution import revalidate
 from .graph import ConservativeTradingGraph, classify_instrument
@@ -113,7 +113,9 @@ def hard_risk_for(profiles: Profiles, policy: PolicyDecision, ticker: str, bucke
     if policy.final_action in ("BUY", "ADD"):
         keys = {"market": "market_report", "news": "news_report", "fundamentals": "fundamentals_report", "social": "sentiment_report"}
         required = [keys[name] for name in profiles.analysts_for(cls.instrument_type) if name in keys]
-        evidence = collect_evidence(ticker, trade_date, reports=final_state, required_reports=required)
+        evidence = collect_evidence(ticker, trade_date, reports=final_state,
+                                    required_reports=required, bucket=bucket,
+                                    known_buckets=tuple(snap.buckets))
     proposal = Proposal(
         ticker=ticker.upper(), bucket=bucket, action=policy.final_action, size_hint=policy.size_hint,
         confidence=policy.confidence, trade_date=trade_date, cls=cls,
@@ -191,6 +193,11 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
 
     proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders, regime, final_state)
     final = _final(result, proposal_obj)
+    # Checked on every run, not only the ones that propose a trade. The run this check was
+    # written for recommended NO_TRADE, so the evidence path — which is only walked for BUY and
+    # ADD — would never have looked at it. A report about the wrong account is worth knowing
+    # about whatever it concluded, because the same reports are what a human reads afterwards.
+    off_book = foreign_bucket_mentions(final_state, tuple(snap.buckets))
 
     record = build_record(
         run_id=run_id, ticker=ticker, instrument_type=instrument_type, bucket=bucket,
@@ -223,6 +230,8 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         store.save(proposal)
         record["proposal_id"] = proposal.proposal_id
         record["proposal"] = proposal.as_dict()
+    record["bucket_context"] = {"analysed": bucket, "snapshot_buckets": sorted(snap.buckets),
+                                "foreign_mentions": off_book}
     record["llm_calls_audit_file"] = str(runs_dir / "llm_calls.jsonl")
     record["started_at"] = started_at
     record_path = write_record(run_dir / "decision_record.json", record)
@@ -231,6 +240,10 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
            f"| confidence: {policy.confidence} | reviewer: {policy.llm_action}")
     for reason in policy.reasons:
         _print(f"[{ticker}]   - {reason}")
+    if off_book:
+        _print(f"[{ticker}] BUCKET CONTEXT: the reports reason about "
+               f"{', '.join(name.upper() for name in off_book)}, which was not in the snapshot "
+               f"given to them (this analysis is {bucket.upper()}). Read them with that in mind.")
     _print(f"[{ticker}] HARD RISK: {final['summary']}")
     for r in result.failed_rules:
         _print(f"[{ticker}]   x {r.rule_id} {r.name}: {r.detail}")

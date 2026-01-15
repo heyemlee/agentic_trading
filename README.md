@@ -1,195 +1,69 @@
-English | [简体中文](README.zh-CN.md)
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-# Conservative Trading
+<h1 align="center">Agentic Trading</h1>
 
-A conservative, human-approved investment system for one investor.
+<p align="center">
+  <strong>AI agents research, debate, and propose. Humans approve.</strong><br />
+  A portfolio-aware multi-agent system with tool use, structured decisions, and auditable execution.
+</p>
 
-An AI research pipeline studies a security, a deterministic risk layer decides what is
-permitted, and you approve anything that touches money.
+<p align="center">
+  <a href="#how-it-works">Architecture</a> ·
+  <a href="#what-i-built">Engineering</a> ·
+  <a href="#run-locally">Quick start</a>
+</p>
 
-`Python 3.12` · `FastAPI` · `Local-only` · Real-money execution off by default
+## The idea
 
-[Documentation](docs/OPERATIONS.md) · [Quick Start](#getting-started) · [Frontend handoff](docs/FRONTEND_HANDOFF.md)
+Give a team of AI agents a ticker and your portfolio context. Analysts gather evidence, bull and bear researchers challenge the thesis, and managers synthesize a recommendation. The system turns that research into a structured proposal with risks, missing information, and reasons to act—or do nothing.
 
-<br />
+The core design question: **how much authority should an agent have?** Here, agents own research; deterministic code enforces risk limits, and execution requires human approval and a fresh state check. Live trading is disabled by default.
 
-![Conservative Trading — Home](docs/screenshots/index.png)
+## How it works
 
-<sub>The console, running on the bundled sample payloads. The amber strip is the product
-working: sample data can never be mistaken for live data.</sub>
+![Agentic Trading architecture: context-aware research agents use Claude and MCP data tools, then pass proposals through risk checks and human approval before execution.](docs/architecture/system.svg)
 
-<br />
+<sub>Drawn with <a href="https://github.com/tt-a1i/archify">Archify</a> · <a href="docs/architecture/system.html">Interactive HTML — download and open</a> · <a href="docs/architecture/system.architecture.json">Diagram source</a></sub>
 
----
+## What I built
 
-## Core Features
+Built on [TradingAgents](https://github.com/TauricResearch/TradingAgents), which supplies the research graph and agent roles. My work integrates that graph into a complete application:
 
-**No trade is a result**
+| Area | Implementation |
+| --- | --- |
+| **Agent orchestration** | Inject portfolio context and investment constraints into each role; select analysts by instrument type and route roles to different model/effort settings. [Code](conservative_trading/graph.py) |
+| **Runtime & tool use** | A LangChain-compatible Claude Code adapter with allowlisted MCP data tools, structured output, and captured tool-call traces. [Code](conservative_trading/llm/claude_code.py) |
+| **Decision boundaries** | Pydantic proposals, deterministic action mapping, and risk checks before review and again before execution. [Policy](conservative_trading/policy.py) · [Execution](conservative_trading/execution.py) |
+| **Reliability & evaluation** | Durable research jobs, idempotent order handling, SQLite audit state, and forward evaluation against a passive benchmark. [Jobs](conservative_trading/research_jobs.py) · [Evaluation](conservative_trading/evaluation.py) |
 
-The system is judged on capital preservation, not activity. A quiet queue means it looked and
-declined — the outcome is recorded with its full reasoning.
+Offline tests exercise the agent graph with a fake model runtime, tool isolation, policy failures, and execution recovery. [Explore tests →](tests)
 
-**Deterministic risk, twice**
+<details>
+<summary>View the research console</summary>
 
-A rules layer runs at proposal time and again at execution time. It is plain Python, not a
-model, and nothing in the interface can bypass it.
+![Research console showing recorded runs and decision details using sample data.](docs/screenshots/readme-research.png)
 
-**Approval means "if it still holds"**
+<sub>Sample-data preview. Review research reports and decisions from the web console.</sub>
 
-Approving authorises the idea, never a stored order. The backend re-reads the quote, the
-portfolio and the risk state, then refuses if the world moved too far.
+</details>
 
-**Three isolated pools**
+## Run locally
 
-Core and Sandbox are conceptual. Micro-Live is real money at Robinhood, hard-capped at $100 in
-four independent places. A bucket may only execute at its own venue.
-
-**Every decision on the record**
-
-Each run leaves the analyst reports, the bull and bear debate, the risk debate and the final
-verdict. The console reads them back as an ordered trace.
-
-<br />
-
-![Approval detail](docs/screenshots/approvals.png)
-
-<sub>A proposal, with the case, the blind spots and every risk rule it had to clear.</sub>
-
-<br />
-
-![Research trace](docs/screenshots/research.png)
-
-<sub>Decision strength against the trading floor, and every recorded run.</sub>
-
-<br />
-
----
-
-## Built On
-
-Nothing here re-implements something that already exists.
-
-**[TradingAgents](https://github.com/TauricResearch/TradingAgents)** — the multi-agent research
-framework. Pinned to a commit, never vendored, never modified.
-
-**Claude Code CLI** — the LLM runtime, on a Max subscription rather than a metered API key.
-
-**[Model Context Protocol](https://modelcontextprotocol.io)** — the official Python SDK exposes
-TradingAgents' data tools to that runtime, and nothing else.
-
-**Robinhood Agentic Trading** — used through its official MCP server as a broker transport for
-deterministic Python, never as a tool handed to a model.
-
-**exchange-calendars** — NYSE sessions, holidays and half days, so execution never relies on a
-hand-maintained calendar.
-
-**FastAPI** — chosen for the OpenAPI schema it publishes; the console is built against that
-contract rather than against prose.
-
-<br />
-
----
-
-## Tech Stack
-
-**Backend**
-Python 3.12 · FastAPI · Uvicorn · Pydantic
-
-**Research**
-TradingAgents · Claude Code CLI · Model Context Protocol
-
-**Broker**
-Robinhood Agentic Trading (official MCP) · simulated adapter
-
-**Storage**
-SQLite transactions for portfolio, risk, proposals, approvals, orders, fills and research jobs.
-Existing YAML/JSON files are retained as one-time migration sources.
-
-**Console**
-Static HTML, CSS and JavaScript. No framework, no build step.
-
-**Tooling**
-uv · pytest · ruff
-
-<br />
-
----
-
-## Architecture
-
-```mermaid
-%%{init: {'theme':'neutral'}}%%
-flowchart TD
-    U(Investor) --> C(Console · static, served at /ui)
-    C --> A(FastAPI · 127.0.0.1:8787)
-    A --> R(Research · TradingAgents on Claude)
-    R --> P(Conservative Policy + Hard Risk)
-    P --> H{Human approval}
-    H --> E[(Execution · Robinhood official MCP)]
-    E --> S[(Transactional state + audit)]
-    A --> S
-```
-
-The research layer proposes. The risk layer permits. You approve. Execution re-reads the world
-and may still refuse — a refusal is a correct result, not an error.
-
-<br />
-
----
-
-## Getting Started
-
-### Requirements
-
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/)
-- Claude Code CLI, signed in — the research runtime
-- A Robinhood account — only for the Micro-Live experiment
-
-### Installation
+Requires **Python 3.12** and **[uv](https://docs.astral.sh/uv/)**. AI research also requires a signed-in Claude Code CLI with access to the models configured in `config/investor_profile.yaml`.
 
 ```bash
-git clone https://github.com/<owner>/agentic_trading.git
+git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
 uv sync
-```
-
-### Environment
-
-```bash
-cp .env.example .env
-cp state/portfolio.example.yaml state/portfolio.yaml
-cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
-```
-
-Every key in `.env` is optional. Do not set `ANTHROPIC_API_KEY` — the LLM layer runs on your
-subscription, and an API key would switch billing to pay-as-you-go.
-
-The two ledgers are untracked: they record what you actually hold, so only the all-cash
-templates are in the repository.
-
-### Run
-
-```bash
+cp -n .env.example .env
+cp -n state/portfolio.example.yaml state/portfolio.yaml
+cp -n state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
+uv run ct-auth              # create your local console login
 uv run ct-api
 ```
 
-```text
-http://127.0.0.1:8787/ui/
-```
+Open [localhost:8787/ui/](http://127.0.0.1:8787/ui/). Broker setup and operating details are in the [operations guide](docs/OPERATIONS.md).
 
-The API and the console are one process on one origin. The OpenAPI schema is at `/docs`.
-
-Command-line entry points, the broker connection and the risk configuration are covered in
-[Documentation](docs/OPERATIONS.md).
-
-<br />
-
----
-
-## License
-
-No license has been declared for this repository yet. Until one is added, all rights are
-reserved by the author.
-
-TradingAgents and every other dependency remain under their own upstream licenses.
+<sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · Vanilla JS</sub>

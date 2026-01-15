@@ -1,0 +1,56 @@
+{
+  "diagram_type": "architecture",
+  "generator": {
+    "name": "Archify",
+    "url": "https://github.com/tt-a1i/archify",
+    "revision": "d8e4daf2610d512821365f41b139d874b29efe81"
+  },
+  "specification": {
+    "path": "system.architecture.json",
+    "sha256": "9de6c33597f75fff3052242957408bd210c03d3ee2fe8a861a973439d2b4506c",
+    "bytes": 4387
+  },
+  "artifact": {
+    "path": "system.html",
+    "sha256": "1858bc37091a74f4e28e903780123faadb13d82914cc3940bc2165c3768d5aa0",
+    "bytes": 711017
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "browser_evidence": "passed",
+  "viewport_coverage": [
+    "1440x900",
+    "1600x1000",
+    "1920x1080",
+    "2048x1320"
+  ],
+  "theme_capture_coverage": [
+    "1440x900 light",
+    "1440x900 dark",
+    "2048x1320 light",
+    "2048x1320 dark"
+  ],
+  "visual_review": "passed",
+  "visual_review_notes": "Inspected light 1440x900 and dark 2048x1320 browser screenshots and the canonical PNG export for legibility, overlap and clipping.",
+  "correction_rounds": 2,
+  "exports": [
+    {
+      "path": "system.svg",
+      "sha256": "d2947ddcf47e3e145dbdf46fadb0d1453857101512a2565156c40729d2acac92",
+      "bytes": 54388,
+      "canonical_state_clean": true
+    },
+    {
+      "path": "system.png",
+      "sha256": "1f7e6d1d6bfcb6277d7ca390dc96479bd9d27ff4bc14e05aa59f336d5e26f10a",
+      "bytes": 401655,
+      "canonical_state_clean": true
+    }
+  ]
+}

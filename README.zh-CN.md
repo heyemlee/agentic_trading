@@ -1,178 +1,69 @@
-[English](README.md) | 简体中文
+<p align="center">
+  <a href="README.md">English</a> · <strong>简体中文</strong>
+</p>
 
-# Conservative Trading
+<h1 align="center">Agentic Trading</h1>
 
-一套为单个投资者设计的、保守的、必须人工批准的投资系统。
+<p align="center">
+  <strong>AI Agent 负责研究、辩论和提案，人来批准。</strong><br />
+  一个理解持仓上下文、调用工具、输出结构化决策，并记录执行过程的多智能体系统。
+</p>
 
-AI 研究流水线负责研究标的，确定性风控层决定什么被允许，任何动到钱的操作都由你批准。
+<p align="center">
+  <a href="#如何运行">系统架构</a> ·
+  <a href="#我实现了什么">工程实现</a> ·
+  <a href="#本地启动">快速开始</a>
+</p>
 
-`Python 3.12` · `FastAPI` · `仅限本机` · 真金执行默认关闭
+## 项目思路
 
-[文档](docs/OPERATIONS.md) · [快速开始](#快速开始) · [前端交接](docs/FRONTEND_HANDOFF.md)
+给一组 AI Agent 一个标的和你的持仓上下文：分析师收集证据，多空研究员质疑论点，管理者综合形成建议。系统将研究结果转成结构化提案，写明风险、缺失信息，以及采取行动或保持观望的理由。
 
-<br />
+核心设计问题是：**应该给 Agent 多大的权限？** 在这里，Agent 负责研究，确定性代码约束风险，执行前必须经过人工审批并重新检查当前状态。实盘交易默认关闭。
 
-![Conservative Trading — 首页](docs/screenshots/index.png)
+## 如何运行
 
-<sub>控制台运行在内置的示例数据上。顶部那条琥珀色提示正是产品在工作：示例数据永远不可能被误认成实时数据。</sub>
+![Agentic Trading 架构：理解持仓上下文的研究 Agent 通过 Claude 和 MCP 调用数据工具，提案经风控和人工审批后，再次校验并执行。](docs/architecture/system.svg)
 
-<br />
+<sub>使用 <a href="https://github.com/tt-a1i/archify">Archify</a> 绘制 · <a href="docs/architecture/system.html">交互版 HTML：下载后打开</a> · <a href="docs/architecture/system.architecture.json">图表源文件</a></sub>
 
----
+## 我实现了什么
 
-## 核心能力
+项目基于 [TradingAgents](https://github.com/TauricResearch/TradingAgents)，复用其研究图和 Agent 角色。我的工作是把这套研究流程接入完整应用：
 
-**不交易也是一种结果**
+| 方向 | 具体实现 |
+| --- | --- |
+| **Agent 编排** | 为各角色注入持仓上下文和投资约束；按标的类型选择分析师，为不同角色配置模型和推理强度。[代码](conservative_trading/graph.py) |
+| **运行时与工具调用** | 实现兼容 LangChain 的 Claude Code 适配器，支持 MCP 数据工具白名单、结构化输出及工具调用记录。[代码](conservative_trading/llm/claude_code.py) |
+| **决策权限边界** | 用 Pydantic 定义提案，通过确定性代码映射动作，在审批前和执行前分别检查风险。[策略](conservative_trading/policy.py) · [执行](conservative_trading/execution.py) |
+| **可靠性与评估** | 持久化研究任务、幂等订单处理、SQLite 审计状态，以及对照被动基准的前瞻评估。[任务](conservative_trading/research_jobs.py) · [评估](conservative_trading/evaluation.py) |
 
-这套系统的考核标准是保住本金，不是交易频次。队列安静意味着它看过了并选择放弃——这个结论会连同完整推理一起被记录下来。
+离线测试通过模拟模型运行时验证 Agent 研究图，并覆盖工具隔离、策略失败和执行恢复。[查看测试 →](tests)
 
-**确定性风控，跑两遍**
+<details>
+<summary>展开查看研究控制台</summary>
 
-规则层在提案时跑一次，在执行时再跑一次。它是纯 Python，不是模型，界面里没有任何东西能绕过它。
+![使用示例数据的研究控制台，展示历史研究和决策详情。](docs/screenshots/readme-research.png)
 
-**批准的含义是「如果条件仍然成立」**
+<sub>示例数据预览：通过网页控制台查看研究报告和决策。</sub>
 
-批准授权的是这个想法，而不是一张存好的订单。后端会重新读取报价、组合和风险状态，如果外部条件偏离太多就直接拒绝。
+</details>
 
-**三个互相隔离的资金池**
+## 本地启动
 
-Core 和 Sandbox 是概念仓。Micro-Live 是 Robinhood 上的真金，被四道独立的机制限死在 $100。每个桶只能在自己的交易场所执行。
-
-**每一个决策都留痕**
-
-每次运行都会留下分析师报告、多空辩论、风险辩论和最终裁定。控制台把它们按顺序还原成一条完整轨迹。
-
-<br />
-
-![审批详情](docs/screenshots/approvals.png)
-
-<sub>一条提案：论据、盲区，以及它必须通过的每一条风控规则。</sub>
-
-<br />
-
-![研究轨迹](docs/screenshots/research.png)
-
-<sub>决策强度对照交易门槛，以及全部运行记录。</sub>
-
-<br />
-
----
-
-## 站在现成的东西上
-
-这里没有重复造任何一个已经存在的轮子。
-
-**[TradingAgents](https://github.com/TauricResearch/TradingAgents)** —— 多智能体研究框架。锁定到具体 commit，不 vendor、不修改。
-
-**Claude Code CLI** —— LLM 运行时，跑在 Max 订阅上而不是按量计费的 API key。
-
-**[Model Context Protocol](https://modelcontextprotocol.io)** —— 官方 Python SDK 把 TradingAgents 自己的数据工具暴露给该运行时，仅此而已。
-
-**Robinhood Agentic Trading** —— 通过其官方 MCP server 使用，只作为确定性 Python 的券商传输层，绝不作为交给模型的工具。
-
-**exchange-calendars** —— NYSE 的交易时段、假日和半日市，执行环节不依赖任何手工维护的日历。
-
-**FastAPI** —— 选它是因为它会发布 OpenAPI schema；控制台是对着这份契约构建的，而不是对着一段文字描述。
-
-<br />
-
----
-
-## 技术栈
-
-**后端**
-Python 3.12 · FastAPI · Uvicorn · Pydantic
-
-**研究**
-TradingAgents · Claude Code CLI · Model Context Protocol
-
-**券商**
-Robinhood Agentic Trading（官方 MCP）· 模拟适配器
-
-**存储**
-SQLite 事务保存组合、风险、提案、审批、订单、成交与研究任务。
-现有 YAML/JSON 文件只作为一次性迁移来源保留。
-
-**控制台**
-静态 HTML、CSS 和 JavaScript。无框架，无构建步骤。
-
-**工具链**
-uv · pytest · ruff
-
-<br />
-
----
-
-## 系统架构
-
-```mermaid
-%%{init: {'theme':'neutral'}}%%
-flowchart TD
-    U(Investor) --> C(Console · static, served at /ui)
-    C --> A(FastAPI · 127.0.0.1:8787)
-    A --> R(Research · TradingAgents on Claude)
-    R --> P(Conservative Policy + Hard Risk)
-    P --> H{Human approval}
-    H --> E[(Execution · Robinhood official MCP)]
-    E --> S[(事务状态与审计)]
-    A --> S
-```
-
-研究层提出建议，风控层决定是否允许，你来批准。执行时会重新读取真实世界，并且仍然可能拒绝——拒绝是一个正确的结果，不是错误。
-
-<br />
-
----
-
-## 快速开始
-
-### 环境要求
-
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/)
-- 已登录的 Claude Code CLI —— 研究运行时
-- 一个 Robinhood 账户 —— 仅 Micro-Live 实验需要
-
-### 安装
+需要 **Python 3.12** 和 **[uv](https://docs.astral.sh/uv/)**。AI 研究还需要已登录的 Claude Code CLI，并能使用 `config/investor_profile.yaml` 中配置的模型。
 
 ```bash
-git clone https://github.com/<owner>/agentic_trading.git
+git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
 uv sync
-```
-
-### 环境变量
-
-```bash
-cp .env.example .env
-cp state/portfolio.example.yaml state/portfolio.yaml
-cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
-```
-
-`.env` 里所有的 key 都是可选的。不要设置 `ANTHROPIC_API_KEY` —— LLM 层跑在你的订阅上，设了 API key 会把计费切换成按量付费。
-
-两个台账文件不纳入版本控制：它们记录的是你真实的持仓，仓库里只保留全现金的模板。
-
-### 运行
-
-```bash
+cp -n .env.example .env
+cp -n state/portfolio.example.yaml state/portfolio.yaml
+cp -n state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
+uv run ct-auth              # 创建本地控制台登录凭据
 uv run ct-api
 ```
 
-```text
-http://127.0.0.1:8787/ui/
-```
+打开 [localhost:8787/ui/](http://127.0.0.1:8787/ui/)。券商连接和运行细节见[操作文档](docs/OPERATIONS.md)。
 
-API 和控制台是同一个进程、同一个源。OpenAPI schema 在 `/docs`。
-
-命令行入口、券商连接和风控配置见[文档](docs/OPERATIONS.md)。
-
-<br />
-
----
-
-## 许可证
-
-本仓库尚未声明许可证。在补充之前，作者保留所有权利。
-
-TradingAgents 及其他所有依赖各自遵循其上游许可证。
+<sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · 原生 JavaScript</sub>

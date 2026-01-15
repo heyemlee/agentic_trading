@@ -1,0 +1,230 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agentic Trading",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      460
+    ]
+  },
+  "components": [
+    {
+      "id": "context",
+      "type": "database",
+      "label": "Portfolio context",
+      "sublabel": "Holdings / mandate / limits",
+      "pos": [
+        50,
+        30
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "Claude Code adapter",
+      "sublabel": "LangChain-compatible runtime",
+      "pos": [
+        410,
+        30
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "external",
+      "label": "MCP data tools",
+      "sublabel": "Market / news / fundamentals",
+      "pos": [
+        770,
+        30
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "entry",
+      "type": "frontend",
+      "label": "Console + triggers",
+      "sublabel": "FastAPI / durable research jobs",
+      "pos": [
+        50,
+        190
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "research",
+      "type": "backend",
+      "label": "Research agents",
+      "sublabel": "Analysts / bull-bear / managers",
+      "pos": [
+        410,
+        190
+      ],
+      "size": [
+        260,
+        76
+      ],
+      "tag": "TradingAgents + context"
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "Policy + hard risk",
+      "sublabel": "Structured proposal / code rules",
+      "pos": [
+        770,
+        190
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "broker",
+      "type": "external",
+      "label": "Broker adapters",
+      "sublabel": "Simulated / Robinhood MCP",
+      "pos": [
+        50,
+        350
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "execution",
+      "type": "backend",
+      "label": "Revalidate + execute",
+      "sublabel": "Fresh state / risk checked again",
+      "pos": [
+        410,
+        350
+      ],
+      "size": [
+        260,
+        76
+      ]
+    },
+    {
+      "id": "approval",
+      "type": "security",
+      "label": "Human review",
+      "sublabel": "Approve or reject in console",
+      "pos": [
+        770,
+        350
+      ],
+      "size": [
+        260,
+        76
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "start-research",
+      "from": "entry",
+      "to": "research",
+      "label": "research",
+      "variant": "emphasis",
+      "labelDx": -8
+    },
+    {
+      "id": "inject-context",
+      "from": "context",
+      "to": "research",
+      "label": "inject",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "invoke-runtime",
+      "from": "research",
+      "to": "runtime",
+      "label": "invoke",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "allowed-tools",
+      "from": "runtime",
+      "to": "tools",
+      "label": "MCP"
+    },
+    {
+      "id": "produce-verdict",
+      "from": "research",
+      "to": "policy",
+      "label": "verdict",
+      "variant": "emphasis"
+    },
+    {
+      "id": "request-approval",
+      "from": "policy",
+      "to": "approval",
+      "label": "proposal",
+      "variant": "security",
+      "labelAt": [
+        900,
+        309
+      ]
+    },
+    {
+      "id": "approve-idea",
+      "from": "approval",
+      "to": "execution",
+      "label": "approved",
+      "variant": "security"
+    },
+    {
+      "id": "submit-order",
+      "from": "execution",
+      "to": "broker",
+      "label": "submit",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Agent collaboration",
+      "items": [
+        "Analysts gather evidence; bull and bear researchers debate; managers synthesize a decision."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Explicit authority",
+      "items": [
+        "Agents receive data tools only. Python owns broker access and rechecks risk after approval."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Traceable decisions",
+      "items": [
+        "Reports and tool-call traces are saved to files; SQLite tracks jobs, proposals and execution."
+      ]
+    }
+  ]
+}
