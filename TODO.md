@@ -58,45 +58,23 @@
   `719d8ac`（只读路径缺表/缺列时不再崩溃，见下）、以及本轮的
   **launchd 插件路径改用稳定的 `current` 软链**（避免下面这个坑）。
 
-  **2026-09-05 20:44/20:47（太平洋时间）两次 `release.sh publish` 都在 10 秒健康检查内失败并自动回滚。**
-  排查：统一日志里 `backgroundtaskmanagementd` 在两次尝试期间都精确打出
-  `Exceeded max notifications for run_api.sh`（四个 job 全中）——这是 **macOS 自己的限流**，
-  不是这段代码的 bug：`release.sh` 每次发布都把 plist 指向新 release 的具体路径，
-  内容因此每次都变，macOS 把这当成"重新注册 LaunchAgent"；短时间内注册太多次，
-  `launchctl bootstrap` 继续报成功，但任务被静默拒绝启动。当时运行中的旧进程完全没受影响
-  （curl 一直 200），只是新版起不来。
-  **已修复根因**：plist 现在引用 `releases/current` 软链而不是具体 release 的时间戳路径，
-  两个不同 release 渲染出的 job 定义现在逐字节相同（`test_two_releases_render_byte_identical_jobs_through_the_current_symlink`）；
-  常规发布不再重写 plist，只翻转软链 + `launchctl kickstart` 重启进程，不再触碰 launchd 注册。
-  `release.sh` / `install.sh` 也都加了"重写前后哈希对比，没变就跳过 bootout/bootstrap"的保护。
+  **2026-09-05：四次 `release.sh publish` 全部在健康检查内失败并自动回滚。根因已查明并修复。**
 
-  **但今天已经触发过的限流不会因为这次修复立刻解除**——它是按时间窗口计数的，不是按内容。
-  **不要连续重试 publish**；等一段时间（论坛经验从几十分钟到需要重新登录不等，Apple 未公开具体窗口），
-  或者干脆留到下面第 7 项"整机重启演练"时一起验证（重启必然会清空这个计数）。
-  ```bash
-  log show --last 1h --predicate 'eventMessage CONTAINS "Exceeded max notifications"'  # 确认已经解除
-  uv run ct-state status | head -20        # 确认没有未结订单
-  deploy/macos/release.sh publish
-  uv run ct-trigger scheduled --force      # 本周期已被占用，需要 --force
-  ```
-  **2026-09-05 05:0x（UTC）第三次尝试 + 一次我造成的登录中断。**
-  我用工作区的新代码跑了只读命令 `ct-state status`，当时的实现会在**读取路径**上自动补 schema，
-  于是给 `console_sessions` 加了 `session_id` / `label` 两列。但运行中的旧版 release 写会话用的是
-  **位置参数**（7 个值），表变成 9 列后每次登录都失败：
-  `table console_sessions has 9 columns but 7 values were supplied`。
-  已有会话靠 cookie 还能用，所以表面看不出来——但谁都登不进去。
-  **已修复（`8bab08a`）**：读取路径永不改 schema；schema 变更只由写连接或 `ct-state migrate` 施加；
-  各个 reader 改为容忍缺表缺列（设备列表用 `SELECT *`，旧库里的会话照常列出，只标记为暂不可单独撤销）。
-  新增两个测试：一个直接用上一版的位置 INSERT 打到迁移后的表上断言失败、再断言本版命名列写入成功；
-  另一个扫描源码，禁止对任何"后加过列"的表使用位置 INSERT。
-  **现场已恢复**：先用旧 release 的 `ct-state` 备份，再把那两列删掉，让运行中的旧版重新能写会话
-  （会话记录 1 条，完好保留）。登录现在应该正常了。
+  **真正的原因**：健康检查只等 10 秒（40 × 0.25s），而一次重启要花 13 秒——
+  `kickstart -k` 杀掉进程后，plist 里的 `ThrottleInterval: 10` 强制 launchd 等 10 秒才重启，
+  应用自己再花几秒加载 pandas 和交易日历。**服务其实每次都起来了，只是比超时晚 3 秒**，
+  于是脚本判定失败、回滚掉一个本来正常的版本。
+  用每 0.5 秒探测 8787 的方式抓到了铁证：端口空了 13 秒，然后恢复 200。
+  `install.sh` 一直没事，是因为它走 bootout+bootstrap（全新加载不受 ThrottleInterval 约束），
+  只有 publish 走 kickstart 才会撞上。已把两个脚本的等待窗口都放宽到 60 秒。
 
-  第三次 publish 仍然失败并自动回滚——**但这次确认了新代码本身没问题**：
-  把新 release 的 `ct-api` 手动跑在 8788 端口，`GET /ui/login.html` 返回 200。
-  失败纯粹是 launchd/BTM 侧仍在限流，不肯启动这个 job。
+  **之前的诊断是错的，在此更正**：我一度把它归因于 macOS 后台任务限流
+  （`backgroundtaskmanagementd` 的 `Exceeded max notifications`），并据此写进了本文件。
+  那些日志是真的，但含义是"macOS 不再弹出『已添加后台项』通知"，
+  **与任务能否启动无关**。当时没有直接证据，我把一个时间上巧合的日志当成了根因。
+  由此产生的"不要连续重试 publish""等限流解除"等说法一并作废。
 
-  **完成标准：** publish 成功且不再触发限流；worker 日志里 `regime=` 不是 UNKNOWN；
+  **完成标准：** publish 成功；worker 日志里 `regime=` 不是 UNKNOWN；
   三个任务都到达终态；`ct-trigger scheduled --dry-run` 的 `last_run.analysed_sessions`
   是有数据的那个交易日。发布成功后 `session_id` / `label` 两列会由新代码自己加回来。
 

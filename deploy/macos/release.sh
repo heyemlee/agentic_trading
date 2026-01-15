@@ -65,12 +65,10 @@ activate() {                              # point launchd at a release and prove
 
   # Snapshot each plist before rewriting. render() points every job at the `current` symlink
   # rather than this specific release, so an ordinary publish (same origins, same schedule)
-  # produces byte-identical files and nothing here needs to change. That distinction matters:
-  # re-registering an unchanged LaunchAgent trains macOS's background-task manager to throttle
-  # it — `launchctl bootstrap` keeps reporting success while the job silently never starts,
-  # only `log show --predicate 'eventMessage CONTAINS "Exceeded max notifications"'` shows it.
-  # This is what actually happened here on 2026-09-05: two publishes in under an hour, on top
-  # of the earlier install, was enough to trip it on all four jobs at once.
+  # produces byte-identical files and there is nothing to re-register. Worth keeping for its
+  # own sake — a LaunchAgent that never changes is one fewer thing that can go wrong — though
+  # it was not, as first believed, the cause of the failed publishes on 2026-09-05. That was
+  # the readiness window being shorter than the restart it was waiting for; see below.
   typeset -A before
   for label in "${labels[@]}"; do
     before[$label]="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
@@ -101,14 +99,19 @@ activate() {                              # point launchd at a release and prove
   # never contributes to the throttle above.
   launchctl kickstart -k "gui/$UID/com.local.agentic-trading.api"
 
-  for attempt in {1..40}; do
+  # Long enough to cover the whole restart, which is not just the app starting. kickstart kills
+  # the process, launchd then holds it for ThrottleInterval (10s) before spawning it again, and
+  # the app itself spends several seconds importing pandas and the exchange calendars. A ten
+  # second window declared failure at exactly the moment the service was coming back: the port
+  # was empty for thirteen seconds, so every publish rolled back a release that worked.
+  for attempt in {1..120}; do
     if curl --fail --silent --output /dev/null http://127.0.0.1:8787/ui/login.html; then
       print -r -- "running $(basename "$release")"
       return 0
     fi
-    sleep 0.25
+    sleep 0.5
   done
-  print -r -- "the new release did not answer on loopback" >&2
+  print -r -- "the new release did not answer on loopback within 60s" >&2
   if [[ -n "$previous" && -d "$previous" ]]; then
     print -r -- "rolling back to $(basename "$previous")" >&2
     activate "$previous"

@@ -79,12 +79,12 @@ done
 launchctl kickstart -k "gui/$UID/com.local.agentic-trading.api"
 
 ready=false
-for attempt in {1..40}; do
+for attempt in {1..120}; do
   if curl --fail --silent --output /dev/null http://127.0.0.1:8787/ui/login.html; then
     ready=true
     break
   fi
-  sleep 0.25
+  sleep 0.5
 done
 if [[ "$ready" != true ]]; then
   echo "ct-api did not become ready; inspect runs/service/api.stderr.log" >&2
