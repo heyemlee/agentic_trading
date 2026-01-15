@@ -100,7 +100,7 @@ This one takes calendar time. Start it and come back.
 | 4.2 | Let the scheduled job fire on its own. Afterwards: System screen shows the run, the tickers and the count. | |
 | 4.3 | Run `uv run ct-trigger scheduled` manually in the same week. Expect a skip: "already executed for …". | |
 | 4.4 | Confirm in `runs/service/research.stdout.log` that the launchd environment completed the whole chain — Claude authenticated, data fetched, evidence written under `runs/<id>/`, a decision record produced. | 2026-09-05: chain confirmed; found and fixed a defect (see 4.4b) |
-| 4.4b | Check the worker log's `regime=` line. It must not be `UNKNOWN`. A session closes hours before its prices publish, so a run anchored to the calendar's date reasons with no market context while otherwise looking healthy. Re-run after publishing the fix. | |
+| 4.4b | Check the worker log's `regime=` line. It must not be `UNKNOWN`. A session closes hours before its prices publish, so a run anchored to the calendar's date reasons with no market context while otherwise looking healthy. Re-run after publishing the fix. | ✅ 2026-09-05 07:14Z, release 506f2ff: `regime=LOW_RISK`, anchored to 2026-09-04 which now has data |
 | 4.5 | Wait for a market holiday (or temporarily set `on_non_session_day: skip` and fire on a weekend). Confirm the skip reason names the calendar. | |
 | 4.6 | Exhaust the daily budget with manual runs; confirm the schedule skips with the count. | |
 
