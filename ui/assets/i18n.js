@@ -340,6 +340,11 @@ window.I18N = (function () {
       'code.HARD_RISK_REJECTED': 'Risk layer refused', 'code.BROKER_REVIEW_REJECTED': 'Venue refused',
       'code.REJECTED': 'Declined', 'code.NO_TRADE': 'No trade', 'code.NO_ACTION': 'No action',
       'code.BUY': 'Buy', 'code.SELL': 'Sell', 'code.HOLD': 'Hold',
+      'code.ADD': 'Add', 'code.REDUCE': 'Reduce',
+      /* CANCELLED is a research job the operator stopped; CANCELED, one L, is the venue's
+         spelling for an order that will not fill. Both reach the console and they do not mean
+         the same thing. */
+      'code.SUBMITTED': 'Submitted, awaiting fill', 'code.CANCELED': 'Canceled at the venue',
       'code.NORMAL': 'Normal', 'code.WARNING': 'Warning', 'code.RISK_REDUCTION': 'Risk reduction',
       'code.HARD_HALT': 'Hard halt', 'code.EMERGENCY': 'Emergency', 'code.HALT': 'Halt',
       'code.LOW_RISK': 'Low risk', 'code.ELEVATED_RISK': 'Elevated risk',

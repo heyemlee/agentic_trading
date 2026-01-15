@@ -285,3 +285,48 @@ test('an audit trail that cannot be read says so instead of showing nothing', as
   await flush();
   assert.ok(c.element('audit-note').textContent.includes('login required'));
 });
+
+/* ── the translation dictionary against the pages that use it ──────────────
+   Both halves of this caught something real: twelve keys on the system page
+   that no dictionary defined, and a stale second copy of the whole dictionary
+   in ui/ that no page loaded, so edits to it changed nothing. A missing key
+   renders as its own name — "sy.budget" where a label should be — which is
+   visible but only to whoever happens to open that page. */
+const uiFile = f => fs.readFileSync(path.join(root, 'ui', f), 'utf8');
+const pages = fs.readdirSync(path.join(root, 'ui')).filter(f => f.endsWith('.html'));
+const dictionary = () => {
+  const src = uiFile('assets/i18n.js');
+  const block = lang => {
+    const m = src.match(new RegExp(`\\n    ${lang}: \\{([\\s\\S]*?)\\n    \\},?\\n`));
+    return new Set([...m[1].matchAll(/'([\w.]+)':/g)].map(x => x[1]));
+  };
+  return { en: block('en'), zh: block('zh') };
+};
+
+test('every key a page asks for is defined, in both languages', () => {
+  const { en, zh } = dictionary();
+  const used = new Set();
+  for (const file of pages)
+    for (const m of uiFile(file).matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g))
+      m[1].split(/\s+/).forEach(k => used.add(k));
+
+  assert.ok(used.size > 100, 'the pages should be reading a lot of copy');
+  assert.deepEqual([...used].filter(k => !en.has(k)), [], 'used in a page, missing from en');
+  assert.deepEqual([...used].filter(k => !zh.has(k)), [], 'used in a page, missing from zh');
+});
+
+test('neither language carries copy the other is missing', () => {
+  const { en, zh } = dictionary();
+  assert.deepEqual([...en].filter(k => !zh.has(k)), [], 'in en, missing from zh');
+  assert.deepEqual([...zh].filter(k => !en.has(k)), [], 'in zh, missing from en');
+});
+
+test('every script and stylesheet a page loads is actually shipped', () => {
+  for (const file of pages)
+    for (const m of uiFile(file).matchAll(/(?:src|href)="((?!https?:|\/\/|#|mailto:)[^"]+)"/g)) {
+      const target = m[1].split(/[?#]/)[0];
+      if (target.endsWith('.html')) continue;             // navigation, not an asset
+      assert.ok(fs.existsSync(path.join(root, 'ui', target)),
+                `${file} loads ${target}, which does not exist`);
+    }
+});
