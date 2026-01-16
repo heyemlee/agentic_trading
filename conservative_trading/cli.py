@@ -21,6 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .broker import make_broker
+from .env import load_env
 from .evidence import collect_evidence, foreign_bucket_mentions
 from .execution import execute as execute_proposal
 from .execution import revalidate
@@ -303,6 +304,7 @@ def _load(config_dir: str) -> Profiles | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-research",
                                      description="TradingAgents -> Conservative Policy -> Hard Risk. No broker, no orders.")
     parser.add_argument("tickers", nargs="+")
@@ -333,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def risk_check_main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-risk-check",
                                      description="Evaluate a hypothetical proposal against the current portfolio. No model call.")
     parser.add_argument("ticker")
@@ -376,6 +379,7 @@ if __name__ == "__main__":
 
 
 def proposals_main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-proposals", description="List proposals and their freshness.")
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--all", action="store_true", help="include closed proposals")
@@ -399,6 +403,7 @@ def proposals_main(argv: list[str] | None = None) -> int:
 
 
 def approve_main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(
         prog="ct-approve",
         description="Approve a proposal, revalidate against the current world, then execute if it still holds.")

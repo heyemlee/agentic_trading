@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .env import load_env
 from .evidence import collect_evidence
 from .portfolio import PortfolioState, build_snapshot, classify_instrument
 from .profile import Profiles, load_profiles
@@ -174,6 +175,7 @@ def run_scenario(sc: Scenario, profiles: Profiles) -> Outcome:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     profiles = load_profiles("config")
     outcomes = [run_scenario(sc, profiles) for sc in build_scenarios()]
     width = max(len(o.scenario.title) for o in outcomes)

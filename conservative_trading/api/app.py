@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
+from ..env import load_env
 from ..state_db import StateConflict
 from .auth import COOKIE, SESSION_SECONDS, ConsoleAuth
 from .service import Service, ServiceConflict, ServiceError
@@ -451,6 +452,7 @@ def orders(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> dict[str, Any]:
 
 def main() -> None:
     """``ct-api``: run the backend for a local frontend."""
+    load_env()
     import argparse
 
     import uvicorn

@@ -37,7 +37,7 @@ secret_scan() {
   # The files that legitimately hold secrets must not be tracked at all.
   local tracked
   tracked="$(git ls-files -- .env 'state/console_auth.json' 'state/robinhood_token.json' \
-    'state/*.sqlite3' || true)"
+    'state/vapid_key.json' 'state/*.sqlite3' || true)"
   if [[ -n "$tracked" ]]; then
     print -r -- "these files hold credentials or live state and must not be tracked:"
     print -r -- "$tracked"

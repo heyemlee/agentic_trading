@@ -22,6 +22,7 @@ from typing import Any, ClassVar
 
 from ..broker import make_broker
 from ..broker.base import BrokerError
+from ..env import load_env
 from ..execution import execute as execute_proposal
 from ..execution import needs_reconciliation, reconcile_proposal, revalidate
 from ..micro_live import BUCKET as MICRO_BUCKET
@@ -1179,19 +1180,19 @@ def _close(broker: Any) -> None:
 
 
 def _fred_configured(profiles: Profiles) -> bool:
-    """A real key, not an empty placeholder line copied from .env.example."""
+    """A real key, not an empty placeholder line copied from .env.example.
+
+    This used to read the environment and then fall back to parsing .env itself, which meant the
+    health page could answer from the file while the process doing the fetching had nothing —
+    the warning would go quiet without the data arriving. The file is now loaded into the
+    environment at every entry point (:mod:`conservative_trading.env`), so there is one answer
+    and it is the one the fetcher sees.
+    """
     import os
 
     if os.environ.get("FRED_API_KEY", "").strip():
         return True
-    try:
-        for line in (profiles.project_dir / ".env").read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("FRED_API_KEY=") and stripped.split("=", 1)[1].strip():
-                return True
-    except OSError:
-        return False
-    return False
+    return bool(load_env(profiles.project_dir) and os.environ.get("FRED_API_KEY", "").strip())
 
 
 @lru_cache(maxsize=4)

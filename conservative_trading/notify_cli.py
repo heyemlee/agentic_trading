@@ -12,11 +12,13 @@ import json
 import sys
 
 from .api.service import Service, ServiceError
+from .env import load_env
 from .notify import DeliveryError, Event, heartbeat, send
 from .profile import load_profiles
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(
         prog="ct-notify",
         description="Inspect the notification channel and send a deliberate test message.",

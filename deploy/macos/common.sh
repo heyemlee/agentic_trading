@@ -34,3 +34,18 @@ if [[ ! -d "$data_dir/config" ]]; then
 fi
 
 cd "$data_dir"
+
+# The same file the Python entry points read (conservative_trading/env.py). The shell scripts
+# need it too: CT_BACKUP_MIRROR and CT_BACKUP_KEY_FILE are read by backup_state.sh, which never
+# enters Python, so a value that lived only in the process environment vanished at the next
+# restart with nothing to say it had. Only KEY=VALUE lines, and never over a value the caller
+# set deliberately on the command line.
+if [[ -r "$data_dir/.env" ]]; then
+  while IFS= read -r line; do
+    [[ "$line" == \#* || "$line" != *=* ]] && continue
+    key="${line%%=*}"; value="${line#*=}"
+    key="${key// /}"; value="${${value#[\"\']}%[\"\']}"
+    [[ -z "$key" || -z "$value" ]] && continue
+    [[ -n "${(P)key:-}" ]] || export "$key=$value"
+  done < "$data_dir/.env"
+fi

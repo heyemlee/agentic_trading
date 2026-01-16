@@ -18,6 +18,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from .env import load_env
 from .micro_live import run_preflight
 from .profile import ProfileError, load_profiles
 
@@ -191,6 +192,7 @@ def _preflight(profiles) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-robinhood",
                                      description="Connect and inspect the Robinhood Agentic account. Places no orders.")
     parser.add_argument("command", choices=["connect", "status", "preflight"])

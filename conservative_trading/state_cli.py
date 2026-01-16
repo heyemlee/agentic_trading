@@ -10,6 +10,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .env import load_env
 from .operations import record as record_activity
 from .portfolio import cash_flow_summary, migrate_portfolio, record_cash_flow
 from .profile import load_profiles
@@ -285,6 +286,7 @@ def _cashflow(profiles, args, parser) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-state")
     parser.add_argument("action", choices=("migrate", "status", "backup", "restore",
                                            "sessions", "cashflow"))

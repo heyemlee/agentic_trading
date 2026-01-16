@@ -21,6 +21,7 @@ from typing import Any
 
 from . import operations, schedule
 from .api.service import Service, ServiceError
+from .env import load_env
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ def event_analysis(service: Service, ticker: str, *, bucket: str = "core",
 
 def main(argv: list[str] | None = None) -> int:
     """``ct-trigger``: the entry point a scheduler calls."""
+    load_env()
     parser = argparse.ArgumentParser(
         prog="ct-trigger",
         description="Start a research run from a scheduler, a person, or an event. "

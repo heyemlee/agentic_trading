@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from .broker import SimulatedBroker
+from .env import load_env
 from .evidence import collect_evidence
 from .execution import execute
 from .profile import Profiles, load_profiles
@@ -269,6 +270,7 @@ def run_interrupted_session_case() -> CaseOutcome:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     outcomes = [run_case(c) for c in build_cases()]
     outcomes.append(run_idempotency_case())
     outcomes.append(run_interrupted_session_case())

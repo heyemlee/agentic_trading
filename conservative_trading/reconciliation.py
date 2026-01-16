@@ -4,9 +4,11 @@ import json
 import time
 
 from .api.service import Service
+from .env import load_env
 
 
 def main(argv=None):
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-reconcile")
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--watch", action="store_true", help="keep synchronizing every 15 seconds")

@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .env import load_env
+
 ACTIVITIES = ("reconciliation", "research_dispatch", "backup", "maintenance", "schedule")
 HEARTBEATS = "activity_heartbeats"
 
@@ -109,6 +111,7 @@ def disk(path: Path, floor_gb: float) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     """``ct-ops``: the housekeeping the daily maintenance job runs."""
+    load_env()
     from .profile import load_profiles
     from .state_db import StateDB
 

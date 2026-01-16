@@ -15,6 +15,7 @@ state/simulated_orders.json
 state/fills.jsonl
 state/HALT
 state/console_auth.json
+state/vapid_key.json
 state/*.lock
 state/*.sqlite3
 state/*.sqlite3-*

@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ..env import load_env
 from ..state_db import StateDB
 from ..storage import atomic_write
 
@@ -262,6 +263,7 @@ class ConsoleAuth:
 
 
 def main(argv=None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="ct-auth", description="Set/rotate the local console owner's password.")
     parser.add_argument("--file", type=Path, default=Path(os.environ.get("CT_AUTH_FILE", "state/console_auth.json")))
     parser.add_argument("--username", default="owner")

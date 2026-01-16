@@ -13,6 +13,7 @@ import sys
 
 from . import evaluation
 from .api.service import Service, ServiceError
+from .env import load_env
 
 
 def _account(service: Service) -> dict:
@@ -27,6 +28,7 @@ def _account(service: Service) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(
         prog="ct-evaluate",
         description="A forward record of what this system decided, against a passive benchmark.",
