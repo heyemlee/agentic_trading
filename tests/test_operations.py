@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conservative_trading import launchd, operations
-from conservative_trading.api.service import Service
+from agentic_trading import launchd, operations
+from agentic_trading.api.service import Service
 from tests.conftest import ROOT
 
 
@@ -184,13 +184,13 @@ def command_lines(text: str) -> list[str]:
 
 #: Which argument parser serves each command the deployment scripts invoke.
 PARSERS = {
-    "conservative_trading.launchd": "conservative_trading.launchd",
-    "ct-ops": "conservative_trading.operations",
-    "conservative_trading.operations": "conservative_trading.operations",
-    "ct-state": "conservative_trading.state_cli",
-    "ct-trigger": "conservative_trading.triggers",
-    "ct-notify": "conservative_trading.notify_cli",
-    "ct-api": "conservative_trading.api.app",
+    "agentic_trading.launchd": "agentic_trading.launchd",
+    "ct-ops": "agentic_trading.operations",
+    "agentic_trading.operations": "agentic_trading.operations",
+    "ct-state": "agentic_trading.state_cli",
+    "ct-trigger": "agentic_trading.triggers",
+    "ct-notify": "agentic_trading.notify_cli",
+    "ct-api": "agentic_trading.api.app",
 }
 
 

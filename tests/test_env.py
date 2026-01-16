@@ -12,7 +12,7 @@ import tomllib
 
 import pytest
 
-from conservative_trading.env import env_path, load_env
+from agentic_trading.env import env_path, load_env
 from tests.conftest import ROOT
 
 
@@ -86,7 +86,7 @@ def test_every_console_script_loads_it():
 def test_the_backup_job_really_sees_the_file(tmp_path):
     """One end-to-end case behind the source scan: ct-ops is the entry point that was broken."""
     (tmp_path / ".env").write_text("CT_DOTENV_PROBE=reached\n")
-    script = ("import os; from conservative_trading.env import load_env; load_env(); "
+    script = ("import os; from agentic_trading.env import load_env; load_env(); "
               "print(os.environ.get('CT_DOTENV_PROBE', '<absent>'))")
     out = subprocess.run(
         [sys.executable, "-c", script], check=False,

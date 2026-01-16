@@ -6,7 +6,7 @@
 ``ct-risk-check`` what-if check against the current portfolio, no model call
 
 Approval never submits the stored order directly. It authorises the idea, and execution only
-proceeds if the world still supports it (see conservative_trading.execution).
+proceeds if the world still supports it (see agentic_trading.execution).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from .env import load_env
 from .evidence import collect_evidence, foreign_bucket_mentions
 from .execution import execute as execute_proposal
 from .execution import revalidate
-from .graph import ConservativeTradingGraph, classify_instrument
+from .graph import AgenticTradingGraph, classify_instrument
 from .llm.claude_code import USAGE_LOG, ClaudeCodeError, reset_usage_log, usage_summary
 from .policy import PolicyDecision, run_policy
 from .portfolio import (
@@ -165,7 +165,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     gov = ladders.for_bucket(bucket) if bucket != "core" else ladders.total
     _print(f"[{ticker}] ladder={gov.level} ({gov.drawdown_pct:+.2f}%) | regime={regime.level} | bucket cash=${snap.buckets[bucket].cash_usd:,.2f}")
 
-    graph = ConservativeTradingGraph(profiles, instrument_type=instrument_type, bucket=bucket, debug=debug,
+    graph = AgenticTradingGraph(profiles, instrument_type=instrument_type, bucket=bucket, debug=debug,
                                      portfolio_text=portfolio_text)
     try:
         final_state, pm_signal = graph.propagate(ticker, trade_date, asset_type=asset_type)

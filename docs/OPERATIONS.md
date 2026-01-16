@@ -1,4 +1,4 @@
-# Conservative AI Trading System
+# Agentic Trading — operations
 
 A conservative, portfolio-aware wrapper around the open-source
 [TradingAgents](https://github.com/TauricResearch/TradingAgents) framework.
@@ -59,7 +59,7 @@ and `ct-state backup`; never copy a live SQLite file as a backup.
 ## Brokers
 
 `config/risk_profile.yaml` selects the adapter. Broker code lives only behind
-`conservative_trading/broker/`; the research and risk layers never import a broker SDK.
+`agentic_trading/broker/`; the research and risk layers never import a broker SDK.
 
 | Adapter | Venue | Money | Use |
 |---|---|---|---|
@@ -186,7 +186,7 @@ uv run ct-approve <id>                         # authorise, revalidate, then may
 ### Pausing
 
 ```bash
-uv run python -c "from conservative_trading.api.service import Service; Service().pause('reason')"
+uv run python -c "from agentic_trading.api.service import Service; Service().pause('reason')"
 ```
 
 or `POST /system/pause`, or simply create the file `state/HALT`. Remove the file or call
@@ -226,12 +226,12 @@ The system calls Claude through the official Claude Code CLI in headless mode
 (`claude -p`) using your Claude Max login. No Anthropic API key is used or
 accepted:
 
-- `conservative_trading/llm/claude_code.py` strips `ANTHROPIC_API_KEY` and
+- `agentic_trading/llm/claude_code.py` strips `ANTHROPIC_API_KEY` and
   related variables before every call and never uses `--bare` (which would
   disable subscription login).
 - Built-in tools are disabled; the only tools the model can call are
   TradingAgents' own data tools, served over MCP by
-  `conservative_trading/llm/ta_tool_server.py`.
+  `agentic_trading/llm/ta_tool_server.py`.
 - A subscription limit stops the run with a clear message. Rerunning the same
   ticker and date resumes from the upstream checkpoint. There is no fallback
   to pay-as-you-go.

@@ -1,4 +1,4 @@
-"""HTTP layer over :mod:`conservative_trading.api.service`.
+"""HTTP layer over :mod:`agentic_trading.api.service`.
 
 Thin by design: each route calls one service function and returns its dict. FastAPI is used for
 one reason beyond routing, which is that it publishes an OpenAPI schema at ``/openapi.json``, so
@@ -77,7 +77,7 @@ async def lifespan(app):
 
 app = FastAPI(
     lifespan=lifespan,
-    title="Conservative Trading Backend",
+    title="Agentic Trading Backend",
     version="0.1.0",
     summary="Product interface for a conservative, human-approved investment system.",
     description=(
@@ -516,7 +516,7 @@ def main() -> None:
     # the request arrives as plain HTTP and the protocol is only knowable from a forwarded
     # header. Trust that header from loopback and nowhere else: otherwise anything that could
     # reach this port could claim HTTPS and the session cookie would lose its Secure flag.
-    uvicorn.run("conservative_trading.api.app:app", host=args.host, port=args.port,
+    uvicorn.run("agentic_trading.api.app:app", host=args.host, port=args.port,
                 reload=args.reload, proxy_headers=True, forwarded_allow_ips="127.0.0.1")
 
 

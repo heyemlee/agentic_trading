@@ -181,7 +181,7 @@
 - 真正要紧的不是这一次：**这次被发现纯粹是因为模型碰巧自己写进了 `missing_information`。
   当时没有任何代码在检查"报告在谈哪个账户"。**
 
-已补：`conservative_trading/evidence.py` 里的 `foreign_bucket_mentions()`。规则不是
+已补：`agentic_trading/evidence.py` 里的 `foreign_bucket_mentions()`。规则不是
 "提到了别的桶"——core 运行拿到的快照本来就同时列着 CORE 和 SANDBOX，写"本次不动 SANDBOX"
 是对的行为；规则是**报告在把一个从未出现在它快照里的账户当账户来谈**。对 10 次归档运行
 （110 个报告文件）实测：只命中那一次污染，其余 9 次零误报。

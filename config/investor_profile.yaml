@@ -129,7 +129,7 @@ llm:
   subscription_budget_note: "Max 5x: 5-hour session limit plus a weekly cap shared with interactive use; keep analyses per day small"
 
 tradingagents:                             # merged verbatim into upstream DEFAULT_CONFIG; keys are upstream names
-  llm_provider: claude_code                # handled by conservative_trading.llm, not by upstream's provider list
+  llm_provider: claude_code                # handled by agentic_trading.llm, not by upstream's provider list
   deep_think_llm: claude-opus-5
   quick_think_llm: claude-sonnet-5
   max_debate_rounds: 2                     # gives the Bear a rebuttal round

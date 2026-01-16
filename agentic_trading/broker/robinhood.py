@@ -250,7 +250,7 @@ class RobinhoodBroker:
         from mcp.shared.auth import OAuthClientMetadata
 
         metadata = OAuthClientMetadata(
-            client_name="conservative-trading (personal)",
+            client_name="agentic-trading (personal)",
             redirect_uris=["http://localhost:8765/callback"],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
@@ -440,7 +440,7 @@ class RobinhoodBroker:
         return [o for o in self._orders() if o.is_open]
 
     def get_order_by_client_id(self, client_order_id: str) -> BrokerOrder | None:
-        ref_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"conservative-trading:{client_order_id}"))
+        ref_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentic-trading:{client_order_id}"))
         return self._find_by_ref(ref_id, client_order_id)
 
     def _orders(self, **filters: Any) -> list[BrokerOrder]:
@@ -564,7 +564,7 @@ class RobinhoodBroker:
 
         # Idempotency: ref_id is the venue's key, a UUID derived deterministically from our
         # client order id, so a retry carries the same value and the venue rejects the duplicate.
-        ref_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"conservative-trading:{request.client_order_id}"))
+        ref_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentic-trading:{request.client_order_id}"))
         existing = self._find_by_ref(ref_id, request.client_order_id)
         if existing is not None:
             raise DuplicateOrder(f"an order for {request.client_order_id} already exists at Robinhood", existing)

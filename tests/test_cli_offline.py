@@ -4,10 +4,10 @@ import json
 import shutil
 from pathlib import Path
 
-from conservative_trading import cli, scenarios
-from conservative_trading.portfolio import build_snapshot
-from conservative_trading.profile import load_profiles
-from conservative_trading.state_db import StateDB
+from agentic_trading import cli, scenarios
+from agentic_trading.portfolio import build_snapshot
+from agentic_trading.profile import load_profiles
+from agentic_trading.state_db import StateDB
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_IDENTITY = {"company_name": "Test Fund", "quote_type": "ETF", "exchange": "PCX"}
@@ -31,9 +31,9 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     monkeypatch.setattr(cli, "assess_regime", lambda p, d: scenarios.regime("NORMAL"))
     monkeypatch.setattr(cli, "upstream_identity_lookup", scenarios.identity_lookup)
     monkeypatch.setattr("tradingagents.graph.trading_graph.resolve_instrument_identity", lambda t: FAKE_IDENTITY)
-    monkeypatch.setattr("conservative_trading.profile.build_tradingagents_config",
+    monkeypatch.setattr("agentic_trading.profile.build_tradingagents_config",
                         lambda p, runs_dir=None: _cfg(p, tmp_path))
-    monkeypatch.setattr("conservative_trading.graph.build_tradingagents_config",
+    monkeypatch.setattr("agentic_trading.graph.build_tradingagents_config",
                         lambda p, runs_dir=None: _cfg(p, tmp_path))
 
     code = cli.run_one(profiles, "VTI", scenarios.TRADE_DATE, "core", "etf", tmp_path / "runs", debug=False)

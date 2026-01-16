@@ -35,7 +35,7 @@ fi
 
 cd "$data_dir"
 
-# The same file the Python entry points read (conservative_trading/env.py). The shell scripts
+# The same file the Python entry points read (agentic_trading/env.py). The shell scripts
 # need it too: CT_BACKUP_MIRROR and CT_BACKUP_KEY_FILE are read by backup_state.sh, which never
 # enters Python, so a value that lived only in the process environment vanished at the next
 # restart with nothing to say it had. Only KEY=VALUE lines, and never over a value the caller

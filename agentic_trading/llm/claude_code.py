@@ -246,7 +246,7 @@ class ClaudeCodeChatModel(BaseChatModel):
     work_dir: str | None = None
     config_dir: str | None = None
     tool_names: list[str] = Field(default_factory=list)
-    tool_server_module: str = "conservative_trading.llm.ta_tool_server"
+    tool_server_module: str = "agentic_trading.llm.ta_tool_server"
     json_schema: dict[str, Any] | None = None
     role: str = "quick"
 

@@ -1,4 +1,4 @@
-"""ConservativeTradingGraph: the upstream TradingAgentsGraph, unmodified, with
+"""AgenticTradingGraph: the upstream TradingAgentsGraph, unmodified, with
 
 * the LLM layer swapped for the subscription-backed Claude Code adapter,
 * the conservative mandate and bucket context injected into every agent's
@@ -77,7 +77,7 @@ def classify_instrument(ticker: str, *, strict: bool = False) -> str:
     return "stock"
 
 
-class ConservativeTradingGraph(TradingAgentsGraph):
+class AgenticTradingGraph(TradingAgentsGraph):
     def __init__(
         self,
         profiles: Profiles,

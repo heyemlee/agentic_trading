@@ -277,7 +277,7 @@ def answer(profiles, context, message, history, language="zh", llm=None):
 def read_only_research(profiles, job, snapshot, notes):
     """Reuse the full upstream graph and the same policy mapping; never call an order store."""
     from .evidence import check_evidence, collect_evidence
-    from .graph import ConservativeTradingGraph, classify_instrument
+    from .graph import AgenticTradingGraph, classify_instrument
     from .llm.claude_code import USAGE_LOG, reset_usage_log, usage_summary
     from .policy import run_policy
     from .profile import build_tradingagents_config
@@ -308,7 +308,7 @@ def read_only_research(profiles, job, snapshot, notes):
                   output_language="Simplified Chinese" if task.get("language", "zh") == "zh" else "English")
     reset_usage_log()
     started = time.monotonic()
-    graph = ConservativeTradingGraph(profiles, instrument_type=kind, bucket="advisory",
+    graph = AgenticTradingGraph(profiles, instrument_type=kind, bucket="advisory",
                                      portfolio_text=context, config=config)
     final_state, rating = graph.propagate(ticker, job["trade_date"], asset_type="stock")
     report = graph.save_reports(final_state, ticker, root / "reports")

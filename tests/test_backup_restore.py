@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from conservative_trading import state_cli
-from conservative_trading.portfolio import load_portfolio, migrate_portfolio
-from conservative_trading.proposals import PROPOSED, ProposalStore
-from conservative_trading.stage3_scenarios import _proposal
-from conservative_trading.state_db import StateDB
+from agentic_trading import state_cli
+from agentic_trading.portfolio import load_portfolio, migrate_portfolio
+from agentic_trading.proposals import PROPOSED, ProposalStore
+from agentic_trading.stage3_scenarios import _proposal
+from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT
 
 
@@ -81,7 +81,7 @@ def test_a_database_written_with_absolute_keys_is_adopted_on_first_open(tmp_path
         conn.execute("INSERT INTO migrations VALUES(?,?,?,'2026-01-01')",
                      (legacy, "portfolio", None))
 
-    import conservative_trading.state_db as module
+    import agentic_trading.state_db as module
     module._relinked.clear()               # a fresh process opening the moved database
 
     reopened = StateDB(state / "proposals.json")
@@ -215,7 +215,7 @@ def test_reading_an_older_database_reports_gaps_and_changes_nothing(tmp_path):
                            "NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL)")
         connection.execute("INSERT INTO documents VALUES('portfolio.yaml','{}',1,'2026-01-01')")
 
-    import conservative_trading.state_db as module
+    import agentic_trading.state_db as module
     module._relinked.clear()
 
     db = StateDB(state / "proposals.json")

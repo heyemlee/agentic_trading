@@ -11,10 +11,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conservative_trading import notify
-from conservative_trading.api.service import Service
-from conservative_trading.proposals import PROPOSED, ProposalStore
-from conservative_trading.stage3_scenarios import _proposal
+from agentic_trading import notify
+from agentic_trading.api.service import Service
+from agentic_trading.proposals import PROPOSED, ProposalStore
+from agentic_trading.stage3_scenarios import _proposal
 from tests.conftest import ROOT
 
 

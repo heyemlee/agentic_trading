@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Conservative Trading console — shared chrome and helpers.
+ * Agentic Trading console — shared chrome and helpers.
  *
  * Reads window.CT: live pages receive same-origin API data; explicit demo
  * pages receive fixtures. The API layer tracks freshness independently.

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conservative_trading.research_jobs import ResearchJobManager, ResearchJobStore
+from agentic_trading.research_jobs import ResearchJobManager, ResearchJobStore
 
 
 def create_job(store, tmp_path, name="one", **overrides):
@@ -61,8 +61,8 @@ def test_dispatch_persists_worker_pid_and_uses_run_key(tmp_path, monkeypatch):
         calls.append((command, kwargs))
         return Process()
 
-    monkeypatch.setattr("conservative_trading.research_jobs.subprocess.Popen", popen)
-    monkeypatch.setattr("conservative_trading.research_jobs._scrubbed_environment", dict)
+    monkeypatch.setattr("agentic_trading.research_jobs.subprocess.Popen", popen)
+    monkeypatch.setattr("agentic_trading.research_jobs._scrubbed_environment", dict)
     assert mgr.dispatch() == ["dispatch"]
     assert mgr.store.get("dispatch")["pid"] == 4321
     assert calls[0][0][-2:] == ["--run-key", "dispatch"]
@@ -75,7 +75,7 @@ def test_orphaned_research_requeues_same_run_id(tmp_path, monkeypatch):
     mgr.store.claim(2)
     old = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     mgr.store.update("recover", {"started_at": old, "pid": 999_999}, expected_states=("RUNNING",))
-    monkeypatch.setattr("conservative_trading.research_jobs._worker_alive", lambda *_: False)
+    monkeypatch.setattr("agentic_trading.research_jobs._worker_alive", lambda *_: False)
     monkeypatch.setattr(mgr, "dispatch", list)
     result = mgr.tick()
     assert result["recovered"] == ["recover"]
@@ -90,7 +90,7 @@ def test_research_timeout_is_terminal_and_durable(tmp_path, monkeypatch):
     past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
     mgr.store.update("late", {"deadline_at": past, "pid": 4242}, expected_states=("RUNNING",))
     killed = []
-    monkeypatch.setattr("conservative_trading.research_jobs._terminate_worker",
+    monkeypatch.setattr("agentic_trading.research_jobs._terminate_worker",
                         lambda pid, key: killed.append((pid, key)) or True)
     monkeypatch.setattr(mgr, "dispatch", list)
     result = mgr.tick()
@@ -127,7 +127,7 @@ def test_restart_accepts_only_the_matching_decision_record(tmp_path, monkeypatch
 
 def test_the_suite_cannot_open_the_real_state_database():
     """The guard has to fail the offending test, not report a diff after the damage."""
-    from conservative_trading.state_db import StateDB
+    from agentic_trading.state_db import StateDB
     from tests.conftest import ROOT
 
     live = StateDB(ROOT / "state" / "proposals.json")
@@ -166,7 +166,7 @@ def test_cancelling_a_run_is_terminal_and_the_worker_cannot_overwrite_it(tmp_pat
     mgr.store.claim(2)
     mgr.store.update("unwanted", {"pid": 4242}, expected_states=("RUNNING",))
     killed = []
-    monkeypatch.setattr("conservative_trading.research_jobs._terminate_worker",
+    monkeypatch.setattr("agentic_trading.research_jobs._terminate_worker",
                         lambda pid, key: killed.append((pid, key)) or True)
 
     cancelled = mgr.cancel("unwanted", "cancelled from the console")

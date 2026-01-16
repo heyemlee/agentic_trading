@@ -159,7 +159,7 @@ def _post(url: str, body: dict[str, Any], token: str | None) -> dict[str, Any]:
     """
     request = urllib.request.Request(      # https-only: _https rejects anything else
         _https(url), data=json.dumps(body).encode(), method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "conservative-trading/1"})
+        headers={"Content-Type": "application/json", "User-Agent": "agentic-trading/1"})
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -268,7 +268,7 @@ def heartbeat(settings: Settings) -> dict[str, Any]:
     url = os.environ.get(settings.heartbeat_url_env, "").strip()
     if not url:
         return {"sent": False, "reason": f"{settings.heartbeat_url_env} is not set"}
-    _post(url, {"at": datetime.now(UTC).isoformat(), "source": "conservative-trading"}, None)
+    _post(url, {"at": datetime.now(UTC).isoformat(), "source": "agentic-trading"}, None)
     return {"sent": True, "at": datetime.now(UTC).isoformat()}
 
 

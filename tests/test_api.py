@@ -12,14 +12,14 @@ from datetime import timedelta
 
 import pytest
 
-from conservative_trading.api.service import Service, ServiceError
-from conservative_trading.api.status import (
+from agentic_trading.api.service import Service, ServiceError
+from agentic_trading.api.status import (
     MicroLiveStatus,
     ProposalStatus,
     SystemStatus,
     proposal_status,
 )
-from conservative_trading.proposals import (
+from agentic_trading.proposals import (
     APPROVED,
     EXECUTED,
     INVALIDATED,
@@ -28,7 +28,7 @@ from conservative_trading.proposals import (
     ProposalStore,
     utcnow,
 )
-from conservative_trading.stage3_scenarios import _proposal
+from agentic_trading.stage3_scenarios import _proposal
 from tests.conftest import ROOT
 
 
@@ -112,7 +112,7 @@ def test_proposal_status_covers_the_lifecycle(profiles):
 
 
 def test_micro_live_status_is_disabled_until_the_switch_is_flipped(profiles):
-    from conservative_trading.api.status import micro_live_status
+    from agentic_trading.api.status import micro_live_status
 
     assert micro_live_status(enabled=False, connected=True, preflight_ready=True,
                              open_proposal=None, profiles=profiles) == MicroLiveStatus.DISABLED
@@ -188,7 +188,7 @@ def test_pausing_stops_orders_while_research_keeps_running(sandbox_service, monk
     of the kill switch and the operations guide. It now runs, and only a status that makes
     research impossible stops it.
     """
-    from conservative_trading.triggers import scheduled_review
+    from agentic_trading.triggers import scheduled_review
 
     started = []
     monkeypatch.setattr(sandbox_service, "start_research",
@@ -241,7 +241,7 @@ def test_accounts_are_reported_separately_and_never_summed_into_one_drawdown(san
 
 def test_a_deposit_is_funding_and_never_a_return(sandbox_service):
     """Paying money in must move equity and funding by the same amount, leaving result alone."""
-    from conservative_trading.portfolio import record_cash_flow
+    from agentic_trading.portfolio import record_cash_flow
 
     ledger = sandbox_service.profiles().project_dir / "state" / "portfolio.yaml"
     before = sandbox_service.portfolio()["accounts"]["conceptual"]

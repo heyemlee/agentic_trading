@@ -3,16 +3,16 @@
 
 from tradingagents.agents.utils.rating import RATINGS_5_TIER
 
-from conservative_trading.graph import ConservativeTradingGraph
-from conservative_trading.llm.claude_code import (
+from agentic_trading.graph import AgenticTradingGraph
+from agentic_trading.llm.claude_code import (
     USAGE_LOG,
     ClaudeCodeChatModel,
     reset_usage_log,
     usage_summary,
 )
-from conservative_trading.policy import run_policy
-from conservative_trading.profile import build_tradingagents_config
-from conservative_trading.records import build_record, write_record
+from agentic_trading.policy import run_policy
+from agentic_trading.profile import build_tradingagents_config
+from agentic_trading.records import build_record, write_record
 
 FAKE_IDENTITY = {"company_name": "Test Fund", "sector": "Financial", "industry": "Asset Management",
                  "exchange": "PCX", "quote_type": "ETF"}
@@ -26,7 +26,7 @@ def test_full_run_offline(fake_claude, profiles, tmp_path, monkeypatch, real_aud
     cfg["checkpoint_enabled"] = False
 
     reset_usage_log()
-    graph = ConservativeTradingGraph(profiles, instrument_type="etf", bucket="core", config=cfg)
+    graph = AgenticTradingGraph(profiles, instrument_type="etf", bucket="core", config=cfg)
     state, signal = graph.propagate("VTI", "2026-09-02", asset_type="stock")
 
     assert signal in RATINGS_5_TIER

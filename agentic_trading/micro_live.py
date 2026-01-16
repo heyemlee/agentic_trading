@@ -80,7 +80,7 @@ def _resolve(profiles: Profiles, path_value: Any) -> Path:
 def _market_calendar_ok(broker: Any | None) -> tuple[bool, str]:
     """The session must come from a real exchange calendar, not a hand-maintained assumption."""
     try:
-        from conservative_trading.broker.robinhood import _nyse_calendar
+        from agentic_trading.broker.robinhood import _nyse_calendar
 
         cal = _nyse_calendar()
         import pandas as pd

@@ -12,14 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from conservative_trading.broker.base import (
+from agentic_trading.broker.base import (
     BrokerError,
     BrokerUnavailable,
     DuplicateOrder,
     OrderRequest,
 )
-from conservative_trading.broker.robinhood import RobinhoodBroker
-from conservative_trading.micro_live import bucket_is_executable, run_preflight
+from agentic_trading.broker.robinhood import RobinhoodBroker
+from agentic_trading.micro_live import bucket_is_executable, run_preflight
 
 # Shapes below mirror the real Robinhood MCP responses observed on 2026-09-03: every tool
 # answers {"data": ..., "guide": "..."}, accounts carry an explicit agentic_allowed flag, and
@@ -280,7 +280,7 @@ def test_research_runtime_cannot_reach_a_trading_tool(profiles):
 
 
 def test_micro_live_uses_its_own_ledger(profiles):
-    from conservative_trading.execution import _ledger_for
+    from agentic_trading.execution import _ledger_for
 
     assert _ledger_for(profiles, "micro_live").name == "micro_live_portfolio.yaml"
     assert _ledger_for(profiles, "core").name == "portfolio.yaml"
@@ -290,9 +290,9 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     """A funded Micro-Live proposal: approval, revalidation, Hard Risk, preflight, then one order."""
     import yaml
 
-    from conservative_trading.execution import execute
-    from conservative_trading.proposals import ProposalStore
-    from conservative_trading.stage3_scenarios import _proposal
+    from agentic_trading.execution import execute
+    from agentic_trading.proposals import ProposalStore
+    from agentic_trading.stage3_scenarios import _proposal
 
     ledger = tmp_path / "micro_live_portfolio.yaml"
     ledger.write_text(yaml.safe_dump({
@@ -314,10 +314,10 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     broker = make_broker(profiles, fake, enabled=True)
     from datetime import UTC, datetime
 
-    from conservative_trading.broker.base import Clock
-    from conservative_trading.scenarios import regime as fake_regime
+    from agentic_trading.broker.base import Clock
+    from agentic_trading.scenarios import regime as fake_regime
 
-    monkeypatch.setattr("conservative_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
+    monkeypatch.setattr("agentic_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
     monkeypatch.setattr(broker, "get_clock", lambda: Clock(is_open=True, timestamp=datetime.now(UTC)))
 
     proposal = _proposal(bucket="micro_live", notional=35.0, price=376.88, confidence=80)
@@ -335,7 +335,7 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     assert sent["time_in_force"] == "gfd" and sent["market_hours"] == "regular_hours"
     assert "ref_id" in sent
     assert any(n == "review_equity_order" for n, _ in fake.calls), "the venue pre-trade review must run first"
-    from conservative_trading.portfolio import load_portfolio
+    from agentic_trading.portfolio import load_portfolio
 
     updated = load_portfolio(ledger)
     assert updated.positions[0].symbol == "VTI"
@@ -350,7 +350,7 @@ def test_market_session_comes_from_the_exchange_calendar(profiles):
     """Holidays and half days come from exchange_calendars, not hand-maintained assumptions."""
     import pandas as pd
 
-    from conservative_trading.broker.robinhood import _nyse_calendar
+    from agentic_trading.broker.robinhood import _nyse_calendar
 
     cal = _nyse_calendar()
     assert cal.is_session(pd.Timestamp("2026-09-04")) is True        # an ordinary Friday
@@ -366,7 +366,7 @@ def test_market_session_comes_from_the_exchange_calendar(profiles):
 
 def test_calendar_failure_reports_the_market_closed(profiles, monkeypatch):
     """An unavailable calendar must never permit an order."""
-    import conservative_trading.broker.robinhood as R
+    import agentic_trading.broker.robinhood as R
 
     monkeypatch.setattr(R, "_nyse_calendar", lambda: (_ for _ in ()).throw(RuntimeError("no calendar")))
     broker = make_broker(profiles, FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS}))
@@ -403,11 +403,11 @@ def test_partial_fill_reconciles_only_what_filled(profiles, tmp_path, monkeypatc
 
     import yaml
 
-    from conservative_trading.broker.base import Clock
-    from conservative_trading.execution import execute
-    from conservative_trading.proposals import ProposalStore
-    from conservative_trading.scenarios import regime as fake_regime
-    from conservative_trading.stage3_scenarios import _proposal
+    from agentic_trading.broker.base import Clock
+    from agentic_trading.execution import execute
+    from agentic_trading.proposals import ProposalStore
+    from agentic_trading.scenarios import regime as fake_regime
+    from agentic_trading.stage3_scenarios import _proposal
 
     ledger = tmp_path / "micro_live_portfolio.yaml"
     ledger.write_text(yaml.safe_dump({"as_of": "2026-09-02", "currency": "USD",
@@ -418,7 +418,7 @@ def test_partial_fill_reconciles_only_what_filled(profiles, tmp_path, monkeypatc
                "quantity": "0.0929", "cumulative_quantity": "0.0400", "average_price": "378.39"}
     broker, _ = _order_flow_broker(profiles, partial,
                                    orders_after={"data": {"orders": []}})
-    monkeypatch.setattr("conservative_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
+    monkeypatch.setattr("agentic_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
     monkeypatch.setattr(broker, "get_clock", lambda: Clock(is_open=True, timestamp=datetime.now(UTC)))
     monkeypatch.setattr(broker, "poll_order", lambda oid, **kw: broker._order(partial))
 
@@ -432,7 +432,7 @@ def test_partial_fill_reconciles_only_what_filled(profiles, tmp_path, monkeypatc
     assert result.order["status"] == "partially_filled"
     saved = store.get(proposal.proposal_id)
     assert any(h["event"] == "pending" for h in saved.history), "a partial fill must be flagged as pending"
-    from conservative_trading.portfolio import load_portfolio
+    from agentic_trading.portfolio import load_portfolio
 
     updated = load_portfolio(ledger)
     assert updated.positions[0].quantity == 0.04, "only the filled quantity is recorded"

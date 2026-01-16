@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conservative_trading.advisor import (
+from agentic_trading.advisor import (
     NOTES,
     READ_TOOLS,
     SNAPSHOT,
@@ -18,11 +18,11 @@ from conservative_trading.advisor import (
     read_only_research,
     run_task,
 )
-from conservative_trading.api.service import ServiceConflict, ServiceError
-from conservative_trading.broker.base import BrokerUnavailable
-from conservative_trading.broker.robinhood import RobinhoodBroker
-from conservative_trading.records import write_record
-from conservative_trading.research_jobs import ResearchJobManager
+from agentic_trading.api.service import ServiceConflict, ServiceError
+from agentic_trading.broker.base import BrokerUnavailable
+from agentic_trading.broker.robinhood import RobinhoodBroker
+from agentic_trading.records import write_record
+from agentic_trading.research_jobs import ResearchJobManager
 from tests.test_api import sandbox_service  # noqa: F401 - shared isolated fixture
 from tests.test_robinhood import FakeMCP
 
@@ -136,7 +136,7 @@ def test_chat_survives_reload_and_uses_profile_history_and_existing_decisions(as
         captured.update(context=context, message=message, history=history)
         return {"answer": "I see your home purchase plan.", "research_candidates": []}
 
-    monkeypatch.setattr("conservative_trading.advisor.answer", reply)
+    monkeypatch.setattr("agentic_trading.advisor.answer", reply)
     s.advisor_notes("Home purchase in 2 years", 0)
     job = s.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="What fits my plan?")
     assert run_task(s.profiles(), job) == 0
@@ -155,7 +155,7 @@ def test_chat_survives_reload_and_uses_profile_history_and_existing_decisions(as
 
 def test_shortlist_only_returns_candidates_from_sources(assistant_service, monkeypatch):
     s = assistant_service
-    monkeypatch.setattr("conservative_trading.advisor.answer", lambda *args: {
+    monkeypatch.setattr("agentic_trading.advisor.answer", lambda *args: {
         "answer": "Research priorities", "research_candidates": [
             {"symbol": "VTI", "reason": "Existing universe"}, {"symbol": "MADEUP", "reason": "invented"}]})
     job = s.start_advisor(kind="shortlist", request_id=str(uuid.uuid4()), message="Find candidates")
@@ -179,10 +179,10 @@ def test_batch_review_reports_deferred_budget_and_idempotent_retry(assistant_ser
 def test_readonly_analysis_reuses_upstream_graph_and_cannot_create_proposals(
         assistant_service, fake_claude, monkeypatch, real_audit_guard):
     s = assistant_service
-    monkeypatch.setattr("conservative_trading.graph.classify_instrument", lambda _, **kwargs: "etf")
+    monkeypatch.setattr("agentic_trading.graph.classify_instrument", lambda _, **kwargs: "etf")
     monkeypatch.setattr("tradingagents.graph.trading_graph.resolve_instrument_identity", lambda _: {
         "company_name": "Test ETF", "quote_type": "ETF", "exchange": "PCX"})
-    monkeypatch.setattr("conservative_trading.proposals.ProposalStore.save",
+    monkeypatch.setattr("agentic_trading.proposals.ProposalStore.save",
                         lambda *a, **k: pytest.fail("read-only research created an order proposal"))
     job = s.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="VTI", account_id="a" * 20)
     record = read_only_research(s.profiles(), job, snapshot(), "My home purchase")
@@ -205,7 +205,7 @@ def test_readonly_analysis_requires_the_selected_holding_to_exist(assistant_serv
 
 @pytest.mark.parametrize("quote_type", ["MUTUALFUND", "OPTION", ""])
 def test_advisory_classification_rejects_unsupported_or_unknown_funds(quote_type, monkeypatch):
-    from conservative_trading.graph import classify_instrument
+    from agentic_trading.graph import classify_instrument
 
     monkeypatch.setattr("tradingagents.agents.utils.agent_utils.resolve_instrument_identity",
                         lambda _: {"quote_type": quote_type})
@@ -215,7 +215,7 @@ def test_advisory_classification_rejects_unsupported_or_unknown_funds(quote_type
 def test_assistant_reuses_cli_and_only_upstream_read_tools(assistant_service, fake_claude):
     result = answer(assistant_service.profiles(), {"snapshot": snapshot()}, "My risks?", [])
     assert AssistantReply.model_validate(result).answer
-    from conservative_trading.llm.claude_code import ClaudeCodeChatModel
+    from agentic_trading.llm.claude_code import ClaudeCodeChatModel
 
     command = ClaudeCodeChatModel()._build_command("personal context")
     assert "--strict-mcp-config" in command and command[command.index("--tools") + 1] == ""
@@ -241,7 +241,7 @@ def test_assistant_removes_only_trailing_serialization_markers(profiles):
 def test_assistant_routes_are_authenticated_and_reject_order_fields(assistant_service, auth_client, monkeypatch):
     from importlib import import_module
 
-    monkeypatch.setattr(import_module("conservative_trading.api.app"), "_service", assistant_service)
+    monkeypatch.setattr(import_module("agentic_trading.api.app"), "_service", assistant_service)
     assert auth_client.get("/advisor").status_code == 200
     response = auth_client.post("/advisor/jobs", json={"kind": "chat", "request_id": str(uuid.uuid4()),
                                                      "message": "My risks?", "place_order": True})
@@ -283,8 +283,8 @@ def test_offline_chat_discloses_staleness_and_retains_saved_context(assistant_se
         captured.update(context)
         return {"answer": "Saved data is stale", "research_candidates": []}
 
-    monkeypatch.setattr("conservative_trading.advisor.fetch_snapshot", offline)
-    monkeypatch.setattr("conservative_trading.advisor.answer", reply)
+    monkeypatch.setattr("agentic_trading.advisor.fetch_snapshot", offline)
+    monkeypatch.setattr("agentic_trading.advisor.answer", reply)
     job = s.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="My holdings?")
     assert run_task(s.profiles(), job) == 0
     assert captured["snapshot"]["stale"] and captured["snapshot"]["errors"]
@@ -292,7 +292,7 @@ def test_offline_chat_discloses_staleness_and_retains_saved_context(assistant_se
 
 
 def test_advisory_jobs_do_not_pollute_the_declared_investment_study():
-    from conservative_trading.evaluation import _decisions
+    from agentic_trading.evaluation import _decisions
 
     data = _decisions([
         {"bucket": "advisory", "trade_date": "2026-09-09", "final_action": "BUY"},
@@ -303,7 +303,7 @@ def test_advisory_jobs_do_not_pollute_the_declared_investment_study():
 
 
 def test_refresh_does_not_spend_research_allowance(assistant_service):
-    from conservative_trading.schedule import analyses_today, settings
+    from agentic_trading.schedule import analyses_today, settings
 
     s = assistant_service
     s.start_advisor(kind="refresh", request_id=str(uuid.uuid4()))

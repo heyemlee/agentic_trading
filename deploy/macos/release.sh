@@ -75,7 +75,7 @@ activate() {                              # point launchd at a release and prove
   done
 
   ln -sfn "$release" "$current_link"
-  "$(venv_for "$release")/python" -m conservative_trading.launchd \
+  "$(venv_for "$release")/python" -m agentic_trading.launchd \
     --data-dir "$data_dir" --release-dir "$release" --launch-agents "$launch_agents"
 
   local after
@@ -157,7 +157,7 @@ publish)
   previous=""
   [[ -L "$current_link" ]] && previous="$(cd "$current_link" && pwd -P)"
   activate "$release" "$previous"
-  "$(venv_for "$release")/python" -m conservative_trading.operations heartbeat \
+  "$(venv_for "$release")/python" -m agentic_trading.operations heartbeat \
     --config-dir "$data_dir/config" --activity maintenance --detail "published $name" >/dev/null
   print -r -- "published $name; the previous release is kept for rollback"
   ;;

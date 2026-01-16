@@ -1,4 +1,4 @@
-# Conservative Trading — console
+# Agentic Trading — console
 
 Frontend for the local API in `agentic_trading`. Seven screens, one shared
 asset layer, no build step.
@@ -21,7 +21,7 @@ assets/data.js       sanitized fixtures from docs/examples/
 
 ## Serving it
 
-Already wired. `conservative_trading/api/app.py` mounts this folder at `/ui`
+Already wired. `agentic_trading/api/app.py` mounts this folder at `/ui`
 when it exists, so the console is same-origin with the API and no CORS
 middleware is needed.
 

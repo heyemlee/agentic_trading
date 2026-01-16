@@ -3,7 +3,7 @@ import shutil
 import pytest
 import yaml
 
-from conservative_trading.profile import ProfileError, build_tradingagents_config, load_profiles
+from agentic_trading.profile import ProfileError, build_tradingagents_config, load_profiles
 
 
 def test_real_profiles_load_in_execution_capable_stage(profiles):

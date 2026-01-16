@@ -48,7 +48,7 @@ for label in "${labels[@]}"; do
   before_reload[$label]="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
 done
 
-"$project_dir/.venv/bin/python" -m conservative_trading.launchd \
+"$project_dir/.venv/bin/python" -m agentic_trading.launchd \
   --data-dir "$project_dir" --launch-agents "$launch_agents" "${origin_args[@]}"
 
 chmod 700 "$project_dir/deploy/macos/"*.sh

@@ -33,10 +33,10 @@
 
 | 方向 | 具体实现 |
 | --- | --- |
-| **Agent 编排** | 为各角色注入持仓上下文和投资约束；按标的类型选择分析师，为不同角色配置模型和推理强度。[代码](conservative_trading/graph.py) |
-| **运行时与工具调用** | 实现兼容 LangChain 的 Claude Code 适配器，支持 MCP 数据工具白名单、结构化输出及工具调用记录。[代码](conservative_trading/llm/claude_code.py) |
-| **决策权限边界** | 用 Pydantic 定义提案，通过确定性代码映射动作，在审批前和执行前分别检查风险。[策略](conservative_trading/policy.py) · [执行](conservative_trading/execution.py) |
-| **可靠性与评估** | 持久化研究任务、幂等订单处理、SQLite 审计状态，以及对照被动基准的前瞻评估。[任务](conservative_trading/research_jobs.py) · [评估](conservative_trading/evaluation.py) |
+| **Agent 编排** | 为各角色注入持仓上下文和投资约束；按标的类型选择分析师，为不同角色配置模型和推理强度。[代码](agentic_trading/graph.py) |
+| **运行时与工具调用** | 实现兼容 LangChain 的 Claude Code 适配器，支持 MCP 数据工具白名单、结构化输出及工具调用记录。[代码](agentic_trading/llm/claude_code.py) |
+| **决策权限边界** | 用 Pydantic 定义提案，通过确定性代码映射动作，在审批前和执行前分别检查风险。[策略](agentic_trading/policy.py) · [执行](agentic_trading/execution.py) |
+| **可靠性与评估** | 持久化研究任务、幂等订单处理、SQLite 审计状态，以及对照被动基准的前瞻评估。[任务](agentic_trading/research_jobs.py) · [评估](agentic_trading/evaluation.py) |
 
 离线测试通过模拟模型运行时验证 Agent 研究图，并覆盖工具隔离、策略失败和执行恢复。[查看测试 →](tests)
 

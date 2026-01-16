@@ -12,8 +12,8 @@ import shutil
 
 import pytest
 
-from conservative_trading import webpush
-from conservative_trading.api.service import Service
+from agentic_trading import webpush
+from agentic_trading.api.service import Service
 from tests.conftest import ROOT
 
 ENDPOINT = "https://web.push.apple.com/QABC123-secret-capability-url"
@@ -65,7 +65,7 @@ def test_the_same_device_resubscribing_replaces_rather_than_duplicates(service):
 
 
 def test_a_malformed_subscription_is_refused(service):
-    from conservative_trading.api.service import ServiceError
+    from agentic_trading.api.service import ServiceError
 
     for bad in ({"endpoint": "http://insecure.example/x", "keys": SUBSCRIPTION["keys"]},
                 {"endpoint": ENDPOINT}, {"endpoint": ENDPOINT, "keys": {"p256dh": "x"}}, {}):
@@ -154,7 +154,7 @@ def test_the_app_shell_is_reachable_before_signing_in(console_auth):
     """Add to Home Screen happens from the login screen, before any session exists."""
     from fastapi.testclient import TestClient
 
-    from conservative_trading.api.app import app
+    from agentic_trading.api.app import app
 
     client = TestClient(app, base_url="https://testserver")
     for path in ("/ui/manifest.webmanifest", "/ui/sw.js", "/ui/icons/icon-180.png",
@@ -170,7 +170,7 @@ def test_subscribing_needs_a_session_and_a_csrf_token(auth_client, console_auth)
     """A subscription endpoint is a capability; writing one is an authenticated action."""
     from fastapi.testclient import TestClient
 
-    from conservative_trading.api.app import app
+    from agentic_trading.api.app import app
 
     anonymous = TestClient(app, base_url="https://testserver", headers={
         "Origin": "https://testserver", "X-CT-Request": "1"})

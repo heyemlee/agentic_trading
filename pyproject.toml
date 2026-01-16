@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "conservative-trading"
+name = "agentic-trading"
 version = "0.1.0"
 description = "Conservative, portfolio-aware wrapper around TradingAgents: subscription-backed LLM adapter, conservative policy step, deterministic risk enforcement (later stages)."
 requires-python = ">=3.12,<3.13"
@@ -25,21 +25,21 @@ dependencies = [
 ]
 
 [project.scripts]
-ct-research = "conservative_trading.cli:main"
-ct-risk-check = "conservative_trading.cli:risk_check_main"
-ct-scenarios = "conservative_trading.scenarios:main"
-ct-stage3 = "conservative_trading.stage3_scenarios:main"
-ct-approve = "conservative_trading.cli:approve_main"
-ct-proposals = "conservative_trading.cli:proposals_main"
-ct-robinhood = "conservative_trading.robinhood_cli:main"
-ct-api = "conservative_trading.api.app:main"
-ct-auth = "conservative_trading.api.auth:main"
-ct-reconcile = "conservative_trading.reconciliation:main"
-ct-trigger = "conservative_trading.triggers:main"
-ct-state = "conservative_trading.state_cli:main"
-ct-ops = "conservative_trading.operations:main"
-ct-notify = "conservative_trading.notify_cli:main"
-ct-evaluate = "conservative_trading.evaluate_cli:main"
+ct-research = "agentic_trading.cli:main"
+ct-risk-check = "agentic_trading.cli:risk_check_main"
+ct-scenarios = "agentic_trading.scenarios:main"
+ct-stage3 = "agentic_trading.stage3_scenarios:main"
+ct-approve = "agentic_trading.cli:approve_main"
+ct-proposals = "agentic_trading.cli:proposals_main"
+ct-robinhood = "agentic_trading.robinhood_cli:main"
+ct-api = "agentic_trading.api.app:main"
+ct-auth = "agentic_trading.api.auth:main"
+ct-reconcile = "agentic_trading.reconciliation:main"
+ct-trigger = "agentic_trading.triggers:main"
+ct-state = "agentic_trading.state_cli:main"
+ct-ops = "agentic_trading.operations:main"
+ct-notify = "agentic_trading.notify_cli:main"
+ct-evaluate = "agentic_trading.evaluate_cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.5"]
@@ -48,7 +48,7 @@ dev = ["pytest>=8.0", "ruff>=0.5"]
 tradingagents = { git = "https://github.com/TauricResearch/TradingAgents", rev = "9dee508c44662702281a8dbaad1f7b42179b5ba7" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["conservative_trading"]
+packages = ["agentic_trading"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

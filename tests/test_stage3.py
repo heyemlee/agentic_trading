@@ -2,9 +2,9 @@
 
 import pytest
 
-from conservative_trading.broker import SimulatedBroker
-from conservative_trading.broker.base import BrokerRejection, DuplicateOrder, OrderRequest
-from conservative_trading.proposals import (
+from agentic_trading.broker import SimulatedBroker
+from agentic_trading.broker.base import BrokerRejection, DuplicateOrder, OrderRequest
+from agentic_trading.proposals import (
     EXPIRED,
     STALE,
     VALID,
@@ -12,7 +12,7 @@ from conservative_trading.proposals import (
     client_order_id,
     positions_fingerprint,
 )
-from conservative_trading.stage3_scenarios import (
+from agentic_trading.stage3_scenarios import (
     _proposal,
     build_cases,
     run_case,

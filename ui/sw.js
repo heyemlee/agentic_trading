@@ -18,16 +18,16 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch (e) {
-    payload = { title: 'Conservative Trading', detail: 'A notification arrived unreadable.' };
+    payload = { title: 'Agentic Trading', detail: 'A notification arrived unreadable.' };
   }
-  const title = payload.title || 'Conservative Trading';
+  const title = payload.title || 'Agentic Trading';
   event.waitUntil(self.registration.showNotification(title, {
     body: payload.detail || '',
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
     /* One notification per event key: a standing condition replaces its own banner
        instead of stacking a new one every quiet period. */
-    tag: payload.key || 'conservative-trading',
+    tag: payload.key || 'agentic-trading',
     renotify: Boolean(payload.urgent),
     requireInteraction: Boolean(payload.urgent),
     data: { link: payload.link || 'index.html' },

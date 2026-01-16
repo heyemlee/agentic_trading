@@ -1049,7 +1049,7 @@ class Service:
         profiles = self.profiles()
         try:
             return webpush.deliver(self.state_db(profiles), profiles.project_dir / "state", {
-                "title": "Conservative Trading",
+                "title": "Agentic Trading",
                 "detail": "Notifications reach this device.",
                 "link": "index.html", "key": "test", "urgent": False})
         except webpush.PushError as exc:
@@ -1356,7 +1356,7 @@ def _fred_configured(profiles: Profiles) -> bool:
     This used to read the environment and then fall back to parsing .env itself, which meant the
     health page could answer from the file while the process doing the fetching had nothing —
     the warning would go quiet without the data arriving. The file is now loaded into the
-    environment at every entry point (:mod:`conservative_trading.env`), so there is one answer
+    environment at every entry point (:mod:`agentic_trading.env`), so there is one answer
     and it is the one the fetcher sees.
     """
     import os

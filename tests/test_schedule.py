@@ -10,11 +10,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conservative_trading import schedule
-from conservative_trading.api.service import Service
-from conservative_trading.profile import load_profiles
-from conservative_trading.state_db import StateDB
-from conservative_trading.triggers import scheduled_review
+from agentic_trading import schedule
+from agentic_trading.api.service import Service
+from agentic_trading.profile import load_profiles
+from agentic_trading.state_db import StateDB
+from agentic_trading.triggers import scheduled_review
 from tests.conftest import ROOT
 
 FRIDAY_AFTER_CLOSE = datetime(2026, 9, 4, 21, 0, tzinfo=UTC)     # 17:00 New York
@@ -127,7 +127,7 @@ def test_an_unusable_system_state_skips_with_the_reason(sandbox):
 def test_next_run_is_read_from_the_same_configuration_the_job_is_written_from(cfg):
     from zoneinfo import ZoneInfo
 
-    from conservative_trading.launchd import research_interval
+    from agentic_trading.launchd import research_interval
 
     pacific = ZoneInfo("America/Los_Angeles")
     upcoming = datetime.fromisoformat(

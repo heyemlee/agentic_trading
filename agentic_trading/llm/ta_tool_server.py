@@ -46,7 +46,7 @@ def build_server(tool_names: list[str], config_dir: str | None):
     from tradingagents.agents.utils import agent_utils
     from tradingagents.dataflows.config import set_config
 
-    from conservative_trading.profile import build_tradingagents_config, load_profiles
+    from agentic_trading.profile import build_tradingagents_config, load_profiles
 
     profiles = load_profiles(config_dir or "config")
     set_config(build_tradingagents_config(profiles))

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from conservative_trading.api.app import app
-from conservative_trading.api.auth import COOKIE, ConsoleAuth, configure_password
+from agentic_trading.api.app import app
+from agentic_trading.api.auth import COOKIE, ConsoleAuth, configure_password
 
 
 @pytest.mark.parametrize('path', ['/health', '/portfolio', '/risk', '/orders', '/proposals', '/research', '/openapi.json'])
@@ -17,7 +17,7 @@ def test_business_reads_require_login(console_auth, path):
 
 
 def test_missing_configuration_is_closed(monkeypatch, tmp_path):
-    module = import_module('conservative_trading.api.app')
+    module = import_module('agentic_trading.api.app')
     monkeypatch.setattr(module, '_auth', ConsoleAuth(tmp_path / 'absent', ['https://testserver']))
     client = TestClient(app, base_url='https://testserver')
     assert client.get('/portfolio').status_code == 503
@@ -27,7 +27,7 @@ def test_missing_configuration_is_closed(monkeypatch, tmp_path):
 
 def test_external_origin_empty_approval_and_resume_never_reach_service(auth_client, monkeypatch):
     calls = []
-    module = import_module('conservative_trading.api.app')
+    module = import_module('agentic_trading.api.app')
     monkeypatch.setattr(module, '_service', SimpleNamespace(
         approve=lambda *args, **kwargs: calls.append('approve'), resume=lambda: calls.append('resume')))
     for path in ['/proposals/example/approve', '/system/resume']:
@@ -67,7 +67,7 @@ def test_password_rotation_revokes_sessions(auth_client, console_auth):
 
 
 def test_session_survives_auth_object_restart(auth_client, console_auth, monkeypatch):
-    module = import_module('conservative_trading.api.app')
+    module = import_module('agentic_trading.api.app')
     restarted = ConsoleAuth(console_auth.path, ['https://testserver'])
     monkeypatch.setattr(module, '_auth', restarted)
     session = auth_client.get('/auth/session').json()
@@ -88,7 +88,7 @@ def test_expiry_and_rate_limit(auth_client, console_auth):
 
 def test_identity_is_from_session_not_payload(auth_client, monkeypatch):
     calls = []
-    module = import_module('conservative_trading.api.app')
+    module = import_module('agentic_trading.api.app')
     monkeypatch.setattr(module, '_service', SimpleNamespace(approve=lambda *args, **kwargs: calls.append(kwargs) or {}))
     body = {'confirm': True, 'version': 'a' * 64, 'idempotency_key': '77197e1a-bdeb-48f7-a807-f425365bc705',
             'ticker': 'VTI', 'bucket': 'micro_live', 'action': 'BUY', 'notional_usd': 35}
@@ -171,7 +171,7 @@ def test_revoking_the_device_you_are_holding_signs_it_out_here_too(console_auth)
 
 def test_use_records_activity_but_never_buys_more_time(console_auth, monkeypatch):
     """A console left polling in a browser tab must not keep a session alive forever."""
-    from conservative_trading.api import auth as auth_module
+    from agentic_trading.api import auth as auth_module
 
     client = sign_in(console_auth, LAPTOP)
     first = client.get('/auth/sessions').json()['sessions'][0]
@@ -238,8 +238,8 @@ def test_upgrading_a_deployed_database_keeps_its_sessions(tmp_path):
     """
     import sqlite3
 
-    from conservative_trading.api.auth import ConsoleAuth, configure_password
-    from conservative_trading.state_db import StateDB
+    from agentic_trading.api.auth import ConsoleAuth, configure_password
+    from agentic_trading.state_db import StateDB
 
     path = tmp_path / 'auth.json'
     configure_password(path, 'test-owner', 'test-only-password-for-console')
@@ -313,9 +313,9 @@ def test_every_write_to_a_migrated_table_names_its_columns():
     from tests.conftest import ROOT
 
     migrated = {table for table, _column, _kind in
-                __import__('conservative_trading.state_db', fromlist=['StateDB']).StateDB.ADDED_COLUMNS}
+                __import__('agentic_trading.state_db', fromlist=['StateDB']).StateDB.ADDED_COLUMNS}
     offenders = []
-    for path in sorted((ROOT / 'conservative_trading').rglob('*.py')):
+    for path in sorted((ROOT / 'agentic_trading').rglob('*.py')):
         for table in migrated:
             if re.search(rf'INSERT\s+INTO\s+{table}\s+VALUES', path.read_text()):
                 offenders.append(f'{path.name}: positional INSERT into {table}')

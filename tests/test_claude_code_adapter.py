@@ -3,7 +3,7 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from conservative_trading.llm.claude_code import (
+from agentic_trading.llm.claude_code import (
     USAGE_LOG,
     ClaudeCodeChatModel,
     ClaudeCodeError,
@@ -92,7 +92,7 @@ def test_mcp_config_points_at_our_tool_server(tmp_path):
     args = llm._mcp_args()
     cfg = json.loads(args[args.index("--mcp-config") + 1])
     server = cfg["mcpServers"]["ta"]
-    assert server["args"][:2] == ["-m", "conservative_trading.llm.ta_tool_server"]
+    assert server["args"][:2] == ["-m", "agentic_trading.llm.ta_tool_server"]
     assert server["args"][-1] == "get_news" and server["env"]["CT_CONFIG_DIR"] == "/cfg"
 
 
@@ -103,6 +103,6 @@ def test_mcp_config_points_at_our_tool_server(tmp_path):
     "Usage limit reached for this period",
 ])
 def test_real_limit_wordings_are_classified(text):
-    from conservative_trading.llm.claude_code import _LIMIT_RE
+    from agentic_trading.llm.claude_code import _LIMIT_RE
 
     assert _LIMIT_RE.search(text)

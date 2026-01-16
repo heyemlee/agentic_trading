@@ -6,12 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from conservative_trading import execution
-from conservative_trading.api.service import Service, ServiceConflict
-from conservative_trading.api.status import ProposalStatus, proposal_status
-from conservative_trading.broker.base import BrokerUnavailable, Quote
-from conservative_trading.portfolio import load_portfolio, snapshot_from_broker
-from conservative_trading.proposals import (
+from agentic_trading import execution
+from agentic_trading.api.service import Service, ServiceConflict
+from agentic_trading.api.status import ProposalStatus, proposal_status
+from agentic_trading.broker.base import BrokerUnavailable, Quote
+from agentic_trading.portfolio import load_portfolio, snapshot_from_broker
+from agentic_trading.proposals import (
     CANCELED,
     EXECUTED,
     PARTIALLY_FILLED,
@@ -20,9 +20,9 @@ from conservative_trading.proposals import (
     UNKNOWN,
     ProposalStore,
 )
-from conservative_trading.scenarios import identity_lookup, regime
-from conservative_trading.stage3_scenarios import _std
-from conservative_trading.state_db import StateDB
+from agentic_trading.scenarios import identity_lookup, regime
+from agentic_trading.stage3_scenarios import _std
+from agentic_trading.state_db import StateDB
 
 
 @pytest.fixture(autouse=True)
@@ -230,7 +230,7 @@ def test_service_recovery_does_not_submit(tmp_path, monkeypatch):
 
 
 def test_simulated_venue_recovers_after_broker_and_service_restart(tmp_path, monkeypatch):
-    from conservative_trading.broker.simulated import SimulatedBroker
+    from agentic_trading.broker.simulated import SimulatedBroker
 
     profiles, p, _, ledger, store = setup(tmp_path)
     venue_state = tmp_path / 'venue-orders.json'
@@ -277,7 +277,7 @@ def test_preview_is_read_only_and_does_not_require_existing_approval(tmp_path, m
 
 
 def test_disabled_micro_switch_does_not_disable_order_reads(tmp_path, monkeypatch):
-    from conservative_trading.broker import robinhood
+    from agentic_trading.broker import robinhood
 
     profiles, p, broker, ledger, store = setup(tmp_path, 'none')
     execution.execute(profiles, p, broker, store, ledger_path=str(ledger))

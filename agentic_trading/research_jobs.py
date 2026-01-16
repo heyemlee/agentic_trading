@@ -159,7 +159,7 @@ class ResearchJobManager:
         launched: list[str] = []
         for job in self.store.claim(self.max_concurrent):
             command = [
-                sys.executable, "-m", "conservative_trading.research_worker",
+                sys.executable, "-m", "agentic_trading.research_worker",
                 "--config-dir", str(self.config_dir), "--run-key", job["run_key"],
             ]
             try:
@@ -305,7 +305,7 @@ def _worker_alive(pid: int | None, run_key: str) -> bool:
     except (OSError, ValueError, TypeError):
         return False
     command = _worker_command(int(pid))
-    return "conservative_trading.research_worker" in command and run_key in command
+    return "agentic_trading.research_worker" in command and run_key in command
 
 
 def _terminate_worker(pid: int | None, run_key: str) -> bool:

@@ -9,12 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def console_auth(monkeypatch, tmp_path):
     from importlib import import_module
 
-    from conservative_trading.api.auth import ConsoleAuth, configure_password
+    from agentic_trading.api.auth import ConsoleAuth, configure_password
 
     path = tmp_path / "auth.json"
     configure_password(path, "test-owner", "test-only-password-for-console")
     auth = ConsoleAuth(path, ["https://testserver"])
-    monkeypatch.setattr(import_module("conservative_trading.api.app"), "_auth", auth)
+    monkeypatch.setattr(import_module("agentic_trading.api.app"), "_auth", auth)
     return auth
 
 
@@ -22,7 +22,7 @@ def console_auth(monkeypatch, tmp_path):
 def auth_client(console_auth):
     from fastapi.testclient import TestClient
 
-    from conservative_trading.api.app import app
+    from agentic_trading.api.app import app
 
     client = TestClient(app, base_url="https://testserver")
     client.headers.update({"Origin": "https://testserver", "X-CT-Request": "1"})
@@ -45,7 +45,7 @@ def fake_claude(monkeypatch, tmp_path):
 
 @pytest.fixture
 def profiles():
-    from conservative_trading.profile import load_profiles
+    from agentic_trading.profile import load_profiles
 
     return load_profiles(ROOT / "config")
 
@@ -90,7 +90,7 @@ def real_state_guard(monkeypatch):
       deployed API checkpoints its own WAL while the suite runs, which is not a test writing.
     * every other file in state/ is compared before and after, which also catches a new file.
     """
-    from conservative_trading import state_db
+    from agentic_trading import state_db
 
     live_directory = (ROOT / "state").resolve()
 

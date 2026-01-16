@@ -1,6 +1,6 @@
 
 
-from conservative_trading.policy import ConservativeProposal, deterministic_action, run_policy
+from agentic_trading.policy import ConservativeProposal, deterministic_action, run_policy
 
 
 def act(profiles, rating, **kw):
@@ -59,7 +59,7 @@ def test_sell_with_position_is_sell(profiles):
 
 
 def test_run_policy_fails_closed_on_low_confidence(fake_claude, profiles, tmp_path, real_audit_guard):
-    from conservative_trading.llm.claude_code import ClaudeCodeChatModel
+    from agentic_trading.llm.claude_code import ClaudeCodeChatModel
 
     state = {"market_report": "m", "news_report": "n", "investment_plan": "p",
              "trader_investment_plan": "t", "final_trade_decision": "**Rating**: Buy"}

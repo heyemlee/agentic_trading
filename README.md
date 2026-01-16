@@ -33,10 +33,10 @@ Built on [TradingAgents](https://github.com/TauricResearch/TradingAgents), which
 
 | Area | Implementation |
 | --- | --- |
-| **Agent orchestration** | Inject portfolio context and investment constraints into each role; select analysts by instrument type and route roles to different model/effort settings. [Code](conservative_trading/graph.py) |
-| **Runtime & tool use** | A LangChain-compatible Claude Code adapter with allowlisted MCP data tools, structured output, and captured tool-call traces. [Code](conservative_trading/llm/claude_code.py) |
-| **Decision boundaries** | Pydantic proposals, deterministic action mapping, and risk checks before review and again before execution. [Policy](conservative_trading/policy.py) · [Execution](conservative_trading/execution.py) |
-| **Reliability & evaluation** | Durable research jobs, idempotent order handling, SQLite audit state, and forward evaluation against a passive benchmark. [Jobs](conservative_trading/research_jobs.py) · [Evaluation](conservative_trading/evaluation.py) |
+| **Agent orchestration** | Inject portfolio context and investment constraints into each role; select analysts by instrument type and route roles to different model/effort settings. [Code](agentic_trading/graph.py) |
+| **Runtime & tool use** | A LangChain-compatible Claude Code adapter with allowlisted MCP data tools, structured output, and captured tool-call traces. [Code](agentic_trading/llm/claude_code.py) |
+| **Decision boundaries** | Pydantic proposals, deterministic action mapping, and risk checks before review and again before execution. [Policy](agentic_trading/policy.py) · [Execution](agentic_trading/execution.py) |
+| **Reliability & evaluation** | Durable research jobs, idempotent order handling, SQLite audit state, and forward evaluation against a passive benchmark. [Jobs](agentic_trading/research_jobs.py) · [Evaluation](agentic_trading/evaluation.py) |
 
 Offline tests exercise the agent graph with a fake model runtime, tool isolation, policy failures, and execution recovery. [Explore tests →](tests)
 

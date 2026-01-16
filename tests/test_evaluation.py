@@ -9,9 +9,9 @@ import shutil
 
 import pytest
 
-from conservative_trading import evaluation
-from conservative_trading.api.service import Service
-from conservative_trading.state_db import StateDB
+from agentic_trading import evaluation
+from agentic_trading.api.service import Service
+from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT
 
 

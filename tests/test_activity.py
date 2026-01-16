@@ -10,10 +10,10 @@ import shutil
 
 import pytest
 
-from conservative_trading import events
-from conservative_trading.api.service import Service
-from conservative_trading.proposals import PROPOSED, REJECTED, ProposalStore
-from conservative_trading.stage3_scenarios import _proposal
+from agentic_trading import events
+from agentic_trading.api.service import Service
+from agentic_trading.proposals import PROPOSED, REJECTED, ProposalStore
+from agentic_trading.stage3_scenarios import _proposal
 from tests.conftest import ROOT
 
 
@@ -121,7 +121,7 @@ def test_a_finished_run_is_remembered_even_after_it_is_requeued(service):
 
 
 def test_a_fill_is_journalled_once_however_often_it_is_replayed(service):
-    from conservative_trading.state_db import StateDB
+    from agentic_trading.state_db import StateDB
 
     db = StateDB(service.profiles().project_dir / "state" / "proposals.json")
     fill = {"fill_id": "f1", "proposal_id": "p1", "at": "2026-09-04T18:00:00+00:00",
@@ -152,7 +152,7 @@ def test_a_credential_or_a_private_note_cannot_reach_the_journal(service):
 
 
 def test_an_unknown_kind_is_refused_rather_than_stored(service):
-    from conservative_trading.state_db import StateDB
+    from agentic_trading.state_db import StateDB
 
     db = StateDB(service.profiles().project_dir / "state" / "proposals.json")
     with pytest.raises(ValueError, match="unknown event kind"), db.transaction() as conn:
@@ -161,7 +161,7 @@ def test_an_unknown_kind_is_refused_rather_than_stored(service):
 
 def test_history_written_before_the_journal_existed_is_caught_up_once(service):
     """A proposal that closed before the journal must not be missing from the record."""
-    from conservative_trading.state_db import StateDB
+    from agentic_trading.state_db import StateDB
 
     proposal = make(service, "VTI")
     db = StateDB(service.profiles().project_dir / "state" / "proposals.json")

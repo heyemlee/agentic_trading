@@ -181,7 +181,7 @@ def write(destination: Path, jobs: dict[str, dict[str, Any]]) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``python -m conservative_trading.launchd``: render the deployment's launchd jobs."""
+    """``python -m agentic_trading.launchd``: render the deployment's launchd jobs."""
     parser = argparse.ArgumentParser(
         prog="ct-launchd", description="Write the macOS launchd jobs for this deployment.")
     parser.add_argument("--data-dir", required=True, type=Path,
