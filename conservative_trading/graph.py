@@ -59,7 +59,7 @@ def make_llm_factory(profiles: Profiles, work_dir: str | None = None):
     return factory
 
 
-def classify_instrument(ticker: str) -> str:
+def classify_instrument(ticker: str, *, strict: bool = False) -> str:
     """etf | stock | crypto, from the upstream deterministic identity resolver."""
     upper = ticker.upper()
     if upper.endswith("-USD") or "/" in upper:
@@ -72,6 +72,8 @@ def classify_instrument(ticker: str) -> str:
         return "etf"
     if quote_type == "CRYPTOCURRENCY":
         return "crypto"
+    if strict and quote_type != "EQUITY":
+        return "unsupported"
     return "stock"
 
 

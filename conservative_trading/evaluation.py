@@ -231,7 +231,9 @@ def _decisions(research: list[dict[str, Any]], jobs: list[dict[str, Any]],
     A record of trades alone would describe only the occasions this system chose to act, which
     is a biased sample of its own judgement.
     """
-    runs = [row for row in research if str(row.get("trade_date") or "") >= since]
+    # Personal-account observations are outside the declared paper/live study.
+    runs = [row for row in research if str(row.get("trade_date") or "") >= since
+            and row.get("bucket") != "advisory"]
     actions: dict[str, int] = {}
     incomplete_data = 0
     for row in runs:
@@ -241,6 +243,8 @@ def _decisions(research: list[dict[str, Any]], jobs: list[dict[str, Any]],
             incomplete_data += 1
     states: dict[str, int] = {}
     for job in jobs:
+        if job.get("bucket") == "advisory":
+            continue
         if str(job.get("created_at") or "") >= since:
             states[job["state"]] = 1 + states.get(job["state"], 0)
     statuses: dict[str, int] = {}

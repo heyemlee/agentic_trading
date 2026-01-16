@@ -49,6 +49,10 @@
 
 </details>
 
+## 个人投资助手
+
+控制台新增「投资助手」：只读分析所有 Robinhood 账户的股票与 ETF，从已有自选和筛选结果接入候选，并结合个人档案、补充信息和历史研究进行连续聊天。复用原有研究和后台任务，普通账户不会获得交易权限。使用方法和能力边界见 [个人助手说明](docs/PERSONAL_ASSISTANT.md)。
+
 ## 本地启动
 
 需要 **Python 3.12** 和 **[uv](https://docs.astral.sh/uv/)**。AI 研究还需要已登录的 Claude Code CLI，并能使用 `config/investor_profile.yaml` 中配置的模型。

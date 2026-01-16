@@ -49,6 +49,10 @@ Offline tests exercise the agent graph with a fake model runtime, tool isolation
 
 </details>
 
+## Personal assistant
+
+The console's **Assistant** adds read-only Robinhood holdings reviews, sourced stock/ETF candidates and persistent profile-aware chat, reusing the same research graph and job queue. Ordinary accounts remain outside live-trading permissions. See [capabilities and boundaries](docs/PERSONAL_ASSISTANT.md).
+
 ## Run locally
 
 Requires **Python 3.12** and **[uv](https://docs.astral.sh/uv/)**. AI research also requires a signed-in Claude Code CLI with access to the models configured in `config/investor_profile.yaml`.

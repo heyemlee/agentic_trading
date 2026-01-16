@@ -329,6 +329,54 @@ def micro_live() -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------- research
+class AdvisorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["refresh", "chat", "shortlist", "analysis"]
+    request_id: str
+    message: str = Field("", max_length=4000)
+    conversation_id: str = Field("default", max_length=64)
+    ticker: str = Field("", max_length=20)
+    account_id: str | None = None
+    language: Literal["zh", "en"] = "zh"
+
+
+class AdvisorNotes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=4000)
+    revision: int = Field(ge=0)
+
+
+class AdvisorReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str
+    language: Literal["zh", "en"] = "zh"
+
+
+@app.get("/advisor", tags=["assistant"])
+def advisor_state() -> dict[str, Any]:
+    return _ok(_service.advisor_state)
+
+
+@app.get("/advisor/conversations/{conversation_id}", tags=["assistant"])
+def advisor_conversation(conversation_id: str) -> dict[str, Any]:
+    return _ok(_service.advisor_conversation, conversation_id)
+
+
+@app.post("/advisor/jobs", tags=["assistant"])
+def advisor_start(body: AdvisorRequest) -> dict[str, Any]:
+    return _ok(_service.start_advisor, **body.model_dump())
+
+
+@app.post("/advisor/notes", tags=["assistant"])
+def advisor_notes(body: AdvisorNotes) -> dict[str, Any]:
+    return _ok(_service.advisor_notes, body.text, body.revision)
+
+
+@app.post("/advisor/review", tags=["assistant"])
+def advisor_review(body: AdvisorReview) -> dict[str, Any]:
+    return _ok(_service.review_observed_holdings, body.request_id, body.language)
+
+
 class ResearchRequest(BaseModel):
     ticker: str = Field(description="Symbol to analyse, for example VTI.")
     bucket: Literal["core", "sandbox", "micro_live"] = "core"

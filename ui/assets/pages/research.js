@@ -258,4 +258,7 @@
     CT_API.watchRun(res.run_key);
   });
 
+  const query = new URLSearchParams(window.location.search);
+  if (query.get('ticker')) document.getElementById('f-ticker').value = query.get('ticker').toUpperCase();
+  if (query.get('run') && !window.CT_DEMO) openTrace(query.get('run'));
 })();

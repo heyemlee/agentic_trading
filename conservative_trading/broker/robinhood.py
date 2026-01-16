@@ -119,6 +119,12 @@ def _rows(payload: Any, *keys: str) -> list[dict[str, Any]]:
     return []
 
 
+def _quote_rows(payload: Any) -> list[dict[str, Any]]:
+    """Official equity quotes wrap each result as {quote, close}; keep the trade quote."""
+    return [row.get("quote", row) for row in _rows(payload, "quotes")
+            if isinstance(row.get("quote", row), dict)]
+
+
 class _Portal:
     """A private event loop on a background thread, so a sync adapter can drive an async client."""
 
@@ -411,14 +417,14 @@ class RobinhoodBroker:
             except ValueError:
                 return None
 
-        rows = _rows(self._call("quotes", {"symbols": [symbol.upper()]}), "quotes")
+        rows = _quote_rows(self._call("quotes", {"symbols": [symbol.upper()]}))
         for row in rows:
             if str(_first(row, "symbol", "ticker", default=symbol)).upper() != symbol.upper():
                 continue
             bid, ask = _num(_first(row, "bid_price", "bid")), _num(_first(row, "ask_price", "ask"))
             last = _num(_first(row, "last_trade_price", "last_price", "price", "mark_price"))
             received = datetime.now(UTC)
-            traded = market_time(_first(row, "last_trade_at", "last_trade_time", "last_trade_timestamp"))
+            traded = market_time(_first(row, "venue_last_trade_time", "last_trade_at", "last_trade_time", "last_trade_timestamp"))
             quoted = market_time(_first(row, "quote_timestamp", "updated_at", "timestamp"))
             if bid and ask and quoted:
                 return Quote(symbol.upper(), (bid + ask) / 2, quoted, "last_quote_mid",

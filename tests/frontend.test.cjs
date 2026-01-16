@@ -45,6 +45,46 @@ function context(demo = false) {
 const response = (data, status = 200) => ({ ok: status === 200, status, statusText: 'failed', json: async () => data });
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(setImmediate); };
 
+function advisorPage(post) {
+  const c = context(); c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT.advisor = { notes: { text: 'Saved plan', revision: 1 }, jobs: [], decisions: [],
+    snapshot: { accounts: [], candidates: [{ symbol: 'VTI', sources: ['watchlists:<script>'] }] } };
+  c.CT_API = { writesEnabled: true, post, readOnce: async () => {},
+    fetchJSON: async () => ({ messages: [] }) };
+  c.run('pages/advisor.js');
+  return c;
+}
+
+test('assistant safely renders sources and preserves new edits during a note save', async () => {
+  let finish;
+  const c = advisorPage(() => new Promise(resolve => { finish = resolve; }));
+  assert.ok(c.element('candidate-list').innerHTML.includes('&lt;script&gt;'));
+  const input = c.element('personal-notes');
+  input.value = 'First edit'; input.events.input();
+  const save = c.element('save-notes').events.click();
+  input.value = 'Second edit'; input.events.input();
+  finish({ revision: 2, text: 'First edit' }); await save;
+  c.CT.advisor.notes = { revision: 2, text: 'First edit' }; c.render();
+  assert.equal(input.value, 'Second edit');
+});
+
+test('assistant retries an uncertain request with the same id and keeps failed text', async () => {
+  const ids = []; let calls = 0;
+  const c = advisorPage(async (url, body) => {
+    ids.push(body.request_id);
+    if (++calls === 1) throw Error('network lost');
+    return { run_key: 'advisor_test' };
+  });
+  c.element('chat-input').value = 'What fits my goals?';
+  c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(c.element('chat-input').value, 'What fits my goals?');
+  c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(ids.length, 2); assert.equal(ids[0], ids[1]);
+  assert.equal(c.element('chat-input').value, '');
+});
+
 test('live starts empty; demo never reads or writes the API', async () => {
   const live = context();
   assert.equal(live.CT.proposalDetail, null);

@@ -1,6 +1,7 @@
 """Persistent, deduplicated research queue with restart and timeout recovery."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -34,8 +35,13 @@ class ResearchJobStore:
 
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
                instrument_type: str, trigger: str, log_path: Path,
-               timeout_seconds: int, max_attempts: int) -> tuple[dict[str, Any], bool]:
+               timeout_seconds: int, max_attempts: int,
+               task: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
         dedupe = f"{trade_date}:{ticker.upper()}:{bucket}:{instrument_type}"
+        if task:
+            # A conversation is serial; independent conversations and account reviews are not.
+            scope = task.get("conversation_id") or task.get("account_id") or task["kind"]
+            dedupe += ":" + hashlib.sha256(str(scope).encode()).hexdigest()[:24]
         created = _now()
         job = {
             "run_key": run_key, "dedupe_key": dedupe, "ticker": ticker.upper(),
@@ -47,6 +53,8 @@ class ResearchJobStore:
             "log": str(log_path), "exit_code": None, "error": None,
             "limit_recoveries": 0, "proposal_created": False, "proposal_id": None,
         }
+        if task:
+            job["task"] = task
         with self.db.transaction() as conn:
             try:
                 conn.execute("INSERT INTO research_jobs VALUES(?,?,?,?,?,?)", (
@@ -136,13 +144,15 @@ class ResearchJobManager:
         self.max_limit_recoveries = max(0, int(settings.get("max_limit_recoveries", 2)))
 
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
-               instrument_type: str, trigger: str) -> tuple[dict[str, Any], bool]:
+               instrument_type: str, trigger: str,
+               task: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
         log_dir = self.project_dir / "runs" / "api"
         log_dir.mkdir(parents=True, exist_ok=True)
         return self.store.create(
             run_key=run_key, ticker=ticker, bucket=bucket, trade_date=trade_date,
             instrument_type=instrument_type, trigger=trigger, log_path=log_dir / f"{run_key}.log",
             timeout_seconds=self.timeout_seconds, max_attempts=self.max_attempts,
+            task=task,
         )
 
     def dispatch(self) -> list[str]:

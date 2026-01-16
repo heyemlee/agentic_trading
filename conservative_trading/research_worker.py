@@ -41,11 +41,16 @@ def main(argv: list[str] | None = None) -> int:
     prior_handler = signal.signal(signal.SIGALRM, _timeout)
     signal.setitimer(signal.ITIMER_REAL, int(job["timeout_seconds"]))
     try:
-        code = run_one(
-            profiles, job["ticker"], job["trade_date"], job["bucket"],
-            job["instrument_type"], profiles.project_dir / "runs", False,
-            run_id=args.run_key,
-        )
+        if job.get("task"):
+            from .advisor import run_task
+
+            code = run_task(profiles, job)
+        else:
+            code = run_one(
+                profiles, job["ticker"], job["trade_date"], job["bucket"],
+                job["instrument_type"], profiles.project_dir / "runs", False,
+                run_id=args.run_key,
+            )
         record_path = profiles.project_dir / "runs" / args.run_key / "decision_record.json"
         record = {}
         if record_path.exists():

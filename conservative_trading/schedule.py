@@ -162,6 +162,8 @@ def analyses_today(jobs: list[dict[str, Any]], cfg: dict[str, Any],
     today = market_now(cfg, now).date()
     count = 0
     for job in jobs:
+        if (job.get("task") or {}).get("kind") in ("refresh", "chat", "shortlist"):
+            continue
         try:
             created = datetime.fromisoformat(str(job.get("created_at")))
         except (TypeError, ValueError):

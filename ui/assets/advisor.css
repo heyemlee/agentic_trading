@@ -1,0 +1,22 @@
+.advisor-page main .container { max-width: 1100px; }
+.advisor-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+.advisor-layout .section-head { flex-wrap: wrap; gap: 12px; }
+.advisor-layout .btn-sm { width: auto; }
+.advisor-layout .section-head h2 { flex: 1; min-width: max-content; }
+.advisor-layout .card { min-width: 0; }
+.advisor-layout .form-input { display: block; width: 100%; box-sizing: border-box; padding: 12px; margin-block: 8px 12px; border: 1px solid var(--line, #d9dcd9); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+.advisor-layout textarea { resize: vertical; }
+.advisor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-block: 12px; }
+.chat-messages { max-height: 540px; overflow-y: auto; overflow-wrap: anywhere; margin-block: 20px; }
+.chat-message { padding: 16px 0; border-bottom: 1px solid var(--line, #e0e3e0); }
+.chat-message.user { background: var(--surface, #f5f6f4); padding: 12px; border-radius: 8px; }
+.chat-message .md { white-space: normal; }
+.candidate-list { max-height: 400px; overflow-y: auto; margin-block: 16px; }
+.advisor-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--line, #e0e3e0); }
+.advisor-row > div { min-width: 0; overflow-wrap: anywhere; }
+.advisor-row .btn { flex-shrink: 0; }
+.advisor-decision { border-top: 1px solid var(--line, #e0e3e0); margin-top: 20px; padding-top: 16px; overflow-wrap: anywhere; }
+.advisor-decision dt { font-weight: 600; margin-top: 12px; }
+.advisor-decision dd { margin: 4px 0 0; white-space: pre-wrap; }
+#advisor-status { min-height: 24px; margin-top: 16px; overflow-wrap: anywhere; }
+@media (max-width: 850px) { .advisor-layout { grid-template-columns: minmax(0, 1fr); } .chat-messages { max-height: 430px; } }

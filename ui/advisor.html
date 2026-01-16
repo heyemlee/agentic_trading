@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>投资助手 · Conservative Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css" />
+<link rel="stylesheet" href="assets/advisor.css?v=2" />
+</head>
+<body class="advisor-page">
+<main id="content" hidden data-i18n-title="ai.title">
+  <section class="section pagehead"><div class="container">
+    <p class="eyebrow" data-i18n="ai.eyebrow">PERSONAL INVESTING</p>
+    <h1 data-i18n="ai.title">投资助手</h1>
+    <p class="body-muted" data-i18n="ai.intro">从你的持仓和计划出发，讨论下一步。</p>
+    <p id="advisor-status" class="body-sm" role="status" aria-live="polite"></p>
+  </div></section>
+  <section class="section" style="padding-top:0"><div class="container advisor-layout">
+    <div class="stack stack-4">
+      <div class="card">
+        <div class="section-head"><h2 data-i18n="ai.chat">和我聊聊</h2>
+          <button id="new-conversation" class="btn btn-secondary btn-sm" data-i18n="ai.new">新对话</button></div>
+        <label for="conversations" class="body-sm" data-i18n="ai.history">历史对话</label>
+        <select id="conversations" class="form-input" aria-label="Conversation"></select>
+        <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
+        <div class="advisor-actions">
+          <button class="btn btn-secondary btn-sm" id="ask-risk" data-i18n="ai.askRisk">我的持仓有哪些风险？</button>
+          <button class="btn btn-secondary btn-sm" id="ask-scenario" data-i18n="ai.askScenario">如果股票跌 5% 呢？</button>
+        </div>
+        <form id="chat-form">
+          <label for="chat-input" class="body-sm" data-i18n="ai.message">你的问题</label>
+          <textarea id="chat-input" class="form-input" rows="3" maxlength="4000" required></textarea>
+          <button id="chat-send" class="btn btn-green" type="submit" data-i18n="ai.send">发送</button>
+        </form>
+        <p class="body-sm body-muted" data-i18n="ai.chatNote">回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。</p>
+      </div>
+      <div class="card">
+        <div class="section-head"><h2 data-i18n="ai.holdings">Robinhood 持仓</h2>
+          <button id="refresh-holdings" class="btn btn-secondary btn-sm" data-i18n="ai.refresh">刷新账户与候选</button></div>
+        <p id="snapshot-status" class="body-sm body-muted"></p>
+        <div id="observed-accounts"></div>
+        <button id="review-holdings" class="btn btn-green" data-i18n="ai.reviewAll">逐一研究我的持仓</button>
+        <p class="body-sm body-muted" data-i18n="ai.coverage">覆盖所有 Robinhood 账户的股票与 ETF。其他资产暂不分析。每次完整研究计入每日额度。</p>
+        <div id="holding-decisions"></div>
+      </div>
+    </div>
+    <div class="stack stack-4">
+      <div class="card">
+        <h2 data-i18n="ai.candidates">值得研究的候选</h2>
+        <p class="body-sm body-muted" data-i18n="ai.sources">来自你的 Robinhood 自选、已保存的筛选器，以及现有 ETF 投资范围。按个人适合度筛选。</p>
+        <button id="shortlist" class="btn btn-green" data-i18n="ai.shortlist">帮我筛选候选</button>
+        <div id="candidate-list" class="candidate-list"></div>
+        <form id="symbol-form" class="advisor-actions">
+          <label for="symbol-input" class="body-sm" data-i18n="ai.symbol">或输入股票 / ETF 代码</label>
+          <input id="symbol-input" class="form-input" maxlength="20" placeholder="VTI" required />
+          <button class="btn btn-secondary btn-sm" type="submit" data-i18n="ai.research">完整研究</button>
+        </form>
+      </div>
+      <details class="card">
+        <summary data-i18n="ai.personal">我的个人情况</summary>
+        <p class="body-sm body-muted" data-i18n="ai.notesHint">补充投资目标、用钱时间、收入稳定性、近期计划或沟通偏好。保存后跨对话使用。</p>
+        <label for="personal-notes" class="body-sm" data-i18n="ai.personal">我的个人情况</label>
+        <textarea id="personal-notes" class="form-input" rows="6" maxlength="4000"></textarea>
+        <button id="save-notes" class="btn btn-secondary btn-sm" data-i18n="ai.save">保存</button>
+        <p class="body-sm body-muted" data-i18n="ai.notesBoundary">这里的补充不会修改交易权限或风控参数。</p>
+      </details>
+      <div class="card">
+        <h2 data-i18n="ai.jobs">正在处理与最近完成</h2>
+        <div id="advisor-jobs"></div>
+      </div>
+      <div class="card">
+        <h2 data-i18n="ai.reuse">Robinhood 已有工具</h2>
+        <p class="body-sm body-muted" data-i18n="ai.alertHint">高低点、价格和指标提醒直接在 Robinhood 设置。触发后，可以在这里重新研究。</p>
+        <p><a href="https://robinhood.com/us/en/support/articles/stock-price-alerts/" target="_blank" rel="noopener noreferrer" data-i18n="ai.alerts">价格与指标提醒</a></p>
+        <p><a href="https://robinhood.com/us/en/support/articles/stock-screeners/" target="_blank" rel="noopener noreferrer" data-i18n="ai.screeners">设置 Robinhood 筛选器</a></p>
+      </div>
+    </div>
+  </div></section>
+</main>
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/pages/advisor.js"></script>
+</body>
+</html>

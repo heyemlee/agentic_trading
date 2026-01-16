@@ -8,6 +8,7 @@ window.CT_API = (function () {
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   const SOURCES = {
+    advisor: { path: () => '/advisor', ms: 5000 },
     health: { path: () => '/health', ms: 30000 },
     schedule: { path: () => '/system/schedule', ms: 60000 },
     operations: { path: () => '/system/operations', ms: 60000 },
