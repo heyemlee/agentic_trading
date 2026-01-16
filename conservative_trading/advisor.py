@@ -212,7 +212,7 @@ def fetch_snapshot(profiles, broker_factory=ObservationBroker) -> dict:
 
 def profile_context(profiles, notes="") -> dict:
     return {"objective": profiles.investor.get("objective"),
-            "horizon": profiles.investor_cfg("horizon", "investment_horizon"),
+            "horizon": profiles.investor.get("horizon"),
             "risk_tolerance": profiles.investor.get("risk_tolerance"),
             "preferences": profiles.investor.get("preferences"),
             "unresolved_fields": profiles.unresolved,
@@ -258,6 +258,8 @@ def answer(profiles, context, message, history, language="zh", llm=None):
         "latest full research action if present, otherwise explain that a deep review is needed. "
         "Distinguish HOLD from unreviewed. Entry/exit conditions should come from full research; "
         "never invent target prices or promise to find a top or bottom. A scenario is hypothetical.\n"
+        "Any TODO/unresolved field and its recommended_default are unconfirmed suggestions, not "
+        "personal facts. Never describe a recommended horizon, allocation or limit as user-confirmed.\n"
         + profiles.mandate_context()
     )
     messages = [{"role": "system", "content": system},
@@ -265,6 +267,8 @@ def answer(profiles, context, message, history, language="zh", llm=None):
     messages.extend(history[-12:])
     messages.append({"role": "user", "content": message})
     reply = llm.with_structured_output(AssistantReply).invoke(messages)
+    # Some CLI structured-output replies leak closing serialization markers into the text.
+    reply.answer = re.sub(r"(?:\s*</(?:answer|invoke)>\s*)+$", "", reply.answer).strip()
     reply.research_candidates = [c for c in reply.research_candidates
                                  if SYMBOL.fullmatch(c.symbol.upper())]
     return reply.model_dump()

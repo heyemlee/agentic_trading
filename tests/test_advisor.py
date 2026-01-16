@@ -14,6 +14,7 @@ from conservative_trading.advisor import (
     answer,
     fetch_snapshot,
     now,
+    profile_context,
     read_only_research,
     run_task,
 )
@@ -218,6 +219,23 @@ def test_assistant_reuses_cli_and_only_upstream_read_tools(assistant_service, fa
 
     command = ClaudeCodeChatModel()._build_command("personal context")
     assert "--strict-mcp-config" in command and command[command.index("--tools") + 1] == ""
+
+
+def test_profile_does_not_turn_an_unconfirmed_horizon_into_a_fact(profiles):
+    context = profile_context(profiles)
+    assert context["horizon"] == profiles.investor["horizon"]
+
+
+def test_assistant_removes_only_trailing_serialization_markers(profiles):
+    class Model:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            assert "unconfirmed suggestions" in messages[0]["content"]
+            return AssistantReply(answer="A < B.\n</answer>\n</invoke>\n")
+
+    assert answer(profiles, {}, "test", [], llm=Model())["answer"] == "A < B."
 
 
 def test_assistant_routes_are_authenticated_and_reject_order_fields(assistant_service, auth_client, monkeypatch):
