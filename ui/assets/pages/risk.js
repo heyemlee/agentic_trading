@@ -38,9 +38,13 @@
     document.getElementById('spy-bar').style.width = Math.min(100, (delta / 25) * 100).toFixed(1) + '%';
 
     /* ── ladders ─────────────────────────────────────────────────────── */
+    /* 'total' is the conceptual book's own roll-up of core and sandbox, so it
+       goes when they go. Micro-Live is judged against its own high-water mark
+       and reads the same either way. */
     const LADDERS = [['total', 'Total', 'conceptual'], ['core', 'Core', 'conceptual'],
-                     ['sandbox', 'Sandbox', 'conceptual'], ['micro_live', 'Micro-Live', 'micro_live']];
-    const lv = D.risk.total || {};
+                     ['sandbox', 'Sandbox', 'conceptual'], ['micro_live', 'Micro-Live', 'micro_live']]
+      .filter(([key]) => (key === 'total' ? C.SHOW_CONCEPTUAL : C.showsBucket(key)));
+    const lv = (C.SHOW_CONCEPTUAL ? D.risk.total : D.risk.micro_live) || {};
     document.getElementById('ladder-summary').textContent =
       C.t('rk.ladderSummary', { l: C.code(lv.level), d: C.pct(lv.drawdown_pct || 0) });
     document.getElementById('ladder-cards').innerHTML = LADDERS.map(([key, label, kind]) => {

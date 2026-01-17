@@ -37,7 +37,10 @@ function context(demo = false) {
   // assert on the numbers a screen puts into a sentence without depending on its wording.
   ctx.I18N = { t: (key, vars) => vars ? key + ' ' + Object.values(vars).join(' ') : key,
     lang: 'en', LANGS: { en: 'EN' } };
-  ctx.run = file => vm.runInContext(fs.readFileSync(path.join(root, 'ui/assets', file), 'utf8'), ctx, { filename: file });
+  ctx.run = (file, edit) => {
+    const src = fs.readFileSync(path.join(root, 'ui/assets', file), 'utf8');
+    return vm.runInContext(edit ? edit(src) : src, ctx, { filename: file });
+  };
   ctx.run('data.js');
   ctx.elements = elements; ctx.element = element; ctx.intervals = intervals;
   return ctx;
@@ -219,8 +222,17 @@ test('double-click sends one explicit versioned approval and pending is not a co
   assert.ok(!c.element('result-slot').innerHTML.includes('card-real'));
 });
 
-function homePage(portfolio) {
-  const c = context(true); c.run('console.js');
+/* The console hides the conceptual book behind one switch in console.js. Flipping the
+   source is deliberate: it exercises the real constant, so renaming the switch fails
+   here rather than quietly leaving these tests asserting the same state twice. */
+function withConceptual(src) {
+  const out = src.replace('const SHOW_CONCEPTUAL = false;', 'const SHOW_CONCEPTUAL = true;');
+  assert.notEqual(out, src, 'the SHOW_CONCEPTUAL switch was renamed; update this test');
+  return out;
+}
+
+function homePage(portfolio, showConceptual = false) {
+  const c = context(true); c.run('console.js', showConceptual ? withConceptual : null);
   if (portfolio) c.CT.portfolio = portfolio;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
@@ -232,19 +244,38 @@ function homePage(portfolio) {
 test('the headline equity is one account, never the real and paper books added together', () => {
   const c = homePage();
   const A = c.CT.portfolio.accounts;
-  assert.equal(c.element('equity-value').textContent, '$3,000.00');
-  assert.notEqual(A.conceptual.equity_usd, c.CT.portfolio.combined.equity_usd);
+  assert.equal(c.element('equity-value').textContent, '$100.00');
+  assert.notEqual(A.micro_live.equity_usd, c.CT.portfolio.combined.equity_usd);
   // the mark it is measured against belongs to the same account
-  assert.ok(c.element('hwm-foot').textContent.includes('$3,000.00'));
-  // the other account keeps its own row rather than being folded into the total
-  assert.ok(c.element('account-list').innerHTML.includes('$100.00'));
+  assert.ok(c.element('hwm-foot').textContent.includes('$100.00'));
   assert.ok(c.element('equity-source').textContent.length > 0);
+});
+
+test('with the switch off, no conceptual money reaches the home screen', () => {
+  const c = homePage();
+  const screen = c.element('equity-value').textContent + c.element('funding-kv').innerHTML +
+    c.element('account-list').innerHTML + c.element('bucket-list').innerHTML +
+    c.element('hwm-foot').textContent;
+  // the paper book's equity, and each of its buckets, in the figures the page writes
+  for (const paper of ['$3,000.00', '$2,500.00', '$500.00']) {
+    assert.ok(!screen.includes(paper), 'the paper book leaked onto the home screen: ' + paper);
+  }
+});
+
+test('the conceptual book comes back in full when the switch is on', () => {
+  const c = homePage(null, true);
+  assert.equal(c.element('equity-value').textContent, '$3,000.00');
+  assert.ok(c.element('hwm-foot').textContent.includes('$3,000.00'));
+  // the real-money account keeps its own row rather than being folded into the total
+  assert.ok(c.element('account-list').innerHTML.includes('$100.00'));
+  const buckets = c.element('bucket-list').innerHTML;
+  assert.ok(buckets.includes('$2,500.00') && buckets.includes('$500.00'));
 });
 
 test('money paid in is shown as funding, not as a result', () => {
   const c = homePage();
   const funded = c.element('funding-kv').innerHTML;
-  assert.ok(funded.includes('$3,000.00'));       // net deposits
+  assert.ok(funded.includes('$100.00'));         // net deposits
   assert.ok(funded.includes('+$0.00'));          // investment result, separate from funding
   assert.ok(funded.includes('0.00%'));           // return measured against money paid in
 });

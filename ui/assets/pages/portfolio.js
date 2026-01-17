@@ -5,11 +5,18 @@
   /* Everything below is re-run on every poll cycle. */
   function render() {
 
-    const order = ['core', 'sandbox', 'micro_live'];
+    const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
     const B = D.portfolio.buckets;
     const A = D.portfolio.accounts || {};
     const combined = D.portfolio.combined || { equity_usd: 0 };
-    const total = combined.equity_usd;
+    /* The API's combined figure spans every bucket. With the paper book hidden
+       the header has to add up only what is on the page, or it states a total
+       the cards below cannot account for. */
+    const total = C.SHOW_CONCEPTUAL ? combined.equity_usd
+      : order.filter((k) => B[k]).reduce((sum, k) => sum + B[k].equity_usd, 0);
+    /* Nothing conceptual is on screen, so the mixed-money warning would be
+       describing a sum the reader cannot see. */
+    const mixed = C.SHOW_CONCEPTUAL && combined.mixes_real_and_conceptual;
 
     const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--green)' };
 
@@ -21,11 +28,12 @@
        and its own return, which is what any of these numbers can be compared
        against. */
     document.getElementById('pf-asof').textContent =
-      C.t(combined.mixes_real_and_conceptual ? 'pf.totalMixed' : 'pf.totalAs',
+      C.t(mixed ? 'pf.totalMixed' : 'pf.totalAs',
           { d: C.dateOnly(D.portfolio.as_of) });
 
     /* ── per account: equity, funding, result, drawdown ──────────────── */
     document.getElementById('account-cards').innerHTML = Object.keys(A)
+      .filter(C.showsAccount)
       .sort((a, b) => (a === 'conceptual' ? -1 : b === 'conceptual' ? 1 : a.localeCompare(b)))
       .map((key) => {
         const a = A[key];

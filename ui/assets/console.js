@@ -10,6 +10,23 @@
 
   const D = window.CT;
 
+  /* ─── conceptual portfolio visibility ──────────────────────────────
+     Core and Sandbox are a paper book: no venue behind them, nothing they
+     produce can reach a broker, and their $3,000 is not the operator's
+     money. With this off the console shows real capital only.
+
+     Display only. The evaluation study, the scheduled core research and
+     every ledger keep running exactly as before, and `ct-evaluate report`
+     still reads the whole record. Set it to true to bring the paper book
+     back into the interface.
+
+     Approvals are deliberately not filtered. Nothing that is waiting on a
+     human is ever hidden, whatever bucket it came from. */
+  const SHOW_CONCEPTUAL = false;
+  const CONCEPTUAL_BUCKETS = ['core', 'sandbox'];
+  const showsBucket = (key) => SHOW_CONCEPTUAL || !CONCEPTUAL_BUCKETS.includes(key);
+  const showsAccount = (key) => SHOW_CONCEPTUAL || key !== 'conceptual';
+
   /* The fixture is a snapshot taken at health.checked_at. Ages and countdowns
      tick forward from page load against that instant, so a freshness clock
      behaves the way it will against a live API without inventing a value. */
@@ -481,6 +498,7 @@
 
   window.Console = {
     D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
+    SHOW_CONCEPTUAL, showsBucket, showsAccount,
     t, code, sysCopy, mlCopy, psCopy, bucket,
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,

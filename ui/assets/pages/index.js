@@ -3,7 +3,10 @@
   C.mount('dashboard');
 
   const $ = (id) => document.getElementById(id);
-  const order = ['core', 'sandbox', 'micro_live'];
+  const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
+
+  /* Runs on a hidden bucket stay out of the headline and the Latest list. */
+  const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket));
 
   /* ── equity against the high-water mark ────────────────────────────
      One account at a time. The paper core/sandbox book and the real-money
@@ -12,11 +15,12 @@
      either mark: it would misstate both the assets and the drawdown. The
      lead figure is the primary account; the other is listed beneath it with
      its own numbers. */
-  const PRIMARY = 'conceptual';
+  const PRIMARY = C.SHOW_CONCEPTUAL ? 'conceptual' : 'micro_live';
 
   function accountsInOrder() {
     const A = D.portfolio.accounts || {};
-    return Object.keys(A).sort((a, b) => (a === PRIMARY ? -1 : b === PRIMARY ? 1 : a.localeCompare(b)));
+    return Object.keys(A).filter(C.showsAccount)
+      .sort((a, b) => (a === PRIMARY ? -1 : b === PRIMARY ? 1 : a.localeCompare(b)));
   }
 
   function renderEquity() {
@@ -97,7 +101,7 @@
   function renderAgent() {
     const run = D.researchRun;
     const waiting = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
-    const last = (D.research || [])[0];
+    const last = visibleRuns()[0];
     const dot = $('agent-dot');
     let live = false, state, note;
 
@@ -212,7 +216,7 @@
   /* ── latest ──────────────────────────────────────────────────────── */
   function renderLatest() {
     const rows = [];
-    const run = (D.research || [])[0];
+    const run = visibleRuns()[0];
     if (run) {
       rows.push(C.listRow({
         id: 'latest-run', href: 'research.html',

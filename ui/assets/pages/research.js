@@ -8,9 +8,13 @@
 
     const FLOOR = 50;
 
+    /* Runs on a hidden bucket leave the charts and the lists. The record is
+       untouched: `ct-evaluate report` still counts every one of them. */
+    const runs = (D.research || []).filter((r) => C.showsBucket(r.bucket));
+
     /* ── confidence bars — filled encoding, real values only ─────────── */
     document.getElementById('conf-chart').innerHTML = '<div class="stack stack-4">' +
-      D.research.map((r) =>
+      runs.map((r) =>
         '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '">' +
           '<div class="row-between" style="margin-bottom:6px;">' +
             '<span class="body-sm">' + C.escapeHtml(r.ticker) + ' · ' + C.escapeHtml(C.bucket(r.bucket)) +
@@ -44,14 +48,14 @@
         note: C.dateOnly(r.trade_date),
       })).join('') + '</div>';
     }
-    document.getElementById('panel-runs-all').innerHTML = runList(D.research);
+    document.getElementById('panel-runs-all').innerHTML = runList(runs);
     document.getElementById('panel-runs-notrade').innerHTML =
-      runList(D.research.filter((r) => r.final_action === 'NO_TRADE'));
+      runList(runs.filter((r) => r.final_action === 'NO_TRADE'));
     document.getElementById('panel-runs-proposal').innerHTML =
-      runList(D.research.filter((r) => r.proposal_id));
+      runList(runs.filter((r) => r.proposal_id));
 
     /* Most recent decision — read from the record, not baked into markup. */
-    const last = (D.research || [])[0];
+    const last = runs[0];
     document.getElementById('recent-card').innerHTML = !last ? '' :
       '<div class="section-head">' +
         '<span class="chip chip-ink">' +
@@ -89,6 +93,11 @@
   /* ── POST /research → poll GET /research/{run_key} ───────────────── */
   const hint = document.getElementById('run-hint');
   const bucketSel = document.getElementById('f-bucket');
+  /* One switch governs the whole console: a bucket nobody can see is not a
+     bucket anyone can start a run against either. */
+  Array.from(bucketSel.options).forEach((opt) => {
+    if (!C.showsBucket(opt.value)) opt.remove();
+  });
   const paintHint = () => {
     hint.textContent = bucketSel.value === 'micro_live'
       ? C.t('rs.hintMicro') : C.t('rs.hintConceptual');
