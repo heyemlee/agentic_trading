@@ -70,6 +70,29 @@ test('assistant safely renders sources and preserves new edits during a note sav
   assert.equal(input.value, 'Second edit');
 });
 
+test('assistant panels switch instantly without losing a draft', () => {
+  const c = advisorPage(async () => ({}));
+  assert.equal(c.element('panel-chat').hidden, false);
+  assert.equal(c.element('panel-holdings').hidden, true);
+  c.element('chat-input').value = 'Keep my question';
+  c.element('view-holdings').events.click();
+  assert.equal(c.element('panel-chat').hidden, true);
+  assert.equal(c.element('panel-holdings').hidden, false);
+  assert.equal(c.element('panel-personal').hidden, true);
+  c.element('view-chat').events.click();
+  assert.equal(c.element('chat-input').value, 'Keep my question');
+  assert.equal(c.element('panel-chat').hidden, false);
+});
+
+test('candidate screening returns to the conversation where the answer arrives', async () => {
+  const c = advisorPage(async () => ({ run_key: 'test' }));
+  c.element('view-discover').events.click();
+  assert.equal(c.element('panel-discover').hidden, false);
+  c.element('shortlist').events.click(); await flush();
+  assert.equal(c.element('panel-chat').hidden, false);
+  assert.equal(c.element('panel-discover').hidden, true);
+});
+
 test('assistant retries an uncertain request with the same id and keeps failed text', async () => {
   const ids = []; let calls = 0;
   const c = advisorPage(async (url, body) => {

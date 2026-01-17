@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Conservative Trading console — interface language.
+ * Agentic Trading console — interface language.
  *
  * SCOPE, and the line this must not cross:
  *
@@ -60,6 +60,10 @@ window.I18N = (function () {
       'ai.shortlistPrompt': 'Rank the most suitable stocks or ETFs from my supplied candidates. Explain fit with my holdings and profile, key risks, evidence gaps and what to research next. Do not add symbols outside these sources.',
       'ai.value': 'Account value', 'ai.cash': 'Cash', 'ai.reviewed': 'Reviewed {date}',
       /* chrome */
+      'app.chat': 'Chat', 'app.holdings': 'Holdings', 'app.discover': 'Discover',
+      'app.details': 'Account details', 'app.ask': 'Ask my assistant',
+      'app.positions': 'My holdings', 'app.manage': 'History & preferences',
+      'nav.hint.approvals': 'Review pending trades before anything executes',
       'nav.dashboard': 'Home', 'nav.portfolio': 'Portfolio', 'nav.approvals': 'Approvals',
       'nav.research': 'Research', 'nav.risk': 'Risk', 'nav.activity': 'Activity',
       'nav.system': 'System', 'nav.more': 'More',
@@ -420,6 +424,10 @@ window.I18N = (function () {
       'ai.shortlistPrompt': '从给出的候选中筛选最适合我的股票或 ETF，按优先级排列。结合我的持仓和个人情况解释理由、主要风险、缺失证据及下一步研究方向。不要添加来源之外的标的。',
       'ai.value': '账户总值', 'ai.cash': '现金', 'ai.reviewed': '研究日期 {date}',
       /* chrome */
+      'app.chat': '聊天', 'app.holdings': '持仓', 'app.discover': '选股',
+      'app.details': '账户明细', 'app.ask': '问问助手',
+      'app.positions': '我的持仓', 'app.manage': '历史与个人设置',
+      'nav.hint.approvals': '待你确认的交易，不会自动执行',
       'nav.dashboard': '首页', 'nav.portfolio': '组合', 'nav.approvals': '审批',
       'nav.research': '研究', 'nav.risk': '风控', 'nav.activity': '流水',
       'nav.system': '系统', 'nav.more': '更多',
@@ -760,7 +768,7 @@ window.I18N = (function () {
     });
     document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : 'en';
     const title = document.querySelector('[data-i18n-title]');
-    if (title) document.title = t(title.getAttribute('data-i18n-title')) + ' · Conservative Trading';
+    if (title) document.title = t(title.getAttribute('data-i18n-title')) + ' · Agentic Trading';
   }
 
   function set(next) {

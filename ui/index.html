@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Home · Conservative Trading</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Home · Agentic Trading</title>
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#111318" />
 <link rel="stylesheet" href="assets/console.css" />
 </head>
-<body>
+<body class="home-page">
 
 <main id="content" hidden data-i18n-title="home.title">
 
@@ -42,6 +42,12 @@
         <span class="chip" id="chip-money">—</span>
       </div>
 
+      <div class="app-quick-actions">
+        <a class="btn btn-green" href="advisor.html" data-i18n="app.ask">问问助手</a>
+        <a class="btn btn-secondary" href="advisor.html?view=holdings" data-i18n="app.positions">Robinhood 持仓</a>
+      </div>
+      <details class="app-disclosure">
+      <summary data-i18n="app.details">账户明细</summary>
       <div class="hwm" data-od-id="high-water-mark">
         <p class="hwm-delta" id="hwm-delta">—</p>
         <div class="hwm-track" id="hwm-track" role="img" aria-label="">
@@ -53,6 +59,7 @@
 
       <dl class="kv" style="margin-top:16px;" id="funding-kv"></dl>
       <div class="list" style="margin-top:16px;" id="account-list"></div>
+      </details>
     </div>
   </section>
 

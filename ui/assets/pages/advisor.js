@@ -6,6 +6,27 @@
   let notesRevision = 0, notesLoaded = false, notesDirty = false;
   let busy = false, pendingRequest = null, shownMessages = [];
   C.mount('advisor');
+  const views = ['chat', 'holdings', 'discover'];
+  function showView(view, focus = false) {
+    if (!views.includes(view)) view = 'chat';
+    for (const name of views) {
+      el('panel-' + name).hidden = name !== view;
+      el('view-' + name).setAttribute('aria-selected', String(name === view));
+      el('view-' + name).tabIndex = name === view ? 0 : -1;
+    }
+    el('panel-personal').hidden = view !== 'chat';
+    el('panel-tools').hidden = view === 'chat';
+    if (focus) el('view-' + view).focus();
+  }
+  for (const [index, name] of views.entries()) {
+    el('view-' + name).addEventListener('click', () => showView(name));
+    el('view-' + name).addEventListener('keydown', e => {
+      const next = e.key === 'ArrowRight' ? (index + 1) % 3 : e.key === 'ArrowLeft' ? (index + 2) % 3
+        : e.key === 'Home' ? 0 : e.key === 'End' ? 2 : null;
+      if (next !== null) { e.preventDefault(); showView(views[next], true); }
+    });
+  }
+  showView(new URLSearchParams(location.search).get('view'));
   const status = text => { el('advisor-status').textContent = text; };
   const money = n => n == null ? '—' : C.usd(n);
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
@@ -117,7 +138,7 @@
   el('ask-risk').addEventListener('click', () => { el('chat-input').value = t('ai.askRisk'); });
   el('ask-scenario').addEventListener('click', () => { el('chat-input').value = t('ai.askScenario'); });
   el('refresh-holdings').addEventListener('click', () => send('refresh'));
-  el('shortlist').addEventListener('click', () => send('shortlist', { message: t('ai.shortlistPrompt') }));
+  el('shortlist').addEventListener('click', () => { showView('chat'); send('shortlist', { message: t('ai.shortlistPrompt') }); });
   el('symbol-form').addEventListener('submit', e => {
     e.preventDefault(); send('analysis', { ticker: el('symbol-input').value.trim().toUpperCase() });
   });

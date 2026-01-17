@@ -117,7 +117,7 @@
   const NAV = [
     { href: 'index.html',     key: 'dashboard', icon: 'home',      tab: true },
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
-    { href: 'approvals.html', key: 'approvals', icon: 'approvals', tab: true },
+    { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'research',  tab: true },
     { href: 'research.html',  key: 'research',  icon: 'research' },
     { href: 'risk.html',      key: 'risk' },
@@ -138,8 +138,10 @@
         ' data-od-id="tab-' + n.key + '">' + ICON[n.icon] + dot +
         '<span data-nav-label="' + n.key + '">' + t('nav.' + n.key) + '</span></a>';
     }).join('') +
-      '<button class="tabitem" type="button" id="tab-more" aria-expanded="' + inOverflow + '"' +
+      '<button class="tabitem" type="button" id="tab-more" aria-expanded="false"' +
+      (inOverflow ? ' aria-current="page"' : '') +
       ' aria-haspopup="dialog" data-od-id="tab-more">' + ICON.more +
+      '<span id="more-badge" class="tabdot"' + (open ? '' : ' hidden') + '></span>' +
       '<span data-nav-label="more">' + t('nav.more') + '</span></button>';
 
     const sheetLinks = overflow.map((n) =>
@@ -154,23 +156,25 @@
       '<a class="skip-link" href="#content">' + t('common.skip') + '</a>' +
       '<header class="topnav" data-od-id="topnav"><div class="topnav-inner">' +
         '<a class="brand" href="index.html" data-od-id="brand">' +
-          '<span class="brand-mark" aria-hidden="true">CT</span><span>Conservative Trading</span></a>' +
+          '<span class="brand-mark" aria-hidden="true">CT</span><span>Trading</span></a>' +
         '<span class="spacer"></span>' +
         '<button class="langswitch" type="button" id="lang-switch" data-od-id="lang-switch"></button>' +
         '<a class="nav-status" href="system.html" id="nav-status" data-od-id="nav-status">' +
           '<span class="dot"></span><span>' + t('nav.status') + '</span></a>' +
       '</div></header>' +
       '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner">' + tabs + '</div></nav>' +
-      '<dialog class="sheet" id="more-sheet" data-od-id="more-sheet"><div class="sheet-inner">' +
+      '<dialog class="sheet" id="more-sheet" aria-label="' + t('nav.more') + '" data-od-id="more-sheet"><div class="sheet-inner">' +
         '<div class="sheet-grip" aria-hidden="true"></div>' +
         '<div class="list">' + sheetLinks + '</div>' +
-        '<button class="btn btn-secondary" id="more-close" style="margin-top:16px;">' +
+        '<button class="btn btn-secondary" id="more-close" data-i18n="common.close" style="margin-top:16px;">' +
           t('common.close') + '</button>' +
       '</div></dialog>';
   }
 
 
   function paintNavStatus() {
+    const badge = document.getElementById('more-badge');
+    if (badge) badge.hidden = !openCount();
     const el = document.getElementById('nav-status');
     if (!el) return;
     const s = systemStatus();
@@ -220,7 +224,7 @@
         missing.map(([key, item]) => key + (item.error ? ' — ' + item.error : '')).join('; ');
     } else {
       bar.className = 'conn-bar';
-      bar.textContent = zh ? '真实数据 · 以下为各模块最近读取时间' : 'Account data · Last successful read by resource';
+      bar.hidden = true;
     }
     let details = document.getElementById('resource-status');
     if (!details) {
@@ -261,7 +265,7 @@
         ? (CT_API.authenticated ? '退出' : '登录') : (CT_API.authenticated ? 'Sign out' : 'Sign in');
     };
     paintSession();
-    document.querySelector('.topnav-inner').appendChild(sessionLink);
+    document.querySelector('#more-sheet .sheet-inner').appendChild(sessionLink);
     document.addEventListener('ct:auth', paintSession);
     document.addEventListener('ct:lang', paintSession);
     sessionLink.addEventListener('click', async event => {
@@ -286,6 +290,7 @@
     /* A language change repaints the chrome and re-runs every screen render. */
     document.addEventListener('ct:lang', () => {
       paintLang();
+      document.getElementById('more-sheet').setAttribute('aria-label', t('nav.more'));
       document.querySelectorAll('[data-nav-label]').forEach((el) => {
         el.textContent = t('nav.' + el.getAttribute('data-nav-label'));
       });
@@ -301,7 +306,8 @@
     const sheet = document.getElementById('more-sheet');
     const moreBtn = document.getElementById('tab-more');
     if (sheet && moreBtn) {
-      moreBtn.addEventListener('click', () => sheet.showModal());
+      moreBtn.addEventListener('click', () => { sheet.showModal(); moreBtn.setAttribute('aria-expanded', 'true'); });
+      sheet.addEventListener('close', () => { moreBtn.setAttribute('aria-expanded', 'false'); moreBtn.focus(); });
       document.getElementById('more-close').addEventListener('click', () => sheet.close());
       sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
     }
