@@ -255,9 +255,9 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         current = load_ladder_states(ladder_path, profiles)
         micro_equity = snap.buckets[MICRO_BUCKET].equity if MICRO_BUCKET in snap.buckets else None
         evaluate_ladders(current, profiles, proposal.trade_date,
-                         snap.total_equity if "core" in snap.buckets else (micro_equity or snap.total_equity),
-                         snap.buckets["core"].equity if "core" in snap.buckets else (micro_equity or 0.0),
-                         snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else 0.0,
+                         snap.total_equity if "core" in snap.buckets else None,
+                         snap.buckets["core"].equity if "core" in snap.buckets else None,
+                         snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else None,
                          micro_live_equity=micro_equity)
         if persist_risk:
             save_ladder_states(ladder_path, current)

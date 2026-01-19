@@ -132,16 +132,29 @@ def _step(state: LadderState, equity: float, thresholds: list[tuple[str, float]]
 
 
 def evaluate_ladders(states: LadderStates, profiles: Profiles, as_of: str,
-                     total_equity: float, core_equity: float, sandbox_equity: float,
+                     total_equity: float | None, core_equity: float | None,
+                     sandbox_equity: float | None,
                      micro_live_equity: float | None = None) -> LadderStates:
+    """Step each ladder against its own portfolio's equity.
+
+    None means the snapshot did not contain that portfolio, so its ladder is left exactly
+    as it was. A Micro-Live run is handed a snapshot with one bucket in it; standing a zero
+    in for the conceptual buckets it was never shown reads as a total loss, and the ladder
+    latches a halt that needs a human to clear. That happened: a $100 account judged against
+    the paper book's $3,000 high-water mark recorded -96.7% and went to EMERGENCY, with
+    Sandbox at -100% and HALT, on portfolios that had never held a position. The guard the
+    Micro-Live ladder already had is simply the same one, applied to all four.
+    """
     hyst = float(profiles.risk_cfg("drawdown_ladder", "de_escalation", "hysteresis_pct_points", default=2))
     manual = set(profiles.risk_cfg("drawdown_ladder", "de_escalation", "manual_reset_levels", default=[]) or [])
     total_thr = _thresholds(profiles, "total_portfolio")
-    _step(states.total, total_equity, total_thr, ORDER, hyst, manual, as_of)
-    if profiles.risk_cfg("drawdown_ladder", "core", "mirror_total_portfolio_levels", default=True):
+    if total_equity is not None:
+        _step(states.total, total_equity, total_thr, ORDER, hyst, manual, as_of)
+    if core_equity is not None and profiles.risk_cfg("drawdown_ladder", "core", "mirror_total_portfolio_levels", default=True):
         _step(states.core, core_equity, total_thr, ORDER, hyst, manual, as_of)
-    sandbox_thr = _thresholds(profiles, "sandbox")
-    _step(states.sandbox, sandbox_equity, sandbox_thr, SANDBOX_ORDER, hyst, {"HALT"}, as_of)
+    if sandbox_equity is not None:
+        sandbox_thr = _thresholds(profiles, "sandbox")
+        _step(states.sandbox, sandbox_equity, sandbox_thr, SANDBOX_ORDER, hyst, {"HALT"}, as_of)
     if states.micro_live is not None and micro_live_equity is not None:
         _step(states.micro_live, micro_live_equity, _thresholds(profiles, "micro_live"),
               SANDBOX_ORDER, hyst, {"HALT"}, as_of)

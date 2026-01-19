@@ -104,6 +104,28 @@ def test_hard_halt_is_sticky_until_manual_reset(profiles):
     assert json.dumps(ladders.as_dict())  # serialisable
 
 
+def test_a_micro_live_run_never_judges_the_conceptual_ladders(profiles):
+    """A snapshot with one bucket may only move that bucket's ladder.
+
+    The Micro-Live ledger carries micro_live and nothing else. Standing a zero in for the
+    conceptual buckets it was never shown made a $100 account read as -96.7% against the
+    paper book's $3,000 high-water mark, and latched EMERGENCY and HALT on portfolios that
+    had never held a position.
+    """
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, "2026-09-08", None, None, None, micro_live_equity=100.0)
+    for absent in (ladders.total, ladders.core, ladders.sandbox):
+        assert absent.level == "NORMAL"
+        assert not absent.manual_reset_required
+        assert absent.drawdown_pct == 0.0
+        assert absent.history == []
+    assert ladders.micro_live.level == "NORMAL"
+    # and the ladder it was actually given still works
+    evaluate_ladders(ladders, profiles, "2026-09-09", None, None, None, micro_live_equity=75.0)
+    assert ladders.micro_live.level == "HALT" and ladders.total.level == "NORMAL"
+
+
 def test_sandbox_ladder_halts_at_minus_20(profiles):
     ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0))
     evaluate_ladders(ladders, profiles, "2026-09-01", 2900.0, 2500.0, 400.0)   # sandbox -20%, total -3.3%

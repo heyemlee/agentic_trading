@@ -95,9 +95,9 @@ def portfolio_context(profiles: Profiles, trade_date: str,
         ladders = load_ladder_states(ladder_path, profiles)
         micro_equity = snap.buckets[MICRO_BUCKET].equity if MICRO_BUCKET in snap.buckets else None
         evaluate_ladders(ladders, profiles, trade_date,
-                         snap.total_equity if "core" in snap.buckets else (micro_equity or snap.total_equity),
-                         snap.buckets["core"].equity if "core" in snap.buckets else (micro_equity or 0.0),
-                         snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else 0.0,
+                         snap.total_equity if "core" in snap.buckets else None,
+                         snap.buckets["core"].equity if "core" in snap.buckets else None,
+                         snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else None,
                          micro_live_equity=micro_equity)
         save_ladder_states(ladder_path, ladders)
     regime = assess_regime(profiles, trade_date)
