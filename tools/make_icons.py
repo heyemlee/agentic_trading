@@ -6,7 +6,7 @@ decision this thing makes, drawn as four rising bars with the top one held back.
 here rather than committed as opaque binary so it can be read, reviewed and changed like the
 rest of the code.
 
-    uv run python deploy/make_icons.py
+    uv run python tools/make_icons.py
 
 PNG is written by hand because the alternative is a dependency for four flat images. The format
 is simple enough: a signature, a header chunk, zlib-compressed scanlines, and an end chunk.

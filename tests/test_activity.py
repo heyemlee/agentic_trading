@@ -12,8 +12,8 @@ import pytest
 
 from agentic_trading import events
 from agentic_trading.api.service import Service
+from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import PROPOSED, REJECTED, ProposalStore
-from agentic_trading.stage3_scenarios import _proposal
 from tests.conftest import ROOT
 
 
@@ -21,7 +21,6 @@ from tests.conftest import ROOT
 def service(tmp_path):
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
-    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
     shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")

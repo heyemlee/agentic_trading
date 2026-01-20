@@ -27,8 +27,8 @@ dependencies = [
 [project.scripts]
 ct-research = "agentic_trading.cli:main"
 ct-risk-check = "agentic_trading.cli:risk_check_main"
-ct-scenarios = "agentic_trading.scenarios:main"
-ct-stage3 = "agentic_trading.stage3_scenarios:main"
+ct-risk-scenarios = "agentic_trading.risk_scenarios:main"
+ct-execution-scenarios = "agentic_trading.execution_scenarios:main"
 ct-approve = "agentic_trading.cli:approve_main"
 ct-proposals = "agentic_trading.cli:proposals_main"
 ct-robinhood = "agentic_trading.robinhood_cli:main"

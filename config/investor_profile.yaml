@@ -22,7 +22,7 @@ objective:
   accept_lower_upside_for_lower_downside: true
   cash_is_valid_outcome: true
   no_trade_is_valid_outcome: true
-  mandate_file: MANDATE.md
+  mandate_file: config/MANDATE.md
   mandate_context_file: config/mandate_context.md   # compact version injected into every agent prompt
 
 capital:

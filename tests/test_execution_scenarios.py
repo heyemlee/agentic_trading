@@ -1,9 +1,16 @@
-"""Stage 3: proposal lifecycle, freshness, revalidation and paper execution. Fully offline."""
+"""Proposal lifecycle, freshness, revalidation and paper execution. Fully offline."""
 
 import pytest
 
 from agentic_trading.broker import SimulatedBroker
 from agentic_trading.broker.base import BrokerRejection, DuplicateOrder, OrderRequest
+from agentic_trading.execution_scenarios import (
+    _proposal,
+    build_cases,
+    run_case,
+    run_idempotency_case,
+    run_interrupted_session_case,
+)
 from agentic_trading.proposals import (
     EXPIRED,
     STALE,
@@ -12,17 +19,10 @@ from agentic_trading.proposals import (
     client_order_id,
     positions_fingerprint,
 )
-from agentic_trading.stage3_scenarios import (
-    _proposal,
-    build_cases,
-    run_case,
-    run_idempotency_case,
-    run_interrupted_session_case,
-)
 
 
 @pytest.mark.parametrize("case", build_cases(), ids=lambda c: c.key)
-def test_stage3_case(case):
+def test_execution_scenario_case(case):
     outcome = run_case(case)
     assert outcome.outcome == case.expect_outcome, (case.title, outcome.detail)
     assert outcome.submitted == case.expect_submitted, case.title

@@ -10,6 +10,7 @@ from agentic_trading import execution
 from agentic_trading.api.service import Service, ServiceConflict
 from agentic_trading.api.status import ProposalStatus, proposal_status
 from agentic_trading.broker.base import BrokerUnavailable, Quote
+from agentic_trading.execution_scenarios import _std
 from agentic_trading.portfolio import load_portfolio, snapshot_from_broker
 from agentic_trading.proposals import (
     CANCELED,
@@ -20,8 +21,7 @@ from agentic_trading.proposals import (
     UNKNOWN,
     ProposalStore,
 )
-from agentic_trading.scenarios import identity_lookup, regime
-from agentic_trading.stage3_scenarios import _std
+from agentic_trading.risk_scenarios import identity_lookup, regime
 from agentic_trading.state_db import StateDB
 
 

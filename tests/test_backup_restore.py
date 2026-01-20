@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 from agentic_trading import state_cli
+from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.portfolio import load_portfolio, migrate_portfolio
 from agentic_trading.proposals import PROPOSED, ProposalStore
-from agentic_trading.stage3_scenarios import _proposal
 from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT
 
@@ -27,7 +27,6 @@ def project(tmp_path):
     """A complete state directory: config, a ledger, a proposal and a ladder document."""
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
-    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     state = tmp_path / "state"
     state.mkdir()
     (tmp_path / "runs").mkdir()

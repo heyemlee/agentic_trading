@@ -19,6 +19,7 @@ from agentic_trading.api.status import (
     SystemStatus,
     proposal_status,
 )
+from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import (
     APPROVED,
     EXECUTED,
@@ -28,7 +29,6 @@ from agentic_trading.proposals import (
     ProposalStore,
     utcnow,
 )
-from agentic_trading.stage3_scenarios import _proposal
 from tests.conftest import ROOT
 
 
@@ -37,7 +37,6 @@ def sandbox_service(tmp_path):
     """A Service whose every state path points at a temp directory."""
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
-    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     state = tmp_path / "state"
     state.mkdir()
     shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")

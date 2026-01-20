@@ -10,7 +10,7 @@ quiet about.
 import pytest
 
 from agentic_trading.evidence import check_evidence, collect_evidence, foreign_bucket_mentions
-from agentic_trading.scenarios import TRADE_DATE, price_lookup
+from agentic_trading.risk_scenarios import TRADE_DATE, price_lookup
 
 # Verbatim from runs/2026-09-04_VTI_873e64ae, the contaminated run.
 CONTAMINATED = ("The bull framed cash as an opportunity cost, but this is a $100 MICRO_LIVE "

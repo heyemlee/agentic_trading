@@ -291,8 +291,8 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     import yaml
 
     from agentic_trading.execution import execute
+    from agentic_trading.execution_scenarios import _proposal
     from agentic_trading.proposals import ProposalStore
-    from agentic_trading.stage3_scenarios import _proposal
 
     ledger = tmp_path / "micro_live_portfolio.yaml"
     ledger.write_text(yaml.safe_dump({
@@ -315,7 +315,7 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
     from datetime import UTC, datetime
 
     from agentic_trading.broker.base import Clock
-    from agentic_trading.scenarios import regime as fake_regime
+    from agentic_trading.risk_scenarios import regime as fake_regime
 
     monkeypatch.setattr("agentic_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
     monkeypatch.setattr(broker, "get_clock", lambda: Clock(is_open=True, timestamp=datetime.now(UTC)))
@@ -405,9 +405,9 @@ def test_partial_fill_reconciles_only_what_filled(profiles, tmp_path, monkeypatc
 
     from agentic_trading.broker.base import Clock
     from agentic_trading.execution import execute
+    from agentic_trading.execution_scenarios import _proposal
     from agentic_trading.proposals import ProposalStore
-    from agentic_trading.scenarios import regime as fake_regime
-    from agentic_trading.stage3_scenarios import _proposal
+    from agentic_trading.risk_scenarios import regime as fake_regime
 
     ledger = tmp_path / "micro_live_portfolio.yaml"
     ledger.write_text(yaml.safe_dump({"as_of": "2026-09-02", "currency": "USD",

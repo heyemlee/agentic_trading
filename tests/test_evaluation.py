@@ -20,7 +20,6 @@ def study(tmp_path, monkeypatch):
     """A started study over a two-symbol benchmark, with prices under the test's control."""
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
-    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
     shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")

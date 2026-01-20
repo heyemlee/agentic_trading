@@ -1,4 +1,4 @@
-"""Stage 3 validation: the proposal -> approval -> revalidation -> paper execution pipeline.
+"""Execution validation: the proposal -> approval -> revalidation -> paper execution pipeline.
 
 Every scenario runs against the deterministic SimulatedBroker with no network, no credentials
 and no model call, so the safety properties are provable and repeatable. The same code path

@@ -216,8 +216,8 @@ FRED 每次都排在缺失证据的第一或第二条。
 
 ## 参考
 
-- 验收记录表：[docs/ACCEPTANCE_P1.md](docs/ACCEPTANCE_P1.md)
+- 验收记录表：[docs/archive/ACCEPTANCE_P1.md](docs/archive/ACCEPTANCE_P1.md)
 - 部署、发布回滚、异地备份：[docs/MACOS_DEPLOYMENT.md](docs/MACOS_DEPLOYMENT.md)
 - 登录、排期、通知、恢复：[docs/CONSOLE_SETUP_AND_RECOVERY.md](docs/CONSOLE_SETUP_AND_RECOVERY.md)
 - 日常运行与命令：[docs/OPERATIONS.md](docs/OPERATIONS.md)
-- 最初评审（历史，不代表现状）：[docs/PROJECT_REVIEW_2026-09-03.md](docs/PROJECT_REVIEW_2026-09-03.md)
+- 最初评审（历史，不代表现状）：[docs/archive/PROJECT_REVIEW_2026-09-03.md](docs/archive/PROJECT_REVIEW_2026-09-03.md)

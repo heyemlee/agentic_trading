@@ -13,7 +13,7 @@ from agentic_trading.portfolio import (
 )
 from agentic_trading.risk import HardRiskEngine, Proposal
 from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
-from agentic_trading.scenarios import (
+from agentic_trading.risk_scenarios import (
     TRADE_DATE,
     build_scenarios,
     identity_lookup,
@@ -43,7 +43,7 @@ def test_acceptable_buy_is_sized_from_the_baseline(profiles):
 @pytest.mark.parametrize('action,quantity', [('SELL', 2.0), ('REDUCE', 1.0)])
 def test_risk_engine_generates_nonzero_exit_size(profiles, action, quantity):
     from agentic_trading.risk import HardRiskEngine, Proposal
-    from agentic_trading.scenarios import make_ladders, regime
+    from agentic_trading.risk_scenarios import make_ladders, regime
 
     state = make_state(core_cash=1700, positions=[
         {'symbol': 'VTI', 'bucket': 'core', 'quantity': 2, 'cost_basis_per_share': 370}])

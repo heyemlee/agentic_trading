@@ -37,7 +37,7 @@ RATING_TO_ACTION: dict[str, tuple[str, str]] = {
 
 
 class ConservativeProposal(BaseModel):
-    """The mandate's trade-proposal format (MANDATE.md), filled by the reviewer."""
+    """The mandate's trade-proposal format (config/MANDATE.md), filled by the reviewer."""
 
     ticker: str
     recommended_action: Action = Field(description="Your recommendation. NO_TRADE is expected when evidence is weak.")

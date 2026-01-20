@@ -1,0 +1,48 @@
+name: checks
+
+# The same gate that runs before a release, run on every push and pull request.
+#
+# It shells out to deploy/checks.sh rather than restating the steps, so there is one definition
+# of "green" and it cannot drift from what a release is actually held to. Everything it runs is
+# offline: no venue, no credentials and no model call, so nothing here can place an order or
+# spend subscription quota.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # checks.sh is zsh, matching the deployment scripts it sits beside.
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # --frozen so a lockfile that no longer matches pyproject.toml fails here rather than
+      # resolving to something no one has run locally.
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff, pytest, frontend cases, secret scan
+        run: zsh deploy/checks.sh

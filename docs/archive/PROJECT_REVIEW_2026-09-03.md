@@ -25,31 +25,31 @@ Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当�
 
 **A. 卖出与减仓金额为零，导致无法执行。**
 
-[风险引擎](/Users/l/Desktop/agentic_trading/agentic_trading/risk/engine.py:209) 对已有持仓的 SELL/REDUCE 返回 APPROVE，但金额固定为 0。[执行复核](/Users/l/Desktop/agentic_trading/agentic_trading/execution.py:269) 将新金额与批准金额取最小值，再因低于最低订单金额而拒绝。
+[风险引擎](../../agentic_trading/risk/engine.py:209) 对已有持仓的 SELL/REDUCE 返回 APPROVE，但金额固定为 0。[执行复核](../../agentic_trading/execution.py:269) 将新金额与批准金额取最小值，再因低于最低订单金额而拒绝。
 
 建议：SELL 按可卖持仓数量，REDUCE 按明确目标差额定量；检查碎股、小额余仓、已有卖单占用数量。验证持仓→提案→批准→部分/全部卖出→记账的完整流程。理由：风险降低必须能真正完成，单测只检查风控 verdict 会漏掉此问题。
 
 **B. 部分成交、延迟成交和重启恢复没有闭合。**
 
-[券商轮询](/Users/l/Desktop/agentic_trading/agentic_trading/broker/robinhood.py:573) 最多等待约 30 秒。[执行代码](/Users/l/Desktop/agentic_trading/agentic_trading/execution.py:425) 随后把 pending/partial 也存为 EXECUTED，[后续执行](/Users/l/Desktop/agentic_trading/agentic_trading/execution.py:316) 直接返回。当前没有持续同步剩余成交的 worker；订单查询只是读取和展示。
+[券商轮询](../../agentic_trading/broker/robinhood.py:573) 最多等待约 30 秒。[执行代码](../../agentic_trading/execution.py:425) 随后把 pending/partial 也存为 EXECUTED，[后续执行](../../agentic_trading/execution.py:316) 直接返回。当前没有持续同步剩余成交的 worker；订单查询只是读取和展示。
 
 建议：将提案状态和订单状态分开，保留 SUBMITTING、SUBMITTED、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED、UNKNOWN；持久保存订单意图、券商订单号与已入账成交量。后台及启动时查询未终结/未知订单，只入账新增成交量。理由：提交成功不等于成交完成，手机超时也不意味着订单失败，盲目重试或只读本地账本都会产生错误。
 
 **C. 审批 API 没有身份校验；确认参数默认同意。**
 
-[approve 路由](/Users/l/Desktop/agentic_trading/agentic_trading/api/app.py:148) 的 confirm 默认为 true，请求体也可省略。API 当前没有登录与 Origin 校验。[审批记录](/Users/l/Desktop/agentic_trading/agentic_trading/api/service.py:391) 将批准人固定写成 investor，无法追溯实际身份。
+[approve 路由](../../agentic_trading/api/app.py:148) 的 confirm 默认为 true，请求体也可省略。API 当前没有登录与 Origin 校验。[审批记录](../../agentic_trading/api/service.py:391) 将批准人固定写成 investor，无法追溯实际身份。
 
 建议：由可信访问网关或应用会话识别唯一用户，在服务器端实施写权限；审批要求显式确认、提案 ID/版本与幂等键，并记真实身份。交易审批与恢复交易可要求短时间内重新验证。若用 Cookie 会话，增加 CSRF 保护与严格 Origin/Host 检查。前端按钮和 writesEnabled 都不能充当安全边界。CORS 也不是登录或完整的 CSRF 防护，参见 [OWASP CSRF 指南](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)。
 
 **D. 无锁整文件存储不适合手机、多页面与研究并发。**
 
-[ProposalStore](/Users/l/Desktop/agentic_trading/agentic_trading/proposals.py:187) 和[账本写入](/Users/l/Desktop/agentic_trading/agentic_trading/portfolio.py:342) 都是先读、修改、写固定临时文件再替换，缺少事务/执行锁。存在并发时的记录覆盖和丢更新风险；本次未进行真实并发订单复现。
+[ProposalStore](../../agentic_trading/proposals.py:187) 和[账本写入](../../agentic_trading/portfolio.py:342) 都是先读、修改、写固定临时文件再替换，缺少事务/执行锁。存在并发时的记录覆盖和丢更新风险；本次未进行真实并发订单复现。
 
 建议：单机使用 SQLite，事务保存状态转换和额度预留，并串行处理同一账户的订单。事务不应跨越漫长网络调用：先原子记录意图与预留，再调用券商，再原子记结果。确定性券商订单 ID 仍需保留。理由：同一订单防重不能解决两条不同提案同时使用同一笔现金；单 Uvicorn worker 也不能自动消除线程/子进程并发。
 
 **E. 报价的接收时间冒充市场时间。**
 
-[get_quote](/Users/l/Desktop/agentic_trading/agentic_trading/broker/robinhood.py:404) 使用本地当前时间为报价打戳，之后的新鲜度检查无法识别券商返回的旧成交价。Micro-Live 实际使用市价单，计算的参考 limit 不是实际成交价格上限。
+[get_quote](../../agentic_trading/broker/robinhood.py:404) 使用本地当前时间为报价打戳，之后的新鲜度检查无法识别券商返回的旧成交价。Micro-Live 实际使用市价单，计算的参考 limit 不是实际成交价格上限。
 
 建议：分开记录市场时间与接收时间，验证原始时间、买卖价差与数据来源；市场时间缺失时明确拒绝或降级。理由：刚收到的数据可能已经过时，研究价格、预览价格和成交价格也不应混为一谈。
 
@@ -57,16 +57,16 @@ Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当�
 
 | 当前情况 | 建议 | 理由 |
 |---|---|---|
-| [API 地址固定为本机](/Users/l/Desktop/agentic_trading/ui/assets/api.js:26) | 使用相对路径，由同一 HTTPS 入口代理 UI 和 API | 手机的 127.0.0.1 指向手机；域名、不同端口及 HTTPS 访问也会出问题 |
-| [全部写请求默认关闭](/Users/l/Desktop/agentic_trading/ui/assets/api.js:173) | 界面清楚显示当前可用能力；完成服务端权限后再接通写操作 | 目前研究、审批、拒绝、暂停按钮都不能完成对应 POST，不能仅改此变量就上线 |
-| [任一接口成功即标全局在线](/Users/l/Desktop/agentic_trading/ui/assets/api.js:111) | 演示模式独立；真实模式从空数据开始，逐模块标记来源、时效与错误 | 已复现组合接口失败、健康接口成功后，示例组合仍展示而警告消失 |
-| [暂停状态优先读 localStorage](/Users/l/Desktop/agentic_trading/ui/assets/console.js:76) | 暂停只以服务器确认状态为准，失败提示单独保留 | 手机、电脑、服务端状态可能不一致；离线时应显示“未知”而非“已暂停” |
-| [弹窗提交时重新读取动态提案 ID](/Users/l/Desktop/agentic_trading/ui/approvals.html:361) | 打开弹窗即固定 ID、版本、账户、金额、方向；变化后重新确认 | 15 秒轮询可更换队首提案，已勾选的确认可能用于另一笔 |
-| [部分外部文本直接拼入 HTML](/Users/l/Desktop/agentic_trading/ui/assets/console.js:400) | 普通文本用 textContent；富文本采用严格允许列表，并加合适 CSP | 研究、风险、警告文本可成为注入入口；同源脚本执行会影响交易操作台 |
-| [运行句柄仅存在浏览器内存](/Users/l/Desktop/agentic_trading/ui/assets/api.js:57) | 后端提供运行中任务列表，刷新/跨页后按 run ID 恢复 | 手机切后台、关页、断网不应丢失研究状态或诱发重复运行 |
-| [活动页直接访问详情 history](/Users/l/Desktop/agentic_trading/ui/activity.html:106) | 正确处理无提案，提供服务器分页审计事件流 | 空详情会抛错，单条提案历史不能替代完整活动记录 |
+| [API 地址固定为本机](../../ui/assets/api.js:26) | 使用相对路径，由同一 HTTPS 入口代理 UI 和 API | 手机的 127.0.0.1 指向手机；域名、不同端口及 HTTPS 访问也会出问题 |
+| [全部写请求默认关闭](../../ui/assets/api.js:173) | 界面清楚显示当前可用能力；完成服务端权限后再接通写操作 | 目前研究、审批、拒绝、暂停按钮都不能完成对应 POST，不能仅改此变量就上线 |
+| [任一接口成功即标全局在线](../../ui/assets/api.js:111) | 演示模式独立；真实模式从空数据开始，逐模块标记来源、时效与错误 | 已复现组合接口失败、健康接口成功后，示例组合仍展示而警告消失 |
+| [暂停状态优先读 localStorage](../../ui/assets/console.js:76) | 暂停只以服务器确认状态为准，失败提示单独保留 | 手机、电脑、服务端状态可能不一致；离线时应显示“未知”而非“已暂停” |
+| [弹窗提交时重新读取动态提案 ID](../../ui/approvals.html:361) | 打开弹窗即固定 ID、版本、账户、金额、方向；变化后重新确认 | 15 秒轮询可更换队首提案，已勾选的确认可能用于另一笔 |
+| [部分外部文本直接拼入 HTML](../../ui/assets/console.js:400) | 普通文本用 textContent；富文本采用严格允许列表，并加合适 CSP | 研究、风险、警告文本可成为注入入口；同源脚本执行会影响交易操作台 |
+| [运行句柄仅存在浏览器内存](../../ui/assets/api.js:57) | 后端提供运行中任务列表，刷新/跨页后按 run ID 恢复 | 手机切后台、关页、断网不应丢失研究状态或诱发重复运行 |
+| [活动页直接访问详情 history](../../ui/activity.html:106) | 正确处理无提案，提供服务器分页审计事件流 | 空详情会抛错，单条提案历史不能替代完整活动记录 |
 
-审批页还使用 microLive 的拦截信息，但[轮询清单](/Users/l/Desktop/agentic_trading/ui/approvals.html:419) 未包含 microLive；应确保所有交易相关字段来自当前真实状态。按钮文案也应根据结果区分“批准但未提交”“已提交”“部分成交”“已成交”和“拒绝”。
+审批页还使用 microLive 的拦截信息，但[轮询清单](../../ui/approvals.html:419) 未包含 microLive；应确保所有交易相关字段来自当前真实状态。按钮文案也应根据结果区分“批准但未提交”“已提交”“部分成交”“已成交”和“拒绝”。
 
 首页建议把真实 Micro-Live 净值放在最显眼处，概念账户单独展示。把概念资金和真钱合成一个醒目的总资产数，容易误解；净入金也应与投资收益分离。研究全文保留在展开详情中，手机首屏优先展示操作、金额、理由、最大风险、阻挡原因和数据更新时间。
 
@@ -86,7 +86,7 @@ Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当�
 4. 在 Mac 与手机配置 Tailscale，限制本人访问，启用 Serve 所需 HTTPS。
 5. 以下仅为配置完成后的启动示例，本次未执行部署命令：
 
-       cd /Users/l/Desktop/agentic_trading
+       cd ~/Projects/agentic_trading
        uv sync --frozen
        uv run ct-api --host 127.0.0.1 --port 8787
 
@@ -121,7 +121,7 @@ Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当�
 |---|---|
 | 手机断线或点击后超时 | 显示提交结果未知，按请求 ID 查状态；避免鼓励立即重复下单 |
 | 主机断电/重启 | 先恢复订单与对账，确认一致后才允许新订单；恢复旧备份不能直接继续交易 |
-| 研究卡死/额度不足 | 持久任务状态、超时、有限并发、重复任务合并；[当前后台线程](/Users/l/Desktop/agentic_trading/agentic_trading/api/service.py:443) 和日志关键字不足以提供可靠恢复 |
+| 研究卡死/额度不足 | 持久任务状态、超时、有限并发、重复任务合并；[当前后台线程](../../agentic_trading/api/service.py:443) 和日志关键字不足以提供可靠恢复 |
 | 多设备暂停/恢复 | 以服务器状态为准；区分“禁止新单”与“取消已挂单”，不能假设暂停会撤掉券商现有订单 |
 | 主机已离线 | 手机远程暂停也无法到达主机；紧急时应能直接在 Robinhood 查看/处理现有订单 |
 | 开市/收市与时区 | 调度明确 America/New_York，以交易日历识别假日/半日市；研究默认日期由后端给出最近完成交易日 |
@@ -136,15 +136,15 @@ Core/Sandbox 为概念账户，Micro-Live 为独立的真实账户用途，当�
 
 另有三项规则实现差距，应在扩展策略或开放对应能力前修正：
 
-- 总组合梯级没有正确约束 Sandbox 开仓。[风险引擎](/Users/l/Desktop/agentic_trading/agentic_trading/risk/engine.py:180) 对非 Core 只取 bucket 自身梯级；离线场景总回撤 −4%、−7%、−15% 而 Sandbox 正常时均批准开仓，与配置的总梯级限制不一致。Sandbox 当前是概念账户，不能称为已发生实盘越限。
-- ETF 识别和权限没有确定性执行排除杠杆/反向等结构。[分类](/Users/l/Desktop/agentic_trading/agentic_trading/portfolio.py:144) 与[权限](/Users/l/Desktop/agentic_trading/agentic_trading/risk/engine.py:436) 在注入 leverage=3 的未知 ETF 时仍批准。建议初期用明确允许的标的清单，未知产品拒绝；做多不等于没有杠杆。
-- 材料缺失仍依赖模型自评分。[数据门](/Users/l/Desktop/agentic_trading/agentic_trading/risk/engine.py:277) 只挡 poor，模型同时报告 good 与 material missing 时仍可放行。给关键证据、时间戳和来源建立代码级要求，区分必需信息与可选宏观补充。
+- 总组合梯级没有正确约束 Sandbox 开仓。[风险引擎](../../agentic_trading/risk/engine.py:180) 对非 Core 只取 bucket 自身梯级；离线场景总回撤 −4%、−7%、−15% 而 Sandbox 正常时均批准开仓，与配置的总梯级限制不一致。Sandbox 当前是概念账户，不能称为已发生实盘越限。
+- ETF 识别和权限没有确定性执行排除杠杆/反向等结构。[分类](../../agentic_trading/portfolio.py:144) 与[权限](../../agentic_trading/risk/engine.py:436) 在注入 leverage=3 的未知 ETF 时仍批准。建议初期用明确允许的标的清单，未知产品拒绝；做多不等于没有杠杆。
+- 材料缺失仍依赖模型自评分。[数据门](../../agentic_trading/risk/engine.py:277) 只挡 poor，模型同时报告 good 与 material missing 时仍可放行。给关键证据、时间戳和来源建立代码级要求，区分必需信息与可选宏观补充。
 
 下一步的价值验证应与工程测试分开：先积累前瞻模拟建议和执行记录，把 BUY、SELL、拒绝及 NO_TRADE 都保存，再与相同资金、日期、入金和风险约束的被动配置比较。比较收益、最大回撤、换手、交易摩擦、模型调用量和人工耗时。30 天适合观察流程稳定性，不足以证明长期收益优势。
 
 78/100 是模型自评强度，未经校准不能当作 78% 成功率。多角色讨论可以改善研究组织，但同一模型与同一数据源的判断不等于独立证据。建议进行“完整多 Agent / 简化单 Agent / 无 LLM 基准”的对照，验证额外复杂度是否带来可测收益。
 
-历史回放需要 point-in-time 数据。[个股筛选](/Users/l/Desktop/agentic_trading/agentic_trading/risk/engine.py:453) 读取当前 yfinance.info，不能据此代表历史当时已知的财务情况；LLM 对历史事件的预训练记忆也是额外评估限制。优先前瞻记录，再考虑严格历史回放。
+历史回放需要 point-in-time 数据。[个股筛选](../../agentic_trading/risk/engine.py:453) 读取当前 yfinance.info，不能据此代表历史当时已知的财务情况；LLM 对历史事件的预训练记忆也是额外评估限制。优先前瞻记录，再考虑严格历史回放。
 
 **8. 建议实施顺序**
 

@@ -40,8 +40,8 @@ uv run ct-approve <proposal-id> --revalidate-only # show the revalidation, chang
 uv run ct-approve <proposal-id> --dry-run         # revalidate and stop before submitting
 uv run ct-approve <proposal-id>                   # approve, revalidate, then submit a paper order
 uv run ct-risk-check VTI --confidence 80          # what-if check, no model call
-uv run ct-scenarios                               # Hard Risk validation scenarios
-uv run ct-stage3                                  # proposal / approval / execution validation
+uv run ct-risk-scenarios                          # Hard Risk validation scenarios
+uv run ct-execution-scenarios                     # proposal / approval / execution validation
 uv run ct-state status                            # integrity, record counts, unsettled orders
 uv run ct-state backup --verify                   # consistent SQLite backup, integrity-checked
 uv run ct-state sessions                          # persistent console logins and their expiry
@@ -264,8 +264,8 @@ uv run ct-approve <id> --revalidate-only       # preview the approval check
 uv run ct-approve <id>                         # approve, revalidate, maybe execute
 uv run ct-risk-check VTI --confidence 80       # what-if against the portfolio, no model call
 uv run ct-robinhood status|preflight|connect   # the real-money venue
-uv run ct-scenarios                            # Hard Risk validation scenarios
-uv run ct-stage3                               # proposal, approval and execution validation
+uv run ct-risk-scenarios                       # Hard Risk validation scenarios
+uv run ct-execution-scenarios                  # proposal, approval and execution validation
 uv run ct-state migrate                         # one-time import of legacy state
 uv run ct-state backup --verify                 # consistent SQLite backup, integrity-checked
 uv run ct-state restore --source <f> --into <d> # restore, revoke sessions, list orders to check
@@ -314,7 +314,7 @@ future autonomy setting can execute one without an explicit confirmation.
 - `config/investor_profile.yaml`: objectives, capital buckets, universe, LLM and upstream settings
 - `config/risk_profile.yaml`: execution stage and modes, limits, drawdown ladder, permissions
 - `config/mandate_context.md`: compact mandate injected into every agent prompt
-- `MANDATE.md`: full mandate used by the policy step
+- `config/MANDATE.md`: full mandate used by the policy step
 
 Fields marked `value: TODO` carry a `recommended_default` and `reasoning`.
 Research runs work with TODOs present; execution stages refuse to start until

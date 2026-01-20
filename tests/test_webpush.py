@@ -25,7 +25,6 @@ SUBSCRIPTION = {"endpoint": ENDPOINT,
 def service(tmp_path):
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
-    shutil.copy(ROOT / "MANDATE.md", tmp_path / "MANDATE.md")
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
     shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")

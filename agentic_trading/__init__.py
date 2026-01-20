@@ -1,6 +1,6 @@
 """Conservative, portfolio-aware wrapper around the upstream TradingAgents framework.
 
-Design principles (see MANDATE.md and the gap analysis of 2026-09-03):
+Design principles (see config/MANDATE.md and the gap analysis of 2026-09-03):
 - Upstream TradingAgents is a pinned dependency and is never modified.
 - Personal preferences live in config/*.yaml, outside upstream code.
 - The LLM layer runs on the investor's Claude subscription via the official

@@ -1,4 +1,4 @@
-"""Validation scenarios for the Hard Risk Layer. Shared by the test suite and ``ct-scenarios``.
+"""Validation scenarios for the Hard Risk Layer. Shared by the test suite and ``ct-risk-scenarios``.
 
 Every scenario is fully synthetic: prices, identities and regime inputs are injected, so it runs
 offline, deterministically, and without a single model call.
