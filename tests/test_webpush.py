@@ -27,7 +27,7 @@ def service(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
     return Service(cfg)
 
 

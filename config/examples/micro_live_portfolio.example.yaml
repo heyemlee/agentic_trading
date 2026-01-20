@@ -1,4 +1,4 @@
-# state/micro_live_portfolio.example.yaml
+# config/examples/micro_live_portfolio.example.yaml
 # Template. Copy to state/micro_live_portfolio.yaml, which is untracked because it records real positions.
 # Bucket ledger for the Micro-Live experiment. Reconciles against the real Robinhood Agentic
 # account, so cash here must match that account's cash. Execution updates it after every fill.

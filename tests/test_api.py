@@ -39,8 +39,8 @@ def sandbox_service(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"
     state.mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
-    shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     (tmp_path / "runs").mkdir()
     disarm(cfg / "risk_profile.yaml")
     return Service(cfg)

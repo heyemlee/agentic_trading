@@ -243,8 +243,8 @@ Check your login before running: `claude auth status` should report
 
 ```bash
 uv sync
-cp state/portfolio.example.yaml state/portfolio.yaml
-cp state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
+cp config/examples/portfolio.example.yaml state/portfolio.yaml
+cp config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 ```
 
 Both ledgers are untracked, because they record real positions and real cash. The

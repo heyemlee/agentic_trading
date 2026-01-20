@@ -22,7 +22,7 @@ def study(tmp_path, monkeypatch):
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
 
     prices = {"VTI": {"2026-09-01": 100.0}, "BND": {"2026-09-01": 50.0}}
     monkeypatch.setattr(evaluation, "_price",

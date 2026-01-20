@@ -62,8 +62,8 @@ git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
 uv sync
 cp -n .env.example .env
-cp -n state/portfolio.example.yaml state/portfolio.yaml
-cp -n state/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
+cp -n config/examples/portfolio.example.yaml state/portfolio.yaml
+cp -n config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 uv run ct-auth              # create your local console login
 uv run ct-api
 ```

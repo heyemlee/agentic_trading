@@ -23,8 +23,8 @@ def service(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
-    shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml",
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml",
                 tmp_path / "state" / "micro_live_portfolio.yaml")
     ready = Service(cfg)
     ready.profiles().risk["broker"]["state_file"] = "state/proposals.json"

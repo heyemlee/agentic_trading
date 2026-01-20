@@ -30,7 +30,7 @@ def project(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
     migrate_portfolio(state / "portfolio.yaml")
     ProposalStore(state / "proposals.json").save(_proposal(status=PROPOSED))
     StateDB(state / "proposals.json").write_document(state / "risk_state.json",

@@ -19,7 +19,7 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     shutil.copytree(ROOT / "config", cfg_dir)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state_dir / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state_dir / "portfolio.yaml")
     profiles = load_profiles(cfg_dir)
     profiles.risk["portfolio_state"]["file"] = "state/portfolio.yaml"
     profiles.risk["portfolio_state"]["risk_state_file"] = "state/risk_state.json"

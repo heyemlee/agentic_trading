@@ -25,8 +25,8 @@ def service(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "state" / "portfolio.example.yaml", state / "portfolio.yaml")
-    shutil.copy(ROOT / "state" / "micro_live_portfolio.example.yaml",
+    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
+    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml",
                 state / "micro_live_portfolio.yaml")
     return Service(cfg)
 

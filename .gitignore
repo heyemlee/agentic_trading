@@ -4,6 +4,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 runs/
+# The bare names, not just the trailing-slash directory forms: in a data-dir-separated
+# install, state and runs are symlinks pointing outside the checkout, and a symlink never
+# matches a "name/" rule. Without this, an ordinary `git add -A` would track the symlink
+# itself, leaking a local absolute path into a public repository.
+state
+runs
 .env
 .env.*
 !.env.example
