@@ -1,4 +1,4 @@
-"""HTTP layer over :mod:`agentic_trading.api.service`.
+"""HTTP layer over :mod:`agentic_trading.service`.
 
 Thin by design: each route calls one service function and returns its dict. FastAPI is used for
 one reason beyond routing, which is that it publishes an OpenAPI schema at ``/openapi.json``, so
@@ -26,9 +26,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..env import load_env
+from ..service import Service, ServiceConflict, ServiceError
 from ..state_db import StateConflict
 from .auth import COOKIE, SESSION_SECONDS, ConsoleAuth
-from .service import Service, ServiceConflict, ServiceError
 
 logger = logging.getLogger(__name__)
 

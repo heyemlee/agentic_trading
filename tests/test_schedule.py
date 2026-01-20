@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from agentic_trading import schedule
-from agentic_trading.api.service import Service
 from agentic_trading.profile import load_profiles
+from agentic_trading.service import Service
 from agentic_trading.state_db import StateDB
 from agentic_trading.triggers import scheduled_review
 from tests.conftest import ROOT

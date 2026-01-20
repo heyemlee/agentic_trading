@@ -10,7 +10,7 @@ import shutil
 import pytest
 
 from agentic_trading import evaluation
-from agentic_trading.api.service import Service
+from agentic_trading.service import Service
 from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT
 

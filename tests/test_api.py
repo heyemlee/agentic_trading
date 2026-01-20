@@ -12,13 +12,6 @@ from datetime import timedelta
 
 import pytest
 
-from agentic_trading.api.service import Service, ServiceError
-from agentic_trading.api.status import (
-    MicroLiveStatus,
-    ProposalStatus,
-    SystemStatus,
-    proposal_status,
-)
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import (
     APPROVED,
@@ -28,6 +21,13 @@ from agentic_trading.proposals import (
     PROPOSED,
     ProposalStore,
     utcnow,
+)
+from agentic_trading.service import Service, ServiceError
+from agentic_trading.service.status import (
+    MicroLiveStatus,
+    ProposalStatus,
+    SystemStatus,
+    proposal_status,
 )
 from tests.conftest import ROOT
 
@@ -111,7 +111,7 @@ def test_proposal_status_covers_the_lifecycle(profiles):
 
 
 def test_micro_live_status_is_disabled_until_the_switch_is_flipped(profiles):
-    from agentic_trading.api.status import micro_live_status
+    from agentic_trading.service.status import micro_live_status
 
     assert micro_live_status(enabled=False, connected=True, preflight_ready=True,
                              open_proposal=None, profiles=profiles) == MicroLiveStatus.DISABLED

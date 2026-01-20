@@ -13,7 +13,7 @@ import shutil
 import pytest
 
 from agentic_trading import webpush
-from agentic_trading.api.service import Service
+from agentic_trading.service import Service
 from tests.conftest import ROOT
 
 ENDPOINT = "https://web.push.apple.com/QABC123-secret-capability-url"
@@ -64,7 +64,7 @@ def test_the_same_device_resubscribing_replaces_rather_than_duplicates(service):
 
 
 def test_a_malformed_subscription_is_refused(service):
-    from agentic_trading.api.service import ServiceError
+    from agentic_trading.service import ServiceError
 
     for bad in ({"endpoint": "http://insecure.example/x", "keys": SUBSCRIPTION["keys"]},
                 {"endpoint": ENDPOINT}, {"endpoint": ENDPOINT, "keys": {"p256dh": "x"}}, {}):

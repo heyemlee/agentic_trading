@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from . import operations, schedule
-from .api.service import Service, ServiceError
 from .env import load_env
+from .service import Service, ServiceError
 
 logger = logging.getLogger(__name__)
 

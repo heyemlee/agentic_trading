@@ -18,11 +18,11 @@ from agentic_trading.advisor import (
     read_only_research,
     run_task,
 )
-from agentic_trading.api.service import ServiceConflict, ServiceError
 from agentic_trading.broker.base import BrokerUnavailable
 from agentic_trading.broker.robinhood import RobinhoodBroker
 from agentic_trading.records import write_record
 from agentic_trading.research_jobs import ResearchJobManager
+from agentic_trading.service import ServiceConflict, ServiceError
 from tests.test_api import sandbox_service  # noqa: F401 - shared isolated fixture
 from tests.test_robinhood import FakeMCP
 

@@ -11,9 +11,9 @@ import shutil
 import pytest
 
 from agentic_trading import events
-from agentic_trading.api.service import Service
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import PROPOSED, REJECTED, ProposalStore
+from agentic_trading.service import Service
 from tests.conftest import ROOT
 
 

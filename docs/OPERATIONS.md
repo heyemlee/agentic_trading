@@ -186,7 +186,7 @@ uv run ct-approve <id>                         # authorise, revalidate, then may
 ### Pausing
 
 ```bash
-uv run python -c "from agentic_trading.api.service import Service; Service().pause('reason')"
+uv run python -c "from agentic_trading.service import Service; Service().pause('reason')"
 ```
 
 or `POST /system/pause`, or simply create the file `state/HALT`. Remove the file or call

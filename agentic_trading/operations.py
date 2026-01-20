@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     # rather than relying on somebody remembering to.
     marked: dict[str, Any] = {"recorded": False, "reason": "no study is running"}
     try:
-        from .api.service import Service
+        from .service import Service
 
         marked = Service(args.config_dir).evaluation_snapshot()
     except Exception as exc:  # noqa: BLE001 - housekeeping continues even if the study cannot

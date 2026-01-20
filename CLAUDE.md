@@ -50,7 +50,9 @@ file, so a red run there is a defect in the test, not a reason to relax the guar
 
 ```
 agentic_trading/     the package
-  api/               HTTP layer and the Service that backs it
+  api/               HTTP layer only — a thin FastAPI wrapper over service/
+  service/           every product operation, plain Python, no HTTP; shared by the CLI, the
+                     scheduler and the API
   broker/            venue adapters (simulated, Robinhood)
   llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime

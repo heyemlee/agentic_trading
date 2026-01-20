@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from agentic_trading import launchd, operations
-from agentic_trading.api.service import Service
+from agentic_trading.service import Service
 from tests.conftest import ROOT
 
 

@@ -3,8 +3,8 @@ import argparse
 import json
 import time
 
-from .api.service import Service
 from .env import load_env
+from .service import Service
 
 
 def main(argv=None):

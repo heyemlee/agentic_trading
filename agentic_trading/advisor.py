@@ -343,7 +343,7 @@ def read_only_research(profiles, job, snapshot, notes):
 
 
 def run_task(profiles, job):
-    from .api.service import Service
+    from .service import Service
 
     service = Service(profiles.config_dir)
     db = service.state_db(profiles)

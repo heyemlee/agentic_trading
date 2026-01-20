@@ -6,7 +6,7 @@ trading engine. Written for an implementation agent such as OpenDesign.
 - **Backend contract**: `http://127.0.0.1:8787/openapi.json` (start it with `uv run ct-api`)
 - **Interactive schema**: `http://127.0.0.1:8787/docs`
 - **Example payloads**: [`docs/examples/`](examples/) — real shapes, sanitized, safe to prototype against
-- **Status vocabulary**: [`agentic_trading/api/status.py`](../agentic_trading/api/status.py)
+- **Status vocabulary**: [`agentic_trading/service/status.py`](../agentic_trading/service/status.py)
 
 ---
 

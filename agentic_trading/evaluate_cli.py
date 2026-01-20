@@ -12,8 +12,8 @@ import json
 import sys
 
 from . import evaluation
-from .api.service import Service, ServiceError
 from .env import load_env
+from .service import Service, ServiceError
 
 
 def _account(service: Service) -> dict:

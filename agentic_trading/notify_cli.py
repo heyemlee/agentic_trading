@@ -11,10 +11,10 @@ import argparse
 import json
 import sys
 
-from .api.service import Service, ServiceError
 from .env import load_env
 from .notify import DeliveryError, Event, heartbeat, send
 from .profile import load_profiles
+from .service import Service, ServiceError
 
 
 def main(argv: list[str] | None = None) -> int:
