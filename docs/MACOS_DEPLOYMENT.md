@@ -87,6 +87,21 @@ deploy/macos/release.sh rollback          # back to the previous release
 `publish` refuses to run over an order the broker still owns, backs up the database first, and
 if the new release does not answer on loopback it puts the previous one back automatically.
 
+### Keeping the data directory out of the checkout without `--data-dir`
+
+`--data-dir` moves `config/`, `state/` and `runs/` together, which means `config/` stops being
+the git-tracked copy a developer edits — a separate location needs its own updates kept in sync.
+An alternative that avoids that: leave `config/` in the checkout (it holds no secrets and is
+meant to be reviewed and diffed) and turn only `state/`, `runs/` and `.env` into symlinks
+pointing at a directory outside it, e.g. `~/Library/Application Support/agentic-trading/data/`.
+Every path in the code and in these scripts is relative (`state/…`, `runs/…`, `.env`), so the OS
+resolves the symlink with no code, plist or `CT_*` variable change. This only works if `state/`
+holds no git-tracked files — the setup templates it once held live in `config/examples/` for
+exactly this reason.
+
+Stop the API before moving anything, back up first (`ct-state backup --verify`), and confirm
+`ct-state status --fail-on-unsettled` before touching a live install.
+
 Rollback moves the **code** only. The database is not rolled back, so a release that migrated
 it must be restored with `ct-state restore` before an older release can read it.
 

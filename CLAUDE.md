@@ -6,16 +6,29 @@ Conventions that are not derivable from the code. Read this before changing anyt
 
 Four launchd jobs run against it: `com.local.agentic-trading.{api,research-weekly,backup-daily,maintenance-daily}`.
 Their `CT_DATA_DIR` is this directory. Code runs from an immutable release under
-`~/Library/Application Support/agentic-trading/releases/current`, but `config/`, `state/`, `runs/`
-and `.env` are read live from here.
+`~/Library/Application Support/agentic-trading/releases/current`; `config/`, `state/`, `runs/`
+and `.env` are read live from here, as `CT_DATA_DIR` always was.
+
+`state`, `runs` and `.env` are symlinks into
+`~/Library/Application Support/agentic-trading/data/`, put there on 2026-09-09 so that an
+ordinary git accident in this checkout — `git clean -xdf`, an errant `rm -rf` — cannot reach the
+ledger, the broker token or the backup passphrase. Nothing else changed: every path in the code
+and in `deploy/`, `CT_DATA_DIR` included, still just says `state/…`, `runs/…`, `.env`, and the OS
+resolves the symlink transparently. `config/` stays a real, git-tracked directory in the
+checkout on purpose — it is meant to be reviewed and diffed, and moving it out would only create
+a second copy to keep in sync.
 
 Real-money execution is enabled for the `micro_live` bucket.
 
 - Editing `config/*.yaml` changes the running system's behaviour, not just the development copy.
 - `state/` holds the ledger, the SQLite audit database and the drawdown high-water marks. Never
-  move, rename or hand-edit anything in it. Use `ct-state`.
-- Moving the data directory is an operations task: `deploy/macos/release.sh publish --data-dir`,
-  with a verified backup first and no unsettled orders. Never do it as part of a refactor.
+  move, rename or hand-edit anything in it, symlink or not. Use `ct-state`.
+- Before stopping or restarting the live API by hand: `deploy/macos/checks.sh`'s
+  `--fail-on-unsettled` guard (see `release.sh publish`) is the check to run first, not a guess.
+  `start.sh`'s port cleanup calls `lsof -ti :PORT` without filtering to `LISTEN`, so it will list
+  (and try to kill) any process that merely has a stale, already-closed connection to that port
+  number — harmless against another app's helper process (macOS blocks the cross-app signal),
+  but worth knowing before reading its output as "these are all copies of the API."
 - Code and documentation can be reorganised freely; they live in git and ship in a release.
 
 ## Boundaries that are load-bearing
@@ -56,9 +69,11 @@ agentic_trading/     the package
   broker/            venue adapters (simulated, Robinhood)
   llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime
-config/              profiles, the mandate, the prompt context — live, read by the running service
-state/               ledgers, audit database, tokens — live, untracked except *.example.yaml
-runs/                research artefacts and logs — live, untracked
+config/              profiles, the mandate, the prompt context — live, read by the running
+                     service, and (unlike state/runs/.env) tracked in git on purpose
+  examples/          state/*.yaml templates a setup script copies into the live ledger
+state/               ledgers, audit database, tokens — a symlink outside the checkout; untracked
+runs/                research artefacts and logs — a symlink outside the checkout; untracked
 ui/                  the console: seven pages, no build step, served at /ui by the API
 deploy/macos/        launchd install, release/rollback, backup, maintenance, selfcheck
 tools/               developer utilities that are not part of the deployment
