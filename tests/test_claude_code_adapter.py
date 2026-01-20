@@ -106,3 +106,96 @@ def test_real_limit_wordings_are_classified(text):
     from agentic_trading.llm.claude_code import _LIMIT_RE
 
     assert _LIMIT_RE.search(text)
+
+
+# -- web access scoping ------------------------------------------------------------
+#
+# The adapter's "built-in tools are disabled" property becomes conditional here: --tools is
+# empty on every call except the news analyst's, and that exception is derived in code from an
+# exact match on the bound tool names. These tests are what makes the exception auditable.
+
+NEWS_TOOLS = ["get_news", "get_global_news", "get_macro_indicators", "get_prediction_markets"]
+MARKET_TOOLS = ["get_stock_data", "get_indicators", "get_verified_market_snapshot"]
+BOTH_ON = {"fetch_enabled": True, "search_enabled": True, "extra_turns": 6}
+
+
+def _flag(args, name):
+    return args[args.index(name) + 1] if name in args else None
+
+
+def _bind(names, policy=None, **kwargs):
+    llm = ClaudeCodeChatModel(model="claude-sonnet-5", config_dir="/cfg", web_policy=policy, **kwargs)
+    return llm.bind_tools([{"name": n} for n in names])
+
+
+def test_a_call_with_no_tools_still_disables_builtin_tools():
+    args = ClaudeCodeChatModel(model="claude-sonnet-5", claude_bin="/bin/true")._build_command("")
+    assert _flag(args, "--tools") == ""
+    assert "--allowedTools" not in args
+
+
+def test_the_news_analyst_gets_the_cli_web_tools_only_when_search_is_enabled():
+    bound = _bind(NEWS_TOOLS, BOTH_ON, claude_bin="/bin/true")
+    assert bound.analyst_role == "news"
+    args = bound._build_command("")
+    assert _flag(args, "--tools") == "WebSearch,WebFetch"
+    assert "WebSearch" in _flag(args, "--allowedTools")
+
+    off = _bind(NEWS_TOOLS, {"fetch_enabled": True, "search_enabled": False}, claude_bin="/bin/true")
+    assert _flag(off._build_command(""), "--tools") == ""
+
+
+@pytest.mark.parametrize("names", [MARKET_TOOLS, ["get_fundamentals", "get_balance_sheet",
+                                                 "get_cashflow", "get_income_statement"]])
+def test_no_other_analyst_ever_gets_the_cli_web_tools(names):
+    bound = _bind(names, BOTH_ON, claude_bin="/bin/true")
+    assert bound.analyst_role in ("market", "fundamentals")
+    assert _flag(bound._build_command(""), "--tools") == ""
+
+
+def test_the_allowlisted_fetch_tool_is_added_for_an_analyst_and_only_when_enabled():
+    assert "fetch_url" in _bind(MARKET_TOOLS, BOTH_ON).tool_names
+    assert "fetch_url" not in _bind(MARKET_TOOLS, {"fetch_enabled": False}).tool_names
+    # Not an analyst: the personal assistant's overlapping set matches no signature.
+    assert "fetch_url" not in _bind(
+        ["get_verified_market_snapshot", "get_news", "get_fundamentals", "get_indicators"],
+        BOTH_ON).tool_names
+
+
+def test_builtin_tools_are_allowlisted_even_with_no_mcp_tools_bound():
+    # _mcp_args used to be the only source of --allowedTools, so a built-in tool on a call with
+    # no MCP tools would have been offered and then denied, with no way to prompt in -p.
+    llm = ClaudeCodeChatModel(model="claude-sonnet-5", claude_bin="/bin/true",
+                              analyst_role="news", web_policy=BOTH_ON)
+    args = llm._build_command("")
+    assert "--mcp-config" not in args
+    assert _flag(args, "--allowedTools") == "WebSearch,WebFetch"
+
+
+def test_only_a_searching_call_gets_the_extra_turn_allowance():
+    searching = _bind(NEWS_TOOLS, BOTH_ON, max_turns=12, claude_bin="/bin/true")
+    assert _flag(searching._build_command(""), "--max-turns") == "18"
+    fetching = _bind(MARKET_TOOLS, BOTH_ON, max_turns=12, claude_bin="/bin/true")
+    assert _flag(fetching._build_command(""), "--max-turns") == "12"
+
+
+def test_a_web_search_result_block_is_captured_in_the_audit_trail():
+    from agentic_trading.llm.claude_code import _extract_tool_calls
+
+    calls = _extract_tool_calls([
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "WebSearch", "input": {"query": "AAPL 10-Q"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "web_search_tool_result", "tool_use_id": "t1",
+             "content": [{"type": "text", "text": "three results"}]}]}},
+    ])
+    assert calls == [{"tool": "WebSearch", "input": {"query": "AAPL 10-Q"},
+                      "result_excerpt": "three results"}]
+
+
+def test_a_searching_news_call_reaches_the_cli_with_both_routes(fake_claude, tmp_path):
+    llm = ClaudeCodeChatModel(model="claude-sonnet-5", work_dir=str(tmp_path), config_dir="config",
+                              web_policy=BOTH_ON)
+    msg = llm.bind_tools([{"name": n} for n in NEWS_TOOLS]).invoke("what happened")
+    assert "BUILTIN_TOOLS_ENABLED" in msg.content
+    assert "mcp__ta__fetch_url" in msg.content and "WebSearch" in msg.content

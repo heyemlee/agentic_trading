@@ -288,10 +288,12 @@ class HardRiskEngine:
         rule("HR04", "instrument permission", perm_ok, perm_detail)
 
         # HR05 confidence and data quality
-        from ..evidence import check_evidence
+        from ..evidence import check_evidence, check_web_sources
 
         evidence_ok, evidence_detail = check_evidence(prop.evidence, ticker, prop.trade_date, max_age)
         rule("HR05c", "required market evidence", evidence_ok, evidence_detail)
+        web_ok, web_detail = check_web_sources(prop.evidence, self._web_evidence_window(prop))
+        rule("HR05e", "web evidence provenance and freshness", web_ok, web_detail)
         rule("HR05d", "missing material information", not prop.missing_information,
              "; ".join(prop.missing_information) or "no unresolved material information")
         conf = prop.confidence
@@ -436,6 +438,20 @@ class HardRiskEngine:
             return enabled, (f"sandbox strategy {strategy!r} is {'permitted' if enabled else 'not permitted yet'}; "
                              "it permanently requires explicit human approval before any execution")
         return True, f"sandbox strategy {strategy!r} carries no special gate"
+
+    def _web_evidence_window(self, prop: Proposal) -> float:
+        """How old a web retrieval may be, from ``data_freshness.medium``.
+
+        An event-driven thesis is a statement about the current tape, so it takes the shorter
+        window the same config already declares for it.
+        """
+        from ..proposals import STRATEGY_FRESHNESS_CLASS
+
+        medium = (self.p.risk.get("data_freshness") or {}).get("medium") or {}
+        default = float(medium.get("max_age_minutes", 1440))
+        if STRATEGY_FRESHNESS_CLASS.get((prop.strategy or "").lower()) == "event_driven":
+            return float(medium.get("event_driven_max_age_minutes", default))
+        return default
 
     def _human_gated(self, prop: Proposal) -> tuple[bool, str]:
         sp = (self.p.risk.get("strategy_policy") or {}).get("sandbox") or {}

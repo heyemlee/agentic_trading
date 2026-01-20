@@ -187,3 +187,71 @@ def test_unknown_etf_is_not_treated_as_a_plain_safe_etf(profiles):
                     data_quality="good", evidence={})
     allowed, detail = HardRiskEngine(profiles)._permission(prop)
     assert allowed is False and "unverified" in detail
+
+
+# -- HR05e: web-sourced evidence ----------------------------------------------------
+#
+# The rule exists to bound how stale this system's *reading* of a page is, and to refuse a web
+# claim that arrived without provenance. It must be invisible to the yfinance-only path: every
+# scenario above has no web_sources, so HR05e passing there is the property that keeps the
+# existing evidence path provably unchanged.
+
+def _evaluate(profiles, *, evidence=None, strategy="long_only_diversified"):
+    from agentic_trading.risk_scenarios import make_ladders
+
+    snap = build_snapshot(make_state(core_cash=2500.0), profiles, TRADE_DATE, price_lookup,
+                          identity_lookup)
+    ladders = make_ladders(snap.total_equity, snap.buckets["core"].equity,
+                           snap.buckets["sandbox"].equity, profiles)
+    prop = Proposal(ticker="VTI", bucket="core", action="BUY", size_hint="normal", confidence=80,
+                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
+                    data_quality="good", strategy=strategy,
+                    evidence=evidence if evidence is not None else collect_evidence(
+                        "VTI", TRADE_DATE, price_lookup=price_lookup))
+    engine = HardRiskEngine(profiles, halt_file="/nonexistent/HALT")
+    return engine.evaluate(prop, snap, ladders, regime())
+
+
+def test_hr05e_passes_and_is_recorded_when_there_is_no_web_evidence(profiles):
+    result = _evaluate(profiles)
+    rule = next(r for r in result.rules if r.rule_id == "HR05e")
+    assert rule.passed and "no web-sourced evidence" in rule.detail
+    assert "HR05e" not in [r.rule_id for r in result.failed_rules]
+    assert result.verdict == "APPROVE", [r.rule_id for r in result.failed_rules]
+
+
+def test_hr05c_still_reports_the_price_provenance_and_not_the_web_provenance(profiles):
+    hr05c = next(r for r in _evaluate(profiles).rules if r.rule_id == "HR05c")
+    assert "TradingAgents daily OHLCV" in hr05c.detail
+    assert "web" not in hr05c.detail.lower()
+
+
+def test_hr05e_blocks_the_proposal_when_a_web_source_is_stale(profiles):
+    evidence = collect_evidence("VTI", TRADE_DATE, price_lookup=price_lookup)
+    evidence["web_sources"] = [{
+        "tool": "mcp__ta__fetch_url", "url": "https://sec.gov/a", "domain": "sec.gov",
+        "retrieved_at": "2020-01-01T00:00:00+00:00", "sha256": "a" * 64}]
+    result = _evaluate(profiles, evidence=evidence)
+    assert "HR05e" in [r.rule_id for r in result.failed_rules]
+    assert result.verdict == "REJECT" and result.proposed_notional_usd == 0.0
+
+
+def test_hr05e_refuses_a_web_claim_that_arrived_without_provenance(profiles):
+    from agentic_trading.evidence import check_web_sources
+
+    ok, why = check_web_sources({"web_sources": [
+        {"tool": "mcp__ta__fetch_url", "requested": "https://sec.gov/a"}]}, 1440)
+    assert not ok, why
+    assert "did not come back through the allowlisted fetch tool" in why
+
+
+def test_the_medium_window_narrows_for_an_event_driven_thesis(profiles):
+    engine = HardRiskEngine(profiles)
+    slow = Proposal(ticker="VTI", bucket="core", action="BUY", size_hint="normal", confidence=80,
+                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
+                    strategy="long_only_diversified")
+    fast = Proposal(ticker="VTI", bucket="core", action="BUY", size_hint="normal", confidence=80,
+                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
+                    strategy="event_driven")
+    assert engine._web_evidence_window(slow) == 1440
+    assert engine._web_evidence_window(fast) == 60

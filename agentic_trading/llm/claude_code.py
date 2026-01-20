@@ -53,6 +53,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Field
 
+from .analyst_roles import analyst_role
+
 # Variables that would move billing to the API or to a cloud provider. Stripped
 # from the CLI environment on every call, regardless of the caller's shell.
 BILLING_ENV_VARS = (
@@ -208,10 +210,18 @@ def _extract_tool_calls(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
         elif ev.get("type") == "user":
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
+                if not isinstance(block, dict):
+                    continue
+                # The CLI reports its own web tools with their own result block types rather
+                # than tool_result, so an unhandled shape would record the call with no result
+                # at all and leave the audit trail unable to say what came back.
+                if block.get("type") in ("tool_result", "web_search_tool_result",
+                                         "web_fetch_tool_result"):
                     call = calls.get(str(block.get("tool_use_id")))
                     if call is not None:
-                        call["result_excerpt"] = _excerpt(block.get("content"))
+                        call["result_excerpt"] = _excerpt(
+                            block.get("content") if block.get("content") is not None
+                            else block.get("result"))
     return list(calls.values())
 
 
@@ -242,6 +252,7 @@ class ClaudeCodeChatModel(BaseChatModel):
     effort: str | None = None
     timeout_seconds: int = 900
     max_turns: int = 12
+    max_turns_ceiling: int = 24
     claude_bin: str | None = None
     work_dir: str | None = None
     config_dir: str | None = None
@@ -249,6 +260,11 @@ class ClaudeCodeChatModel(BaseChatModel):
     tool_server_module: str = "agentic_trading.llm.ta_tool_server"
     json_schema: dict[str, Any] | None = None
     role: str = "quick"
+    # Which upstream analyst this instance is bound for, derived from the bound tool names in
+    # bind_tools. None for every call that is not an analyst, which is how web access stays
+    # scoped without touching a pinned upstream node.
+    analyst_role: str | None = None
+    web_policy: dict[str, Any] | None = None
 
     @property
     def _llm_type(self) -> str:
@@ -266,7 +282,15 @@ class ClaudeCodeChatModel(BaseChatModel):
             if not name:
                 raise ValueError(f"cannot determine tool name for {t!r}")
             names.append(str(name))
-        return self.model_copy(update={"tool_names": names})
+        # The upstream analyst nodes hardcode their tool lists and pass nothing else down, so
+        # the bound set is the only signal for which analyst this is. An exact-set mismatch
+        # (an upstream bump, or the personal assistant's overlapping list) yields None and
+        # grants no web access at all.
+        role = analyst_role(names)
+        policy = self.web_policy or {}
+        if role is not None and policy.get("fetch_enabled"):
+            names = [*names, "fetch_url"]
+        return self.model_copy(update={"tool_names": names, "analyst_role": role})
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> Runnable:
         if isinstance(schema, type) and issubclass(schema, BaseModel):
@@ -315,18 +339,41 @@ class ClaudeCodeChatModel(BaseChatModel):
                 }
             }
         }
-        allowed = ",".join(f"mcp__ta__{name}" for name in self.tool_names)
-        return ["--mcp-config", json.dumps(cfg), "--allowedTools", allowed]
+        return ["--mcp-config", json.dumps(cfg)]
+
+    def _builtin_tools(self) -> tuple[str, ...]:
+        """The CLI's own web tools, offered on the news analyst's call and nowhere else.
+
+        Unlike fetch_url these run inside the CLI, so nothing here sees the query, the URL or
+        the bytes. The whole control surface is this method: which call they appear on, and
+        whether they are enabled at all.
+        """
+        policy = self.web_policy or {}
+        if self.analyst_role == "news" and policy.get("search_enabled"):
+            return ("WebSearch", "WebFetch")
+        return ()
+
+    def _allowed_tools(self) -> list[str]:
+        # Built-ins must be named here as well as in --tools: `claude -p` cannot prompt for a
+        # permission, so anything absent from the allowlist is denied rather than asked about.
+        return [f"mcp__ta__{name}" for name in self.tool_names] + list(self._builtin_tools())
+
+    def _turn_budget(self) -> int:
+        # Web calls spend the same turns as the data tools, so a news call that may search gets
+        # its own allowance instead of starving get_news of turns. The ceiling is the guard: it
+        # is read from config but enforced here, so no configured allowance can widen it.
+        extra = int((self.web_policy or {}).get("extra_turns", 0)) if self._builtin_tools() else 0
+        return min(self.max_turns + max(extra, 0), self.max_turns_ceiling)
 
     def _build_command(self, system_text: str) -> list[str]:
         args = [
             self._resolve_bin(), "-p",
             "--output-format", "stream-json", "--verbose",
             "--model", self.model,
-            "--tools", "",
+            "--tools", ",".join(self._builtin_tools()),
             "--strict-mcp-config",
             "--no-session-persistence",
-            "--max-turns", str(self.max_turns),
+            "--max-turns", str(self._turn_budget()),
         ]
         if self.effort:
             args += ["--effort", self.effort]
@@ -335,6 +382,9 @@ class ClaudeCodeChatModel(BaseChatModel):
         if self.json_schema is not None:
             args += ["--json-schema", json.dumps(self.json_schema)]
         args += self._mcp_args()
+        allowed = self._allowed_tools()
+        if allowed:
+            args += ["--allowedTools", ",".join(allowed)]
         return args
 
     def _generate(

@@ -42,6 +42,18 @@ def _server_class():
         return FastMCP
 
 
+# Tools this project owns rather than upstream. Consulted before the agent_utils lookup, so an
+# unknown name still fails the same way. Each factory takes the loaded profiles and returns the
+# callable, which lets a tool close over configuration without a second env var.
+def _build_fetch_url(profiles):
+    from agentic_trading.llm.web_fetch import build_fetch_tool
+
+    return build_fetch_tool(profiles)
+
+
+LOCAL_TOOLS = {"fetch_url": _build_fetch_url}
+
+
 def build_server(tool_names: list[str], config_dir: str | None):
     from tradingagents.agents.utils import agent_utils
     from tradingagents.dataflows.config import set_config
@@ -53,11 +65,15 @@ def build_server(tool_names: list[str], config_dir: str | None):
 
     server = _server_class()("ta")
     for name in tool_names:
-        tool = getattr(agent_utils, name, None)
-        fn = getattr(tool, "func", None)
-        if fn is None:
-            raise SystemExit(f"unknown TradingAgents tool: {name}")
-        description = getattr(tool, "description", None) or fn.__doc__ or name
+        if name in LOCAL_TOOLS:
+            fn = LOCAL_TOOLS[name](profiles)
+            description = fn.__doc__ or name
+        else:
+            tool = getattr(agent_utils, name, None)
+            fn = getattr(tool, "func", None)
+            if fn is None:
+                raise SystemExit(f"unknown TradingAgents tool: {name}")
+            description = getattr(tool, "description", None) or fn.__doc__ or name
         # structured_output=False: every upstream tool returns markdown/CSV text.
         server.add_tool(_quiet(fn), name=name, description=description, structured_output=False)
     return server

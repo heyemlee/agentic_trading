@@ -72,13 +72,47 @@ def foreign_bucket_mentions(reports, known_buckets):
     return sorted(found)
 
 
+#: Attributes of the provenance envelope agentic_trading.llm.web_fetch puts in front of every
+#: page it returns. Parsed out of the audit copy of the tool result, which is why that envelope
+#: header has to be the first bytes of the tool's return value.
+_ENVELOPE_RE = re.compile(r'<web_source\s+([^>]*)>')
+_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+
+
+def web_sources_from_calls(tool_calls):
+    """Structured provenance for every page the allowlisted fetch tool returned.
+
+    Only route (a) appears here. The CLI's own WebSearch and WebFetch run inside the CLI
+    process, so nothing in this codebase saw the URL, the redirect chain or the bytes, and
+    there is no provenance record to write down. That is why a fact that exists only because
+    WebSearch found it can inform a report but can never be evidence: the asymmetry is a
+    property of this function, not a policy statement.
+    """
+    sources, searched = [], False
+    for call in tool_calls or ():
+        tool = str((call or {}).get("tool") or "")
+        if tool in ("WebSearch", "WebFetch"):
+            searched = True
+            continue
+        if not tool.endswith("fetch_url"):
+            continue
+        record = {"tool": tool, "requested": (call.get("input") or {}).get("url")}
+        match = _ENVELOPE_RE.search(str(call.get("result_excerpt") or ""))
+        if match:
+            record.update(dict(_ATTR_RE.findall(match.group(1))))
+        sources.append(record)
+    return sources, searched
+
+
 def collect_evidence(symbol, trade_date, *, reports=None, required_reports=(), price_lookup=None,
-                     bucket=None, known_buckets=()):
+                     bucket=None, known_buckets=(), llm_calls=()):
     evidence = {"symbol": symbol.upper(), "source": "TradingAgents daily OHLCV",
                 "observed_at": datetime.now(UTC).isoformat(),
                 "missing_required_reports": [
                     key for key in required_reports if not str((reports or {}).get(key) or "").strip()
                 ]}
+    tool_calls = [c for call in (llm_calls or ()) for c in (call.get("tool_calls") or ())]
+    evidence["web_sources"], evidence["web_search_used"] = web_sources_from_calls(tool_calls)
     if bucket:
         evidence["analysed_bucket"] = bucket
         evidence["snapshot_buckets"] = sorted(known_buckets or (bucket,))
@@ -90,6 +124,44 @@ def collect_evidence(symbol, trade_date, *, reports=None, required_reports=(), p
     except Exception as exc:  # noqa: BLE001 - missing evidence is a rejection, never a guessed value
         evidence["error"] = f"market evidence unavailable: {type(exc).__name__}"
     return evidence
+
+
+def check_web_sources(evidence, max_age_minutes, now=None):
+    """Provenance and retrieval age of web-sourced evidence.
+
+    The clock is the moment *this system read the page*, taken from the envelope our own code
+    wrote. It is deliberately not the page's own publication date: a scraped date is untrusted
+    content, and treating it as a limit would make a model-visible string into a safety
+    boundary. So this bounds how stale our reading is, not how stale the news is.
+
+    Empty ``web_sources`` passes. The yfinance-only path must be unaffected by this rule.
+    """
+    sources = evidence.get("web_sources") or []
+    if not sources:
+        return True, "no web-sourced evidence in this proposal"
+    moment = now or datetime.now(UTC)
+    ages = []
+    for source in sources:
+        missing = [k for k in ("url", "domain", "retrieved_at", "sha256") if not source.get(k)]
+        if missing:
+            return False, (f"a web source is missing {', '.join(missing)}; it did not come back "
+                           f"through the allowlisted fetch tool ({source.get('requested')!r})")
+        try:
+            retrieved = datetime.fromisoformat(str(source["retrieved_at"]))
+        except ValueError:
+            return False, f"web source {source['url']} has an unreadable retrieval time"
+        if retrieved.tzinfo is None:
+            return False, f"web source {source['url']} has no timezone on its retrieval time"
+        age = (moment - retrieved).total_seconds() / 60.0
+        if age < -5:
+            return False, f"web source {source['url']} claims to have been read in the future"
+        ages.append((age, source["url"]))
+    age, url = max(ages)
+    if age > max_age_minutes:
+        return False, (f"web evidence is {age:.0f} min old, past the {max_age_minutes:.0f} min "
+                       f"window for this strategy ({url})")
+    return True, (f"{len(sources)} web source(s), the oldest read {age:.0f} min ago "
+                  f"(limit {max_age_minutes:.0f} min)")
 
 
 def check_evidence(evidence, symbol, trade_date, max_age_days=3):

@@ -28,6 +28,7 @@ from .broker.base import (
     DuplicateOrder,
     OrderRequest,
 )
+from .evidence import check_web_sources
 from .portfolio import (
     PortfolioError,
     Snapshot,
@@ -100,6 +101,15 @@ class Revalidation:
         return asdict(self)
 
 
+def _web_window(profiles: Profiles, proposal: Proposal) -> float:
+    """The same ``data_freshness.medium`` window HR05e uses, keyed on the proposal's class."""
+    medium = (profiles.risk.get("data_freshness") or {}).get("medium") or {}
+    default = float(medium.get("max_age_minutes", 1440))
+    if proposal.freshness_class(profiles) == "event_driven":
+        return float(medium.get("event_driven_max_age_minutes", default))
+    return default
+
+
 def _venue_price(broker: BrokerAdapter, symbol: str, profiles: Profiles) -> tuple[float | None, str]:
     """Current price from the execution venue, age-checked against the fast-data window.
 
@@ -163,6 +173,15 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     if state == EXPIRED:
         rv.outcome = OUT_STALE
         rv.reasons.append("expired proposals are never executed; run a fresh analysis")
+        return rv
+    # Web-sourced facts age faster than the proposal does. A proposal may wait out
+    # human_approval.proposal_ttl_minutes, which is long enough for a headline read before the
+    # open to be four hours stale by the time someone approves it.
+    web_ok, web_why = check_web_sources(proposal.evidence, _web_window(profiles, proposal))
+    rv.reasons.append(f"web evidence: {web_why}")
+    if not web_ok:
+        rv.changes.append("news_recheck_required_and_material_change")
+        rv.outcome = OUT_REANALYZE
         return rv
     if proposal.status != APPROVED and proposal.requires_human_approval:
         rv.outcome = OUT_REJECTED

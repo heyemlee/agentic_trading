@@ -22,6 +22,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.base_client import BaseLLMClient
 
 from .llm.claude_code import ClaudeCodeChatModel
+from .llm.untrusted import UNTRUSTED_CONTENT_NOTICE
 from .profile import Profiles, build_tradingagents_config
 
 
@@ -39,6 +40,11 @@ class _ClaudeCodeClient(BaseLLMClient):
 
 def make_llm_factory(profiles: Profiles, work_dir: str | None = None):
     """Return a drop-in replacement for upstream ``create_llm_client``."""
+    from .llm.web_fetch import load_policy
+
+    # Read once per run: a bad web configuration must stop the run here, not surface as a
+    # refusal string inside an analyst's report halfway through.
+    web_policy = load_policy(profiles).as_dict()
 
     def factory(provider: str, model: str, base_url: str | None = None, **kwargs: Any) -> BaseLLMClient:
         role = "deep" if model == profiles.tradingagents.deep_think_llm else "quick"
@@ -48,10 +54,12 @@ def make_llm_factory(profiles: Profiles, work_dir: str | None = None):
             effort=effort,
             timeout_seconds=profiles.llm.timeout_seconds,
             max_turns=profiles.llm.max_turns,
+            max_turns_ceiling=profiles.llm.max_turns_ceiling,
             claude_bin=profiles.llm.claude_bin,
             work_dir=work_dir or str(profiles.project_dir / "runs" / ".claude_workdir"),
             config_dir=str(profiles.config_dir),
             role=role,
+            web_policy=web_policy,
             callbacks=kwargs.get("callbacks"),
         )
         return _ClaudeCodeClient(model, base_url, llm=llm)
@@ -116,7 +124,8 @@ class AgenticTradingGraph(TradingAgentsGraph):
     # the mandate and the portfolio context.
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         base = super().resolve_instrument_context(ticker, asset_type)
-        return f"{base}\n\n{self.profiles.mandate_context()}\n\n{self.portfolio_context()}"
+        return (f"{base}\n\n{self.profiles.mandate_context()}\n\n{UNTRUSTED_CONTENT_NOTICE}"
+                f"\n\n{self.portfolio_context()}")
 
     def portfolio_context(self) -> str:
         mode = self.profiles.bucket_modes.get(self.bucket, "recommend_only")

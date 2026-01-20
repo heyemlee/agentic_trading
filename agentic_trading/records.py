@@ -18,6 +18,34 @@ from . import UPSTREAM_TRADINGAGENTS_COMMIT, __version__
 RECORD_SCHEMA_VERSION = 1
 
 
+def _data_sources(profiles: Any, llm_calls: list[dict[str, Any]]) -> dict[str, Any]:
+    """What the config says this system reads, beside what this run actually called.
+
+    The two halves exist because they used to disagree invisibly: upstream's sentiment analyst
+    binds no tools, so its StockTwits and Reddit reads never appear in ``llm_calls`` and never
+    appeared anywhere else either. Declaring them makes the gap between declared and observed
+    readable in every record instead of requiring someone to know the upstream source.
+    """
+    from .evidence import web_sources_from_calls
+
+    tool_calls = [c for call in (llm_calls or ()) for c in (call.get("tool_calls") or ())]
+    fetches, searched = web_sources_from_calls(tool_calls)
+    observed = sorted({str(c.get("tool")) for c in tool_calls if c.get("tool")})
+    web = (profiles.risk.get("research_web_access") or {})
+    return {
+        "declared": profiles.investor.get("declared_data_sources") or [],
+        "observed_tools": observed,
+        "web_access": {
+            "fetch_enabled": ((web.get("fetch") or {}).get("enabled")) is True,
+            "search_enabled": ((web.get("search") or {}).get("enabled")) is True,
+            "fetches": fetches,
+            # True when the CLI's own web tools ran. There is deliberately no provenance list
+            # here: that route runs inside the CLI and nothing in this codebase saw the URLs.
+            "cli_web_search_used": searched,
+        },
+    }
+
+
 def build_record(
     *,
     run_id: str,
@@ -87,6 +115,7 @@ def build_record(
         },
         "llm_usage": llm_usage,
         "llm_calls": llm_calls,
+        "data_sources": _data_sources(profiles, llm_calls),
         "elapsed_seconds": round(elapsed_seconds, 1),
         "unresolved_profile_fields": list(profiles.unresolved),
         "error": error,

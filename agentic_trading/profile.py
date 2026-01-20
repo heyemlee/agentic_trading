@@ -55,6 +55,9 @@ class LLMSettings(BaseModel):
     policy_effort: Effort = "high"
     timeout_seconds: int = 900
     max_turns: int = 12
+    # Hard ceiling on the per-call turn budget, including any web allowance. A config typo of
+    # extra_turns: 500 cannot produce a 500-turn call.
+    max_turns_ceiling: int = 24
     claude_bin: str | None = None
     never_use_api_key: bool = True
     on_limit: Literal["wait_for_reset"] = "wait_for_reset"

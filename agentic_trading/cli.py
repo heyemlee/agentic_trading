@@ -108,7 +108,8 @@ def portfolio_context(profiles: Profiles, trade_date: str,
 
 
 def hard_risk_for(profiles: Profiles, policy: PolicyDecision, ticker: str, bucket: str, trade_date: str,
-                  snap: Snapshot, ladders: LadderStates, regime, final_state=None) -> tuple[Proposal, object]:
+                  snap: Snapshot, ladders: LadderStates, regime, final_state=None,
+                  llm_calls=()) -> tuple[Proposal, object]:
     cls = classify_holding(ticker, profiles, upstream_identity_lookup)
     evidence = {}
     if policy.final_action in ("BUY", "ADD"):
@@ -116,7 +117,7 @@ def hard_risk_for(profiles: Profiles, policy: PolicyDecision, ticker: str, bucke
         required = [keys[name] for name in profiles.analysts_for(cls.instrument_type) if name in keys]
         evidence = collect_evidence(ticker, trade_date, reports=final_state,
                                     required_reports=required, bucket=bucket,
-                                    known_buckets=tuple(snap.buckets))
+                                    known_buckets=tuple(snap.buckets), llm_calls=llm_calls)
     proposal = Proposal(
         ticker=ticker.upper(), bucket=bucket, action=policy.final_action, size_hint=policy.size_hint,
         confidence=policy.confidence, trade_date=trade_date, cls=cls,
@@ -192,7 +193,8 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         _print(f"[{ticker}] STOPPED during policy step: {exc}")
         return 3
 
-    proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders, regime, final_state)
+    proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders,
+                                         regime, final_state, llm_calls=list(USAGE_LOG))
     final = _final(result, proposal_obj)
     # Checked on every run, not only the ones that propose a trade. The run this check was
     # written for recommended NO_TRADE, so the evidence path — which is only walked for BUY and

@@ -78,6 +78,49 @@ def real_audit_guard():
 
 
 @pytest.fixture(autouse=True)
+def no_network_guard(monkeypatch):
+    """The suite is offline by contract: no venue, no credentials, no model call.
+
+    That was previously a property of what the tests happened to call rather than something
+    enforced, so nothing stopped a new test from reaching a real endpoint — and the first
+    symptom would have been a flaky run, or a real request carrying the owner's credentials.
+    Research web access makes the risk concrete, so an outbound connection or a name lookup
+    fails here instead. Loopback stays open: the ASGI test client and SQLite need it.
+
+    A test that legitimately exercises fetching passes its own opener or resolver, which is
+    also the only way to assert on a redirect chain or a private-address refusal.
+    """
+    import socket
+
+    LOCAL = {"localhost", "127.0.0.1", "::1", "0.0.0.0", ""}
+
+    def refuse(what: str, host: object) -> AssertionError:
+        return AssertionError(
+            f"an offline test tried to {what} {host!r}; the suite must not touch the network. "
+            "Pass a fake opener or resolver instead.")
+
+    def guard_connect(original):
+        def connect(self, address, *args, **kwargs):
+            # A non-tuple address is an AF_UNIX path, which never leaves the machine.
+            if isinstance(address, tuple) and str(address[0]) not in LOCAL:
+                raise refuse("connect to", address[0])
+            return original(self, address, *args, **kwargs)
+        return connect
+
+    for name in ("connect", "connect_ex"):
+        monkeypatch.setattr(socket.socket, name, guard_connect(getattr(socket.socket, name)))
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def getaddrinfo(host, *args, **kwargs):
+        if str(host) not in LOCAL:
+            raise refuse("resolve", host)
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+
+@pytest.fixture(autouse=True)
 def real_state_guard(monkeypatch):
     """Offline tests must never touch the real state/ directory.
 
