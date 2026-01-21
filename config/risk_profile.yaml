@@ -502,6 +502,58 @@ research_schedule:
   max_analyses_per_day: 6                  # counts every entry point, manual runs included
   run_while_paused: true                   # the kill switch stops orders; research continues
 
+# Read-only web access for factual sources. Two independent routes, separately permissioned,
+# because they differ in what this codebase is able to see.
+#
+# fetch: a project-owned MCP tool (agentic_trading/llm/web_fetch.py) that runs in our own
+# process. The allowlist, the private-address refusal, the redirect re-check, the byte cap, the
+# content-type check and the provenance envelope are all deterministic code here, and every
+# retrieval is recorded in the decision record. Only content from this route becomes evidence.
+#
+# search: the Claude Code CLI's own WebSearch/WebFetch. Its tool loop runs inside the CLI, so
+# nothing here sees the query, the URL, the redirect chain, the response size or the bytes
+# before they enter the model's context. There is no allowlist, no size cap, no sanitisation
+# and no provenance to record. The entire control surface is which call it is offered on,
+# whether it is enabled at all, and the turn and wall-clock budgets. Content reached this way
+# can inform a report but is never evidence, because there is no provenance record to keep.
+research_web_access:
+  fetch:
+    enabled: true
+    max_bytes: 400000                        # ~400 KB per page, then truncated and flagged
+    timeout_seconds: 20
+    max_calls_per_analyst_call: 6            # the tool server is a fresh subprocess per CLI
+                                             # call, so this bounds one analyst call and not
+                                             # one run; llm.max_turns bounds the rest
+    user_agent: "agentic-trading/personal-research (read-only)"
+    # Suffix-matched on a label boundary: "sec.gov" permits www.sec.gov and efts.sec.gov, and
+    # never sec.gov.example.com. Primary and regulatory sources only, plus two wire services.
+    # Paywalled outlets are deliberately absent: a fetch would return the paywall, not the
+    # article, and an allowlist entry that cannot be read is worse than no entry.
+    allowed_domains:
+      - sec.gov
+      - federalreserve.gov
+      - bls.gov
+      - bea.gov
+      - treasury.gov
+      - stlouisfed.org                       # FRED, already a declared macro vendor
+      - ecb.europa.eu
+      - imf.org
+      - investor.vanguard.com
+      - ishares.com
+      - ssga.com
+      - nasdaq.com
+      - nyse.com
+      - reuters.com
+      - apnews.com
+  search:
+    enabled: false                           # ARM SEPARATELY, and only after reading what a
+                                             # fetch-only run actually produced
+    available_to: news_analyst_only          # enforced by exact set equality on the bound
+                                             # upstream tool list; any upstream change to that
+                                             # list grants nothing rather than guessing
+    extra_turns: 6                           # added to llm.max_turns on that one call, capped
+                                             # by llm.max_turns_ceiling
+
 # Unattended operation. The failures that matter on a machine nobody watches are quiet ones:
 # a loop that stopped, a backup that has not run, a disk that filled with run artefacts. Each
 # activity records when it last succeeded and how often it is expected to, so "nothing has
@@ -636,6 +688,9 @@ data_freshness:
     max_age_minutes: 1440                  # news and company developments
     fields: [news, company_developments, event_information]
     event_driven_max_age_minutes: 60
+    # Enforced by HR05e and by revalidate() against evidence.web_sources[].retrieved_at -- the
+    # moment this system read the source, never the moment the source says it was published. A
+    # scraped page's own date is untrusted content and is never used as a clock.
   slow:
     max_age_days: 90                       # statements, cash flow, most macro after publication
     fields: [financial_statements, balance_sheet, free_cash_flow, quarterly_fundamentals]

@@ -115,6 +115,45 @@ run_schedule:
   stock_watchlist_max_analyses_per_day: 3
   sandbox_analysis: on_request
 
+# Every external source this system reads, including the ones no config switch selects.
+# Declaration only: nothing here changes behaviour. It exists because two of these were
+# reaching the model without appearing anywhere a person would look -- upstream's sentiment
+# analyst binds no tools, so its StockTwits and Reddit fetches never show up in a decision
+# record's tool_calls. Copied verbatim into every decision record, beside the tools actually
+# observed, so the gap between declared and observed is readable per run.
+declared_data_sources:
+  - id: yfinance
+    used_for: [prices, indicators, fundamentals, news, earnings_dates]
+    keyless: true
+    tool_visible: true
+  - id: fred
+    used_for: [macro_indicators]
+    keyless: false                           # FRED_API_KEY; degrades to a sentinel without it
+    tool_visible: true
+  - id: polymarket
+    used_for: [prediction_markets]
+    keyless: true
+    tool_visible: true
+  - id: stocktwits
+    used_for: [social_sentiment]
+    keyless: true
+    tool_visible: false                      # fetched directly by upstream's sentiment analyst
+    note: >-
+      Read by tradingagents.agents.analysts.sentiment_analyst, which binds no tools, so the
+      fetch never appears in llm_calls. Anonymous public posts with no editorial process:
+      untrusted content, and never treated as verified information.
+  - id: reddit
+    used_for: [social_sentiment]
+    keyless: true
+    tool_visible: false
+    note: >-
+      Same path and the same caveat as StockTwits.
+  - id: web_fetch_allowlist
+    used_for: [company_filings, macro_releases, company_news]
+    keyless: true
+    tool_visible: true                       # mcp__ta__fetch_url; the allowlist and the
+                                             # controls live in risk_profile research_web_access
+
 # LLM execution layer. The system runs on the Claude Max subscription through the official
 # Claude Code CLI (`claude -p`); no Anthropic API key is ever used or accepted.
 llm:
@@ -124,6 +163,8 @@ llm:
   policy_effort: high
   timeout_seconds: 900
   max_turns: 12                            # cap on tool-use turns inside one analyst call
+  max_turns_ceiling: 24                    # hard ceiling including any web allowance, so a
+                                           # configured extra_turns cannot widen a call
   never_use_api_key: true                  # adapter strips ANTHROPIC_API_KEY / AUTH_TOKEN from the CLI environment
   on_limit: wait_for_reset                 # a subscription limit stops the run; it never falls back to API billing
   subscription_budget_note: "Max 5x: 5-hour session limit plus a weekly cap shared with interactive use; keep analyses per day small"
