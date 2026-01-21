@@ -255,3 +255,133 @@ def test_the_medium_window_narrows_for_an_event_driven_thesis(profiles):
                     strategy="event_driven")
     assert engine._web_evidence_window(slow) == 1440
     assert engine._web_evidence_window(fast) == 60
+
+
+# -- the real-money bucket's diversification rules ----------------------------------
+#
+# micro_live took the generic non-core branch, which carried one max-positions check and
+# nothing else. The bucket that deploys actual capital therefore had no exposure-group check,
+# no combined-stock or sector cap and — the one that matters — no stock eligibility screen.
+# These tests pin that the rules now apply there, and that their absence fails closed rather
+# than reading as permission.
+
+MICRO = "micro_live"
+
+
+def _micro(profiles, *, cash=100.0, positions=(), ladder_equity=100.0):
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={MICRO: {"cash_usd": cash}},
+                           positions=[dict(p) for p in positions], recent_opens=[])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, None, None, None,
+                     micro_live_equity=ladder_equity)
+    return snap, ladders
+
+
+def _micro_result(profiles, ticker, *, action="BUY", size="normal", stock_info=None, **kw):
+    # "small" is 20% of a $100 bucket, which is below sizing.min_order_usd, so the engine
+    # returns NO_ACTION before it reaches any of the rules under test.
+    from agentic_trading.risk_scenarios import GOOD_STOCK_INFO
+
+    snap, ladders = _micro(profiles, **kw)
+    prop = Proposal(ticker=ticker, bucket=MICRO, action=action, size_hint=size, confidence=85,
+                    trade_date=TRADE_DATE,
+                    cls=classify_instrument(ticker, profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified",
+                    evidence=collect_evidence(ticker, TRADE_DATE, price_lookup=price_lookup))
+    engine = HardRiskEngine(profiles, halt_file="/nonexistent/HALT",
+                            stock_info_lookup=lambda s: (GOOD_STOCK_INFO if stock_info is None
+                                                         else stock_info))
+    return engine.evaluate(prop, snap, ladders, regime())
+
+
+def _ids(result):
+    return {r.rule_id for r in result.rules}
+
+
+def test_real_money_now_runs_the_stock_eligibility_screen(profiles):
+    result = _micro_result(profiles, "AAPL")
+    assert "HR04b" in _ids(result), "an individual stock in the real-money bucket must be screened"
+    assert next(r for r in result.rules if r.rule_id == "HR04b").passed
+
+
+def test_real_money_refuses_a_stock_that_fails_the_screen(profiles):
+    thin = {"marketCap": 4.0e8, "freeCashflow": -1.0e8, "netIncomeToCommon": -5.0e7,
+            "debtToEquity": 400.0, "currentRatio": 0.4}
+    result = _micro_result(profiles, "AAPL", stock_info=thin)
+    assert "HR04b" in {r.rule_id for r in result.failed_rules}
+    assert result.verdict == "REJECT" and result.proposed_notional_usd == 0.0
+
+
+def test_real_money_fails_closed_when_the_screen_is_not_required(profiles):
+    profiles.risk["buckets"][MICRO].pop("require_stock_eligibility_screen")
+    result = _micro_result(profiles, "AAPL")
+    assert result.verdict == "REJECT"
+    assert any("no eligibility screen" in r for r in result.fail_closed_reasons), \
+        result.fail_closed_reasons
+
+
+def test_real_money_fails_closed_without_concentration_limits(profiles):
+    profiles.risk["buckets"][MICRO].pop("concentration_pct_of_allocation")
+    result = _micro_result(profiles, "VTI")
+    assert result.verdict == "REJECT"
+    assert any("concentration_pct_of_allocation" in r for r in result.fail_closed_reasons), \
+        result.fail_closed_reasons
+
+
+def test_real_money_applies_the_per_class_cap_on_top_of_the_flat_cap(profiles):
+    # The flat cap is 40% of the bucket; a single name is capped at 10%. The stricter one wins.
+    stock = _micro_result(profiles, "AAPL", size="normal")
+    cap = next(r for r in stock.rules if r.rule_id == "HR08")
+    assert "cap 10.0%" in cap.detail, cap.detail
+    etf = _micro_result(profiles, "VTI", size="normal")
+    assert "cap 40.0%" in next(r for r in etf.rules if r.rule_id == "HR08").detail
+
+
+def test_real_money_refuses_two_etfs_from_one_exposure_group(profiles):
+    # VTI and VOO are the same bet on the same index; holding both is not diversification.
+    held = [{"symbol": "VTI", "bucket": MICRO, "quantity": 0.1, "cost_basis_per_share": 370.0}]
+    result = _micro_result(profiles, "VOO", positions=held, cash=60.0)
+    assert "HR09" in {r.rule_id for r in result.failed_rules}, [r.rule_id for r in result.failed_rules]
+
+
+def test_adding_to_an_existing_real_money_holding_is_not_counted_as_a_new_position(profiles):
+    # HR11c looked for the ticker in "sandbox" even for a micro_live proposal, so topping up an
+    # existing holding counted as a fourth position and was refused at the three-position cap.
+    # Small enough that topping VTI up to its target still clears sizing.min_order_usd.
+    held = [{"symbol": sym, "bucket": MICRO, "quantity": q, "cost_basis_per_share": c}
+            for sym, q, c in (("VTI", 0.01, 370.0), ("BND", 0.02, 71.0), ("SGOV", 0.01, 100.0))]
+    result = _micro_result(profiles, "VTI", action="ADD", positions=held, cash=40.0)
+    positions = next(r for r in result.rules if r.rule_id == "HR11c")
+    assert positions.passed, positions.detail
+    assert "3 positions" in positions.detail
+
+
+def test_one_symbol_one_bucket_now_looks_at_every_other_bucket(profiles):
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    # Previously a micro_live proposal only checked sandbox, so the same symbol held in core
+    # passed unnoticed.
+    state = PortfolioState(as_of=TRADE_DATE, buckets={
+        "core": {"cash_usd": 2000.0}, "sandbox": {"cash_usd": 500.0}, MICRO: {"cash_usd": 100.0}},
+        positions=[{"symbol": "VTI", "bucket": "core", "quantity": 1.0,
+                    "cost_basis_per_share": 370.0}], recent_opens=[])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, snap.total_equity,
+                     snap.buckets["core"].equity, snap.buckets["sandbox"].equity,
+                     micro_live_equity=snap.buckets[MICRO].equity)
+    prop = Proposal(ticker="VTI", bucket=MICRO, action="BUY", size_hint="normal", confidence=85,
+                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified",
+                    evidence=collect_evidence("VTI", TRADE_DATE, price_lookup=price_lookup))
+    result = HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+    overlap = next(r for r in result.rules if r.rule_id == "HR07b")
+    assert not overlap.passed and "held in core" in overlap.detail, overlap.detail

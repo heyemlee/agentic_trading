@@ -335,9 +335,14 @@ class HardRiskEngine:
         # HR07 bucket funding and isolation
         rule("HR07", "bucket funding", bucket.cash_usd + 1e-6 >= notional,
              f"{prop.bucket} cash ${bucket.cash_usd:,.2f} vs order ${notional:,.2f}; the other bucket is never a funding source")
-        other = "core" if prop.bucket == "sandbox" else "sandbox"
-        rule("HR07b", "one symbol one bucket", not snap.has_position(ticker, other),
-             f"{ticker} {'is' if snap.has_position(ticker, other) else 'is not'} held in {other}")
+        # Every other bucket, not one hard-coded counterpart. The old pairing checked sandbox
+        # for a micro_live proposal and silently ignored core, so the rule only half applied to
+        # the bucket that deploys real money.
+        others = [name for name in snap.buckets if name != prop.bucket]
+        elsewhere = [name for name in others if snap.has_position(ticker, name)]
+        rule("HR07b", "one symbol one bucket", not elsewhere,
+             f"{ticker} is " + (f"held in {', '.join(elsewhere)}" if elsewhere
+                                else f"not held in {', '.join(others) or 'any other bucket'}"))
         if prop.bucket != "core":
             cap = bucket.allocation_usd
             rule("HR07c", f"{prop.bucket} deployed cap", bucket.deployed_cost_usd + notional <= cap + 1e-6,
@@ -348,8 +353,15 @@ class HardRiskEngine:
             cap_pct = float(self._cfg("buckets", "core", "position_limits_pct_of_core", prop.cls.limit_class, default=5))
             order_cap = float(self._cfg("buckets", "core", "order_rules", "max_single_order_pct_of_core", default=40))
         else:
-            cap_pct = float(self._cfg("buckets", prop.bucket, "position_limits",
-                                      "max_single_position_pct_of_allocation", default=30))
+            flat = float(self._cfg("buckets", prop.bucket, "position_limits",
+                                   "max_single_position_pct_of_allocation", default=30))
+            # A per-class cap, where the bucket declares one, is applied as well as the flat cap
+            # and never instead of it: a bucket holding both broad ETFs and single names should
+            # not size a single name like an index fund.
+            by_class = self._cfg("buckets", prop.bucket, "position_limits",
+                                 "max_pct_of_allocation_by_class", default=None) or {}
+            per_class = by_class.get(prop.cls.limit_class)
+            cap_pct = min(flat, float(per_class)) if per_class is not None else flat
             order_cap = cap_pct
         rule("HR08", "position cap", post_weight <= cap_pct + 1e-9,
              f"post-trade {post_weight:.1f}% vs cap {cap_pct:.1f}% for {prop.cls.limit_class}")
@@ -395,9 +407,55 @@ class HardRiskEngine:
                 ok_s, det = self._stock_screen(ticker)
                 rule("HR04b", "core stock eligibility screen", ok_s, det)
         else:
-            max_pos = int(self._cfg("buckets", prop.bucket, "position_limits", "max_open_positions", default=3))
-            new_count = bucket.n_positions + (0 if snap.has_position(ticker, "sandbox") else 1)
+            # This branch used to carry a single max-positions check, which left the bucket that
+            # deploys actual capital with none of the diversification rules the conceptual core
+            # book has: no exposure-group check, no cash floor, no combined-stock or sector cap
+            # and no eligibility screen. At $100 of ETFs that mattered little. With real capital
+            # and individual stocks permitted it is the gap that matters most, so the same rules
+            # apply here, from this bucket's own numbers.
+            section = ("buckets", prop.bucket)
+            conc = self._cfg(*section, "concentration_pct_of_allocation", default={}) or {}
+            # For real money, silence is a refusal rather than a bypass. A conceptual bucket may
+            # legitimately have no diversification limits; the one holding real capital may not.
+            if prop.bucket == "micro_live" and not conc:
+                fail_closed.append(f"{prop.bucket} has no concentration_pct_of_allocation limits")
+
+            if conc.get("max_etfs_per_exposure_group") is not None:
+                max_per_group = int(conc["max_etfs_per_exposure_group"])
+                group = prop.cls.exposure_group
+                held = [s for s in bucket.groups_held.get(group, []) if s != ticker] if group else []
+                rule("HR09", "exposure group overlap", len(held) < max_per_group,
+                     f"group {group or 'none'}: already held {held or 'nothing'} (max {max_per_group} per group)")
+            min_cash = self._cfg(*section, "cash", "min_cash_pct_of_allocation", default=None)
+            if min_cash is not None:
+                post_cash_pct = (bucket.cash_usd - notional) / bucket.allocation_usd * 100.0
+                rule("HR10b", "cash minimum", post_cash_pct >= float(min_cash) - 1e-9,
+                     f"post-trade cash {post_cash_pct:.1f}% vs minimum {float(min_cash):.0f}%")
+            if prop.cls.limit_class == "individual_stock" and conc.get("all_individual_stocks_combined") is not None:
+                max_stocks = float(conc["all_individual_stocks_combined"])
+                post_stocks = bucket.stocks_pct + notional / bucket.allocation_usd * 100.0
+                rule("HR11", "stocks combined", post_stocks <= max_stocks + 1e-9,
+                     f"stocks {post_stocks:.1f}% vs max {max_stocks:.0f}%")
+            if (prop.cls.limit_class in ("individual_stock", "sector_factor_thematic_etf")
+                    and conc.get("direct_sector_exposure") is not None):
+                max_sector = float(conc["direct_sector_exposure"])
+                sector = prop.cls.sector or f"unclassified:{ticker}"
+                post_sector = bucket.sectors_pct.get(sector, 0.0) + notional / bucket.allocation_usd * 100.0
+                rule("HR11b", "direct sector exposure", post_sector <= max_sector + 1e-9,
+                     f"sector {sector} post-trade {post_sector:.1f}% vs max {max_sector:.0f}%")
+            max_pos = int(self._cfg(*section, "position_limits", "max_open_positions", default=3))
+            # Was hard-coded to "sandbox", so adding to an existing micro_live holding counted as
+            # a new position and was refused once the bucket held its maximum.
+            new_count = bucket.n_positions + (0 if snap.has_position(ticker, prop.bucket) else 1)
             rule("HR11c", "max open positions", new_count <= max_pos, f"{new_count} positions vs max {max_pos}")
+            if prop.cls.limit_class == "individual_stock":
+                screened = bool(self._cfg(*section, "require_stock_eligibility_screen", default=False))
+                if prop.bucket == "micro_live" and not screened:
+                    fail_closed.append(
+                        f"{prop.bucket} would trade an individual stock with no eligibility screen")
+                if screened:
+                    ok_s, det = self._stock_screen(ticker)
+                    rule("HR04b", "stock eligibility screen", ok_s, det)
 
         # HR12 activity limits (new positions per day / week) from the recorded opens
         if not snap.has_position(ticker, prop.bucket):

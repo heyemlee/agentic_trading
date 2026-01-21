@@ -206,6 +206,31 @@ buckets:
     position_limits:
       max_single_position_pct_of_allocation: {value: TODO, recommended_default: 40}   # $40
       max_open_positions:                    {value: TODO, recommended_default: 3}
+      # Applied as well as the flat cap above, never instead of it. One company failing is a
+      # different event from one market falling, and a single flat cap cannot express that.
+      max_pct_of_allocation_by_class:
+        broad_diversified_etf: 40
+        bond_or_cash_like_etf: 40
+        sector_factor_thematic_etf: 25
+        individual_stock: 10                 # $10 of $100: a total loss costs 10% of the bucket
+    # Investor decision, 2026-09-09. These rules previously applied only to the conceptual core
+    # book, so the bucket that actually deploys money had none of them: no exposure-group check,
+    # no cash floor, no combined-stock or sector cap, no eligibility screen. Individual stocks
+    # with real capital is exactly the case they exist for, so they apply here now. The engine
+    # fails closed if this section is missing for a real-money bucket, so its absence can never
+    # read as permission.
+    concentration_pct_of_allocation:
+      all_individual_stocks_combined: 25
+      direct_sector_exposure: 25
+      max_etfs_per_exposure_group: 1         # VTI and VOO are one bet, not two
+    cash:
+      min_cash_pct_of_allocation: 0          # deliberately none: a $100 account has no room for a
+                                             # cash floor. Explicit, so it reads as a decision
+                                             # rather than an omission. HR07 still refuses an
+                                             # order the bucket cannot fund.
+    require_stock_eligibility_screen: true   # the same deterministic screen the core book uses:
+                                             # large, liquid, profitable, self-funding names only,
+                                             # and no model output can argue a name past it
     activity_limits:
       max_new_positions_per_day:  {value: TODO, recommended_default: 1}
       max_new_positions_per_week: {value: TODO, recommended_default: 2}
