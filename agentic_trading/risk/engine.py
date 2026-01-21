@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..event_calendar import earnings_blackout, macro_blackout, yfinance_next_earnings
 from ..portfolio import InstrumentClass, Snapshot
 from ..profile import Profiles
 from .ladder import LadderStates, effective_core_level
@@ -45,6 +46,11 @@ class Proposal:
     strategy: str = "long_only_diversified"
     sell_quantity: float | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
+    # Whether deterministic code, rather than a person, is standing behind this action. Only
+    # the macro blackout reads it: a human approving on an FOMC day has the calendar in view,
+    # unattended code does not. Defaults to the safe answer, so a caller that forgets to say
+    # gets the human-approved treatment and never the autonomous exemption.
+    autonomous: bool = False
 
 
 @dataclass
@@ -99,11 +105,13 @@ def yfinance_stock_info(symbol: str) -> dict[str, Any]:
 
 class HardRiskEngine:
     def __init__(self, profiles: Profiles, *, halt_file: str | Path | None = None,
-                 stock_info_lookup: StockInfoLookup = yfinance_stock_info):
+                 stock_info_lookup: StockInfoLookup = yfinance_stock_info,
+                 earnings_lookup=yfinance_next_earnings):
         self.p = profiles
         self.halt_file = Path(halt_file) if halt_file else profiles.project_dir / str(
             profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
         self.stock_info_lookup = stock_info_lookup
+        self.earnings_lookup = earnings_lookup
 
     # ------------------------------------------------------------------ helpers
     def _cfg(self, *keys: str, default: Any = None) -> Any:
@@ -278,6 +286,19 @@ class HardRiskEngine:
             rule("HR03", "market regime", True, f"regime {regime.level}: confidence floor {gate_min_conf}, size capped small")
         else:
             rule("HR03", "market regime", True, f"regime {regime.level}: {regime.detail}")
+
+        # HR18/HR19 event blackouts. They sit with the environment gates because they answer the
+        # same question: may a position be opened at all today. Reducing actions returned long
+        # before this point, so neither can ever stand between a holding and its exit.
+        if prop.cls.limit_class == "individual_stock":
+            when, known = self.earnings_lookup(ticker)
+            blocked, detail = earnings_blackout(self.p, ticker, prop.trade_date, action=prop.action,
+                                                next_earnings=when, known=known)
+            rule("HR18", "earnings blackout", not blocked, detail)
+            if not known:
+                fail_closed.append(f"the next earnings date for {ticker} could not be determined")
+        blocked, detail = macro_blackout(self.p, prop.trade_date, autonomous=prop.autonomous)
+        rule("HR19", "macro release blackout", not blocked, detail)
 
         # HR15 strategy policy (core is long-only and conservative by construction)
         strat_ok, strat_detail = self._strategy_allowed(prop)

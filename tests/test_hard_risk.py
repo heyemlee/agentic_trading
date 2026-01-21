@@ -293,9 +293,12 @@ def _micro_result(profiles, ticker, *, action="BUY", size="normal", stock_info=N
                     cls=classify_instrument(ticker, profiles, identity_lookup),
                     data_quality="good", strategy="long_only_diversified",
                     evidence=collect_evidence(ticker, TRADE_DATE, price_lookup=price_lookup))
+    from agentic_trading.risk_scenarios import earnings_lookup
+
     engine = HardRiskEngine(profiles, halt_file="/nonexistent/HALT",
                             stock_info_lookup=lambda s: (GOOD_STOCK_INFO if stock_info is None
-                                                         else stock_info))
+                                                         else stock_info),
+                            earnings_lookup=earnings_lookup)
     return engine.evaluate(prop, snap, ladders, regime())
 
 

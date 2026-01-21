@@ -37,6 +37,19 @@ def identity_lookup(symbol: str) -> dict[str, Any]:
     return IDENTITY.get(symbol.upper(), {})
 
 
+#: Far enough from TRADE_DATE that the earnings blackout is not what these scenarios test. A
+#: scenario that wants to exercise HR18 states its own date rather than relying on this.
+EARNINGS_DATES = {"AAPL": "2026-10-29", "MSFT": "2026-10-27"}
+
+
+def earnings_lookup(symbol: str) -> tuple[Any, bool]:
+    """Deterministic stand-in for the yfinance earnings calendar. Offline by construction."""
+    from datetime import date
+
+    value = EARNINGS_DATES.get(symbol.upper())
+    return (date.fromisoformat(value) if value else None), True
+
+
 def make_state(core_cash: float = 2500.0, sandbox_cash: float = 500.0, positions: list[dict] | None = None,
                recent_opens: list[dict] | None = None, as_of: str = TRADE_DATE) -> PortfolioState:
     return PortfolioState(as_of=as_of, buckets={"core": {"cash_usd": core_cash}, "sandbox": {"cash_usd": sandbox_cash}},
@@ -165,7 +178,8 @@ def run_scenario(sc: Scenario, profiles: Profiles) -> Outcome:
                         missing_information=list(sc.missing), source="scenario", strategy=sc.strategy,
                         evidence=collect_evidence(sc.ticker, TRADE_DATE, price_lookup=price_lookup))
     engine = HardRiskEngine(profiles, halt_file="/nonexistent/HALT",
-                            stock_info_lookup=lambda s: sc.stock_info or {})
+                            stock_info_lookup=lambda s: sc.stock_info or {},
+                            earnings_lookup=earnings_lookup)
     result = engine.evaluate(proposal, snap, ladders, regime(sc.regime_level))
     failed = [r.rule_id for r in result.failed_rules]
     ok = result.verdict == sc.expect_verdict and set(sc.expect_rules_failed) <= set(failed)

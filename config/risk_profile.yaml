@@ -344,13 +344,22 @@ permissions:                               # each is a separate permission, enfo
 
 event_rules:
   earnings:
-    core_stock_no_new_position_trading_days_before:      {value: TODO, recommended_default: 5}
-    core_stock_no_add_trading_days_after:                {value: TODO, recommended_default: 2}
+    # Renamed from core_stock_* on 2026-09-09: these had no code reader at all, and the prefix
+    # said "core" while the risk is in the instrument. They apply wherever an individual stock
+    # may be bought, which now includes the bucket holding real money.
+    stock_no_new_position_trading_days_before:           {value: TODO, recommended_default: 5}
+    stock_no_add_trading_days_after:                     {value: TODO, recommended_default: 2}
     sandbox_options_no_expiry_within_days_after_earnings: {value: TODO, recommended_default: 7}
     source: yfinance_earnings_dates        # fail closed for a stock whose next earnings date cannot be determined
     reasoning: earnings gaps are the main single-name jump risk; a conservative core never opens into one
+    applies_to: every_buy                  # whoever approved it: the jump risk is in the print,
+                                           # not in who pressed the button
   macro_blackout_autonomous_only:
-    calendar_file: config/event_calendar.yaml   # TODO: FOMC decision days, CPI and payroll release days
+    # Autonomous actions only, which is what this key has always been named. A person buying on
+    # an FOMC day has the calendar in view and is choosing; unattended code is not. The blackout
+    # is the release day and the day before it, and it never blocks a sell -- those are exactly
+    # the days someone might most need to reduce.
+    calendar_file: config/event_calendar.yaml
     fail_closed_if_missing: true
 
 confidence_requirements:                   # bands from MANDATE.md v0.1; REVIEW or missing confidence always maps to NO_TRADE

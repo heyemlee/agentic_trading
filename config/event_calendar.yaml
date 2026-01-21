@@ -1,0 +1,30 @@
+# Macro releases an autonomous action must not open a position into.
+#
+# Read by agentic_trading/event_calendar.py. Gates AUTONOMOUS opens only, on the release day
+# and the day before it, and never gates a sell -- those are exactly the days someone might
+# most need to reduce. A human-approved buy is unaffected: a person has the calendar in view.
+#
+# There is no keyless feed for this, so it is maintained by hand and it says how far it is good
+# for. Past `maintained_through` the system refuses autonomous opens and asks to be renewed; it
+# also asks 45 days early, so running out is never a surprise stop.
+#
+# Populate `events` from the primary sources, which are already on the research fetch allowlist:
+#   FOMC decisions   federalreserve.gov/monetarypolicy/fomccalendars.htm
+#   CPI, payrolls    bls.gov/schedule/news_release/
+# Each entry:
+#   - date: YYYY-MM-DD      the release date, US Eastern
+#     kind: fomc_decision | cpi | payrolls | pce | gdp | ...
+#     note: optional free text
+#
+# Deliberately left empty rather than filled with guessed dates. A blackout calendar carrying
+# invented dates is worse than none: it would block the wrong days and, far worse, leave the
+# real ones open while looking maintained. Fill it before enabling autonomous buying.
+
+schema_version: 1
+timezone: America/New_York
+
+# In the past on purpose, so an unpopulated calendar fails closed for autonomous opens. Set
+# this to the last date you have actually entered below.
+maintained_through: 2026-09-08
+
+events: []
