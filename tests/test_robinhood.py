@@ -36,9 +36,16 @@ PORTFOLIO = {"data": {"total_value": "100", "equity_value": "0", "cash": "100", 
                       "buying_power": {"buying_power": "100.0000"}}}
 EMPTY_POSITIONS = {"data": {"positions": []}}
 EMPTY_ORDERS = {"data": {"orders": []}}
-QUOTES = {"data": {"quotes": [{"symbol": "VTI", "last_trade_price": "376.88",
-                               "bid_price": "376.86", "ask_price": "376.90",
-                               "last_trade_at": datetime.now(UTC).isoformat()}]}}
+def quotes_now():
+    """A quote stamped when it is asked for, never when this module was imported.
+
+    execution._venue_price refuses a quote older than data_freshness.fast.max_age_seconds, so a
+    timestamp fixed at import time turns every test that prices an order into a race against how
+    long the rest of the suite takes. It lost at 953s against a 120s limit.
+    """
+    return {"data": {"quotes": [{"symbol": "VTI", "last_trade_price": "376.88",
+                                 "bid_price": "376.86", "ask_price": "376.90",
+                                 "last_trade_at": datetime.now(UTC).isoformat()}]}}
 
 
 class FakeMCP:
@@ -306,7 +313,7 @@ def test_end_to_end_micro_live_order_through_the_full_pipeline(profiles, tmp_pat
                                    "average_price": "378.39", "type": "market"}]}}
     fake = FakeMCP(CURRENT_TOOLS, {
         "get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO,
-        "get_equity_positions": EMPTY_POSITIONS, "get_equity_quotes": QUOTES,
+        "get_equity_positions": EMPTY_POSITIONS, "get_equity_quotes": quotes_now(),
         "get_equity_orders": EMPTY_ORDERS, "review_equity_order": {"data": {"alerts": []}},
         "get_equity_tradability": {"data": {"tradability": [{"symbol": "VTI", "tradable": True, "fractional": True}]}},
         "place_equity_order": placed,
@@ -376,7 +383,7 @@ def test_calendar_failure_reports_the_market_closed(profiles, monkeypatch):
 def _order_flow_broker(profiles, order_row, orders_after=None):
     fake = FakeMCP(CURRENT_TOOLS, {
         "get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO, "get_equity_positions": EMPTY_POSITIONS,
-        "get_equity_quotes": QUOTES, "get_equity_orders": orders_after or EMPTY_ORDERS,
+        "get_equity_quotes": quotes_now(), "get_equity_orders": orders_after or EMPTY_ORDERS,
         "review_equity_order": {"data": {"alerts": []}},
         "get_equity_tradability": {"data": {"tradability": [{"symbol": "VTI", "tradable": True, "fractional": True}]}},
         "place_equity_order": {"data": {"orders": [order_row]}},

@@ -552,8 +552,9 @@ class RobinhoodBroker:
         ceiling = float(micro.get("refuse_if_account_equity_above_usd", self.max_capital * 1.5))
         if account.equity > ceiling:
             raise BrokerError(
-                f"the Agentic account holds ${account.equity:,.2f}, above the ${ceiling:,.2f} ceiling for this "
-                f"experiment (capital boundary ${self.max_capital:,.2f}). Withdraw the excess before trading."
+                f"the Agentic account holds ${account.equity:,.2f}, above the ${ceiling:,.2f} ceiling "
+                f"(capital boundary ${self.max_capital:,.2f}). Raise max_capital_usd deliberately if "
+                "that is the mandate you intend, or withdraw the excess."
             )
         if account.trading_blocked:
             raise BrokerError("the Agentic account is not active for trading")

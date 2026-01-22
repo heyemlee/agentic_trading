@@ -201,7 +201,18 @@ buckets:
       fractional_shares: true
 
   micro_live:
-    allocation_usd_max: 100                # the hard capital boundary, verified against the live account
+    allocation_usd_max: 100                # NOT a limit any more: with sizing_basis live_equity
+                                           # every cap is a percentage of what the account holds.
+                                           # This only seeds the drawdown ladder's high-water
+                                           # mark on a fresh install, so raising it would read as
+                                           # an instant drawdown against an account that has not
+                                           # been funded yet. The real boundary is
+                                           # micro_live_execution.max_capital_usd.
+    # Investor decision, 2026-09-09: the real account manages what is actually in it. Percentages
+    # of a number typed into a config file describe an account that was funded once and never
+    # again; percentages of live equity follow a deposit with no edit, and fall by themselves
+    # after a loss. The ceiling that bounds it is max_capital_usd, checked against the venue.
+    sizing_basis: live_equity
     may_stay_all_cash: true
     position_limits:
       max_single_position_pct_of_allocation: {value: TODO, recommended_default: 40}   # $40
@@ -213,6 +224,27 @@ buckets:
         bond_or_cash_like_etf: 40
         sector_factor_thematic_etf: 25
         individual_stock: 10                 # $10 of $100: a total loss costs 10% of the bucket
+    # Investor decision, 2026-09-10. The risk tiers, as a table of what may be bought rather
+    # than as three sub-accounts. One brokerage account holds one pool of cash: splitting it
+    # into notional envelopes would refuse a buy while the account plainly had the money, and
+    # would mean migrating live ledgers to gain a distinction the venue does not have. Which
+    # tier an order falls in is decided by classify_instrument, not by the model.
+    #
+    # These bound the money. Rate is still bounded per bucket by activity_limits below.
+    # Sells are never bounded by a tier: a tier that filled up must remain reducible.
+    tiers:
+      low:
+        classes: [broad_diversified_etf, bond_or_cash_like_etf]
+        max_pct_of_account: 60               # the two classes share this, not 60 each
+        max_order_usd: 200
+      mid:
+        classes: [sector_factor_thematic_etf]
+        max_pct_of_account: 25
+        max_order_usd: 80
+      high:
+        classes: [individual_stock]
+        max_pct_of_account: 15               # $150 of $1,000, across at most 3 names
+        max_order_usd: 50
     # Investor decision, 2026-09-09. These rules previously applied only to the conceptual core
     # book, so the bucket that actually deploys money had none of them: no exposure-group check,
     # no cash floor, no combined-stock or sector cap, no eligibility screen. Individual stocks
@@ -820,9 +852,19 @@ micro_live_execution:
   bucket_name: micro_live
   ledger_file: state/micro_live_portfolio.yaml   # reconciles against the Robinhood Agentic account, separate from the conceptual portfolio
   risk_state_file: state/micro_live_risk_state.json   # its own drawdown high-water mark
-  max_capital_usd: 100                       # hard boundary; verified against the live account
-  capital_tolerance_usd: 5                   # allows for market drift above the funded amount
-  refuse_if_account_equity_above_usd: 150    # a clearly over-funded account halts trading outright
+  # Investor decision, 2026-09-09. The account manages whatever is in it, up to this ceiling:
+  # adding money needs no config edit, which is the point, but a mistaken transfer cannot hand
+  # the system an authority nobody chose. Above the ceiling it stops and says so rather than
+  # taking the money on. Raising this number is the deliberate act that widens the mandate, and
+  # it is the one thing the console cannot do — tightening is a phone gesture, loosening is a
+  # file edit. Funding the account should also be recorded with `ct-state cashflow`, or the
+  # drawdown ladder reads a deposit as performance.
+  max_capital_usd: 2000                      # the ceiling, verified against the live account
+  capital_tolerance_usd: 50                  # headroom for market drift above it, not extra
+                                             # authority: sizing still follows live equity
+  refuse_if_account_equity_above_usd: 2000   # the same ceiling again, enforced independently in
+                                             # the broker adapter, so one edited number is not
+                                             # enough to widen the boundary everywhere
   execution_mode: human_approval             # opening orders always need explicit confirmation
   allow_autonomous_opening: false
   permissions:

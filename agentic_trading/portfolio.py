@@ -260,6 +260,7 @@ class BucketView:
     sleeves_pct: dict[str, float] = field(default_factory=dict)      # of allocation, cash included
     groups_held: dict[str, list[str]] = field(default_factory=dict)  # exposure group -> symbols
     sectors_pct: dict[str, float] = field(default_factory=dict)      # direct sector exposure (stocks + sector ETFs)
+    classes_pct: dict[str, float] = field(default_factory=dict)      # of allocation, by limit class
     stocks_pct: float = 0.0
     limit_class_pct: dict[str, float] = field(default_factory=dict)
 
@@ -339,6 +340,12 @@ def build_snapshot(
 
     for b in buckets.values():
         b.equity = b.cash_usd + b.market_value
+        if profiles.risk_cfg("buckets", b.name, "sizing_basis", default="") == "live_equity":
+            # Every limit in the engine is a percentage of allocation_usd, so pointing that at
+            # the money actually in the account is the whole change. Caps then follow a deposit
+            # without a config edit, and — the half that matters more — they shrink on their own
+            # after a loss, with nobody having to remember to tighten them.
+            b.allocation_usd = b.equity
         basis = b.allocation_usd if b.allocation_usd > 0 else b.equity
         sleeves: dict[str, float] = defaultdict(float)
         sectors: dict[str, float] = defaultdict(float)
@@ -358,6 +365,7 @@ def build_snapshot(
         b.sectors_pct = dict(sectors)
         b.limit_class_pct = dict(classes)
         b.groups_held = dict(groups)
+        b.classes_pct = dict(classes)
         b.stocks_pct = classes.get("individual_stock", 0.0)
         if b.name == "sandbox" and b.deployed_cost_usd > b.allocation_usd + 1e-6:
             warnings.append(f"sandbox deployed cost {b.deployed_cost_usd:.2f} exceeds its {b.allocation_usd:.0f} cap")

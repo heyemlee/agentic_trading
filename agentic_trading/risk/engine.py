@@ -393,6 +393,30 @@ class HardRiskEngine:
         rule("HR08b", "single order cap", notional <= bucket.allocation_usd * order_cap / 100.0 + 1e-6,
              f"order ${notional:,.2f} vs {order_cap:.0f}% of allocation")
 
+        # HR21 risk tiers. A tier is a set of instrument classes sharing one share of the
+        # account and one order cap, rather than a separate sub-account: one brokerage account
+        # holds one pool of cash, and splitting it into notional envelopes would refuse a buy
+        # while the account plainly had the money. classify_instrument decides which tier an
+        # order falls in, so a model cannot argue a single name into the low tier.
+        tier_name, tier = self._tier_for(prop.bucket, prop.cls.limit_class)
+        if tier_name is None:
+            if prop.bucket == "micro_live":
+                fail_closed.append(
+                    f"{prop.cls.limit_class} belongs to no tier declared for {prop.bucket}")
+        else:
+            held = sum(bucket.classes_pct.get(c, 0.0) for c in tier.get("classes") or ())
+            tier_cap = tier.get("max_pct_of_account")
+            if tier_cap is not None:
+                post_tier = held + (notional / bucket.allocation_usd * 100.0
+                                    if bucket.allocation_usd else 0.0)
+                rule("HR21", f"{tier_name} tier share of the account",
+                     post_tier <= float(tier_cap) + 1e-9,
+                     f"{tier_name} tier post-trade {post_tier:.1f}% vs max {float(tier_cap):.0f}%")
+            tier_order = tier.get("max_order_usd")
+            if tier_order is not None:
+                rule("HR21b", f"{tier_name} tier order cap", notional <= float(tier_order) + 1e-6,
+                     f"order ${notional:,.2f} vs the {tier_name} tier's ${float(tier_order):,.0f} maximum")
+
         if prop.bucket == "core":
             # HR09 exposure-group overlap (fake diversification)
             max_per_group = int(self._cfg("buckets", "core", "concentration_pct_of_core", "max_etfs_per_exposure_group", default=1))
@@ -638,6 +662,18 @@ class HardRiskEngine:
             if 0 <= (td - d).days < 7:
                 week += 1
         return today, week
+
+    def _tier_for(self, bucket: str, limit_class: str) -> tuple[str | None, dict[str, Any]]:
+        """The tier a class of instrument belongs to, or (None, {}) if it belongs to none.
+
+        Belonging to no tier is not permission: for the bucket holding real money the caller
+        fails closed on it, so adding an instrument class the table does not mention refuses
+        rather than sizing it against nothing.
+        """
+        for name, tier in (self._cfg("buckets", bucket, "tiers", default={}) or {}).items():
+            if limit_class in (tier.get("classes") or []):
+                return str(name), dict(tier)
+        return None, {}
 
     @staticmethod
     def _order_activity(snap: Snapshot, bucket: str, trade_date: str) -> tuple[int, set[str]]:

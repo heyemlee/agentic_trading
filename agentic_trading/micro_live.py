@@ -203,9 +203,9 @@ def run_preflight(profiles: Profiles, broker: Any | None = None) -> Preflight:
                   f"account {masked}, equity ${account.equity:,.2f}, cash ${account.cash:,.2f}, "
                   f"trading blocked: {account.trading_blocked}")
             within = account.equity <= boundary + tolerance
-            check("PF02", "account equity within the capital boundary", within,
-                  f"equity ${account.equity:,.2f} vs boundary ${boundary:,.2f} (+${tolerance:,.2f} tolerance)"
-                  + ("" if within else "; withdraw the excess before trading"))
+            check("PF02", "account equity within the capital ceiling", within,
+                  f"equity ${account.equity:,.2f} vs ceiling ${boundary:,.2f} (+${tolerance:,.2f} drift headroom)"
+                  + ("" if within else "; raise max_capital_usd deliberately, or withdraw the excess"))
         except Exception as exc:  # noqa: BLE001 - any failure to read the venue blocks trading
             check("PF01", "agentic account connected", False, f"{type(exc).__name__}: {exc}")
             check("PF02", "account equity within the capital boundary", False, "account state unreadable")

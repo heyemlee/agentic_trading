@@ -358,7 +358,9 @@ def test_adding_to_an_existing_real_money_holding_is_not_counted_as_a_new_positi
     # Small enough that topping VTI up to its target still clears sizing.min_order_usd.
     held = [{"symbol": sym, "bucket": MICRO, "quantity": q, "cost_basis_per_share": c}
             for sym, q, c in (("VTI", 0.01, 370.0), ("BND", 0.02, 71.0), ("SGOV", 0.01, 100.0))]
-    result = _micro_result(profiles, "VTI", action="ADD", positions=held, cash=40.0)
+    # Funded so live equity supports a normal-sized top-up: with sizing_basis live_equity the
+    # denominator is what the account holds, not a number in the config file.
+    result = _micro_result(profiles, "VTI", action="ADD", positions=held, cash=100.0)
     positions = next(r for r in result.rules if r.rule_id == "HR11c")
     assert positions.passed, positions.detail
     assert "3 positions" in positions.detail
@@ -480,3 +482,109 @@ def test_the_broker_snapshot_keeps_the_order_history(tmp_path):
     snap = snapshot_from_broker(broker.get_account(), broker.get_positions(), ledger, profiles,
                                 TRADE_DATE)
     assert snap.state.applied_orders == ledger.applied_orders
+
+
+# -- sizing basis: what the percentages are percentages OF ---------------------------
+#
+# Every cap in the engine divides by BucketView.allocation_usd. Pointing that at live equity
+# for the real-money bucket is the whole of the change: caps follow a deposit with no config
+# edit, and fall by themselves after a loss.
+
+def _alloc(profiles, bucket, cash, positions=()):
+    from agentic_trading.portfolio import PortfolioState
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={bucket: {"cash_usd": cash}},
+                           positions=[dict(p) for p in positions], recent_opens=[])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    return snap.buckets[bucket]
+
+
+def test_the_real_bucket_sizes_against_what_the_account_actually_holds(profiles):
+    funded = _alloc(profiles, MICRO, 1000.0)
+    assert funded.allocation_usd == 1000.0, "a deposit must widen the caps without a config edit"
+    drawn_down = _alloc(profiles, MICRO, 620.0)
+    assert drawn_down.allocation_usd == 620.0, "and a loss must narrow them with no one acting"
+
+
+def test_todays_hundred_dollar_account_is_completely_unaffected(profiles):
+    # The live account holds $100 and allocation_usd_max says 100, so live equity and the static
+    # number agree exactly. This change alters nothing until the account is funded differently.
+    assert _alloc(profiles, MICRO, 100.0).allocation_usd == 100.0
+
+
+def test_equity_counts_positions_and_not_just_cash(profiles):
+    held = [{"symbol": "VTI", "bucket": MICRO, "quantity": 1.0, "cost_basis_per_share": 370.0}]
+    bucket = _alloc(profiles, MICRO, 600.0, held)
+    assert bucket.allocation_usd == pytest.approx(600.0 + price_lookup("VTI", TRADE_DATE)[0])
+
+
+def test_the_conceptual_buckets_still_size_against_their_declared_allocation(profiles):
+    # core and sandbox declare no sizing_basis, so they keep the static number and their
+    # scenarios are unaffected. Only the bucket holding real money opted in.
+    assert _alloc(profiles, "core", 10.0).allocation_usd == 2500.0
+    assert _alloc(profiles, "sandbox", 10.0).allocation_usd == 500.0
+
+
+def test_a_cap_expressed_in_percent_moves_with_the_account(profiles):
+    # An individual stock is capped at 10% of the bucket. That is $10 at $100 and $100 at $1,000,
+    # with nothing edited in between.
+    for equity, expected in ((100.0, 10.0), (1000.0, 100.0)):
+        bucket = _alloc(profiles, MICRO, equity)
+        cap = float(profiles.risk["buckets"][MICRO]["position_limits"]
+                    ["max_pct_of_allocation_by_class"]["individual_stock"])
+        assert bucket.allocation_usd * cap / 100.0 == pytest.approx(expected)
+
+
+# -- HR21: risk tiers ---------------------------------------------------------------
+#
+# A tier is a set of instrument classes sharing one share of the account and one order cap,
+# rather than a sub-account. One brokerage account holds one pool of cash, so notional envelopes
+# would refuse a buy while the account plainly had the money.
+
+def test_the_two_low_risk_classes_share_one_share_of_the_account(profiles):
+    # $550 of a bond ETF is 55% of a $1,000 account. A broad equity ETF is a different class in
+    # the same tier, so the tier is already near its 60% and the buy is refused — 60 each would
+    # let the pair reach 120%.
+    held = [{"symbol": "BND", "bucket": MICRO, "quantity": 7.657, "cost_basis_per_share": 71.83}]
+    result = _micro_result(profiles, "VTI", cash=450.0, positions=held)
+    tier = next(r for r in result.rules if r.rule_id == "HR21")
+    assert not tier.passed and "low tier" in tier.name, tier.detail
+    assert result.verdict == "REJECT"
+
+
+def test_a_tier_caps_the_size_of_a_single_order(profiles):
+    # 35% of a $1,000 account is $350, above the low tier's $200 ticket.
+    result = _micro_result(profiles, "VTI", cash=1000.0)
+    cap = next(r for r in result.rules if r.rule_id == "HR21b")
+    assert not cap.passed and "$200" in cap.detail, cap.detail
+
+
+def test_each_tier_carries_its_own_ticket_size(profiles):
+    tiers = profiles.risk["buckets"][MICRO]["tiers"]
+    assert tiers["low"]["max_order_usd"] == 200
+    assert tiers["mid"]["max_order_usd"] == 80
+    assert tiers["high"]["max_order_usd"] == 50
+    assert [tiers[t]["max_pct_of_account"] for t in ("low", "mid", "high")] == [60, 25, 15]
+
+
+def test_an_instrument_class_in_no_tier_fails_closed_for_real_money(profiles):
+    profiles.risk["buckets"][MICRO]["tiers"]["high"]["classes"] = []
+    result = _micro_result(profiles, "AAPL")
+    assert result.verdict == "REJECT"
+    assert any("belongs to no tier" in r for r in result.fail_closed_reasons), \
+        result.fail_closed_reasons
+
+
+def test_a_tier_that_filled_up_can_still_be_reduced(profiles):
+    # The tier caps what may be bought, never what may be sold. Structural: a reduction returns
+    # before these rules are reached.
+    held = [{"symbol": "BND", "bucket": MICRO, "quantity": 7.657, "cost_basis_per_share": 71.83}]
+    result = _micro_result(profiles, "BND", action="SELL", cash=450.0, positions=held)
+    assert "HR21" not in {r.rule_id for r in result.rules}
+    assert result.verdict == "APPROVE", [r.rule_id for r in result.failed_rules]
+
+
+def test_the_conceptual_buckets_declare_no_tiers_and_are_unaffected(profiles):
+    result = _with_orders(profiles, {}, bucket="core", ticker="VTI")
+    assert "HR21" not in {r.rule_id for r in result.rules}
+    assert "HR21b" not in {r.rule_id for r in result.rules}
