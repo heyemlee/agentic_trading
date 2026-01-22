@@ -688,7 +688,12 @@ def _order_rules(profiles: Profiles, bucket: str) -> dict[str, Any]:
         return {"order_type": rules.get("order_type", "market"),
                 "time_in_force": rules.get("time_in_force", "gfd"),
                 "extended_hours": False,
-                "use_notional": True}
+                "use_notional": True,
+                # Buys only, and only where a whole share fits. A sell stays a market order on
+                # purpose: an exit that does not fill is not risk reduced, and a fractional
+                # holding cannot be sold any other way.
+                "prefer_limit_in_whole_shares": bool(
+                    rules.get("prefer_limit_in_whole_shares", False))}
     broker_cfg = profiles.risk.get("broker") or {}
     defaults = dict(broker_cfg.get("order_defaults") or {})
     return {"order_type": "limit", "time_in_force": defaults.get("time_in_force", "day"),
@@ -700,16 +705,29 @@ def _build_order_request(profiles: Profiles, proposal: Proposal, rv: Revalidatio
     buying = proposal.action in ("BUY", "ADD")
     notional = rv.executable_notional_usd
     quantity = None
+    order_type = rules["order_type"]
     if not buying:
         quantity = rv.executable_quantity
         if quantity is None or quantity <= 0:
             raise ValueError("a sell order requires a revalidated share quantity")
         notional = None
+    elif rules.get("prefer_limit_in_whole_shares") and rv.limit_price:
+        # The venue takes a fractional quantity or a dollar amount only on a market order, so a
+        # limit price costs whole shares. When none fits, the dollar-amount market order is the
+        # only way to express the approved size, and the venue's pre-trade review and the spread
+        # check stay in front of it.
+        #
+        # No materiality guard is needed on the rounding, because it cannot cut an order below
+        # half: floor(n/p)*p > n - p, which is at least n/2 whenever p <= n/2, and when p > n/2
+        # exactly one share is bought for p, which is itself more than n/2.
+        whole = math.floor(notional / rv.limit_price)
+        if whole >= 1:
+            quantity, notional, order_type = float(whole), None, "limit"
     return OrderRequest(
         symbol=proposal.ticker, side="buy" if buying else "sell", client_order_id=coid,
-        notional=notional if rules["use_notional"] else None, quantity=quantity,
-        order_type=rules["order_type"],
-        limit_price=rv.limit_price if rules["order_type"] in ("limit", "stop_limit") else None,
+        notional=notional if (quantity is None and rules["use_notional"]) else None,
+        quantity=quantity, order_type=order_type,
+        limit_price=rv.limit_price if order_type in ("limit", "stop_limit") else None,
         time_in_force=rules["time_in_force"], extended_hours=rules["extended_hours"],
     )
 

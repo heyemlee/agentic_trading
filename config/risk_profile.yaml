@@ -841,6 +841,14 @@ micro_live_execution:
     # rejects the order if that quote has drifted from the analysis price, only highly liquid
     # instruments are permitted, and order size is small.
     order_type: market
+    # A buy takes a limit price whenever the approved size buys at least one whole share and
+    # rounding down to whole shares does not cut it below revalidation.min_reduction_ratio --
+    # past that point the rounding is a different idea, not a better fill, and the dollar-amount
+    # market order expresses the approved size honestly. Whether this can apply at all is a fact
+    # about the share price, not a preference: at $1,000 with a $200 order cap it reaches a
+    # $72 bond ETF and cannot reach a $377 total-market one. It widens on its own as the
+    # account grows. Sells stay market orders: an exit that does not fill is not risk reduced.
+    prefer_limit_in_whole_shares: true
     time_in_force: gfd
     market_hours: regular_hours
     max_review_quote_drift_pct: 1.0      # the review's quote vs our revalidation price
