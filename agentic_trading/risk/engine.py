@@ -318,8 +318,12 @@ class HardRiskEngine:
         rule("HR05d", "missing material information", not prop.missing_information,
              "; ".join(prop.missing_information) or "no unresolved material information")
         conf = prop.confidence
-        floor_small = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "small")
-        floor_normal = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "normal")
+        floor_small = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "small",
+                                              limit_class=prop.cls.limit_class,
+                                              autonomous=prop.autonomous)
+        floor_normal = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "normal",
+                                               limit_class=prop.cls.limit_class,
+                                               autonomous=prop.autonomous)
         floor = max(floor_small, gate_min_conf or 0)
         if conf is None:
             rule("HR05", "confidence", False, "no confidence supplied")

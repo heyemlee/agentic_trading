@@ -75,3 +75,72 @@ def test_live_flag_before_stage_5_is_refused(config_dir, tmp_path):
                     lambda d: d["execution_policy"].__setitem__("live_trading_approved", True))
     with pytest.raises(ProfileError, match="stage 5"):
         load_profiles(dst)
+
+
+# -- confidence floors --------------------------------------------------------------
+#
+# micro_live was not a case in floor() at all, so an order deploying real money was gated by
+# the conceptual core book's numbers. These pin that it now has its own, that they are never
+# looser, and that a deleted one stops trading instead of silently falling back.
+
+CLASSES = ["broad_diversified_etf", "bond_or_cash_like_etf", "sector_factor_thematic_etf",
+           "individual_stock"]
+
+
+def test_real_money_floors_are_its_own_and_never_looser_than_core(profiles):
+    cfg = profiles.confidence
+    for limit_class in CLASSES:
+        kind = "stock" if limit_class == "individual_stock" else "etf"
+        for size in ("small", "normal"):
+            core = cfg.floor("core", kind, size, limit_class=limit_class)
+            real = cfg.floor("micro_live", kind, size, limit_class=limit_class)
+            assert real >= core, f"{limit_class}/{size}: real money {real} is looser than core {core}"
+    assert cfg.floor("micro_live", "stock", "normal", limit_class="individual_stock") == 85
+
+
+def test_a_missing_real_money_floor_stops_trading_rather_than_borrowing_cores(profiles):
+    profiles.confidence.minimum_to_open.pop("micro_live_individual_stock")
+    assert profiles.confidence.floor("micro_live", "stock", "normal",
+                                     limit_class="individual_stock") == 101
+    # A missing core key keeps its documented default; only real money fails closed.
+    profiles.confidence.minimum_to_open.pop("core_individual_stock")
+    assert profiles.confidence.floor("core", "stock", "normal",
+                                     limit_class="individual_stock") == 75
+
+
+def test_an_autonomous_action_can_only_raise_the_floor(profiles):
+    cfg = profiles.confidence
+    for bucket in ("core", "sandbox", "micro_live"):
+        for limit_class in CLASSES:
+            kind = "stock" if limit_class == "individual_stock" else "etf"
+            attended = cfg.floor(bucket, kind, "normal", limit_class=limit_class)
+            alone = cfg.floor(bucket, kind, "normal", limit_class=limit_class, autonomous=True)
+            assert alone >= attended
+            assert alone >= min(80, 101), "autonomous_any is a floor under every autonomous action"
+    assert cfg.floor("sandbox", "etf", "small", autonomous=True) == 80   # sandbox's own is 65
+
+
+def test_the_sector_floor_finally_applies_and_only_ever_tightens(profiles):
+    cfg = profiles.confidence
+    for size in ("small", "normal"):
+        unclassified = cfg.floor("core", "etf", size)
+        sector = cfg.floor("core", "etf", size, limit_class="sector_factor_thematic_etf")
+        assert sector >= unclassified, "applying the sector floor must not loosen anything"
+    # core_sector_factor_etf is 70: it binds at half size, where the broad floor is 65.
+    assert cfg.floor("core", "etf", "small", limit_class="sector_factor_thematic_etf") == 70
+    assert cfg.floor("core", "etf", "normal", limit_class="sector_factor_thematic_etf") == 75
+
+
+def test_an_unclassifiable_instrument_is_never_openable(profiles):
+    for bucket in ("core", "micro_live"):
+        assert profiles.confidence.floor(bucket, "crypto", "normal") == 101
+        assert profiles.confidence.floor(bucket, "etf", "normal", limit_class="crypto") == 101
+
+
+def test_the_old_positional_signature_still_means_what_it_did(profiles):
+    # policy.py calls this without a limit_class; core behaviour there must not have moved.
+    cfg = profiles.confidence
+    assert cfg.floor("core", "etf", "normal") == 75
+    assert cfg.floor("core", "etf", "small") == 65
+    assert cfg.floor("core", "stock", "normal") == 75
+    assert cfg.floor("sandbox", "etf", "small") == 65

@@ -93,17 +93,49 @@ class ConfidenceRequirements(BaseModel):
     def no_trade_below(self) -> int:
         return int(self.bands.get("no_trade_below", 50))
 
-    def floor(self, bucket: str, instrument_type: str, size: str = "small") -> int:
+    def floor(self, bucket: str, instrument_type: str, size: str = "small", *,
+              limit_class: str | None = None, autonomous: bool = False) -> int:
+        """Minimum confidence to open, by bucket, instrument and size.
+
+        Real money has its own floors rather than borrowing core's. It borrowed them silently
+        before: micro_live was not a case here at all, so an order deploying actual capital was
+        gated by the paper book's numbers. A real-money floor that is not declared returns an
+        unreachable value, so deleting one stops trading rather than quietly loosening it.
+
+        ``limit_class`` is optional because not every caller has classified the instrument yet.
+        Given it, a sector fund can be told from a total-market one, which ``instrument_type``
+        cannot express.
+        """
         m = self.minimum_to_open
         if bucket == "sandbox":
-            return int(m.get("sandbox", 65))
-        if instrument_type == "stock":
-            return int(m.get("core_individual_stock", 75))
-        if instrument_type == "etf":
-            key = "core_broad_etf_full_size" if size == "normal" else "core_broad_etf_half_size"
-            return int(m.get(key, 75 if size == "normal" else 65))
-        # crypto and anything else is never a core instrument
-        return 101
+            base = int(m.get("sandbox", 65))
+            return max(base, int(m.get("autonomous_any", 80))) if autonomous else base
+
+        real = bucket == "micro_live"
+        prefix = "micro_live" if real else "core"
+
+        def declared(key: str, default: int) -> int:
+            found = m.get(f"{prefix}_{key}")
+            if found is None:
+                return 101 if real else default
+            return int(found)
+
+        kind = limit_class or {"stock": "individual_stock",
+                               "etf": "broad_diversified_etf"}.get(instrument_type)
+        if kind == "individual_stock":
+            base = declared("individual_stock", 75)
+        elif kind in ("broad_diversified_etf", "bond_or_cash_like_etf",
+                      "sector_factor_thematic_etf"):
+            base = declared(f"broad_etf_{'full' if size == 'normal' else 'half'}_size",
+                            75 if size == "normal" else 65)
+            if kind == "sector_factor_thematic_etf":
+                # Declared all along and never reached, because this branched on
+                # instrument_type. Taken as the stricter of the two, so finally applying it can
+                # only tighten a decision that was already being made and never loosen one.
+                base = max(base, declared("sector_factor_etf", base))
+        else:
+            return 101      # crypto, and anything the classifier could not place
+        return max(base, int(m.get("autonomous_any", 80))) if autonomous else base
 
 
 @dataclass

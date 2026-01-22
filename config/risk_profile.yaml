@@ -370,7 +370,17 @@ confidence_requirements:                   # bands from MANDATE.md v0.1; REVIEW 
     core_sector_factor_etf: 70
     core_individual_stock: 75
     sandbox: 65
-    autonomous_any: 80
+    autonomous_any: 80                     # a floor under any autonomous action, on top of the
+                                           # instrument's own; never an allowance
+    # Investor decision, 2026-09-09. Real money had no floors of its own: micro_live was not a
+    # case in ConfidenceRequirements.floor, so it fell through to the core branches and an order
+    # deploying actual capital was gated by the paper book's numbers. Deliberately stricter than
+    # core across the board — the paper book can afford to be wrong. A floor deleted from here
+    # stops real-money trading rather than falling back to core's.
+    micro_live_broad_etf_half_size: 70
+    micro_live_broad_etf_full_size: 80
+    micro_live_sector_factor_etf: 80
+    micro_live_individual_stock: 85
 
 broker_side_settings:                      # applied once via update_account_config; verified before every run; mismatch => fail closed
   paper_account_starting_balance_usd: 3000 # create the paper account at the real experiment size, not the 100k default
