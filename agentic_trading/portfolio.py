@@ -408,7 +408,8 @@ def snapshot_from_broker(
         prices[symbol] = bp.market_value / bp.quantity if bp.quantity else bp.average_entry_price
     state = PortfolioState(as_of=trade_date, currency=ledger.currency, buckets=ledger.buckets,
                            positions=positions, recent_opens=ledger.recent_opens,
-                           cash_flows=ledger.cash_flows, notes="reconciled from broker state")
+                           cash_flows=ledger.cash_flows, applied_orders=ledger.applied_orders,
+                           notes="reconciled from broker state")
     return build_snapshot(state, profiles, trade_date,
                           price_lookup=lambda sym, _d: (prices[sym.upper()], trade_date),
                           identity_lookup=identity_lookup)

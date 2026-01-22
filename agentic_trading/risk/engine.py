@@ -487,6 +487,25 @@ class HardRiskEngine:
             rule("HR12", "new positions per day", today < per_day, f"{today} opened today vs max {per_day}")
             rule("HR12b", "new positions per week", week < per_week, f"{week} opened this week vs max {per_week}")
 
+        # HR20 order-rate limits, outside the new-position guard above because they count every
+        # order that reached the venue and not only the ones that opened something. Both keys
+        # were declared in config with nothing reading them.
+        orders_week, sold_today = self._order_activity(snap, prop.bucket, prop.trade_date)
+        max_orders = self._cfg("buckets", prop.bucket, "activity_limits", "max_orders_per_week",
+                               default=None)
+        if max_orders is not None:
+            rule("HR20", "orders per week", orders_week < int(max_orders),
+                 f"{orders_week} order(s) in the trailing week vs max {int(max_orders)}")
+        if bool(self._cfg("buckets", prop.bucket, "activity_limits", "no_same_day_round_trips",
+                          default=False)):
+            # Deliberately one-directional. Buying back what was sold hours ago is the churn this
+            # rule exists to stop; selling something bought this morning is risk reduction, and a
+            # reduction never reaches this code anyway.
+            repurchase = ticker in sold_today
+            rule("HR20b", "no same-day round trip", not repurchase,
+                 f"{ticker} was sold in {prop.bucket} today, so buying it back is a round trip"
+                 if repurchase else f"{ticker} was not sold in {prop.bucket} today")
+
         blocking_failures = [r for r in rules if not r.passed and r.blocking]
         verdict = "REJECT" if blocking_failures or fail_closed else "APPROVE"
         final_action = prop.action if verdict == "APPROVE" else "NO_TRADE"
@@ -615,6 +634,34 @@ class HardRiskEngine:
             if 0 <= (td - d).days < 7:
                 week += 1
         return today, week
+
+    @staticmethod
+    def _order_activity(snap: Snapshot, bucket: str, trade_date: str) -> tuple[int, set[str]]:
+        """(orders in the trailing week, symbols sold today) for one bucket.
+
+        Read from the ledger's applied_orders, which is the durable record of what actually
+        reached the venue. recent_opens cannot serve here: it only knows about positions that
+        were opened, so it sees neither an add nor a sell, and those are most of what an
+        order-rate limit is about.
+        """
+        import pandas as pd
+
+        td = pd.to_datetime(trade_date).normalize()
+        week = 0
+        sold_today: set[str] = set()
+        for order in (snap.state.applied_orders or {}).values():
+            if not isinstance(order, dict) or order.get("bucket") != bucket:
+                continue
+            dates = [pd.to_datetime(e["trade_date"]) for e in (order.get("events") or [])
+                     if isinstance(e, dict) and e.get("trade_date")]
+            if not dates:
+                continue
+            placed = min(dates).normalize()
+            if 0 <= (td - placed).days < 7:
+                week += 1
+            if placed == td and str(order.get("side", "")).lower() == "sell":
+                sold_today.add(str(order.get("symbol", "")).upper())
+        return week, sold_today
 
     @staticmethod
     def _ladder_advisories(ladders: LadderStates, snap: Snapshot) -> list[str]:

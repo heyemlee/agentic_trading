@@ -388,3 +388,95 @@ def test_one_symbol_one_bucket_now_looks_at_every_other_bucket(profiles):
         prop, snap, ladders, regime())
     overlap = next(r for r in result.rules if r.rule_id == "HR07b")
     assert not overlap.passed and "held in core" in overlap.detail, overlap.detail
+
+
+# -- HR20: order-rate limits --------------------------------------------------------
+#
+# max_orders_per_week and no_same_day_round_trips were declared in config with nothing reading
+# them. They differ from HR12 in what they count: HR12 counts positions opened, so it is blind
+# to an add or a sell, which is most of what an order-rate limit is about.
+
+def _with_orders(profiles, orders, *, ticker="VTI", action="BUY", bucket="core", held=()):
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk_scenarios import make_ladders
+
+    state = PortfolioState(
+        as_of=TRADE_DATE, buckets={"core": {"cash_usd": 2000.0}, "sandbox": {"cash_usd": 500.0}},
+        positions=[dict(p) for p in held], recent_opens=[], applied_orders=orders)
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = make_ladders(snap.total_equity, snap.buckets["core"].equity,
+                           snap.buckets["sandbox"].equity, profiles)
+    prop = Proposal(ticker=ticker, bucket=bucket, action=action, size_hint="small", confidence=85,
+                    trade_date=TRADE_DATE, cls=classify_instrument(ticker, profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified",
+                    evidence=collect_evidence(ticker, TRADE_DATE, price_lookup=price_lookup))
+    return HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+
+
+def _order(symbol, side, when, bucket="core"):
+    return {"symbol": symbol, "bucket": bucket, "side": side, "quantity": 1.0, "notional": 100.0,
+            "events": [{"trade_date": when, "quantity": 1.0, "price": 100.0, "notional": 100.0}]}
+
+
+def test_order_rate_counts_adds_and_sells_not_just_opens(profiles):
+    profiles.risk["buckets"]["core"]["activity_limits"]["max_orders_per_week"] = 3
+    orders = {"a": _order("BND", "buy", "2026-08-31"),
+              "b": _order("SGOV", "sell", "2026-09-01"),
+              "c": _order("BND", "buy", "2026-09-02")}
+    result = _with_orders(profiles, orders)
+    hr20 = next(r for r in result.rules if r.rule_id == "HR20")
+    assert not hr20.passed and "3 order(s)" in hr20.detail, hr20.detail
+
+
+def test_orders_outside_the_trailing_week_do_not_count(profiles):
+    profiles.risk["buckets"]["core"]["activity_limits"]["max_orders_per_week"] = 2
+    orders = {"old": _order("BND", "buy", "2026-08-20"), "recent": _order("BND", "buy", "2026-09-01")}
+    result = _with_orders(profiles, orders)
+    hr20 = next(r for r in result.rules if r.rule_id == "HR20")
+    assert hr20.passed and "1 order(s)" in hr20.detail, hr20.detail
+
+
+def test_the_rule_is_absent_when_the_bucket_declares_no_order_cap(profiles):
+    profiles.risk["buckets"]["core"]["activity_limits"].pop("max_orders_per_week", None)
+    result = _with_orders(profiles, {"a": _order("BND", "buy", "2026-09-02")})
+    assert "HR20" not in {r.rule_id for r in result.rules}
+
+
+def test_buying_back_what_was_sold_today_is_a_round_trip(profiles):
+    result = _with_orders(profiles, {"s": _order("VTI", "sell", TRADE_DATE)})
+    hr20b = next(r for r in result.rules if r.rule_id == "HR20b")
+    assert not hr20b.passed and "round trip" in hr20b.detail
+
+
+def test_a_sale_on_an_earlier_day_is_not_a_round_trip(profiles):
+    result = _with_orders(profiles, {"s": _order("VTI", "sell", "2026-09-01")})
+    assert next(r for r in result.rules if r.rule_id == "HR20b").passed
+
+
+def test_selling_something_bought_today_is_never_a_round_trip(profiles):
+    # One-directional on purpose: buying back hours later is the churn the rule targets, while
+    # selling this morning's purchase is risk reduction. Reductions never reach this code.
+    held = [{"symbol": "VTI", "bucket": "core", "quantity": 2.0, "cost_basis_per_share": 370.0}]
+    result = _with_orders(profiles, {"b": _order("VTI", "buy", TRADE_DATE)},
+                          action="SELL", held=held)
+    assert "HR20b" not in {r.rule_id for r in result.rules}
+    assert result.verdict == "APPROVE", [r.rule_id for r in result.failed_rules]
+
+
+def test_the_broker_snapshot_keeps_the_order_history(tmp_path):
+    # snapshot_from_broker rebuilt the state without applied_orders, so every order-rate limit
+    # counted zero on the execution-time revalidation pass and silently did not bind.
+    from agentic_trading.broker import SimulatedBroker
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import load_portfolio, snapshot_from_broker
+    from agentic_trading.risk_scenarios import PRICES
+
+    profiles = _profiles(tmp_path)
+    path = _ledger(tmp_path)
+    ledger = load_portfolio(path)
+    ledger.applied_orders = {"ct-1": _order("VTI", "buy", TRADE_DATE)}
+    broker = SimulatedBroker(prices=dict(PRICES), cash=3000.0)
+    snap = snapshot_from_broker(broker.get_account(), broker.get_positions(), ledger, profiles,
+                                TRADE_DATE)
+    assert snap.state.applied_orders == ledger.applied_orders
