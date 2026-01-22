@@ -260,6 +260,22 @@ buckets:
                                              # cash floor. Explicit, so it reads as a decision
                                              # rather than an omission. HR07 still refuses an
                                              # order the bucket cannot fund.
+    # Investor decision, 2026-09-10. The only thing deterministic code may approve on its own,
+    # and it may only ever cut risk. REDUCE is half a holding by construction in the engine, so
+    # "at most half, and closing a position needs a person" falls out of the action itself; SELL
+    # is never autonomous. A refusal here is not a refusal to trade -- the proposal waits for a
+    # person, exactly as everything does today -- so the bar costs a delay when it is wrong and
+    # an unwanted order when it is too low.
+    #
+    # Deliberately NOT conditioned on the drawdown ladder being NORMAL. That condition belongs
+    # to autonomous opening, where an escalating ladder is a reason to stop; applying it to a
+    # reduction would withdraw the ability to cut risk at the moment the ladder says to cut it.
+    autonomy:
+      reduce:
+        enabled: false                     # ARM SEPARATELY, and only once positions exist
+        min_confidence: 80                 # the same floor confidence_requirements sets for any
+                                           # autonomous action; a lower one waits for a person
+        max_positions_reduced_per_day: 1
     require_stock_eligibility_screen: true   # the same deterministic screen the core book uses:
                                              # large, liquid, profitable, self-funding names only,
                                              # and no model output can argue a name past it

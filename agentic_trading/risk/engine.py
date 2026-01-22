@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..autonomy import AUTONOMOUS_ACTION
 from ..event_calendar import earnings_blackout, macro_blackout, yfinance_next_earnings
 from ..portfolio import InstrumentClass, Snapshot
 from ..profile import Profiles
@@ -587,17 +588,33 @@ class HardRiskEngine:
             return True, (f"strategy {strategy!r} permanently requires explicit human confirmation before execution; "
                           "no autonomy setting in any later stage can clear this")
         if prop.bucket == "micro_live":
+            # Real capital is human-gated by default, and stays so for everything that takes on
+            # risk. The one exception is a REDUCE in a bucket that names reduce-autonomy in its
+            # own config: cutting a position is the single action whose worst outcome is being
+            # out of a trade rather than in one. This is eligibility only — agentic_trading
+            # .autonomy decides at execution time, against live state this layer cannot see.
+            if (prop.action == AUTONOMOUS_ACTION and self._cfg(
+                    "buckets", prop.bucket, "autonomy", "reduce", "enabled", default=False) is True):
+                return False, ""
             return True, "micro-live deploys real capital and always requires explicit human confirmation"
         return False, ""
 
     def _stamp(self, result: HardRiskResult, prop: Proposal) -> HardRiskResult:
         """Attach the permanent human-approval requirement. Never weakens it."""
         gated, reason = self._human_gated(prop)
+        result.requires_human_approval = True
         if gated:
-            result.requires_human_approval = True
             result.human_approval_reason = reason
+        elif prop.bucket == "micro_live" and prop.action == AUTONOMOUS_ACTION:
+            # The single case that may start without a person. Narrow on purpose: named bucket,
+            # named action, and its own config switch. Everything else keeps the default above,
+            # so a caller reading this field cannot mistake silence for permission.
+            result.requires_human_approval = False
+            result.human_approval_reason = (
+                "a reduction where the bucket permits reduce-autonomy; whether it is actually "
+                "taken is decided at execution time by agentic_trading.autonomy"
+            )
         else:
-            result.requires_human_approval = True
             result.human_approval_reason = (
                 "stage 2 produces recommendations only; nothing is executable and every future "
                 "execution mode above recommend_only starts at human_approval"

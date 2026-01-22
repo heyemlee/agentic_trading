@@ -199,8 +199,14 @@ def main(argv: list[str] | None = None) -> int:
         prop = f"{sc.action} {sc.ticker} {sc.bucket} c={sc.confidence}"
         print(f"{sc.key:4s} {sc.title:{width}s}  {prop:26s} {o.ladder_level:15s} {o.verdict:9s} {o.final_action:9s} "
               f"{o.notional:10,.2f}  {','.join(o.failed) or '-':16s} {'yes' if o.passed_expectation else 'NO'}")
-    unstamped = [o.scenario.key for o in outcomes if not o.requires_human_approval]
-    print(f"\nevery outcome carries requires_human_approval=True: {'yes' if not unstamped else 'NO: ' + ','.join(unstamped)}")
+    # Rescoped rather than relaxed. "Every outcome is human-gated" stopped being the property
+    # once a reduction could be autonomous; an assertion that has to be weakened to arm a
+    # feature was never the assertion. What is permanent, and what this now states, is that
+    # nothing which takes on risk can ever start without a person.
+    unstamped = [o.scenario.key for o in outcomes if not o.requires_human_approval
+                 and not (o.scenario.bucket == "micro_live" and o.scenario.action == "REDUCE")]
+    print(f"\nnothing that takes on risk can start without a person: "
+          f"{'yes' if not unstamped else 'NO: ' + ','.join(unstamped)}")
     bad = [o for o in outcomes if not o.passed_expectation]
     print(f"\n{len(outcomes) - len(bad)}/{len(outcomes)} scenarios behaved as expected"
           + (f"; recommended defaults used: {len(profiles.defaults_used)}" if profiles.defaults_used else ""))

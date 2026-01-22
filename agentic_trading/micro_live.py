@@ -112,8 +112,14 @@ def run_preflight(profiles: Profiles, broker: Any | None = None) -> Preflight:
           else "micro_live_execution.enabled is false: real-money orders are disabled (this is the intended default)")
 
     # --- configuration gates, checkable without a broker
+    # The assertion is deliberately about OPENING a position, not about every order. Reducing
+    # one may be autonomous where the bucket's own config says so — see buckets.<bucket>
+    # .autonomy.reduce — because the worst outcome of an unwanted reduction is being out of a
+    # trade. Anything that takes on risk still needs a person, and this is what proves it: a
+    # config that tried to open autonomously fails preflight, which blocks execution outright
+    # rather than quietly permitting it.
     mode = str(micro.get("execution_mode", "human_approval"))
-    check("PF04", "human approval active",
+    check("PF04", "human approval active for opening a position",
           mode == "human_approval" and not bool(micro.get("allow_autonomous_opening", False)),
           f"execution_mode={mode}, autonomous opening={micro.get('allow_autonomous_opening', False)}")
 

@@ -588,3 +588,76 @@ def test_the_conceptual_buckets_declare_no_tiers_and_are_unaffected(profiles):
     result = _with_orders(profiles, {}, bucket="core", ticker="VTI")
     assert "HR21" not in {r.rule_id for r in result.rules}
     assert "HR21b" not in {r.rule_id for r in result.rules}
+
+
+# -- the narrow exception in the human-approval lock ---------------------------------
+#
+# Real capital is human-gated in code, not in config. These pin how narrow the one exception
+# is: a named bucket, a named action, and that bucket's own switch. Everything else keeps the
+# default, so no reader of requires_human_approval can mistake silence for permission.
+
+HELD_VTI = [{"symbol": "VTI", "bucket": MICRO, "quantity": 0.2, "cost_basis_per_share": 370.0}]
+
+
+def _arm_reduce(profiles):
+    profiles.risk["buckets"][MICRO]["autonomy"] = {
+        "reduce": {"enabled": True, "min_confidence": 80, "max_positions_reduced_per_day": 1}}
+
+
+def test_a_reduction_still_needs_a_person_until_the_bucket_says_otherwise(profiles):
+    # The live config ships with reduce-autonomy off, which is what this asserts.
+    result = _micro_result(profiles, "VTI", action="REDUCE", positions=HELD_VTI, cash=50.0)
+    assert result.requires_human_approval is True
+    assert "always requires explicit human confirmation" in result.human_approval_reason
+
+
+def test_an_armed_bucket_may_reduce_without_a_person(profiles):
+    _arm_reduce(profiles)
+    result = _micro_result(profiles, "VTI", action="REDUCE", positions=HELD_VTI, cash=50.0)
+    assert result.requires_human_approval is False
+    assert "decided at execution time" in result.human_approval_reason
+
+
+@pytest.mark.parametrize("action", ["BUY", "ADD", "SELL"])
+def test_nothing_else_is_let_through_by_the_same_switch(profiles, action):
+    # Arming reductions must not arm anything that takes on risk, nor closing a position
+    # outright — SELL is the whole holding.
+    _arm_reduce(profiles)
+    result = _micro_result(profiles, "VTI", action=action, positions=HELD_VTI, cash=50.0)
+    assert result.requires_human_approval is True, action
+
+
+@pytest.mark.parametrize("bucket", ["core", "sandbox"])
+def test_arming_the_real_bucket_says_nothing_about_the_others(profiles, bucket):
+    _arm_reduce(profiles)
+    profiles.risk["buckets"][bucket]["autonomy"] = {"reduce": {"enabled": True}}
+    result = _with_orders(profiles, {}, bucket=bucket, ticker="VTI", action="REDUCE",
+                          held=[{"symbol": "VTI", "bucket": bucket, "quantity": 2.0,
+                                 "cost_basis_per_share": 370.0}])
+    assert result.requires_human_approval is True
+
+
+def test_a_permanently_gated_strategy_is_not_reachable_through_the_exception(profiles):
+    # The strategy gate is checked first and returns before the action is ever considered, so
+    # tagging a momentum trade as a reduction cannot buy its way out of human confirmation.
+    _arm_reduce(profiles)
+    snap, ladders = _micro(profiles, cash=50.0, positions=HELD_VTI)
+    prop = Proposal(ticker="VTI", bucket=MICRO, action="REDUCE", size_hint="normal",
+                    confidence=95, trade_date=TRADE_DATE,
+                    cls=classify_instrument("VTI", profiles, identity_lookup),
+                    data_quality="good", strategy="momentum")
+    result = HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+    assert result.requires_human_approval is True
+    assert "no autonomy setting" in result.human_approval_reason
+
+
+def test_the_preflight_still_refuses_a_config_that_would_open_autonomously(profiles, tmp_path):
+    from agentic_trading.micro_live import run_preflight
+
+    profiles.risk["micro_live_execution"] = {
+        **profiles.risk["micro_live_execution"], "enabled": True,
+        "allow_autonomous_opening": True}
+    pf = run_preflight(profiles, None)
+    pf04 = next(c for c in pf.checks if c.check_id == "PF04")
+    assert not pf04.passed and "opening" in pf04.name
