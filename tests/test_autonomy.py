@@ -161,3 +161,67 @@ def test_yesterdays_reduction_does_not_count(armed):
 
 def test_another_buckets_reduction_does_not_count(armed):
     assert autonomy.reduced_today([FakeProposal("VTI", bucket="core")], MICRO, now=NOW) == 0
+
+
+# -- the command ---------------------------------------------------------------------
+
+@pytest.fixture
+def config_copy(tmp_path):
+    """A config the command can load without reaching the real one, or the real state/."""
+    import shutil
+
+    from tests.conftest import ROOT
+
+    cfg = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg)
+    (tmp_path / "state").mkdir()
+    return cfg
+
+
+def run(cfg, *args):
+    from agentic_trading import autonomy as module
+
+    assert module.main([*args, "--config-dir", str(cfg)]) == 0
+
+
+def test_status_reports_what_autonomy_may_do_and_changes_nothing(config_copy, capsys):
+    import json
+
+    run(config_copy, "status")
+    out = json.loads(capsys.readouterr().out)
+    assert out["action_permitted"] == "REDUCE"
+    assert out["enabled"] is False and out["armed"] is False
+    assert out["limits"]["max_positions_reduced_per_day"] == 1
+    assert not (config_copy.parent / "state" / "autonomy.json").exists(), "status must not write"
+
+
+def test_stop_halts_in_one_command_without_touching_the_config(config_copy, capsys):
+    import json
+
+    before = (config_copy / "risk_profile.yaml").read_bytes()
+    run(config_copy, "stop", "--note", "the tape looks wrong to me")
+    out = json.loads(capsys.readouterr().out)
+    assert out["withdrawn"]["tripped"] is True
+    assert "the tape looks wrong to me" in out["withdrawn"]["reason"]
+    # The point of the command: stopping never means editing a live trading config in a hurry.
+    assert (config_copy / "risk_profile.yaml").read_bytes() == before
+
+
+def test_resume_is_separate_deliberate_and_recorded(config_copy, capsys):
+    import json
+
+    run(config_copy, "stop", "--note", "looked wrong")
+    capsys.readouterr()
+    run(config_copy, "resume", "--note", "checked the venue, nothing was placed")
+    out = json.loads(capsys.readouterr().out)
+    assert out["withdrawn"]["tripped"] is False
+    events = [h["event"] for h in out["withdrawn"]["history"]]
+    assert events == ["tripped", "reset"], "restoring autonomy is never invisible"
+
+
+@pytest.mark.parametrize("action", ["stop", "resume"])
+def test_changing_the_state_requires_saying_why(config_copy, action):
+    from agentic_trading import autonomy as module
+
+    with pytest.raises(SystemExit):
+        module.main([action, "--config-dir", str(config_copy)])

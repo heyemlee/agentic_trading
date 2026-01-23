@@ -1052,6 +1052,30 @@ class Service:
                     title=f"{activity['id'].replace('_', ' ')} has not run when expected",
                     detail=f"last success {activity['last_success_at'] or 'never'}",
                     link="/ui/system.html", urgent=activity["id"] == "backup"))
+
+        # Autonomy is the case where nobody was asked, so being told is the only visibility
+        # there is. Read from state like everything else here, so a restart re-notices rather
+        # than forgetting what happened while the process was down.
+        withdrawn = autonomy.load_downgrade(profiles)
+        if withdrawn.tripped:
+            events.append(Event(
+                key=f"autonomy_withdrawn:{withdrawn.at}",
+                kind="autonomy_withdrawn",
+                title="autonomous reductions have been withdrawn",
+                detail=f"{withdrawn.reason}; they stay off until a manual reset",
+                link="/ui/system.html", urgent=True))
+        for proposal in self._store(profiles).all():
+            if not str(proposal.approved_by or "").startswith("autonomy:"):
+                continue
+            events.append(Event(
+                # Keyed on the status too, so the outcome arrives as well as the decision.
+                key=f"autonomy_acted:{proposal.proposal_id}:{proposal.status}",
+                kind="autonomy_acted",
+                title=f"{proposal.action} {proposal.ticker} was decided without asking you",
+                detail=(f"{proposal.bucket}, status {proposal.status}"
+                        + (f", filled {proposal.filled_quantity:g}" if proposal.filled_quantity
+                           else "")),
+                link="/ui/activity.html", urgent=proposal.bucket == MICRO_BUCKET))
         return events
 
     def notification_settings(self, profiles: Profiles | None = None):

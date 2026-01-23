@@ -222,3 +222,54 @@ def reduced_today(proposals, bucket: str, now: datetime | None = None) -> int:
         if moment - when <= timedelta(days=1):
             seen.add(p.ticker.upper())
     return len(seen)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``ct-autonomy``: inspect what autonomy may do, stop it, or restore it."""
+    import argparse
+    import json
+
+    from .env import load_env
+    from .profile import load_profiles
+
+    load_env()
+    # `stop` is why this is a command rather than a console button: it halts autonomous action
+    # in one gesture without editing a live trading config, which is the last thing anyone
+    # should be doing in a hurry. `resume` is deliberately separate and deliberately manual —
+    # the sticky flag exists so that whatever caused it gets looked at first.
+    parser = argparse.ArgumentParser(
+        prog="ct-autonomy",
+        description="Inspect, stop or restore autonomous reductions.")
+    parser.add_argument("action", choices=("status", "stop", "resume"))
+    parser.add_argument("--config-dir", default="config")
+    parser.add_argument("--bucket", default="micro_live")
+    parser.add_argument("--note", default="", help="why, recorded with the change")
+    args = parser.parse_args(argv)
+
+    profiles = load_profiles(args.config_dir)
+    if args.action == "stop":
+        if not args.note:
+            parser.error("--note is required: the reason is the useful half of the record")
+        state = trip(profiles, f"stopped by hand: {args.note}")
+    elif args.action == "resume":
+        if not args.note:
+            parser.error("--note is required: say what was looked into before restoring")
+        state = reset(profiles, args.note)
+    else:
+        state = load_downgrade(profiles)
+
+    cfg = _cfg(profiles, args.bucket)
+    print(json.dumps({
+        "bucket": args.bucket,
+        "action_permitted": AUTONOMOUS_ACTION,
+        "enabled": cfg.get("enabled") is True,
+        "armed": is_armed(profiles, args.bucket),
+        "limits": {k: cfg.get(k) for k in ("min_confidence", "max_positions_reduced_per_day")},
+        "withdrawn": state.as_dict(),
+        "state_file": str(state_path(profiles)),
+    }, indent=2, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

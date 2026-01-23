@@ -43,6 +43,10 @@ EVENTS = {
     "credential_invalid": "a stored credential no longer works",
     "risk_level_changed": "the drawdown ladder changed level",
     "backup_overdue": "a background activity has not run when expected",
+    # Autonomy is the case where nobody was asked. Being told is then the only visibility there
+    # is, which is why these two are not optional in the way the others are.
+    "autonomy_acted": "an order was placed without asking you",
+    "autonomy_withdrawn": "autonomous action was withdrawn and needs a manual reset",
 }
 
 

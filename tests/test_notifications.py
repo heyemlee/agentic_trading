@@ -266,3 +266,61 @@ def test_an_unconfigured_wechat_channel_sends_nothing(service, monkeypatch):
     assert settings.configured() is False
     with pytest.raises(notify.DeliveryError, match='CT_WECHAT_WEBHOOK'):
         notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))
+
+
+# -- autonomy: the case where nobody was asked ---------------------------------------
+
+def test_every_declared_event_kind_exists_in_code_and_the_reverse(service):
+    """The set is closed on purpose, so config and code must not drift apart."""
+    declared = set(service.profiles().risk["notifications"]["events"])
+    assert declared <= set(notify.EVENTS), f"config names unknown kinds: {declared - set(notify.EVENTS)}"
+    assert {"autonomy_acted", "autonomy_withdrawn"} <= declared, \
+        "autonomy is the case where nobody was asked; being told is the only visibility"
+
+
+def test_a_withdrawn_autonomy_is_announced_urgently(service):
+    from agentic_trading import autonomy
+
+    profiles = service.profiles()
+    assert not [e for e in service.collect_notifications() if e.kind == "autonomy_withdrawn"]
+    autonomy.trip(profiles, "the venue returned an order we cannot account for")
+    event = next(e for e in service.collect_notifications() if e.kind == "autonomy_withdrawn")
+    assert event.urgent, "orders stopping without anyone knowing is the failure this prevents"
+    assert "cannot account for" in event.detail and "manual reset" in event.detail
+
+
+def test_an_order_placed_without_asking_is_announced(service):
+    profiles = service.profiles()
+    store = ProposalStore(profiles.project_dir / "state" / "proposals.json")
+    proposal = _proposal(bucket="micro_live", action="REDUCE", ticker="VTI", notional=0.0)
+    proposal.status = PROPOSED
+    proposal.approved_by = "autonomy:reduce"
+    store.save(proposal)
+    event = next(e for e in service.collect_notifications() if e.kind == "autonomy_acted")
+    assert "without asking you" in event.title
+    assert event.urgent, "real money decided without a person is always urgent"
+
+
+def test_a_persons_own_approval_is_not_announced_as_autonomous(service):
+    profiles = service.profiles()
+    store = ProposalStore(profiles.project_dir / "state" / "proposals.json")
+    proposal = _proposal(bucket="micro_live", action="REDUCE", ticker="VTI", notional=0.0)
+    proposal.status = PROPOSED
+    proposal.approved_by = "owner"
+    store.save(proposal)
+    assert not [e for e in service.collect_notifications() if e.kind == "autonomy_acted"]
+
+
+def test_the_outcome_arrives_as_well_as_the_decision(service):
+    profiles = service.profiles()
+    store = ProposalStore(profiles.project_dir / "state" / "proposals.json")
+    proposal = _proposal(bucket="micro_live", action="REDUCE", ticker="VTI", notional=0.0)
+    proposal.status = PROPOSED
+    proposal.approved_by = "autonomy:reduce"
+    store.save(proposal)
+    first = next(e for e in service.collect_notifications() if e.kind == "autonomy_acted")
+    proposal = store.get(proposal.proposal_id)
+    proposal.status = "EXECUTED"
+    store.save(proposal)
+    second = next(e for e in service.collect_notifications() if e.kind == "autonomy_acted")
+    assert first.key != second.key, "a status change must not be deduplicated away"

@@ -38,6 +38,7 @@ ct-reconcile = "agentic_trading.reconciliation:main"
 ct-trigger = "agentic_trading.triggers:main"
 ct-state = "agentic_trading.state_cli:main"
 ct-ops = "agentic_trading.operations:main"
+ct-autonomy = "agentic_trading.autonomy:main"
 ct-notify = "agentic_trading.notify_cli:main"
 ct-evaluate = "agentic_trading.evaluate_cli:main"
 

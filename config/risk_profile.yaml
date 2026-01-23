@@ -699,6 +699,11 @@ notifications:
     - credential_invalid
     - risk_level_changed
     - backup_overdue                       # a background activity stopped running
+    # Autonomy means nobody was asked, so these are the only visibility there is. Turning them
+    # off would leave orders being placed with no way to learn about them until the console is
+    # opened; do not, while any autonomy is armed.
+    - autonomy_acted                       # an order was decided without you
+    - autonomy_withdrawn                   # autonomy stopped itself and needs a manual reset
   heartbeat:
     # Nothing running on this Mac can report that this Mac is gone. An external watcher that
     # expects a regular ping is the only way an outage reaches a phone.
