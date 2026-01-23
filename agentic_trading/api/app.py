@@ -45,6 +45,12 @@ async def lifespan(app):
             except Exception:
                 logger.exception("background research recovery failed")
             try:
+                # Returns immediately, without opening a venue session, whenever autonomy is
+                # off, withdrawn, or the market is closed — which is almost always.
+                await asyncio.to_thread(_service.autonomous_reductions)
+            except Exception:
+                logger.exception("autonomous reduction pass failed")
+            try:
                 await asyncio.to_thread(_service.dispatch_notifications)
             except Exception:
                 logger.exception("notification dispatch failed")

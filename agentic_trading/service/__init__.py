@@ -20,6 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar
 
+from .. import autonomy
 from ..broker import make_broker
 from ..broker.base import BrokerError
 from ..env import load_env
@@ -27,7 +28,7 @@ from ..execution import execute as execute_proposal
 from ..execution import needs_reconciliation, reconcile_proposal, revalidate
 from ..micro_live import BUCKET as MICRO_BUCKET
 from ..micro_live import run_preflight
-from ..portfolio import PortfolioError
+from ..portfolio import PortfolioError, load_portfolio
 from ..profile import ProfileError, Profiles, load_profiles
 from ..proposals import (
     APPROVED,
@@ -521,6 +522,79 @@ class Service:
                 p.approval_response = response
                 store.save(p)
                 return response
+
+    def autonomous_reductions(self) -> dict[str, Any]:
+        """Approve and execute the reductions the deterministic gate permits.
+
+        Deliberately built on ``approve`` rather than beside it. An autonomous approval is a
+        real approval: it takes the same account lock, writes the same immutable approval
+        record under its own identity, and goes down the same execution path. A parallel route
+        would have been a second place for the rules to be slightly different.
+
+        The market calendar is consulted before anything else, and without the venue. Outside
+        session hours every attempt would reach the venue only to come back STALE, and this runs
+        on a fifteen-second loop.
+        """
+        profiles = self.profiles()
+        report: dict[str, Any] = {"considered": 0, "approved": [], "declined": [], "skipped": None}
+        if not autonomy.is_armed(profiles, MICRO_BUCKET):
+            state = autonomy.load_downgrade(profiles)
+            report["skipped"] = ("autonomy was withdrawn and needs a manual reset: "
+                                 f"{state.reason}") if state.tripped else "reduce-autonomy is off"
+            return report
+        if not self.market_status().get("is_open"):
+            report["skipped"] = "the market is closed"
+            return report
+
+        store = self._store(profiles)
+        everything = store.all()
+        candidates = [p for p in everything
+                      if p.status == PROPOSED and p.bucket == MICRO_BUCKET
+                      and p.action == autonomy.AUTONOMOUS_ACTION and not p.requires_human_approval]
+        report["considered"] = len(candidates)
+        if not candidates:
+            return report
+
+        ledger = load_portfolio(profiles.project_dir / str(
+            (profiles.risk.get("micro_live_execution") or {}).get(
+                "ledger_file", "state/micro_live_portfolio.yaml")))
+        for proposal in candidates:
+            held = ledger.position(proposal.ticker, MICRO_BUCKET)
+            decision = autonomy.permits(
+                profiles, bucket=MICRO_BUCKET, action=proposal.action,
+                confidence=proposal.confidence,
+                held_quantity=held.quantity if held else None,
+                requested_quantity=proposal.sell_quantity,
+                reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET))
+            if not decision.permitted:
+                # Not a refusal to trade: the proposal stays in the queue for a person.
+                report["declined"].append({"proposal_id": proposal.proposal_id,
+                                           "reasons": decision.reasons})
+                continue
+            try:
+                response = self.approve(
+                    proposal.proposal_id, note="; ".join(decision.reasons),
+                    identity=f"autonomy:{autonomy.AUTONOMOUS_ACTION.lower()}",
+                    version=proposal.version(), request_id=uuid.uuid4().hex,
+                    terms={"ticker": proposal.ticker, "bucket": proposal.bucket,
+                           "action": proposal.action, "notional_usd": proposal.notional_usd,
+                           "sell_quantity": proposal.sell_quantity})
+            except ServiceConflict as exc:
+                # A person reached the same proposal first, or it moved underneath us. The
+                # approval protocol resolved the race; there is nothing to repair.
+                report["declined"].append({"proposal_id": proposal.proposal_id,
+                                           "reasons": [f"superseded: {exc}"]})
+                continue
+            outcome = str(response.get("outcome") or "")
+            withdrawn = autonomy.trip_for_outcome(profiles, MICRO_BUCKET, outcome,
+                                                  str(response.get("error") or ""))
+            report["approved"].append({"proposal_id": proposal.proposal_id, "outcome": outcome,
+                                       "submitted": response.get("submitted"),
+                                       "autonomy_withdrawn": withdrawn})
+            if withdrawn:
+                break
+            everything = store.all()
+        return report
 
     def reconcile_orders(self) -> dict[str, Any]:
         """Recover submitted orders independently of human approvals or the live switch.
