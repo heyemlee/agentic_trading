@@ -661,3 +661,151 @@ def test_the_preflight_still_refuses_a_config_that_would_open_autonomously(profi
     pf = run_preflight(profiles, None)
     pf04 = next(c for c in pf.checks if c.check_id == "PF04")
     assert not pf04.passed and "opening" in pf04.name
+
+
+# -- HR22: the daily loss gate ------------------------------------------------------
+#
+# The ledger tracked unrealized marks only, so "how much has today cost" had no answer and this
+# rule could not be written. It stops the day compounding: after a bad enough day the answer to
+# "should we open something else" is no, whatever the analysis says.
+
+def _sold(symbol, quantity, price, basis, date=TRADE_DATE, bucket=MICRO):
+    from agentic_trading.portfolio import RealizedTrade
+
+    return RealizedTrade(date=date, symbol=symbol, bucket=bucket, quantity=quantity, price=price,
+                         cost_basis_per_share=basis,
+                         realized_usd=round((price - basis) * quantity, 6))
+
+
+def _with_realized(profiles, trades, *, cash=1000.0):
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={MICRO: {"cash_usd": cash}},
+                           positions=[], recent_opens=[], realized=list(trades))
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, None, None, None, micro_live_equity=cash)
+    prop = Proposal(ticker="BND", bucket=MICRO, action="BUY", size_hint="normal", confidence=85,
+                    trade_date=TRADE_DATE,
+                    cls=classify_instrument("BND", profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified",
+                    evidence=collect_evidence("BND", TRADE_DATE, price_lookup=price_lookup))
+    return HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+
+
+def test_a_bad_enough_day_stops_new_positions(profiles):
+    # -5% of a $1,000 account is -$50.
+    result = _with_realized(profiles, [_sold("VTI", 1.0, 320.0, 380.0)])   # -$60
+    gate = next(r for r in result.rules if r.rule_id == "HR22")
+    assert not gate.passed and "-60.00" in gate.detail, gate.detail
+    assert result.verdict == "REJECT"
+
+
+def test_a_day_inside_the_gate_opens_normally(profiles):
+    result = _with_realized(profiles, [_sold("VTI", 1.0, 340.0, 380.0)])   # -$40
+    gate = next(r for r in result.rules if r.rule_id == "HR22")
+    assert gate.passed and "-40.00" in gate.detail, gate.detail
+    assert "HR22" not in {r.rule_id for r in result.failed_rules}
+
+
+def test_gains_and_losses_on_the_same_day_are_netted(profiles):
+    result = _with_realized(profiles, [_sold("VTI", 1.0, 320.0, 380.0),     # -$60
+                                       _sold("BND", 1.0, 100.0, 70.0)])     # +$30
+    assert next(r for r in result.rules if r.rule_id == "HR22").passed, "net is -$30"
+
+
+def test_yesterdays_loss_does_not_close_todays_gate(profiles):
+    result = _with_realized(profiles, [_sold("VTI", 1.0, 200.0, 380.0, date="2026-09-01")])
+    assert next(r for r in result.rules if r.rule_id == "HR22").passed
+
+
+def test_another_buckets_loss_does_not_close_this_gate(profiles):
+    result = _with_realized(profiles, [_sold("VTI", 1.0, 200.0, 380.0, bucket="core")])
+    assert next(r for r in result.rules if r.rule_id == "HR22").passed
+
+
+def test_the_gate_is_measured_on_closed_trades_and_not_on_the_market(profiles):
+    # A position marked down is not a realized loss. A gate that fired on marks would stop
+    # trading because the market moved, which stopping trading does not fix.
+    held = [{"symbol": "VTI", "bucket": MICRO, "quantity": 1.0, "cost_basis_per_share": 900.0}]
+    result = _micro_result(profiles, "BND", cash=1000.0, positions=held)
+    assert next(r for r in result.rules if r.rule_id == "HR22").passed
+
+
+def test_the_gate_never_stands_between_a_holding_and_its_exit(profiles):
+    held = [{"symbol": "VTI", "bucket": MICRO, "quantity": 1.0, "cost_basis_per_share": 380.0}]
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={MICRO: {"cash_usd": 1000.0}},
+                           positions=[dict(p) for p in held], recent_opens=[],
+                           realized=[_sold("BND", 1.0, 10.0, 500.0)])       # a ruinous day
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, None, None, None, micro_live_equity=1000.0)
+    prop = Proposal(ticker="VTI", bucket=MICRO, action="REDUCE", size_hint="normal",
+                    confidence=85, trade_date=TRADE_DATE,
+                    cls=classify_instrument("VTI", profiles, identity_lookup), data_quality="good")
+    result = HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+    assert "HR22" not in {r.rule_id for r in result.rules}
+    assert result.verdict == "APPROVE", "the day it fires is the day cutting risk must still work"
+
+
+# -- the accounting the gate rests on ------------------------------------------------
+
+def test_a_sale_records_what_it_actually_gained_or_lost(tmp_path):
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import apply_fill_to_ledger, load_portfolio, realized_on
+
+    _profiles(tmp_path)
+    path = _ledger(tmp_path, positions=[{"symbol": "VTI", "bucket": "core", "quantity": 2.0,
+                                         "cost_basis_per_share": 300.0}])
+    apply_fill_to_ledger(path, symbol="VTI", bucket="core", side="sell", quantity=1.0,
+                         price=350.0, trade_date=TRADE_DATE, client_order_id="ct-1")
+    state = load_portfolio(path)
+    assert len(state.realized) == 1
+    assert state.realized[0].realized_usd == pytest.approx(50.0)
+    assert state.realized[0].cost_basis_per_share == 300.0
+    assert realized_on(state, "core", TRADE_DATE) == pytest.approx(50.0)
+
+
+def test_the_basis_is_the_one_the_position_carried_at_the_moment_of_sale(tmp_path):
+    # Closing a position discards its basis, so recording afterwards would have nothing to
+    # measure against.
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import apply_fill_to_ledger, load_portfolio
+
+    _profiles(tmp_path)
+    path = _ledger(tmp_path, positions=[{"symbol": "VTI", "bucket": "core", "quantity": 1.0,
+                                         "cost_basis_per_share": 400.0}])
+    apply_fill_to_ledger(path, symbol="VTI", bucket="core", side="sell", quantity=1.0,
+                         price=350.0, trade_date=TRADE_DATE, client_order_id="ct-2")
+    state = load_portfolio(path)
+    assert state.positions == [], "the position is gone"
+    assert state.realized[0].realized_usd == pytest.approx(-50.0), "the loss survives it"
+
+
+def test_a_purchase_records_nothing_realized(tmp_path):
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import apply_fill_to_ledger, load_portfolio
+
+    _profiles(tmp_path)
+    path = _ledger(tmp_path)
+    apply_fill_to_ledger(path, symbol="VTI", bucket="core", side="buy", quantity=1.0,
+                         price=350.0, trade_date=TRADE_DATE, client_order_id="ct-3")
+    assert load_portfolio(path).realized == [], "buying closes nothing"
+
+
+def test_a_ledger_written_before_this_existed_still_loads(tmp_path):
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import load_portfolio, realized_on
+
+    _profiles(tmp_path)
+    state = load_portfolio(_ledger(tmp_path))     # no realized key at all
+    assert state.realized == []
+    assert realized_on(state, "core", TRADE_DATE) == 0.0

@@ -48,6 +48,26 @@ class RecentOpen(BaseModel):
     date: str
 
 
+class RealizedTrade(BaseModel):
+    """What a sale actually gained or lost, recorded when it happened.
+
+    The ledger kept unrealized marks and nothing else, so "how much has today cost" had no
+    answer, and every rule that needs one — a daily loss gate above all — could not be written
+    at all. Written at the moment of the fill, against the cost basis the position has right
+    then, because closing a position discards that basis and averaging down moves it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    date: str
+    symbol: str
+    bucket: str
+    quantity: float
+    price: float
+    cost_basis_per_share: float
+    realized_usd: float                   # negative is a loss
+    client_order_id: str | None = None
+
+
 class CashFlow(BaseModel):
     """Money entering or leaving a bucket, which is never a gain or a loss.
 
@@ -70,6 +90,7 @@ class PortfolioState(BaseModel):
     buckets: dict[str, BucketCash]
     positions: list[Position] = Field(default_factory=list)
     recent_opens: list[RecentOpen] = Field(default_factory=list)
+    realized: list[RealizedTrade] = Field(default_factory=list)
     cash_flows: list[CashFlow] = Field(default_factory=list)
     notes: str | None = None
     applied_orders: dict[str, Any] = Field(default_factory=dict)
@@ -417,10 +438,21 @@ def snapshot_from_broker(
     state = PortfolioState(as_of=trade_date, currency=ledger.currency, buckets=ledger.buckets,
                            positions=positions, recent_opens=ledger.recent_opens,
                            cash_flows=ledger.cash_flows, applied_orders=ledger.applied_orders,
-                           notes="reconciled from broker state")
+                           realized=ledger.realized, notes="reconciled from broker state")
     return build_snapshot(state, profiles, trade_date,
                           price_lookup=lambda sym, _d: (prices[sym.upper()], trade_date),
                           identity_lookup=identity_lookup)
+
+
+def realized_on(state: PortfolioState, bucket: str, trade_date: str) -> float:
+    """Realized profit and loss for one bucket on one day. Negative is a loss.
+
+    Deliberately realized only. A daily loss gate measured on unrealized marks would fire on a
+    market that moved, which is not something stopping trading fixes; measured on closed trades
+    it fires on what this system actually did.
+    """
+    return round(sum(r.realized_usd for r in state.realized
+                     if r.bucket == bucket and r.date == trade_date), 6)
 
 
 def cash_flow_summary(state: PortfolioState) -> dict[str, float]:
@@ -516,6 +548,13 @@ def apply_fill_to_ledger(path: str | Path, *, symbol: str, bucket: str, side: st
             if existing is None or quantity > existing.quantity + 1e-8:
                 raise PortfolioError(f"cannot record sell: insufficient {symbol} held in {bucket}")
             state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd + notional, 2)
+            # Before the position is touched: the basis this sale is measured against is the one
+            # it carries right now, and the next two lines can discard it.
+            state.realized.append(RealizedTrade(
+                date=trade_date, symbol=symbol, bucket=bucket, quantity=quantity, price=price,
+                cost_basis_per_share=existing.cost_basis_per_share,
+                realized_usd=round((price - existing.cost_basis_per_share) * quantity, 6),
+                client_order_id=client_order_id))
             remaining = round(existing.quantity - quantity, 8)
             if remaining <= 1e-8:
                 state.positions = [p for p in state.positions if p.symbol.upper() != symbol]

@@ -20,7 +20,7 @@ from typing import Any
 
 from ..autonomy import AUTONOMOUS_ACTION
 from ..event_calendar import earnings_blackout, macro_blackout, yfinance_next_earnings
-from ..portfolio import InstrumentClass, Snapshot
+from ..portfolio import InstrumentClass, Snapshot, realized_on
 from ..profile import Profiles
 from .ladder import LadderStates, effective_core_level
 from .regime import RegimeResult
@@ -515,6 +515,20 @@ class HardRiskEngine:
             today, week = self._recent_open_counts(snap, prop.bucket, prop.trade_date)
             rule("HR12", "new positions per day", today < per_day, f"{today} opened today vs max {per_day}")
             rule("HR12b", "new positions per week", week < per_week, f"{week} opened this week vs max {per_week}")
+
+        # HR22 daily loss gate. It stops the day from compounding: after a bad enough day the
+        # answer to "should we open something else" is no, whatever the analysis says. Realized
+        # only — a gate measured on unrealized marks would fire because the market moved, which
+        # is not something stopping trading fixes. It cannot reach a reduction, which is the
+        # point: the day it fires is a day cutting risk should still be possible.
+        gate_pct = self._cfg("buckets", prop.bucket, "loss_limits",
+                             "daily_loss_gate_pct_of_allocation", default=None)
+        if gate_pct is not None and bucket.allocation_usd:
+            realized = realized_on(snap.state, prop.bucket, prop.trade_date)
+            floor_usd = bucket.allocation_usd * float(gate_pct) / 100.0
+            rule("HR22", "daily loss gate", realized > floor_usd,
+                 f"realized ${realized:,.2f} today vs a floor of ${floor_usd:,.2f} "
+                 f"({float(gate_pct):g}% of ${bucket.allocation_usd:,.2f})")
 
         # HR20 order-rate limits, outside the new-position guard above because they count every
         # order that reached the venue and not only the ones that opened something. Both keys
