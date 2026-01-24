@@ -47,10 +47,11 @@ window.CT_API = (function () {
     document.dispatchEvent(new CustomEvent('ct:connection', { detail: state }));
     document.dispatchEvent(new CustomEvent('ct:data', { detail: state }));
   }
-  function unauthorized() {
+  function unauthorized(clearDrafts = true) {
+    if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
     auth = { authenticated: false, csrf_token: null };
     Object.keys(state.resources).forEach(key => { state.resources[key].error = 'login required'; });
-    document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
+    document.dispatchEvent(new CustomEvent('ct:auth', { detail: { ...auth, clearDrafts } }));
   }
   async function request(path, options = {}, timeout = TIMEOUT_MS) {
     if (demo) throw new Error('Demo mode has no API access.');
@@ -160,9 +161,11 @@ window.CT_API = (function () {
   async function post(path, body) {
     if (demo) return { blocked: true, reason: 'Demo mode cannot change state.' };
     if (!auth.authenticated || !auth.csrf_token) throw new Error('Sign in before performing this action.');
-    return request(path, { method: 'POST', headers: {
+    const result = await request(path, { method: 'POST', headers: {
       'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': auth.csrf_token,
     }, body: JSON.stringify(body || {}) }, 60000);
+    if (path === '/auth/logout') unauthorized();
+    return result;
   }
   function watchRun(runKey) {
     activeRun = runKey || null;
@@ -174,6 +177,7 @@ window.CT_API = (function () {
     get activeRun() { return activeRun; },
     get writesEnabled() { return !demo && auth.authenticated === true; },
     get authenticated() { return auth.authenticated === true; },
+    get username() { return auth.authenticated ? auth.username : null; },
     loaded: keys => demo || keys.every(key => !SOURCES[key].path() || !!(state.resources[key]?.lastOkAt || state.resources[key]?.receivedAt)),
     canAct: keys => !demo && auth.authenticated === true && keys.every(isLive),
   };

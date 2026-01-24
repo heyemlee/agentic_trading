@@ -1,4 +1,5 @@
 'use strict';
+try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {}
 const form = document.getElementById('login-form');
 const message = document.getElementById('login-result');
 form.addEventListener('submit', async event => {

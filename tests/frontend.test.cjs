@@ -51,17 +51,118 @@ function context(demo = false) {
 const response = (data, status = 200) => ({ ok: status === 200, status, statusText: 'failed', json: async () => data });
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(setImmediate); };
 
-function advisorPage(post) {
+function tabStorage() {
+  const values = new Map();
+  return { getItem: key => values.get(key) || null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+}
+function advisorPage(post, options = {}) {
   const c = context(); c.run('console.js');
+  c.sessionStorage = options.storage || tabStorage();
+  c.addEventListener = c.document.addEventListener.bind(c.document);
+  c.run('advisor-session.js');
   c.Console.mount = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
   c.CT.advisor = { notes: { text: 'Saved plan', revision: 1 }, jobs: [], decisions: [],
     snapshot: { accounts: [], candidates: [{ symbol: 'VTI', sources: ['watchlists:<script>'] }] } };
-  c.CT_API = { writesEnabled: true, post, readOnce: async () => {},
-    fetchJSON: async () => ({ messages: [] }) };
+  c.CT_API = { writesEnabled: true, authenticated: true, username: options.owner || 'owner', post, readOnce: async () => {},
+    fetchJSON: options.fetchJSON || (async () => ({ messages: [] })) };
   c.run('pages/advisor.js');
   return c;
 }
+
+test('drafts and selected conversation survive a page reload without posting anything', async () => {
+  const storage = tabStorage(); let posts = 0;
+  const post = async () => { posts++; return {}; };
+  const c = advisorPage(post, { storage });
+  c.element('chat-input').value = 'First conversation'; c.element('chat-input').events.input();
+  c.element('new-conversation').events.click();
+  c.element('chat-input').value = 'Second conversation'; c.element('chat-input').events.input();
+  c.element('personal-notes').value = 'Unsaved plan'; c.element('personal-notes').events.input();
+  const selected = JSON.parse(storage.getItem('ct.advisor.session.v1')).selected;
+  const restored = advisorPage(post, { storage }); await flush();
+  assert.equal(restored.element('chat-input').value, 'Second conversation');
+  assert.equal(restored.element('personal-notes').value, 'Unsaved plan');
+  assert.equal(JSON.parse(storage.getItem('ct.advisor.session.v1')).selected, selected);
+  restored.document.dispatchEvent({ type: 'click', target: { closest: selector => selector === '[data-conversation]'
+    ? { dataset: { conversation: 'default' } } : null } });
+  assert.equal(restored.element('chat-input').value, 'First conversation');
+  assert.equal(posts, 0);
+});
+
+test('conversation titles remain stable when old jobs leave the recent list', () => {
+  const storage = tabStorage(), c = advisorPage(async () => ({}), { storage });
+  c.CT.advisor.jobs = [{ run_key: 'job', state: 'COMPLETE', task: { kind: 'chat', conversation_id: 'default', message: 'My long-term plan' } }];
+  c.render();
+  const restored = advisorPage(async () => ({}), { storage });
+  assert.match(restored.element('conversations').innerHTML, /My long-term plan/);
+});
+
+test('a late send response cannot erase a newer draft', async () => {
+  let finish;
+  const storage = tabStorage(), c = advisorPage(() => new Promise(resolve => { finish = resolve; }), { storage });
+  c.element('chat-input').value = 'Send this'; c.element('chat-input').events.input();
+  c.element('chat-form').events.submit({ preventDefault() {} });
+  c.element('chat-input').value = 'Next question'; c.element('chat-input').events.input();
+  finish({ run_key: 'ok' }); await flush();
+  assert.equal(c.element('chat-input').value, 'Next question');
+  assert.equal(advisorPage(async () => ({}), { storage }).element('chat-input').value, 'Next question');
+});
+
+test('reload preserves the request id for an explicit retry but never retries automatically', async () => {
+  const storage = tabStorage(), ids = [];
+  const first = advisorPage(async (url, body) => { ids.push(body.request_id); throw Error('lost response'); }, { storage });
+  first.element('chat-input').value = 'Question'; first.element('chat-input').events.input();
+  first.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  const second = advisorPage(async (url, body) => { ids.push(body.request_id); return {}; }, { storage }); await flush();
+  assert.equal(ids.length, 1);
+  second.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(ids.length, 2); assert.equal(ids[0], ids[1]);
+  assert.equal(second.element('chat-input').value, '');
+});
+
+test('unavailable draft storage prompts before leaving, and authentication loss clears drafts', () => {
+  const blocked = { getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); }, removeItem() {} };
+  const c = advisorPage(async () => ({}), { storage: blocked });
+  c.element('chat-input').value = 'Keep this'; c.element('chat-input').events.input();
+  let prevented = false;
+  c.document.dispatchEvent({ type: 'beforeunload', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  c.CT_API.authenticated = false;
+  c.document.dispatchEvent({ type: 'ct:auth', detail: { authenticated: false, clearDrafts: true } });
+  assert.equal(c.element('chat-input').value, '');
+});
+
+test('drafts cannot be restored under a different signed-in owner', () => {
+  const storage = tabStorage(), c = advisorPage(async () => ({}), { storage });
+  c.element('chat-input').value = 'Private draft'; c.element('chat-input').events.input();
+  const other = advisorPage(async () => ({}), { storage, owner: 'another-owner' });
+  assert.equal(other.element('chat-input').value, '');
+  assert.ok(!storage.getItem('ct.advisor.session.v1').includes('Private draft'));
+});
+
+test('restored personal drafts retain their original revision when the saved profile changes', async () => {
+  const storage = tabStorage();
+  const first = advisorPage(async () => ({}), { storage });
+  first.element('personal-notes').value = 'My unsaved edits'; first.element('personal-notes').events.input();
+  let sent;
+  const restored = advisorPage(async (url, body) => { sent = body; throw Error('revision conflict'); }, { storage });
+  restored.CT.advisor.notes = { text: 'Updated on another device', revision: 2 }; restored.render();
+  assert.equal(restored.element('personal-notes').value, 'My unsaved edits');
+  await restored.element('save-notes').events.click();
+  assert.equal(sent.revision, 1);
+  assert.equal(restored.element('personal-notes').value, 'My unsaved edits');
+  assert.match(restored.element('notes-save-status').textContent, /revision conflict/);
+});
+
+test('changing the signed-in owner clears an already open tab writing state', () => {
+  const storage = tabStorage(), c = advisorPage(async () => ({}), { storage });
+  c.element('chat-input').value = 'Private old owner draft'; c.element('chat-input').events.input();
+  c.CT_API.username = 'new-owner';
+  c.document.dispatchEvent({ type: 'ct:auth', detail: { authenticated: true, username: 'new-owner' } });
+  c.render();
+  assert.equal(c.element('chat-input').value, '');
+  assert.ok(!storage.getItem('ct.advisor.session.v1').includes('Private old owner draft'));
+});
 
 test('assistant safely renders sources and preserves new edits during a note save', async () => {
   let finish;
@@ -88,6 +189,51 @@ test('assistant panels switch instantly without losing a draft', () => {
   c.element('view-chat').events.click();
   assert.equal(c.element('chat-input').value, 'Keep my question');
   assert.equal(c.element('panel-chat').hidden, false);
+});
+
+test('assistant activity and conversation cards use safe readable summaries and remain stable on polls', () => {
+  const c = advisorPage(async () => ({}));
+  c.CT.advisor.jobs = [{ run_key: 'job-1', ticker: 'ASSISTANT', state: 'COMPLETE', created_at: '2026-09-09T12:00:00Z',
+    task: { kind: 'chat', conversation_id: 'default', message: 'My plan <img src=x>' } }];
+  c.render();
+  assert.match(c.element('advisor-jobs').innerHTML, /ux.task.chat/);
+  assert.ok(!c.element('advisor-jobs').innerHTML.includes('ASSISTANT'));
+  assert.match(c.element('conversations').innerHTML, /My plan &lt;img src=x&gt;/);
+  const element = c.element('conversations');
+  let html = element.innerHTML, replacements = 0;
+  Object.defineProperty(element, 'innerHTML', { get: () => html, set: value => { replacements++; html = value; } });
+  c.render(); c.render();
+  assert.equal(replacements, 0, 'unchanged polling must not replace the focused card');
+});
+
+test('research detail stays bound to the opened record while new data arrives', () => {
+  const c = advisorPage(async () => ({}));
+  const decision = { run_id: 'run-1', ticker: 'VTI', action: 'NO_TRADE', trade_date: '2026-09-09', bucket: 'core',
+    policy: { proposal: { investment_thesis: 'Original <script>', entry_logic: 'Wait for evidence' } } };
+  c.CT.advisor.decisions = [decision]; c.render();
+  c.document.dispatchEvent({ type: 'click', target: { closest: selector => selector === '[data-decision]'
+    ? { dataset: { decision: 'run-1' } } : null } });
+  assert.equal(c.element('decision-sheet').open, true);
+  const original = c.element('decision-detail').innerHTML;
+  assert.match(original, /Original &lt;script&gt;/);
+  c.CT.advisor.decisions = [{ ...decision, ticker: 'BND' }]; c.render();
+  assert.equal(c.element('decision-detail').innerHTML, original);
+  assert.equal(c.element('decision-sheet').open, true);
+});
+
+test('glass sheets restore focus without clearing an unsaved personal draft', async () => {
+  const c = advisorPage(async () => ({}));
+  let focused = false;
+  c.document.activeElement = { focus() { focused = true; } };
+  c.matchMedia = () => ({ matches: true });
+  c.Console.openSheet('personal-sheet');
+  c.element('personal-notes').value = 'Unsaved draft'; c.element('personal-notes').events.input();
+  c.Console.closeSheet('personal-sheet');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(c.element('personal-sheet').open, false);
+  assert.equal(focused, true);
+  c.render(); c.Console.openSheet('personal-sheet');
+  assert.equal(c.element('personal-notes').value, 'Unsaved draft');
 });
 
 test('candidate screening returns to the conversation where the answer arrives', async () => {
