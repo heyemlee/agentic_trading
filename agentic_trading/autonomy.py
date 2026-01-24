@@ -1,7 +1,7 @@
-"""Deterministic gate for reducing a position without asking first.
+"""Deterministic gate for acting without asking first.
 
 Autonomy here does exactly one thing: it lets deterministic code give the approval a person
-would otherwise give, for a risk-reducing action and for nothing else. Everything downstream is
+would otherwise give. Everything downstream is
 unchanged — the proposal is approved, revalidated, re-run through the Hard Risk Layer, reserved,
 submitted and reconciled by the same code as a human-approved one. This module cannot widen a
 limit; it can only decide which of the two allowed ways an order may start.
@@ -13,7 +13,12 @@ answer.
 is what happens to everything today. So the bar can be set high without costing anything: the
 failure mode of refusing is a delay, and the failure mode of granting wrongly is an order.
 
-**Only ``REDUCE`` qualifies, never ``SELL``.** The engine already gives those two precise
+**Reducing and opening are separately switched, and reducing came first.** They are different
+in kind: one cuts risk and one creates it, and the worst case of getting them wrong is not the
+same. Opening additionally names which instrument classes it may buy at all, and an empty list
+is not permission to buy anything.
+
+**Only ``REDUCE`` reduces autonomously, never ``SELL``.** The engine already gives those two precise
 meanings — REDUCE is half the holding, SELL is all of it — so "at most half, and closing a
 position needs a person" falls straight out of the action, with no arithmetic of our own to get
 wrong.
@@ -43,6 +48,10 @@ from .state_db import StateDB
 #: The one action deterministic code may approve. SELL closes a position outright and always
 #: belongs to a person; the neutral and opening actions are not autonomy's business at all.
 AUTONOMOUS_ACTION = "REDUCE"
+
+#: The actions that create risk rather than cut it. Separately switched, because they are
+#: different in kind and the worst case of getting them wrong is not the same.
+OPENING_ACTIONS = ("BUY", "ADD")
 
 STATE_DOCUMENT = "autonomy.json"
 
@@ -80,17 +89,19 @@ class Downgrade:
                 else list(self.history)}
 
 
-def _cfg(profiles: Profiles, bucket: str) -> dict[str, Any]:
-    return (profiles.risk_cfg("buckets", bucket, "autonomy", "reduce", default={}) or {})
+def _cfg(profiles: Profiles, bucket: str, block: str = "reduce") -> dict[str, Any]:
+    return (profiles.risk_cfg("buckets", bucket, "autonomy", block, default={}) or {})
 
 
 def is_armed(profiles: Profiles, bucket: str) -> bool:
-    """Whether anything could happen: the switch is on and no trip is standing.
+    """Whether anything could happen: some switch is on and no trip is standing.
 
-    Both halves, deliberately. A boolean that answers only "is the switch on" is a footgun in
-    a caller that then opens a venue session.
+    Both halves, deliberately. A boolean that answers only "is a switch on" is a footgun in a
+    caller that then opens a venue session.
     """
-    return _cfg(profiles, bucket).get("enabled") is True and not load_downgrade(profiles).tripped
+    switched_on = any(_cfg(profiles, bucket, block).get("enabled") is True
+                      for block in ("reduce", "open"))
+    return switched_on and not load_downgrade(profiles).tripped
 
 
 def state_path(profiles: Profiles) -> Path:
@@ -139,18 +150,20 @@ def trip_for_outcome(profiles: Profiles, bucket: str, outcome: str, detail: str 
     """Withdraw autonomy if an attempt ended in a state we cannot account for."""
     if outcome not in TRIPPING_OUTCOMES:
         return False
-    trip(profiles, f"an autonomous reduction in {bucket} ended in {outcome}"
+    trip(profiles, f"an autonomous action in {bucket} ended in {outcome}"
                    + (f": {detail}" if detail else ""))
     return True
 
 
 def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | None,
-            held_quantity: float | None, requested_quantity: float | None,
-            reduced_today: int, now: datetime | None = None) -> Decision:
-    """Whether deterministic code may give this reduction its approval.
+            limit_class: str | None = None, held_quantity: float | None = None,
+            requested_quantity: float | None = None, reduced_today: int = 0,
+            opened_today: int = 0, now: datetime | None = None) -> Decision:
+    """Whether deterministic code may give this proposal its approval.
 
-    Every refusal names the condition, because the caller records it and the next reader has to
-    be able to tell "autonomy declined" from "the trade was refused".
+    Two blocks, separately switched, because they are different in kind: reducing cuts risk and
+    opening creates it. Every refusal names the condition, because the caller records it and the
+    next reader has to be able to tell "autonomy declined" from "the trade was refused".
     """
     reasons: list[str] = []
 
@@ -158,12 +171,17 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
         reasons.append(reason)
         return Decision(False, reasons)
 
-    cfg = _cfg(profiles, bucket)
+    if action == AUTONOMOUS_ACTION:
+        block = "reduce"
+    elif action in OPENING_ACTIONS:
+        block = "open"
+    else:
+        return refuse(f"{action} is never autonomous; closing a position outright and doing "
+                      "nothing both belong to a person")
+
+    cfg = _cfg(profiles, bucket, block)
     if cfg.get("enabled") is not True:
-        return refuse(f"buckets.{bucket}.autonomy.reduce.enabled is not true")
-    if action != AUTONOMOUS_ACTION:
-        return refuse(f"{action} is not autonomous; only {AUTONOMOUS_ACTION} is, because closing "
-                      "a position outright belongs to a person")
+        return refuse(f"buckets.{bucket}.autonomy.{block}.enabled is not true")
 
     downgrade = load_downgrade(profiles)
     if downgrade.tripped:
@@ -171,7 +189,7 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
 
     floor = cfg.get("min_confidence")
     if floor is None:
-        return refuse(f"buckets.{bucket}.autonomy.reduce declares no min_confidence")
+        return refuse(f"buckets.{bucket}.autonomy.{block} declares no min_confidence")
     # bool is a subclass of int, so `min_confidence: true` would otherwise read as 1.
     if isinstance(confidence, bool) or not isinstance(confidence, int):
         return refuse(f"the proposal carries no usable confidence ({confidence!r})")
@@ -179,36 +197,58 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
         return refuse(f"confidence {confidence} is below the autonomous floor of {int(floor)}; "
                       "a person decides this one")
 
-    per_day = cfg.get("max_positions_reduced_per_day")
+    if block == "reduce":
+        per_day = cfg.get("max_positions_reduced_per_day")
+        if per_day is None:
+            return refuse(f"buckets.{bucket}.autonomy.reduce declares no "
+                          "max_positions_reduced_per_day")
+        if reduced_today >= int(per_day):
+            return refuse(f"{reduced_today} position(s) already reduced autonomously today, at "
+                          f"the limit of {int(per_day)}")
+        # Belt and braces over the engine's own REDUCE semantics: even if a caller hands over a
+        # quantity of its own, it may not be the whole holding.
+        if (held_quantity is not None and requested_quantity is not None
+                and requested_quantity > held_quantity / 2.0 + 1e-9):
+            return refuse(f"{requested_quantity:g} of {held_quantity:g} shares is more than half "
+                          "the holding; a larger reduction belongs to a person")
+        reasons.append(f"reduction of at most half a holding, confidence {confidence} at or "
+                       f"above {int(floor)}, {reduced_today} of {int(per_day)} used today")
+        return Decision(True, reasons)
+
+    # Opening. The share of the account this may reach is not checked here — HR23 measures it
+    # against live positions and their provenance, which this function does not have. What is
+    # checked here is what may be bought at all, and how often.
+    allowed = cfg.get("classes")
+    if not isinstance(allowed, list) or not allowed:
+        return refuse(f"buckets.{bucket}.autonomy.open declares no classes; an empty list of "
+                      "what may be bought is not permission to buy anything")
+    if limit_class not in allowed:
+        return refuse(f"{limit_class} is not one of the classes code may open on its own "
+                      f"({', '.join(str(c) for c in allowed)})")
+    per_day = cfg.get("max_new_positions_per_day")
     if per_day is None:
-        return refuse(f"buckets.{bucket}.autonomy.reduce declares no "
-                      "max_positions_reduced_per_day")
-    if reduced_today >= int(per_day):
-        return refuse(f"{reduced_today} position(s) already reduced autonomously today, at the "
+        return refuse(f"buckets.{bucket}.autonomy.open declares no max_new_positions_per_day")
+    if opened_today >= int(per_day):
+        return refuse(f"{opened_today} position(s) already opened autonomously today, at the "
                       f"limit of {int(per_day)}")
-
-    # Belt and braces over the engine's own REDUCE semantics: even if a caller hands over a
-    # quantity of its own, it may not be the whole holding.
-    if (held_quantity is not None and requested_quantity is not None
-            and requested_quantity > held_quantity / 2.0 + 1e-9):
-        return refuse(f"{requested_quantity:g} of {held_quantity:g} shares is more than half "
-                      "the holding; a larger reduction belongs to a person")
-
-    reasons.append(f"reduction of at most half a holding, confidence {confidence} at or above "
-                   f"{int(floor)}, {reduced_today} of {int(per_day)} used today")
+    reasons.append(f"{limit_class} is openable without a person, confidence {confidence} at or "
+                   f"above {int(floor)}, {opened_today} of {int(per_day)} used today")
     return Decision(True, reasons)
 
 
-def reduced_today(proposals, bucket: str, now: datetime | None = None) -> int:
-    """How many positions this bucket has already had reduced autonomously in the last 24h.
+def acted_today(proposals, bucket: str, actions, now: datetime | None = None) -> int:
+    """How many distinct positions code has acted on by itself in this bucket in the last 24h.
 
-    Counted from the approvals themselves rather than from a counter, so a restart, a crash or
-    a second process cannot lose the count.
+    Counted from the approval records themselves rather than from a counter, so a restart, a
+    crash or a second process cannot lose the count.
     """
     moment = now or datetime.now(UTC)
+    wanted = set(actions)
     seen: set[str] = set()
     for p in proposals:
         if p.bucket != bucket or not str(p.approved_by or "").startswith("autonomy:"):
+            continue
+        if p.action not in wanted:
             continue
         approved = p.approved_at
         if not approved:
@@ -222,6 +262,14 @@ def reduced_today(proposals, bucket: str, now: datetime | None = None) -> int:
         if moment - when <= timedelta(days=1):
             seen.add(p.ticker.upper())
     return len(seen)
+
+
+def reduced_today(proposals, bucket: str, now: datetime | None = None) -> int:
+    return acted_today(proposals, bucket, (AUTONOMOUS_ACTION,), now)
+
+
+def opened_today(proposals, bucket: str, now: datetime | None = None) -> int:
+    return acted_today(proposals, bucket, OPENING_ACTIONS, now)
 
 
 def main(argv: list[str] | None = None) -> int:

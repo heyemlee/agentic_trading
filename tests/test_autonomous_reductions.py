@@ -68,7 +68,7 @@ def test_nothing_happens_while_the_switch_is_off(setup, monkeypatch):
     store.save(reduction())
     monkeypatch.setattr(service, "_broker", lambda *_: pytest.fail("no venue session when off"))
     report = service.autonomous_reductions()
-    assert report["skipped"] == "reduce-autonomy is off" and report["considered"] == 0
+    assert report["skipped"] == "no autonomy is switched on" and report["considered"] == 0
 
 
 def test_a_withdrawn_autonomy_says_why_and_does_nothing(setup):
@@ -88,12 +88,14 @@ def test_only_proposals_the_engine_marked_eligible_are_considered(setup):
     assert service.autonomous_reductions()["considered"] == 0
 
 
-def test_an_opening_proposal_is_never_picked_up(setup):
+def test_an_opening_proposal_is_declined_while_only_reductions_are_armed(setup):
     service, _, store = setup
     opening = reduction(action="BUY", notional=35.0)
     opening.sell_quantity = None
     store.save(opening)
-    assert service.autonomous_reductions()["considered"] == 0
+    report = service.autonomous_reductions()
+    assert report["approved"] == []
+    assert "autonomy.open.enabled is not true" in report["declined"][0]["reasons"][-1]
 
 
 def test_low_conviction_is_declined_and_left_for_a_person(setup):

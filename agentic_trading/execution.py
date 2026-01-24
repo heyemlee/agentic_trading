@@ -318,6 +318,10 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         sell_quantity=proposal.sell_quantity,
         missing_information=proposal.missing_information,
         evidence=proposal.evidence,
+        # Derived from who approved it, not passed in. The macro blackout and the autonomous
+        # allowance both key on this, and both would be silently inert if the flag never made
+        # it from the approval record to the rules that read it.
+        autonomous=str(proposal.approved_by or "").startswith("autonomy:"),
     )
     result = HardRiskEngine(profiles).evaluate(risk_proposal, snap, ladders, regime)
     rv.hard_risk = result.as_dict()

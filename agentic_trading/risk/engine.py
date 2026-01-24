@@ -624,6 +624,14 @@ class HardRiskEngine:
             if (prop.action == AUTONOMOUS_ACTION and self._cfg(
                     "buckets", prop.bucket, "autonomy", "reduce", "enabled", default=False) is True):
                 return False, ""
+            # Opening is the other block, switched separately because it creates risk rather
+            # than cutting it, and additionally limited to the instrument classes named there.
+            if prop.action in OPENING_ACTIONS and self._cfg(
+                    "buckets", prop.bucket, "autonomy", "open", "enabled", default=False) is True:
+                openable = self._cfg("buckets", prop.bucket, "autonomy", "open", "classes",
+                                     default=[]) or []
+                if prop.cls.limit_class in openable:
+                    return False, ""
             return True, "micro-live deploys real capital and always requires explicit human confirmation"
         return False, ""
 
@@ -633,14 +641,14 @@ class HardRiskEngine:
         result.requires_human_approval = True
         if gated:
             result.human_approval_reason = reason
-        elif prop.bucket == "micro_live" and prop.action == AUTONOMOUS_ACTION:
-            # The single case that may start without a person. Narrow on purpose: named bucket,
-            # named action, and its own config switch. Everything else keeps the default above,
-            # so a caller reading this field cannot mistake silence for permission.
+        elif prop.bucket == "micro_live":
+            # Reaching here means _human_gated found no permanent gate for a real-money
+            # proposal, which it only does for the named action-and-switch combinations. The
+            # decision is not repeated here, so the two cannot drift apart.
             result.requires_human_approval = False
             result.human_approval_reason = (
-                "a reduction where the bucket permits reduce-autonomy; whether it is actually "
-                "taken is decided at execution time by agentic_trading.autonomy"
+                f"the bucket permits autonomy for {prop.action}; whether it is actually taken "
+                "is decided at execution time by agentic_trading.autonomy"
             )
         else:
             result.human_approval_reason = (

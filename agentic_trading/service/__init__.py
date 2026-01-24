@@ -540,7 +540,7 @@ class Service:
         if not autonomy.is_armed(profiles, MICRO_BUCKET):
             state = autonomy.load_downgrade(profiles)
             report["skipped"] = ("autonomy was withdrawn and needs a manual reset: "
-                                 f"{state.reason}") if state.tripped else "reduce-autonomy is off"
+                                 f"{state.reason}") if state.tripped else "no autonomy is switched on"
             return report
         if not self.market_status().get("is_open"):
             report["skipped"] = "the market is closed"
@@ -548,9 +548,10 @@ class Service:
 
         store = self._store(profiles)
         everything = store.all()
+        actionable = (autonomy.AUTONOMOUS_ACTION, *autonomy.OPENING_ACTIONS)
         candidates = [p for p in everything
                       if p.status == PROPOSED and p.bucket == MICRO_BUCKET
-                      and p.action == autonomy.AUTONOMOUS_ACTION and not p.requires_human_approval]
+                      and p.action in actionable and not p.requires_human_approval]
         report["considered"] = len(candidates)
         if not candidates:
             return report
@@ -563,9 +564,11 @@ class Service:
             decision = autonomy.permits(
                 profiles, bucket=MICRO_BUCKET, action=proposal.action,
                 confidence=proposal.confidence,
+                limit_class=proposal.limit_class,
                 held_quantity=held.quantity if held else None,
                 requested_quantity=proposal.sell_quantity,
-                reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET))
+                reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET),
+                opened_today=autonomy.opened_today(everything, MICRO_BUCKET))
             if not decision.permitted:
                 # Not a refusal to trade: the proposal stays in the queue for a person.
                 report["declined"].append({"proposal_id": proposal.proposal_id,

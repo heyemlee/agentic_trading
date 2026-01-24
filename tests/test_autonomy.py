@@ -39,11 +39,12 @@ def test_a_half_reduction_with_conviction_is_the_one_thing_it_may_do(armed):
 def test_closing_a_position_outright_always_belongs_to_a_person(armed):
     decision = ask(armed, action="SELL", requested_quantity=2.0)
     assert not decision.permitted
-    assert "closing a position outright belongs to a person" in decision.reasons[-1]
+    assert "closing a position outright" in decision.reasons[-1]
 
 
 @pytest.mark.parametrize("action", ["BUY", "ADD", "HOLD", "NO_TRADE"])
-def test_nothing_that_takes_on_risk_is_ever_autonomous(armed, action):
+def test_arming_reductions_arms_nothing_that_takes_on_risk(armed, action):
+    # The two blocks are switched separately, which is the whole reason they are two blocks.
     assert not ask(armed, action=action).permitted
 
 
@@ -132,9 +133,11 @@ def test_the_history_stays_bounded(armed):
 # -- counting what has already been done today --------------------------------------
 
 class FakeProposal:
-    def __init__(self, ticker, bucket=MICRO, approved_by="autonomy:reduce", minutes_ago=30):
+    def __init__(self, ticker, bucket=MICRO, approved_by="autonomy:reduce", minutes_ago=30,
+                 action="REDUCE"):
         self.ticker = ticker
         self.bucket = bucket
+        self.action = action
         self.approved_by = approved_by
         self.approved_at = (NOW - timedelta(minutes=minutes_ago)).isoformat()
 
@@ -225,3 +228,70 @@ def test_changing_the_state_requires_saying_why(config_copy, action):
 
     with pytest.raises(SystemExit):
         module.main([action, "--config-dir", str(config_copy)])
+
+
+# -- opening: the one place code may create risk -------------------------------------
+
+@pytest.fixture
+def armed_to_open(armed):
+    armed.risk["buckets"][MICRO]["autonomy"]["open"] = {
+        "enabled": True, "min_confidence": 80,
+        "classes": ["broad_diversified_etf", "bond_or_cash_like_etf"],
+        "max_new_positions_per_day": 1}
+    return armed
+
+
+def ask_open(profiles, **over):
+    kw = {"bucket": MICRO, "action": "BUY", "confidence": 85,
+          "limit_class": "broad_diversified_etf", "opened_today": 0, "now": NOW}
+    kw.update(over)
+    return autonomy.permits(profiles, **kw)
+
+
+def test_an_allowed_class_with_conviction_may_be_opened(armed_to_open):
+    assert ask_open(armed_to_open).permitted
+
+
+def test_opening_is_off_even_while_reducing_is_on(armed):
+    decision = ask_open(armed)
+    assert not decision.permitted and "autonomy.open.enabled is not true" in decision.reasons[-1]
+
+
+@pytest.mark.parametrize("limit_class", ["individual_stock", "sector_factor_thematic_etf",
+                                         "crypto", None])
+def test_only_the_named_classes_may_be_opened(armed_to_open, limit_class):
+    decision = ask_open(armed_to_open, limit_class=limit_class)
+    assert not decision.permitted
+    assert "not one of the classes code may open" in decision.reasons[-1]
+
+
+def test_an_empty_class_list_is_not_permission_to_buy_anything(armed_to_open):
+    armed_to_open.risk["buckets"][MICRO]["autonomy"]["open"]["classes"] = []
+    decision = ask_open(armed_to_open)
+    assert not decision.permitted and "not permission to buy anything" in decision.reasons[-1]
+
+
+def test_one_new_position_a_day_and_no_more(armed_to_open):
+    assert ask_open(armed_to_open, opened_today=0).permitted
+    spent = ask_open(armed_to_open, opened_today=1)
+    assert not spent.permitted and "at the limit of 1" in spent.reasons[-1]
+
+
+def test_the_two_budgets_are_separate(armed_to_open):
+    # Reducing something does not spend the allowance to open something, and the reverse.
+    assert ask_open(armed_to_open, reduced_today=5).permitted
+    assert ask(armed_to_open, opened_today=5).permitted
+
+
+def test_a_withdrawal_stops_opening_too(armed_to_open):
+    autonomy.trip(armed_to_open, "an order we cannot account for")
+    assert not ask_open(armed_to_open).permitted
+    assert not autonomy.is_armed(armed_to_open, MICRO)
+
+
+def test_the_open_budget_counts_buys_and_the_reduce_budget_counts_reductions(armed_to_open):
+    bought = [FakeProposal("VTI", action="BUY"), FakeProposal("BND", action="ADD")]
+    reduced = [FakeProposal("SGOV", action="REDUCE")]
+    everything = bought + reduced
+    assert autonomy.opened_today(everything, MICRO, now=NOW) == 2
+    assert autonomy.reduced_today(everything, MICRO, now=NOW) == 1
