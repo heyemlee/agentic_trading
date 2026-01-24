@@ -33,9 +33,7 @@
 
     document.getElementById('warn-count').textContent = C.t('common.open', { n: warnings.length });
     document.getElementById('warning-list').innerHTML = warnings.length
-      ? warnings.map((w, i) =>
-          '<div class="banner" data-od-id="warning-' + i + '">' +
-            '<span class="banner-mark">' + C.ICON.info + '</span><p>' + C.escapeHtml(w) + '</p></div>').join('')
+      ? warnings.map(C.noticeCard).join('')
       : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
         '</span><p>' + C.t('home.noNotices') + '</p></div>';
     paint();

@@ -98,13 +98,10 @@
                      detail.notional_usd != null ? C.usd(detail.notional_usd) : null,
                      e.actor && e.actor !== 'system' ? e.actor : null,
                      detail.error || detail.reason || null].filter(Boolean);
-      return C.listRow({
-        id: 'event-' + e.id,
-        title: C.t('ev.' + e.kind) === 'ev.' + e.kind ? e.description : C.t('ev.' + e.kind),
-        sub: parts.join(' · '),
-        value: C.dateTime(e.at),
-        note: e.outcome ? C.code(e.outcome) : '',
-      });
+      const title = C.t('ev.' + e.kind) === 'ev.' + e.kind ? e.description : C.t('ev.' + e.kind);
+      return '<details class="event-card" data-od-id="event-' + C.escapeHtml(e.id) + '"><summary><span><strong>' +
+        C.escapeHtml(title) + '</strong><time>' + C.escapeHtml(C.dateTime(e.at)) + '</time></span><span class="chip">' +
+        C.escapeHtml(e.outcome ? C.code(e.outcome) : '') + '</span></summary><p>' + C.escapeHtml(parts.join(' · ')) + '</p></details>';
     }).join('') : '<div class="empty" data-od-id="empty-audit">' +
         '<p class="empty-title">' + C.t('ac.noEvents') + '</p></div>';
     more.hidden = !cursor;

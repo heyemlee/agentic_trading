@@ -23,6 +23,9 @@ function context(demo = false) {
     return elements.get(id);
   };
   const document = { hidden: false, getElementById: element, querySelector: element,
+    // Pages that style a group of controls read them this way; no test drives a real
+    // collection, so an empty one keeps the render path honest without a DOM.
+    querySelectorAll: () => [],
     addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn); },
     dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
   };
@@ -123,6 +126,48 @@ test('live starts empty; demo never reads or writes the API', async () => {
   assert.equal((await demo.CT_API.post('/proposals/x/approve', {})).blocked, true);
   await flush(); assert.equal(calls, 0);
   assert.ok(demo.CT.proposals.length);
+});
+
+test('initial authentication is loading, then settles without granting writes on failure', async () => {
+  const c = context(); let finish;
+  c.fetch = async url => url === '/auth/session' ? new Promise(resolve => { finish = resolve; }) : response({}, 401);
+  c.run('api.js'); c.CT_API.start(['health']);
+  assert.equal(c.CT_API.state.authPending, true);
+  assert.equal(c.CT_API.writesEnabled, false);
+  finish(response({}, 401)); await flush();
+  assert.equal(c.CT_API.state.authPending, false);
+  assert.equal(c.CT_API.authenticated, false);
+  assert.equal(c.CT_API.canAct(['health']), false);
+});
+
+test('portfolio keeps broker snapshots separate from strategy money and labels stale data', () => {
+  const c = context(true); c.run('console.js');
+  c.Console.mount = () => {};
+  let optional;
+  c.Console.live = (keys, render, extra) => { optional = extra; c.render = render; render(); };
+  c.CT_API = { isLive: () => false };
+  c.CT.advisor = { stale: true, snapshot: { fetched_at: '2026-09-09T12:00:00Z', accounts: [
+    { label: 'Account <img>', equity_usd: 5000, cash_usd: null, complete: false, positions: [
+      { symbol: 'AAPL', quantity: 3, average_cost: 200, market_value_usd: 600, unrealized_pct: 0 }
+    ] }
+  ] } };
+  c.run('pages/portfolio.js');
+  assert.equal(optional[0], 'advisor');
+  assert.match(c.element('broker-accounts').innerHTML, /Account &lt;img&gt;/);
+  assert.match(c.element('broker-accounts').innerHTML, /5,000/);
+  assert.match(c.element('broker-accounts').innerHTML, /ux.incompleteAccount/);
+  assert.match(c.element('broker-stamp').textContent, /ai.stale/);
+  assert.equal(c.element('pf-total').textContent, c.Console.usd(c.CT.portfolio.buckets.micro_live.equity_usd));
+  c.CT.advisor = {}; c.render();
+  assert.equal(c.element('broker-accounts').innerHTML, '');
+  assert.equal(c.element('broker-stamp').textContent, 'ai.empty');
+});
+
+test('shared notice card keeps the full warning and escapes its text', () => {
+  const c = context(); c.run('console.js');
+  const html = c.Console.noticeCard('Trading blocked <script> details', 0);
+  assert.match(html, /Trading blocked &lt;script&gt; details/);
+  assert.match(html, /notice-card/);
 });
 
 test('one successful endpoint cannot hide another failure or enable approval', async () => {

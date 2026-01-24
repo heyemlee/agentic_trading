@@ -232,7 +232,11 @@
     }
     const rows = Object.entries(CT_API.state.resources).filter(([key]) => CT_API.SOURCES[key].path());
     const missing = rows.filter(([key]) => !CT_API.isLive(key));
-    if (!CT_API.authenticated) {
+    const loading = CT_API.state.authPending || (CT_API.authenticated && missing.length && missing.every(([, item]) => item.error === 'loading'));
+    if (loading) {
+      bar.className = 'conn-bar is-loading';
+      bar.textContent = t('ux.connecting');
+    } else if (!CT_API.authenticated) {
       bar.textContent = zh ? '未登录 · 请登录后查看账户或操作' : 'Not signed in · Sign in to view your account or act';
     } else if (!rows.length) {
       bar.textContent = zh ? '正在读取真实数据…' : 'Loading account data…';
@@ -245,17 +249,23 @@
     }
     let details = document.getElementById('resource-status');
     if (!details) {
-      details = document.createElement('details'); details.id = 'resource-status'; details.className = 'container body-sm';
-      const summary = document.createElement('summary'); summary.textContent = zh ? '数据来源与更新时间' : 'Data sources and timestamps';
-      details.appendChild(summary); bar.after(details);
+      details = document.createElement('div'); details.id = 'resource-status'; details.className = 'container';
+      details.innerHTML = '<button class="sync-pill" data-open-sheet="sources-sheet" aria-haspopup="dialog"><span id="sync-dot" class="dot"></span><span id="sync-label"></span>' + CHEVRON + '</button>';
+      bar.after(details);
+      document.body.insertAdjacentHTML('beforeend', '<dialog id="sources-sheet" class="glass-sheet" data-glass-sheet aria-labelledby="sources-title">' +
+        '<div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="sources-title"></h2>' +
+        '<button class="circle-control" data-close-sheet="sources-sheet" data-i18n-aria="common.close" aria-label="' + t('common.close') + '">' + ICON.cross + '</button></div><div id="source-rows"></div></dialog>');
     }
-    details.querySelectorAll('p').forEach(node => node.remove());
-    rows.forEach(([key, item]) => {
-      const row = document.createElement('p');
-      row.textContent = key + ' · ' + (CT_API.isLive(key) ? (zh ? '实时' : 'current') : (zh ? '过期/不可用' : 'stale/unavailable')) +
-        ' · ' + (item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—');
-      details.appendChild(row);
-    });
+    document.getElementById('sync-label').textContent = t(loading ? 'ux.connecting' : missing.length ? 'ux.syncGap' : 'ux.synced');
+    document.getElementById('sync-dot').className = 'dot ' + (missing.length || !CT_API.authenticated || !CT_API.state.online ? 'dot-warn' : 'dot-ok');
+    document.getElementById('sources-title').textContent = t('ux.sources');
+    document.getElementById('source-rows').innerHTML = rows.map(([key, item]) => {
+      const label = t('ux.source.' + key);
+      return '<div class="source-row"><span class="dot ' + (CT_API.isLive(key) ? 'dot-ok' : 'dot-warn') + '"></span><div><strong>' +
+        escapeHtml(label.startsWith('ux.source.') ? key : label) + '</strong><p>' +
+        escapeHtml(t(CT_API.isLive(key) ? 'ux.current' : 'ux.unavailable')) + '</p></div><time>' +
+        escapeHtml(item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—') + '</time></div>';
+    }).join('');
   }
 
   /* The switch shows the language you would move to, not the current one. */
@@ -269,6 +279,16 @@
   }
 
   function mount(activeKey) {
+    document.addEventListener('click', event => {
+      const open = event.target.closest?.('[data-open-sheet]');
+      const close = event.target.closest?.('[data-close-sheet]');
+      if (open) openSheet(open.dataset.openSheet);
+      if (close) closeSheet(close.dataset.closeSheet);
+      if (event.target.matches?.('dialog[data-glass-sheet]')) closeSheet(event.target.id);
+    });
+    document.addEventListener('cancel', event => {
+      if (event.target.matches?.('dialog[data-glass-sheet]')) { event.preventDefault(); closeSheet(event.target.id); }
+    }, true);
     document.body.insertAdjacentHTML('afterbegin', renderChrome(activeKey));
     document.body.insertAdjacentHTML('beforeend', renderFoot());
     const header = document.querySelector('.topnav');
@@ -334,7 +354,7 @@
      Pass the CT keys this screen reads and a render function. render()
      waits for initial live data (or explicit demo fixtures) and runs again
      after each resource update. */
-  function live(keys, render) {
+  function live(keys, render, optionalKeys = []) {
     keys = [...new Set(['health', ...keys])];
     const draw = () => {
       const loaded = CT_API.loaded(keys);
@@ -345,7 +365,7 @@
     draw();
     if (!window.CT_API) return;
     document.addEventListener('ct:data', draw);
-    CT_API.start(keys);
+    CT_API.start([...new Set([...keys, ...optionalKeys])]);
     paintConnection();
   }
 
@@ -496,6 +516,28 @@
       '</div></div>';
   }
 
+  function noticeCard(message, index) {
+    return '<article class="notice-card" data-od-id="warning-' + index + '"><span class="notice-icon">' + ICON.info +
+      '</span><div><p class="notice-label">' + t('home.notices') + ' · ' + String(index + 1).padStart(2, '0') +
+      '</p><p>' + escapeHtml(message) + '</p></div></article>';
+  }
+  const sheetOrigins = new Map();
+  function openSheet(id) {
+    const sheet = document.getElementById(id);
+    if (!sheet || sheet.open) return;
+    sheetOrigins.set(id, document.activeElement);
+    sheet.classList.remove('is-closing');
+    sheet.showModal();
+  }
+  function closeSheet(id) {
+    const sheet = document.getElementById(id);
+    if (!sheet || !sheet.open || sheet.classList.contains('is-closing')) return;
+    sheet.classList.add('is-closing');
+    setTimeout(() => {
+      sheet.close(); sheet.classList.remove('is-closing');
+      sheetOrigins.get(id)?.focus?.(); sheetOrigins.delete(id);
+    }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
+  }
   window.Console = {
     D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
     SHOW_CONCEPTUAL, showsBucket, showsAccount,
@@ -503,6 +545,6 @@
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,
-    mount, wireTabs, live, paintConnection, paintFoot, tickValue,
+    mount, wireTabs, live, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
   };
 })();

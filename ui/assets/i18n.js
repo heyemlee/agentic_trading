@@ -26,6 +26,25 @@ window.I18N = (function () {
 
   const DICT = {
     en: {
+      'ux.draftRestored': 'Draft restored in this tab · not sent or saved to your profile.',
+      'ux.connecting': 'Connecting…', 'ux.advanced': 'Advanced settings',
+      'ux.brokerScope': 'Robinhood accounts · saved read-only snapshot', 'ux.strategyFunds': 'Strategy-managed funds',
+      'ux.strategyBoundary': 'This is a separate view of strategy funds, not your total Robinhood assets. Do not add these amounts to the accounts above.',
+      'ux.incompleteAccount': 'Account data is incomplete. Some positions may be missing.',
+      'ux.diagnostics': 'System diagnostics & schedules', 'ux.devices': 'Devices & notifications',
+      'ux.tracking': 'Order tracking', 'ux.trackingNote': 'Local record · Check synchronization time and any errors.',
+      'ux.synced': 'Data status', 'ux.syncGap': 'Check data connection', 'ux.sources': 'Data connections',
+      'ux.current': 'Current', 'ux.unavailable': 'Stale or unavailable',
+      'ux.source.health': 'System', 'ux.source.portfolio': 'Portfolio', 'ux.source.risk': 'Risk checks',
+      'ux.source.proposals': 'Approvals', 'ux.source.microLive': 'Live account', 'ux.source.research': 'Research',
+      'ux.source.orders': 'Orders', 'ux.source.advisor': 'Assistant',
+      'ux.search': 'Search a stock or ETF', 'ux.review': 'Review', 'ux.activity': 'Activity',
+      'ux.personalHint': 'Your goals, timeline & preferences', 'ux.notesExample': 'What are you investing for? When might you need this money?',
+      'ux.activeJobs': '{n} tasks in progress', 'ux.recentJobs': '{n} recent tasks', 'ux.noTasks': 'Your activity will appear here.',
+      'ux.conversation': 'Conversation {n}', 'ux.researchDetail': 'Research detail',
+      'ux.task.chat': 'Investment conversation', 'ux.task.refresh': 'Account refresh', 'ux.task.shortlist': 'Candidate shortlist', 'ux.task.analysis': 'Full research',
+      'ux.taskHint.chat': 'Personal context and research', 'ux.taskHint.refresh': 'Holdings and saved candidates',
+      'ux.taskHint.shortlist': 'Research priorities for your profile', 'ux.taskHint.analysis': 'Evidence, risks and conclusions',
       'nav.advisor': 'Assistant', 'nav.hint.research': 'Full research and agent reports',
       'bucket.advisory': 'Read-only review', 'code.READ_ONLY': 'Read-only analysis',
       'ai.title': 'Investment assistant', 'ai.eyebrow': 'PERSONAL INVESTING',
@@ -390,6 +409,25 @@ window.I18N = (function () {
     },
 
     zh: {
+      'ux.draftRestored': '已恢复此标签页中的草稿 · 尚未发送或保存到个人资料。',
+      'ux.connecting': '正在连接…', 'ux.advanced': '高级设置',
+      'ux.brokerScope': 'Robinhood 各账户 · 已保存的只读快照', 'ux.strategyFunds': '策略管理资金',
+      'ux.strategyBoundary': '这里单独展示策略资金，并非 Robinhood 全部资产，请勿与上方账户金额相加。',
+      'ux.incompleteAccount': '账户数据不完整，部分持仓可能尚未显示。',
+      'ux.diagnostics': '系统诊断与研究计划', 'ux.devices': '设备与通知',
+      'ux.tracking': '订单追踪', 'ux.trackingNote': '本地记录 · 请核对同步时间与错误信息。',
+      'ux.synced': '数据状态', 'ux.syncGap': '检查数据连接', 'ux.sources': '数据连接',
+      'ux.current': '数据有效', 'ux.unavailable': '过期或暂不可用',
+      'ux.source.health': '系统状态', 'ux.source.portfolio': '投资组合', 'ux.source.risk': '风险检查',
+      'ux.source.proposals': '待办审批', 'ux.source.microLive': '实盘账户', 'ux.source.research': '研究记录',
+      'ux.source.orders': '订单状态', 'ux.source.advisor': '投资助手',
+      'ux.search': '搜索股票或 ETF 代码', 'ux.review': '研究', 'ux.activity': '任务动态',
+      'ux.personalHint': '投资目标、用钱时间与偏好', 'ux.notesExample': '你想实现什么目标？这笔钱预计什么时候会用到？',
+      'ux.activeJobs': '{n} 个任务正在进行', 'ux.recentJobs': '最近 {n} 个任务', 'ux.noTasks': '开始聊天或研究后，动态会出现在这里。',
+      'ux.conversation': '对话 {n}', 'ux.researchDetail': '研究详情',
+      'ux.task.chat': '投资对话', 'ux.task.refresh': '账户刷新', 'ux.task.shortlist': '候选初筛', 'ux.task.analysis': '完整研究',
+      'ux.taskHint.chat': '个人情况与研究讨论', 'ux.taskHint.refresh': '持仓与自选候选',
+      'ux.taskHint.shortlist': '适合你的研究优先项', 'ux.taskHint.analysis': '证据、风险与研究结论',
       'nav.advisor': '助手', 'nav.hint.research': '完整研究与 Agent 报告',
       'bucket.advisory': '只读分析', 'code.READ_ONLY': '只读分析',
       'ai.title': '投资助手', 'ai.eyebrow': '个人投资',
@@ -762,6 +800,9 @@ window.I18N = (function () {
     });
     r.querySelectorAll('[data-i18n-html]').forEach((el) => {
       el.innerHTML = t(el.getAttribute('data-i18n-html'));
+    });
+    r.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+      el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria')));
     });
     r.querySelectorAll('[data-i18n-ph]').forEach((el) => {
       el.placeholder = t(el.getAttribute('data-i18n-ph'));

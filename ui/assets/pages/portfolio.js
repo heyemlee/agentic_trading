@@ -4,6 +4,21 @@
 
   /* Everything below is re-run on every poll cycle. */
   function render() {
+    const saved = D.advisor || {}, snapshot = saved.snapshot || {};
+    const live = window.CT_API.isLive('advisor');
+    document.getElementById('broker-stamp').textContent = snapshot.fetched_at
+      ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) }) : C.t('ai.empty');
+    const money = value => value == null ? '—' : C.usd(value);
+    document.getElementById('broker-accounts').innerHTML = (snapshot.accounts || []).map(a =>
+      '<article class="account-glass"><div class="section-head"><h2>' + C.escapeHtml(a.label) + '</h2><span class="chip">' + C.t('ai.readOnly') + '</span></div>' +
+      '<p class="figure">' + money(a.equity_usd) + '</p><p class="body-sm body-muted">' + C.t('ai.cash') + ' ' + money(a.cash_usd) + '</p>' +
+      (!a.complete ? '<p class="body-sm">' + C.t('ux.incompleteAccount') + '</p>' : '') +
+      (a.positions || []).map(p => C.listRow({ title: p.symbol,
+        sub: C.t('ai.cost') + ' ' + money(p.average_cost) + ' · ' + p.quantity,
+        value: money(p.market_value_usd), note: p.unrealized_pct == null ? '—' : C.pct(p.unrealized_pct),
+        href: 'research.html?ticker=' + encodeURIComponent(p.symbol) })).join('') +
+      (!(a.positions || []).length && a.complete ? '<p class="body-sm">' + C.t('ai.noPositions') + '</p>' : '') + '</article>'
+    ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + C.escapeHtml(snapshot.errors.join(' · ')) + '</p>' : '');
 
     const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
     const B = D.portfolio.buckets;
@@ -111,5 +126,5 @@
     }).join('');
   }
 
-  C.live(['portfolio'], render);
+  C.live(['portfolio'], render, ['advisor']);
 })();

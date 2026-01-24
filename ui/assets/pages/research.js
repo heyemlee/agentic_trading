@@ -2,9 +2,17 @@
   const C = window.Console, D = C.D;
   C.mount('research');
   C.wireTabs();
+  const startSection = document.querySelector('[data-od-id="start-run"]');
+  const chartSection = document.querySelector('[data-od-id="confidence-chart"]');
+  chartSection.before(startSection);
+  const paintScope = () => {
+    document.getElementById('run-scope').textContent = C.t('rs.bucket') + ' · ' + C.bucket(document.getElementById('f-bucket').value);
+  };
+  document.getElementById('f-bucket').addEventListener('change', paintScope);
 
   /* Everything below is re-run on every poll cycle. */
   function render() {
+    paintScope();
 
     const FLOOR = 50;
 

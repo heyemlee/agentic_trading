@@ -31,7 +31,7 @@ window.CT_API = (function () {
       },
     },
   };
-  const state = { online: null, demo, resources: {}, live: {}, lastOkAt: null, lastError: null };
+  const state = { online: null, demo, authPending: !demo, resources: {}, live: {}, lastOkAt: null, lastError: null };
   const timers = [];
   const inFlight = new Map();
 
@@ -134,10 +134,12 @@ window.CT_API = (function () {
   function stop() { while (timers.length) clearInterval(timers.pop()); }
   async function loadSession() {
     if (demo) return;
+    state.authPending = true;
     try {
       auth = await fetchJSON('/auth/session');
       if (!auth.authenticated) unauthorized();
-    } catch (e) { unauthorized(); }
+    } catch (e) { unauthorized(false); }
+    state.authPending = false;
     document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
   }
   function start(keys) {

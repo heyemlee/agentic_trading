@@ -258,9 +258,7 @@
     const w = D.health.warnings || [];
     $('warn-count').textContent = C.t('common.open', { n: w.length });
     $('warning-list').innerHTML = w.length
-      ? w.map((x, i) =>
-          '<div class="banner" data-od-id="warning-' + i + '">' +
-            '<span class="banner-mark">' + C.ICON.info + '</span><p>' + C.escapeHtml(x) + '</p></div>').join('')
+      ? w.map(C.noticeCard).join('')
       : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
         '</span><p>' + C.t('home.noNotices') + '</p></div>';
   }
