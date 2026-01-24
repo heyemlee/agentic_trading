@@ -53,6 +53,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable, RunnableLambda
 from pydantic import BaseModel, Field
 
+from ..agent_roster import role_for_node
 from .analyst_roles import analyst_role
 
 # Variables that would move billing to the API or to a cloud provider. Stripped
@@ -238,6 +239,28 @@ def _persist_usage(entry: dict[str, Any], work_dir: str | None) -> None:
         pass  # auditing must never break an analysis
 
 
+def append_progress(path: str | None, event: dict[str, Any]) -> None:
+    """Append one line to a run's ``progress.jsonl``, the console's only live signal.
+
+    The report tree is written in one go after the whole graph finishes, so without this
+    file a run in flight can only be described as "running". One line per model call, with
+    the upstream node name it came from, is what lets a desk light up while it is working.
+
+    Like the usage audit beside it, this must never break an analysis: a failed write
+    costs a progress line, not a run.
+    """
+    if not path:
+        return
+    try:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"t": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **event},
+                                default=str) + "\n")
+    except OSError:
+        pass
+
+
 def scrubbed_environment(base: dict[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ if base is None else base)
     for var in BILLING_ENV_VARS + NESTED_SESSION_VARS:
@@ -255,6 +278,9 @@ class ClaudeCodeChatModel(BaseChatModel):
     max_turns_ceiling: int = 24
     claude_bin: str | None = None
     work_dir: str | None = None
+    # Where to append this run's progress events. Set per run by the graph; None for the
+    # personal assistant and for tests, which have no office to light up.
+    progress_path: str | None = None
     config_dir: str | None = None
     tool_names: list[str] = Field(default_factory=list)
     tool_server_module: str = "agentic_trading.llm.ta_tool_server"
@@ -400,6 +426,14 @@ class ClaudeCodeChatModel(BaseChatModel):
         if cwd:
             Path(cwd).mkdir(parents=True, exist_ok=True)
 
+        # LangGraph names the node it is currently executing in the run metadata it passes
+        # down. That name is the only thing tying a model call to a desk in the console, and
+        # it costs nothing upstream: no node is modified to report it.
+        metadata = getattr(run_manager, "metadata", None) or {}
+        node = metadata.get("langgraph_node")
+        progress = {"node": node, "role": role_for_node(node), "model": self.role}
+        append_progress(self.progress_path, {"kind": "call_started", **progress})
+
         started = time.time()
         try:
             proc = subprocess.run(
@@ -445,6 +479,11 @@ class ClaudeCodeChatModel(BaseChatModel):
         }
         USAGE_LOG.append(entry)
         _persist_usage(entry, self.work_dir)
+        append_progress(self.progress_path, {
+            "kind": "call_finished", **progress,
+            "wall_seconds": entry["wall_seconds"],
+            "tools": sorted({str(call.get("name")) for call in tool_calls if call.get("name")}),
+        })
 
         message = AIMessage(
             content=text,

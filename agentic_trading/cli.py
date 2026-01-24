@@ -26,7 +26,13 @@ from .evidence import collect_evidence, foreign_bucket_mentions
 from .execution import execute as execute_proposal
 from .execution import revalidate
 from .graph import AgenticTradingGraph, classify_instrument
-from .llm.claude_code import USAGE_LOG, ClaudeCodeError, reset_usage_log, usage_summary
+from .llm.claude_code import (
+    USAGE_LOG,
+    ClaudeCodeError,
+    append_progress,
+    reset_usage_log,
+    usage_summary,
+)
 from .policy import PolicyDecision, run_policy
 from .portfolio import (
     PortfolioError,
@@ -157,6 +163,12 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     run_id = run_id or f"{trade_date}_{ticker.upper().replace('/', '-')}_{uuid.uuid4().hex[:8]}"
     run_dir = runs_dir / run_id
     _print(f"[{ticker}] {instrument_type} | bucket={bucket} | analysts={analysts} | run={run_id}")
+    progress_path = str(run_dir / "progress.jsonl")
+    # Written before the portfolio snapshot, so a run that fails closed before any model call
+    # still tells the console which desks it was going to use.
+    append_progress(progress_path, {"kind": "run_started", "ticker": ticker, "bucket": bucket,
+                                    "instrument_type": instrument_type, "analysts": analysts,
+                                    "trade_date": trade_date})
 
     try:
         snap, ladders, regime, portfolio_text = portfolio_context(profiles, trade_date, bucket)
@@ -167,7 +179,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     _print(f"[{ticker}] ladder={gov.level} ({gov.drawdown_pct:+.2f}%) | regime={regime.level} | bucket cash=${snap.buckets[bucket].cash_usd:,.2f}")
 
     graph = AgenticTradingGraph(profiles, instrument_type=instrument_type, bucket=bucket, debug=debug,
-                                     portfolio_text=portfolio_text)
+                                     portfolio_text=portfolio_text, run_dir=run_dir)
     try:
         final_state, pm_signal = graph.propagate(ticker, trade_date, asset_type=asset_type)
     except ClaudeCodeError as exc:
@@ -238,6 +250,13 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     record["llm_calls_audit_file"] = str(runs_dir / "llm_calls.jsonl")
     record["started_at"] = started_at
     record_path = write_record(run_dir / "decision_record.json", record)
+    # The last line the console reads for this run: what the deterministic gate decided, which
+    # is never what an agent decided.
+    append_progress(progress_path, {"kind": "run_finished", "policy_action": policy.final_action,
+                                    "confidence": policy.confidence,
+                                    "hard_risk": result.verdict,
+                                    "final_action": final["action"],
+                                    "proposal_id": record.get("proposal_id")})
     usage = record["llm_usage"]
     _print(f"[{ticker}] PM rating: {pm_signal} | policy: {policy.final_action} ({policy.size_hint}) "
            f"| confidence: {policy.confidence} | reviewer: {policy.llm_action}")

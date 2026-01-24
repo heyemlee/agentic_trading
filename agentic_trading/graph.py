@@ -38,7 +38,8 @@ class _ClaudeCodeClient(BaseLLMClient):
         return True
 
 
-def make_llm_factory(profiles: Profiles, work_dir: str | None = None):
+def make_llm_factory(profiles: Profiles, work_dir: str | None = None,
+                     progress_path: str | None = None):
     """Return a drop-in replacement for upstream ``create_llm_client``."""
     from .llm.web_fetch import load_policy
 
@@ -57,6 +58,7 @@ def make_llm_factory(profiles: Profiles, work_dir: str | None = None):
             max_turns_ceiling=profiles.llm.max_turns_ceiling,
             claude_bin=profiles.llm.claude_bin,
             work_dir=work_dir or str(profiles.project_dir / "runs" / ".claude_workdir"),
+            progress_path=progress_path,
             config_dir=str(profiles.config_dir),
             role=role,
             web_policy=web_policy,
@@ -97,6 +99,7 @@ class AgenticTradingGraph(TradingAgentsGraph):
         callbacks: list | None = None,
         llm_factory=None,
         portfolio_text: str = "",
+        run_dir: Path | None = None,
     ):
         self.profiles = profiles
         self.portfolio_text = portfolio_text
@@ -112,7 +115,10 @@ class AgenticTradingGraph(TradingAgentsGraph):
         # test writing to a temp results_dir cannot append to the real runs/ log.
         if llm_factory is None:
             factory = make_llm_factory(
-                profiles, work_dir=str(Path(config["results_dir"]).parent / ".claude_workdir")
+                profiles, work_dir=str(Path(config["results_dir"]).parent / ".claude_workdir"),
+                # Per run, beside that run's own reports: the console reads one file and
+                # never has to separate two concurrent runs sharing a directory.
+                progress_path=str(run_dir / "progress.jsonl") if run_dir else None,
             )
 
         with mock.patch.object(upstream_module, "create_llm_client", factory):

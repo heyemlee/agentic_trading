@@ -51,6 +51,21 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     assert rec["final_recommendation"]["action"] == "NO_TRADE"
     assert StateDB(state_dir / "risk_state.json").read_document(state_dir / "risk_state.json") is not None
 
+    # The console reads this file, and only this file, while a run is still working: the
+    # report tree beside it is written in one go at the end and says nothing before that.
+    events = [json.loads(line) for line in
+              (records[0].parent / "progress.jsonl").read_text().splitlines()]
+    opened, closed = events[0], events[-1]
+    assert opened["kind"] == "run_started"
+    assert opened["ticker"] == "VTI" and opened["analysts"] == ["market", "news"]
+    # The last word belongs to the deterministic side, never to a desk.
+    assert closed["kind"] == "run_finished"
+    assert closed["policy_action"] == "NO_TRADE" and closed["hard_risk"] == "NO_ACTION"
+    assert closed["final_action"] == "NO_TRADE" and closed["proposal_id"] is None
+    desks = {e["role"] for e in events if e["kind"] == "call_finished"}
+    assert desks == {"market", "news", "bull", "bear", "manager", "trader",
+                     "aggressive", "neutral", "conservative", "portfolio"}
+
 
 def _cfg(profiles, tmp_path):
     from copy import deepcopy

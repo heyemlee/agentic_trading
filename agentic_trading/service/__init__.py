@@ -20,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .. import autonomy
+from .. import agent_roster, autonomy
 from ..broker import make_broker
 from ..broker.base import BrokerError
 from ..env import load_env
@@ -893,7 +893,12 @@ class Service:
             pass
         except OSError as exc:
             text = f"log unavailable: {exc}"
-        return {**job, "log_tail": text[-4000:],
+        # The worker names the run directory after the run key, so one lookup reaches the
+        # events this run has appended. The containment check is what stops a crafted key
+        # from reading a jsonl file elsewhere on disk.
+        run_dir = (profiles.project_dir / "runs" / run_key).resolve()
+        progress = self._research_progress(run_dir) if runs_root in run_dir.parents else None
+        return {**job, "log_tail": text[-4000:], "progress": progress,
                 **({"assistant_result": self._advisor_result(run_key)} if job.get("task") else {})}
 
     def research_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -1315,6 +1320,10 @@ class Service:
                         "group_label": self._TRACE_GROUPS.get(group_dir.name,
                                                               group_dir.name.replace("_", " ")),
                         "key": path.stem,
+                        # The report stem and the console's role key differ for the portfolio
+                        # manager (decision.md), so carry both rather than make every reader
+                        # know that exception.
+                        "role": agent_roster.BY_REPORT.get(path.stem),
                         "label": self._TRACE_STEPS.get(path.stem, path.stem.replace("_", " ")),
                         "chars": len(text),
                         "truncated": full and len(text) > self._TRACE_CHAR_CAP,
@@ -1327,6 +1336,7 @@ class Service:
             "ticker": record.get("ticker"), "bucket": record.get("bucket"),
             "trade_date": record.get("trade_date"), "created_at": record.get("created_at"),
             "stage": record.get("stage"), "elapsed_seconds": record.get("elapsed_seconds"),
+            "instrument_type": record.get("instrument_type"),
             "analysts": record.get("analysts") or [],
             "models": record.get("models") or {},
             "llm_usage": record.get("llm_usage") or {},
@@ -1337,6 +1347,95 @@ class Service:
             "proposal_id": record.get("proposal_id"),
             "error": record.get("error"),
             "steps": steps,
+        }
+
+    #: Progress lines returned with a run. A long analysis writes a few dozen; the cap is
+    #: there so a pathological run cannot make the polling response unbounded.
+    _PROGRESS_EVENT_CAP: ClassVar = 200
+
+    def _research_progress(self, run_dir: Path) -> dict[str, Any] | None:
+        """What a run in flight has done so far, from the events its model calls append.
+
+        The report tree is written in one go when the whole graph finishes, so it says
+        nothing while a run is working. ``progress.jsonl`` is appended per model call and is
+        the only signal that can tell one desk from another before the run ends.
+
+        Only two desk states are reported here, and both are facts the file states outright:
+        a call is open (``working``), or the last one returned (``done``). Whether a desk is
+        idle, skipped for this instrument, or stalled is a judgement about the clock and the
+        roster, and belongs to the caller that has both.
+        """
+        try:
+            lines = (run_dir / "progress.jsonl").read_text(encoding="utf-8").splitlines()
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        except OSError:
+            return None
+
+        events: list[dict[str, Any]] = []
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # the worker may be mid-write on the final line
+            if isinstance(event, dict) and event.get("kind"):
+                events.append(event)
+
+        desks: dict[str, dict[str, Any]] = {}
+        started: dict[str, Any] = {}
+        finished: dict[str, Any] | None = None
+        for event in events:
+            kind = event.get("kind")
+            if kind == "run_started":
+                started = event
+                continue
+            if kind == "run_finished":
+                finished = event
+                continue
+            role = event.get("role")
+            if not role or kind not in ("call_started", "call_finished"):
+                continue
+            desk = desks.setdefault(role, {"calls": 0, "wall_seconds": 0.0, "tools": []})
+            desk["last_at"] = event.get("t")
+            if kind == "call_started":
+                desk["state"] = "working"
+                desk["calls"] += 1
+            else:
+                desk["state"] = "done"
+                desk["wall_seconds"] = round(
+                    desk["wall_seconds"] + float(event.get("wall_seconds") or 0.0), 1)
+                desk["tools"] = sorted({*desk["tools"], *(event.get("tools") or [])})
+        return {
+            "ticker": started.get("ticker"),
+            "bucket": started.get("bucket"),
+            "instrument_type": started.get("instrument_type"),
+            "analysts": started.get("analysts") or [],
+            "started_at": started.get("t"),
+            "desks": desks,
+            "result": finished,
+            "last_event_at": events[-1].get("t") if events else None,
+            "events": events[-self._PROGRESS_EVENT_CAP:],
+        }
+
+    def research_roster(self) -> dict[str, Any]:
+        """The research team, and which analysts each instrument type actually starts.
+
+        The console draws one desk per role. Without this it would keep a second copy of the
+        team and of the analyst selection in ``config/``, and disagree with the engine the
+        first time either changed — showing a desk that no longer runs, or missing one that
+        does.
+        """
+        profiles = self.profiles()
+        return {
+            "groups": [{"key": key, "directory": directory}
+                       for key, directory in agent_roster.GROUPS],
+            "roles": [dict(role) for role in agent_roster.ROLES],
+            "analysts": {kind: list(profiles.analysts_for(kind))
+                         for kind in ("etf", "stock", "crypto")},
+            # How long one model call may run before the adapter gives up. A desk whose call
+            # has been open longer than this is genuinely stuck, so the console can say so
+            # from configuration rather than from a guessed timeout of its own.
+            "call_timeout_seconds": int(profiles.llm.timeout_seconds),
         }
 
     def research_history(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -1356,6 +1455,9 @@ class Service:
             out.append({
                 "run_id": d.get("run_id"), "ticker": d.get("ticker"), "bucket": d.get("bucket"),
                 "trade_date": d.get("trade_date"), "created_at": d.get("created_at"),
+                # Which desks this run seated. The console shows the team per run rather than
+                # inferring an instrument type back out of the analyst list.
+                "instrument_type": d.get("instrument_type"),
                 "portfolio_manager_rating": (d.get("upstream_decision") or {}).get("portfolio_manager_signal"),
                 "policy_action": policy.get("final_action"), "confidence": policy.get("confidence"),
                 # Evidence quality travels with the decision: a run that concluded without the

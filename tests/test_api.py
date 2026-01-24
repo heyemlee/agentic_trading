@@ -259,3 +259,85 @@ def test_a_deposit_is_funding_and_never_a_return(sandbox_service):
     out = sandbox_service.portfolio()["accounts"]["conceptual"]
     assert out["recorded_flows_usd"] == 150.0
     assert out["investment_pnl_usd"] == 0.0
+
+
+# ----------------------------------------------------- the research-room console
+def test_research_roster_is_the_one_copy_of_the_team(sandbox_service):
+    """The console draws desks from this, so it must answer from config, not a second list."""
+    roster = sandbox_service.research_roster()
+    keys = [role["key"] for role in roster["roles"]]
+
+    assert len(keys) == 12 and len(set(keys)) == 12
+    # The portfolio manager writes decision.md; its desk is still called "portfolio".
+    assert {"key": "portfolio", "group": "portfolio", "node": "Portfolio Manager",
+            "report": "decision", "analyst": None} in roster["roles"]
+
+    # The stall threshold the console shows comes from config, not from a guess in the UI.
+    assert roster["call_timeout_seconds"] == sandbox_service.profiles().llm.timeout_seconds
+
+    analysts = roster["analysts"]
+    assert analysts["stock"] == sandbox_service.profiles().analysts_for("stock")
+    assert "fundamentals" not in analysts["etf"], "an ETF has no statements to analyse"
+    assert "fundamentals" not in analysts["crypto"]
+    # Every selectable analyst has a desk to sit at.
+    for kind in ("etf", "stock", "crypto"):
+        assert set(analysts[kind]) <= {r["analyst"] for r in roster["roles"] if r["analyst"]}
+
+
+def test_research_progress_reports_only_what_the_run_wrote(sandbox_service, tmp_path):
+    """Two desk states, both facts: a call is open, or the last one returned.
+
+    Idle, skipped and stalled are judgements about the roster and the clock, and are the
+    caller's to make. Inventing them here would put a desk state in the record that no
+    event supports.
+    """
+    run_dir = tmp_path / "runs" / "2026-09-10_VTI_abc"
+    run_dir.mkdir(parents=True)
+    (run_dir / "progress.jsonl").write_text("\n".join([
+        json.dumps({"t": "2026-09-10T14:00:00-0700", "kind": "run_started", "ticker": "VTI",
+                    "analysts": ["market", "news"], "instrument_type": "etf"}),
+        json.dumps({"t": "2026-09-10T14:00:01-0700", "kind": "call_started",
+                    "node": "Market Analyst", "role": "market"}),
+        json.dumps({"t": "2026-09-10T14:00:29-0700", "kind": "call_finished",
+                    "node": "Market Analyst", "role": "market", "wall_seconds": 28.0,
+                    "tools": ["get_indicators"]}),
+        json.dumps({"t": "2026-09-10T14:00:30-0700", "kind": "call_started",
+                    "node": "Bull Researcher", "role": "bull"}),
+    ]) + "\n")
+
+    progress = sandbox_service._research_progress(run_dir)
+
+    assert progress["analysts"] == ["market", "news"]
+    assert progress["desks"]["market"] == {
+        "calls": 1, "wall_seconds": 28.0, "tools": ["get_indicators"],
+        "last_at": "2026-09-10T14:00:29-0700", "state": "done"}
+    assert progress["desks"]["bull"]["state"] == "working"
+    assert "bear" not in progress["desks"], "a desk with no event has no reported state"
+    assert progress["result"] is None  # the run has not reached the deterministic gate
+    assert progress["last_event_at"] == "2026-09-10T14:00:30-0700"
+
+
+def test_research_progress_tolerates_a_line_still_being_written(sandbox_service, tmp_path):
+    """The worker appends while the console polls, so the last line can be half a line."""
+    run_dir = tmp_path / "runs" / "2026-09-10_VTI_def"
+    run_dir.mkdir(parents=True)
+    (run_dir / "progress.jsonl").write_text(
+        json.dumps({"t": "2026-09-10T14:00:01-0700", "kind": "call_started", "role": "market"})
+        + '\n{"t": "2026-09-10T14:00:29-0700", "kind": "call_fin')
+
+    progress = sandbox_service._research_progress(run_dir)
+
+    assert progress["desks"]["market"]["state"] == "working"
+    assert len(progress["events"]) == 1
+
+
+def test_research_progress_is_absent_rather_than_empty_before_a_run_writes(sandbox_service, tmp_path):
+    assert sandbox_service._research_progress(tmp_path / "runs" / "nothing-here") is None
+
+
+def test_roster_route_is_matched_before_the_run_key_route(auth_client):
+    """/research/roster must not be read as a run whose key happens to be "roster"."""
+    schema = auth_client.get("/openapi.json").json()
+    paths = list(schema["paths"])
+    assert "/research/roster" in paths
+    assert paths.index("/research/roster") < paths.index("/research/{run_key}")

@@ -402,6 +402,14 @@ def research_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50) -> list[dict[
     return _ok(_service.research_jobs, limit)
 
 
+# Declared before /research/{run_key} so the literal path wins the match, exactly as
+# /research/jobs above it does.
+@app.get("/research/roster", tags=["research"],
+         summary="The research team, and which analysts each instrument type starts")
+def research_roster() -> dict[str, Any]:
+    return _ok(_service.research_roster)
+
+
 class CancelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str | None = Field(None, max_length=500)
