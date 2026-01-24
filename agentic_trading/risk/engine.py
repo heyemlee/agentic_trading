@@ -516,6 +516,20 @@ class HardRiskEngine:
             rule("HR12", "new positions per day", today < per_day, f"{today} opened today vs max {per_day}")
             rule("HR12b", "new positions per week", week < per_week, f"{week} opened this week vs max {per_week}")
 
+        # HR23 the autonomous allowance: the share of the account code may have opened for
+        # itself at any one time. Measured on provenance rather than on a separate sub-account,
+        # so it is one pool of cash with a boundary drawn through it. A position a person later
+        # adds to still counts, because the alternative would free capacity by touching it.
+        allowance = self._cfg("buckets", prop.bucket, "autonomy", "open", "max_pct_of_account",
+                              default=None)
+        if prop.autonomous and allowance is not None and bucket.allocation_usd:
+            held = sum(p.market_value for p in bucket.positions
+                       if str(p.opened_by or "").startswith("autonomy:"))
+            post = (held + notional) / bucket.allocation_usd * 100.0
+            rule("HR23", "autonomous allowance", post <= float(allowance) + 1e-9,
+                 f"positions opened without a person would be {post:.1f}% of the account "
+                 f"vs a limit of {float(allowance):.0f}%")
+
         # HR22 daily loss gate. It stops the day from compounding: after a bad enough day the
         # answer to "should we open something else" is no, whatever the analysis says. Realized
         # only — a gate measured on unrealized marks would fire because the market moved, which

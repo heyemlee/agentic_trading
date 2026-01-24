@@ -809,3 +809,90 @@ def test_a_ledger_written_before_this_existed_still_loads(tmp_path):
     state = load_portfolio(_ledger(tmp_path))     # no realized key at all
     assert state.realized == []
     assert realized_on(state, "core", TRADE_DATE) == 0.0
+
+
+# -- HR23: the autonomous allowance --------------------------------------------------
+#
+# The one place code may create risk rather than cut it. Measured on provenance, because one
+# brokerage account holds one pool of cash: the boundary is drawn through it, not around a
+# separate account the venue would not know about.
+
+def _autonomous_buy(profiles, *, cash=1000.0, positions=(), ticker="BND"):
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={MICRO: {"cash_usd": cash}},
+                           positions=[dict(p) for p in positions], recent_opens=[])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, None, None, None,
+                     micro_live_equity=snap.buckets[MICRO].equity)
+    prop = Proposal(ticker=ticker, bucket=MICRO, action="BUY", size_hint="small", confidence=85,
+                    trade_date=TRADE_DATE,
+                    cls=classify_instrument(ticker, profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified", autonomous=True,
+                    evidence=collect_evidence(ticker, TRADE_DATE, price_lookup=price_lookup))
+    return HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+
+
+def _opened(symbol, quantity, basis, by):
+    return {"symbol": symbol, "bucket": MICRO, "quantity": quantity,
+            "cost_basis_per_share": basis, "opened_by": by}
+
+
+def test_the_allowance_counts_only_what_code_opened_for_itself(profiles):
+    # A person's $700 of VTI does not consume the allowance.
+    held = [_opened("VTI", 2.0, 350.0, None)]
+    result = _autonomous_buy(profiles, cash=300.0, positions=held)
+    allowance = next(r for r in result.rules if r.rule_id == "HR23")
+    assert allowance.passed, allowance.detail
+
+
+def test_the_allowance_is_a_ceiling_on_what_it_holds_at_once(profiles):
+    # ~$226 of BND opened autonomously against a ~$1,000 account is already past 20%.
+    held = [_opened("BND", 3.15, 71.83, "autonomy:open")]
+    result = _autonomous_buy(profiles, cash=774.0, positions=held, ticker="SGOV")
+    allowance = next(r for r in result.rules if r.rule_id == "HR23")
+    assert not allowance.passed and "vs a limit of 20%" in allowance.detail
+    assert result.verdict == "REJECT"
+
+
+def test_a_person_adding_to_it_does_not_free_up_the_allowance(tmp_path):
+    # opened_by is set once and never rewritten, so topping up a position code opened cannot
+    # quietly make room for another one.
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import apply_fill_to_ledger, load_portfolio
+
+    _profiles(tmp_path)
+    path = _ledger(tmp_path)
+    apply_fill_to_ledger(path, symbol="VTI", bucket="core", side="buy", quantity=1.0, price=300.0,
+                         trade_date=TRADE_DATE, client_order_id="ct-a", opened_by="autonomy:open")
+    apply_fill_to_ledger(path, symbol="VTI", bucket="core", side="buy", quantity=1.0, price=320.0,
+                         trade_date=TRADE_DATE, client_order_id="ct-b", opened_by="owner")
+    position = load_portfolio(path).position("VTI")
+    assert position.quantity == 2.0
+    assert position.opened_by == "autonomy:open", "a top-up must not launder the provenance"
+
+
+def test_a_human_approved_buy_is_not_measured_against_the_allowance(profiles):
+    held = [_opened("BND", 3.15, 71.83, "autonomy:open")]
+    from agentic_trading.portfolio import PortfolioState
+    from agentic_trading.risk.ladder import LadderState, LadderStates, evaluate_ladders
+
+    state = PortfolioState(as_of=TRADE_DATE, buckets={MICRO: {"cash_usd": 774.0}},
+                           positions=[dict(p) for p in held], recent_opens=[])
+    snap = build_snapshot(state, profiles, TRADE_DATE, price_lookup, identity_lookup)
+    ladders = LadderStates(LadderState(3000.0), LadderState(2500.0), LadderState(500.0),
+                           LadderState(100.0))
+    evaluate_ladders(ladders, profiles, TRADE_DATE, None, None, None,
+                     micro_live_equity=snap.buckets[MICRO].equity)
+    prop = Proposal(ticker="SGOV", bucket=MICRO, action="BUY", size_hint="small", confidence=85,
+                    trade_date=TRADE_DATE, cls=classify_instrument("SGOV", profiles, identity_lookup),
+                    data_quality="good", strategy="long_only_diversified", autonomous=False,
+                    evidence=collect_evidence("SGOV", TRADE_DATE, price_lookup=price_lookup))
+    result = HardRiskEngine(profiles, halt_file="/nonexistent/HALT").evaluate(
+        prop, snap, ladders, regime())
+    assert "HR23" not in {r.rule_id for r in result.rules}, \
+        "the allowance bounds what code may do, not what a person may"

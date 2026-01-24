@@ -632,7 +632,10 @@ def _record_order_transaction(profiles, proposal, order, store, *, submitted, ou
             ledger, symbol=order.symbol, bucket=proposal.bucket, side=order.side,
             quantity=order.filled_quantity, price=order.filled_avg_price,
             trade_date=utcnow().astimezone(ZoneInfo("America/New_York")).date().isoformat(),
-            client_order_id=proposal.client_order_id)
+            client_order_id=proposal.client_order_id,
+            # Provenance for the autonomous allowance: a position opened without a person is
+            # measured against it for as long as it is held.
+            opened_by=proposal.approved_by)
         # These events are durable in the ledger and can be exported again after a crash.
         for event in state.applied_orders[proposal.client_order_id]["events"]:
             _append_fill(profiles, proposal, order, event)

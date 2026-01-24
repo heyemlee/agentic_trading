@@ -39,6 +39,11 @@ class Position(BaseModel):
     quantity: float = Field(gt=0)
     cost_basis_per_share: float = Field(gt=0)
     opened_on: str | None = None
+    #: Who opened it. None is a person, or a ledger written before this was recorded. Set once
+    #: and never rewritten: if a person later adds to a position autonomy opened, it still
+    #: counts against the autonomous allowance, because the alternative frees capacity by
+    #: touching it.
+    opened_by: str | None = None
 
 
 class RecentOpen(BaseModel):
@@ -267,6 +272,7 @@ class PositionView:
     unrealized_pct: float
     weight_pct_of_bucket: float
     cls: InstrumentClass
+    opened_by: str | None = None
 
 
 @dataclass
@@ -353,7 +359,7 @@ def build_snapshot(
         view = PositionView(symbol=p.symbol.upper(), bucket=p.bucket, quantity=p.quantity, price=price,
                             price_date=price_date, market_value=mv, cost_basis=cost,
                             unrealized_pct=(mv / cost - 1.0) * 100.0 if cost else 0.0,
-                            weight_pct_of_bucket=0.0, cls=cls)
+                            weight_pct_of_bucket=0.0, cls=cls, opened_by=p.opened_by)
         b = buckets[p.bucket]
         b.positions.append(view)
         b.market_value += mv
@@ -432,8 +438,10 @@ def snapshot_from_broker(
     positions, prices = [], {}
     for bp in broker_positions:
         symbol = bp.symbol.upper()
+        prior = ledger.position(symbol)
         positions.append(Position(symbol=symbol, bucket=bucket_of[symbol], quantity=bp.quantity,
-                                  cost_basis_per_share=bp.average_entry_price))
+                                  cost_basis_per_share=bp.average_entry_price,
+                                  opened_by=prior.opened_by if prior else None))
         prices[symbol] = bp.market_value / bp.quantity if bp.quantity else bp.average_entry_price
     state = PortfolioState(as_of=trade_date, currency=ledger.currency, buckets=ledger.buckets,
                            positions=positions, recent_opens=ledger.recent_opens,
@@ -496,7 +504,8 @@ def record_cash_flow(path: str | Path, *, bucket: str, amount_usd: float, kind: 
 
 
 def apply_fill_to_ledger(path: str | Path, *, symbol: str, bucket: str, side: str, quantity: float,
-                         price: float, trade_date: str, client_order_id: str | None = None) -> PortfolioState:
+                         price: float, trade_date: str, client_order_id: str | None = None,
+                         opened_by: str | None = None) -> PortfolioState:
     """Apply a fill, or a cumulative order observation, in one durable ledger commit.
 
     The cumulative cursor, cash and positions live in the same SQLite transaction as the
@@ -537,7 +546,8 @@ def apply_fill_to_ledger(path: str | Path, *, symbol: str, bucket: str, side: st
             state.buckets[bucket].cash_usd = round(state.buckets[bucket].cash_usd - notional, 2)
             if existing is None:
                 state.positions.append(Position(symbol=symbol, bucket=bucket, quantity=quantity,
-                                                cost_basis_per_share=price, opened_on=trade_date))
+                                                cost_basis_per_share=price, opened_on=trade_date,
+                                                opened_by=opened_by))
                 state.recent_opens.append(RecentOpen(symbol=symbol, bucket=bucket, date=trade_date))
             else:
                 total = existing.quantity + quantity

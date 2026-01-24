@@ -271,6 +271,22 @@ buckets:
     # to autonomous opening, where an escalating ladder is a reason to stop; applying it to a
     # reduction would withdraw the ability to cut risk at the moment the ladder says to cut it.
     autonomy:
+      # The allowance: the share of the account code may have opened for itself at any one
+      # time. Not a separate sub-account — one brokerage account holds one pool of cash — but a
+      # boundary drawn through it on provenance, so it is measurable without pretending the
+      # venue knows about envelopes. A position opened without a person counts against this for
+      # as long as it is held, including after a person adds to it.
+      #
+      # This is the only place in the system where code may create risk rather than cut it.
+      # It stays off until every one of these is true, and each is a separate decision:
+      #   * positions exist, bought by hand, and their decision records read well
+      #   * config/event_calendar.yaml is populated — an autonomous open fails closed without it
+      #   * the daily loss gate has been seen to work on real fills
+      open:
+        enabled: false                     # ARM LAST, and separately from reduce
+        max_pct_of_account: 20             # $200 of $1,000, inside the low tier only
+        classes: [broad_diversified_etf, bond_or_cash_like_etf]
+        max_new_positions_per_day: 1
       reduce:
         enabled: false                     # ARM SEPARATELY, and only once positions exist
         min_confidence: 80                 # the same floor confidence_requirements sets for any
