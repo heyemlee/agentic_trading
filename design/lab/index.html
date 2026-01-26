@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>研究室 · Lab</title>
+  <meta name="description" content="研究室独立设计预览：十二位研究角色、离散事件与审批边界。">
+  <link rel="stylesheet" href="lab.css">
+  <link rel="stylesheet" href="pixel-office.css">
+  <script src="pixel-office.js" defer></script>
+  <script src="lab.js" defer></script>
+
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <a class="brand" href="./" aria-label="研究室首页"><span class="brand-mark">L<span>·</span></span><span>研究室 <small>LAB</small></span></a>
+      <div class="header-actions"><span class="preview-tag">设计预览</span><button id="theme" class="icon-button" aria-label="切换深浅主题">◐</button></div>
+    </header>
+    <section class="now" aria-label="现在" aria-live="polite">
+      <span class="now-label">现在</span><div class="now-copy"><strong id="now-title">Bull 研究员正在思考</strong><span id="now-caption">第 1 轮 · 41 秒</span></div>
+      <div class="budget"><strong>2 <span>/ 6</span></strong><small>今日分析</small></div>
+    </section>
+    <main>
+      <div class="workbar">
+        <div class="instrument" role="group" aria-label="标的类型"><button data-instrument="stock">股票</button><button data-instrument="crypto">加密货币</button><button data-instrument="etf" aria-pressed="true">ETF</button></div>
+        <div class="run-choice"><span id="symbol">SPY</span><select id="mode" aria-label="页面模式"><option value="replay">回放</option><option value="running">运行中示例</option><option value="rest">休息中</option></select></div>
+      </div>
+      <div class="workspace">
+        <section class="office-panel" aria-label="办公室">
+          <div class="scene-head"><div><span class="eyebrow">RESEARCH FLOOR</span><h1 id="office-title">SPY · 研究办公室</h1></div><span id="mode-badge" class="mode-badge">回放 · 示例</span></div>
+          <div class="scene" id="scene"><div class="scene-canvas">
+            <canvas id="pixel-office" width="320" height="296" role="img" aria-label="像素研究办公室：分析区、辩论桌、交易与评级台、风险评估区"></canvas>
+            <div id="gestures" class="gestures" aria-hidden="true"></div>
+            <div id="vacancies" class="vacancies" aria-hidden="true"></div>
+            <div id="rig-seat" class="rig-seat"></div>
+            <div class="office-labels" aria-hidden="true"><span style="left:15%;top:15.5%">分析工位</span><span style="left:68%;top:17%">研究讨论</span><span style="left:12%;top:65%">交易与评级</span><span style="left:63%;top:64%">风险评估</span></div>
+            <div id="people" class="people"></div>
+            <div id="walker" class="walker" data-direction="away" hidden aria-hidden="true"><span></span><small id="walk-speech" hidden>聊聊你的观点？</small></div>
+            <div id="ambient-bubbles" class="ambient-bubbles" aria-hidden="true"></div>
+            <div id="flying-file" class="flying-file" hidden aria-hidden="true">▤</div>
+          </div></div>
+          <div class="scene-bottom"><span id="scene-caption">12 个角色 · 点击角色查看详情</span><button id="walk" class="text-button">让所选 Agent 去交流 ↗</button></div>
+          <div class="ambience-controls"><span>像素办公室 · 打字 / 阅读 / 往返交流</span><button id="ambient" class="text-button" aria-pressed="true">暂停办公室动态</button></div>
+          <div class="pixel-credit">角色与家具源自 <a href="https://github.com/pixel-agents-hq/pixel-agents">Pixel Agents</a> · <a href="vendor/pixel-agents/NOTICE.md">MIT / 素材署名</a></div>
+          <div class="replay-controls" id="replay-controls"><button id="previous" class="secondary">上个事件</button><div><span id="event-number">事件 04 / 09</span><small>按事件回放</small></div><button id="next" class="primary">下个事件 →</button></div>
+          <div id="rest-note" class="rest-note" hidden>今日还可分析 4 次 · 下次自动运行：9 月 15 日 06:30 PDT</div>
+        </section>
+        <aside class="sidebar">
+          <section class="selected panel" aria-live="polite">
+            <div class="section-top"><span class="eyebrow">DESK / <span id="selected-zone">辩论桌</span></span><span id="selected-state" class="state-tag">思考中</span></div>
+            <div class="selected-title"><div id="portrait" class="portrait"></div><div><h2 id="selected-name">Bull 研究员</h2><p id="selected-meta">第 1 轮 · 已持续 41 秒</p></div></div>
+            <blockquote id="selected-bubble">正在整理第一轮看多论点，尚未交出新报告。</blockquote>
+            <div id="selected-reason" class="reason"></div>
+          </section>
+          <section class="team panel"><div class="section-top"><h2>工位</h2><span id="team-count" class="muted">11 个启用</span></div><div id="roster"></div></section>
+          <section class="gate panel"><div class="section-top"><h2>规则与审批</h2><span class="rule-label">确定性规则</span></div><div id="gate-result"></div><button class="approval" disabled>等待规则结果</button><p class="caption">经理给出评级，执行仍由规则和你决定。</p></section>
+          <section class="activity panel"><div class="section-top"><h2>活动流</h2><span class="muted">离散事件</span></div><ol id="events"></ol></section>
+        </aside>
+      </div>
+
+      <details class="state-studio"><summary>设计检视 · 七种桌位状态</summary><p>选择状态，查看同一角色在不同状态下的呈现。</p><div id="state-options" class="state-options"></div><div id="state-description" aria-live="polite"></div><button id="clear-state" class="text-button">回到示例事件</button></details>
+    </main>
+    <footer>独立设计预览 · 全部为示例数据 · 未连接交易服务 <a href="assets.html">角色素材一览 ↗</a></footer>
+  </div>
+</body>
+</html>
