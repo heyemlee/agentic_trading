@@ -615,3 +615,195 @@ test('every script and stylesheet a page loads is actually shipped', () => {
                 `${file} loads ${target}, which does not exist`);
     }
 });
+
+/* ── the research room ────────────────────────────────────────────────
+   The office draws one run. These cases pin the line the page must not cross:
+   a desk changes only because an event says so, and the decision shown in the
+   gate is the deterministic one, never a desk's. */
+function labPage(options = {}) {
+  const c = context(options.demo === true);
+  c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.keys = keys; c.render = render; render(); };
+  c.matchMedia = () => ({ matches: true, addEventListener() {} });   // reduced motion: no animation in tests
+  c.document.documentElement = { dataset: {} };
+  c.requestAnimationFrame = (fn) => fn();
+  c.labPixelScene = {
+    seats: Array.from({ length: 12 }, (_, i) => ({ x: i, y: i })),
+    synced: null,
+    sync(data) { this.synced = data; },
+    stop() {}, walk: () => 'started',
+  };
+  if (!options.demo) c.CT.labRoster = options.roster || roster();
+  if (!options.demo) c.CT.research = options.research || [];
+  if (!options.demo) {
+    c.CT.researchJobs = options.jobs || [];
+    c.CT.researchRun = options.run || null;
+    c.CT.schedule = options.schedule || { analyses_today: 2, daily_budget: 6, next_run_at: '2026-09-15T13:30:00+00:00' };
+  }
+  c.CT_API = { activeRun: null, watchRun(key) { this.activeRun = key; this.watched = key; },
+               fetchJSON: options.fetchJSON || (async () => { throw new Error('no trace expected'); }) };
+  c.run('pages/lab.js');
+  return c;
+}
+const ROLES = [
+  ['market', 'analysts', 'Market Analyst', 'market', 'market'],
+  ['social', 'analysts', 'Sentiment Analyst', 'social', 'social'],
+  ['news', 'analysts', 'News Analyst', 'news', 'news'],
+  ['fundamentals', 'analysts', 'Fundamentals Analyst', 'fundamentals', 'fundamentals'],
+  ['bull', 'research', 'Bull Researcher', 'bull', null],
+  ['bear', 'research', 'Bear Researcher', 'bear', null],
+  ['manager', 'research', 'Research Manager', 'manager', null],
+  ['trader', 'trading', 'Trader', 'trader', null],
+  ['aggressive', 'risk', 'Aggressive Analyst', 'aggressive', null],
+  ['neutral', 'risk', 'Neutral Analyst', 'neutral', null],
+  ['conservative', 'risk', 'Conservative Analyst', 'conservative', null],
+  ['portfolio', 'portfolio', 'Portfolio Manager', 'decision', null],
+];
+const roster = () => ({
+  groups: [], call_timeout_seconds: 900,
+  roles: ROLES.map(([key, group, node, report, analyst]) => ({ key, group, node, report, analyst })),
+  analysts: { etf: ['market', 'news'], stock: ['market', 'social', 'news', 'fundamentals'],
+              crypto: ['market', 'social', 'news'] },
+});
+const deskStates = (c) => Object.fromEntries(
+  c.labPixelScene.synced.roles.map((r) => [r.id, r.state]));
+
+test('desks are seated from the run itself, not from a list the page keeps', async () => {
+  const trace = {
+    run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+    policy_action: 'NO_TRADE', hard_risk_verdict: 'NO_ACTION', confidence: 38, elapsed_seconds: 412.6,
+    steps: [
+      { order: 1, role: 'market', key: 'market', label: 'Market analyst', chars: 6743,
+        markdown: '**Interpretation:** Trend is intact, `SMA` stacked.' },
+      { order: 2, role: 'news', key: 'news', label: 'News analyst', chars: 4100, markdown: 'Nothing changes the thesis.' },
+      { order: 3, role: 'portfolio', key: 'decision', label: 'Portfolio decision', chars: 900, markdown: 'Hold.' },
+    ],
+  };
+  const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                                   policy_action: 'NO_TRADE', hard_risk_verdict: 'NO_ACTION', confidence: 38,
+                                   final_action: 'NO_TRADE', proposal_id: null }],
+                       fetchJSON: async () => trace });
+  await flush();
+  c.render();
+
+  const states = deskStates(c);
+  // The two analysts an ETF run never seats, with the engine's own reason rather than a guess.
+  assert.equal(states.fundamentals, 'disabled');
+  assert.equal(states.social, 'disabled');
+  assert.equal(states.market, 'done');
+  assert.equal(states.portfolio, 'done');
+  // A desk that never reported is waiting, not quietly drawn as finished.
+  assert.equal(states.bull, 'waiting');
+  assert.match(c.element('#roster').innerHTML, /fundamentals/);
+  // The engine's words survive; only the markdown markup around them is dropped.
+  const roster = c.element('#roster').innerHTML;
+  assert.match(roster, /Interpretation: Trend is intact, SMA stacked\./);
+  assert.doesNotMatch(roster, /\*\*|`/);
+  assert.match(c.element('#team-count').textContent, /10/);
+});
+
+test('a live run lights only the desks its own events name', async () => {
+  const c = labPage({
+    jobs: [{ run_key: 'live1', ticker: 'VTI', trade_date: '2026-09-10', bucket: 'core',
+             instrument_type: 'etf', state: 'RUNNING' }],
+    run: { run_key: 'live1', state: 'RUNNING', progress: {
+      analysts: ['market', 'news'], started_at: new Date().toISOString(),
+      desks: {
+        market: { state: 'done', calls: 1, wall_seconds: 28, tools: ['get_indicators'], last_at: new Date().toISOString() },
+        bull: { state: 'working', calls: 1, wall_seconds: 0, tools: [], last_at: new Date().toISOString() },
+      },
+      result: null, events: [], last_event_at: new Date().toISOString(),
+    } },
+  });
+  await flush();
+
+  const states = deskStates(c);
+  assert.equal(states.market, 'done');
+  assert.equal(states.bull, 'thinking');
+  assert.equal(states.bear, 'waiting');       // no event yet, so no claim about it
+  assert.equal(c.CT_API.watched, 'live1');    // the run poll follows the run on screen
+  // No progress bar and no percentage: the engine reports discrete events only.
+  assert.ok(!/%/.test(c.element('#now-caption').textContent));
+});
+
+test('a desk is only called stalled once its call outlives the configured timeout', async () => {
+  const old = new Date(Date.now() - 1000 * 1000).toISOString();   // beyond 900s
+  const recent = new Date(Date.now() - 60 * 1000).toISOString();
+  const page = (last) => labPage({
+    jobs: [{ run_key: 'l', ticker: 'VTI', trade_date: '2026-09-10', instrument_type: 'etf', state: 'RUNNING' }],
+    run: { run_key: 'l', state: 'RUNNING', progress: { analysts: ['market', 'news'], desks: {
+      bull: { state: 'working', calls: 1, wall_seconds: 0, tools: [], last_at: last } },
+      result: null, events: [], last_event_at: last } },
+  });
+  assert.equal(deskStates(page(recent)).bull, 'thinking');
+  assert.equal(deskStates(page(old)).bull, 'stalled');
+});
+
+test('a finished run numbers its stages instead of inventing timestamps', async () => {
+  const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+    policy_action: 'NO_TRADE', hard_risk_verdict: 'NO_ACTION', confidence: 38,
+    steps: [{ order: 1, role: 'market', key: 'market', label: 'Market analyst', chars: 6743, markdown: 'Trend is intact.' }] };
+  const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                                   policy_action: 'NO_TRADE', final_action: 'NO_TRADE' }],
+                      fetchJSON: async () => trace });
+  await flush();
+  c.render();
+
+  const feed = c.element('#events').innerHTML;
+  assert.match(feed, /#01/);
+  assert.doesNotMatch(feed, /\d{2}:\d{2}:\d{2}/, 'a report tree carries an order, not a clock');
+});
+
+test('the gate reports the deterministic verdict and offers no approval without a proposal', async () => {
+  const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+    policy_action: 'NO_TRADE', hard_risk_verdict: 'NO_ACTION', confidence: 38, steps: [] };
+  const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                                   policy_action: 'NO_TRADE', hard_risk_verdict: 'NO_ACTION', confidence: 38,
+                                   final_action: 'NO_TRADE', proposal_id: null }],
+                      fetchJSON: async () => trace });
+  await flush();
+  c.render();
+
+  const gate = c.element('#gate-result').innerHTML;
+  assert.match(gate, /No Trade/);          // C.code() renders the engine's own verdict
+  assert.match(gate, /38/);
+  assert.equal(c.element('.lab-approval').disabled, true);
+});
+
+test('an empty deployment says so instead of drawing a run that never happened', () => {
+  const c = labPage({ research: [], jobs: [] });
+  const states = deskStates(c);
+  assert.ok(Object.values(states).every((s) => ['waiting', 'disabled'].includes(s)));
+  assert.equal(c.element('#now-title').textContent, 'lab.noRuns');
+  assert.equal(c.element('#symbol').textContent, '—');
+});
+
+test('demo mode fills the room from the shipped recording and asks the API for nothing', () => {
+  const c = labPage({ demo: true, fetchJSON: async () => { throw new Error('demo must not reach the API'); } });
+
+  const states = deskStates(c);
+  // The shipped fixture is a real ETF run, so the two desks it never seated stay empty.
+  assert.equal(states.fundamentals, 'disabled');
+  assert.equal(states.social, 'disabled');
+  assert.equal(states.market, 'done');
+  assert.match(c.element('#events').innerHTML, /#01/);
+  assert.match(c.element('#gate-result').innerHTML, /No Trade/);
+  assert.equal(c.element('.lab-demo-note').hidden, false);
+});
+
+test('reports that name a different run are refused, not drawn on this office', async () => {
+  const other = { run_id: 'someone-else', ticker: 'BND', instrument_type: 'etf',
+                  analysts: ['market', 'news'], policy_action: 'NO_TRADE',
+                  steps: [{ order: 1, role: 'market', key: 'market', label: 'Market analyst',
+                            chars: 100, markdown: 'Reports from the wrong run.' }] };
+  const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04',
+                                   instrument_type: 'etf', policy_action: 'NO_TRADE' }],
+                      fetchJSON: async () => other });
+  await flush();
+  c.render();
+
+  assert.equal(deskStates(c).market, 'waiting', 'no desk may show another run’s report');
+  assert.doesNotMatch(c.element('#roster').innerHTML, /wrong run/);
+  assert.equal(c.element('.lab-demo-note').hidden, false);
+});

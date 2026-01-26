@@ -121,6 +121,7 @@
     portfolio: sv('<path d="M4 19.5V11M9.3 19.5V6M14.7 19.5v-5.5M20 19.5V8.5"/>', 2),
     approvals: sv('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>'),
     research: sv('<circle cx="10.8" cy="10.8" r="6.3"/><path d="M15.4 15.4L20 20"/>'),
+    lab: sv('<path d="M8 3v5l-4 9a2.5 2.5 0 002.3 3.5h11.4A2.5 2.5 0 0020 17l-4-9V3M7 12h10M7 3h10"/>'),
     more: sv('<circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>' +
              '<circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>' +
              '<circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>'),
@@ -136,6 +137,7 @@
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'research',  tab: true },
+    { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
     { href: 'research.html',  key: 'research',  icon: 'research' },
     { href: 'risk.html',      key: 'risk' },
     { href: 'activity.html',  key: 'activity' },

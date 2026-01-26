@@ -21,6 +21,9 @@ window.CT_API = (function () {
     proposals: { path: () => '/proposals', ms: 15000 },
     orders: { path: () => '/orders', ms: 10000 },
     research: { path: () => '/research?limit=20', ms: 60000 },
+    // The team and the analyst selection come from config/ and change about never,
+    // so this is read once a session rather than polled like live state.
+    labRoster: { path: () => '/research/roster', ms: 900000 },
     researchJobs: { path: () => '/research/jobs?limit=20', ms: 10000 },
     researchRun: { path: () => activeRun ? '/research/' + encodeURIComponent(activeRun) : null, ms: 5000 },
     proposalDetail: {

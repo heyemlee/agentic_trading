@@ -15,6 +15,7 @@ window.CT = (function () {
     schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
+    labRoster: null, labTrace: {},
     orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
   };
   const health = {
@@ -309,9 +310,10 @@ window.CT = (function () {
   };
 
   const research = [
-    { run_id: "2026-09-02_VTI_2bf5a8b5", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-02", created_at: "2026-09-04T00:09:52.569799+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 420.9 },
-    { run_id: "2026-09-02_VTI_f819eaa6", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", created_at: "2026-09-03T21:05:24.598310+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 57, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 582.7 },
-    { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
+    { run_id: "2026-09-04_VTI_873e64ae", ticker: "VTI", bucket: "core", trade_date: "2026-09-04", instrument_type: "etf", created_at: "2026-09-05T06:18:43.090801+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 412.6 },
+    { run_id: "2026-09-02_VTI_2bf5a8b5", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-04T00:09:52.569799+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 420.9 },
+    { run_id: "2026-09-02_VTI_f819eaa6", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T21:05:24.598310+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 57, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 582.7 },
+    { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
   ];
 
   const schedule = {
@@ -391,12 +393,291 @@ window.CT = (function () {
     kinds: {},
   };
 
+  const labRoster = {
+    "groups": [
+      {
+        "key": "analysts",
+        "directory": "1_analysts"
+      },
+      {
+        "key": "research",
+        "directory": "2_research"
+      },
+      {
+        "key": "trading",
+        "directory": "3_trading"
+      },
+      {
+        "key": "risk",
+        "directory": "4_risk"
+      },
+      {
+        "key": "portfolio",
+        "directory": "5_portfolio"
+      }
+    ],
+    "roles": [
+      {
+        "key": "market",
+        "group": "analysts",
+        "node": "Market Analyst",
+        "report": "market",
+        "analyst": "market"
+      },
+      {
+        "key": "social",
+        "group": "analysts",
+        "node": "Sentiment Analyst",
+        "report": "social",
+        "analyst": "social"
+      },
+      {
+        "key": "news",
+        "group": "analysts",
+        "node": "News Analyst",
+        "report": "news",
+        "analyst": "news"
+      },
+      {
+        "key": "fundamentals",
+        "group": "analysts",
+        "node": "Fundamentals Analyst",
+        "report": "fundamentals",
+        "analyst": "fundamentals"
+      },
+      {
+        "key": "bull",
+        "group": "research",
+        "node": "Bull Researcher",
+        "report": "bull",
+        "analyst": null
+      },
+      {
+        "key": "bear",
+        "group": "research",
+        "node": "Bear Researcher",
+        "report": "bear",
+        "analyst": null
+      },
+      {
+        "key": "manager",
+        "group": "research",
+        "node": "Research Manager",
+        "report": "manager",
+        "analyst": null
+      },
+      {
+        "key": "trader",
+        "group": "trading",
+        "node": "Trader",
+        "report": "trader",
+        "analyst": null
+      },
+      {
+        "key": "aggressive",
+        "group": "risk",
+        "node": "Aggressive Analyst",
+        "report": "aggressive",
+        "analyst": null
+      },
+      {
+        "key": "neutral",
+        "group": "risk",
+        "node": "Neutral Analyst",
+        "report": "neutral",
+        "analyst": null
+      },
+      {
+        "key": "conservative",
+        "group": "risk",
+        "node": "Conservative Analyst",
+        "report": "conservative",
+        "analyst": null
+      },
+      {
+        "key": "portfolio",
+        "group": "portfolio",
+        "node": "Portfolio Manager",
+        "report": "decision",
+        "analyst": null
+      }
+    ],
+    "analysts": {
+      "etf": [
+        "market",
+        "news"
+      ],
+      "stock": [
+        "market",
+        "social",
+        "news",
+        "fundamentals"
+      ],
+      "crypto": [
+        "market",
+        "social",
+        "news"
+      ]
+    },
+    "call_timeout_seconds": 900
+  };
+
+  const labTrace = {
+    "2026-09-04_VTI_873e64ae": {
+      "run_id": "2026-09-04_VTI_873e64ae",
+      "ticker": "VTI",
+      "bucket": "core",
+      "trade_date": "2026-09-04",
+      "created_at": "2026-09-05T06:18:43.090801+00:00",
+      "stage": 3,
+      "instrument_type": "etf",
+      "elapsed_seconds": 412.6,
+      "analysts": [
+        "market",
+        "news"
+      ],
+      "llm_usage": {
+        "calls": 13,
+        "input_tokens": 32,
+        "output_tokens": 28011,
+        "cache_creation_input_tokens": 150833,
+        "cache_read_input_tokens": 71336,
+        "list_price_equivalent_usd": 1.424,
+        "wall_seconds": 411.4,
+        "tool_calls": 16,
+        "models": [
+          "claude-opus-5",
+          "claude-sonnet-5"
+        ],
+        "billing": "claude_subscription_via_claude_code_cli"
+      },
+      "confidence": 38,
+      "policy_action": "NO_TRADE",
+      "hard_risk_verdict": "NO_ACTION",
+      "final_action": "NO_TRADE",
+      "proposal_id": null,
+      "error": null,
+      "steps": [
+        {
+          "order": 1,
+          "group": "1_analysts",
+          "group_label": "Analysts",
+          "key": "market",
+          "role": "market",
+          "label": "Market analyst",
+          "chars": 6743,
+          "truncated": false,
+          "markdown": "**Interpretation (INTERPRETATION):** The stacked order (200 SMA < 50 SMA < 10 EMA ≈ price) is a classic bullish trend alignment. However, the gap between price and the 50/200 SMAs has widened meaningfully since June, which increases the risk of mean-reversion if momentum stalls — this is a broad-mar"
+        },
+        {
+          "order": 2,
+          "group": "1_analysts",
+          "group_label": "Analysts",
+          "key": "news",
+          "role": "news",
+          "label": "News analyst",
+          "chars": 6475,
+          "truncated": false,
+          "markdown": "- 24/7 Wall St. and Motley Fool published multiple long-horizon \"buy and hold\" pieces framing VTI as a default core holding for retirement accounts (401(k) comparisons, 10–20 year projections). These are **editorial/marketing-style content**, not new fundamental data — no changes to fund flows, expe"
+        },
+        {
+          "order": 3,
+          "group": "2_research",
+          "group_label": "Research debate",
+          "key": "bear",
+          "role": "bear",
+          "label": "Bear case",
+          "chars": 10392,
+          "truncated": false,
+          "markdown": "Bear Analyst: **Bear case for VTI — rebuttal**"
+        },
+        {
+          "order": 4,
+          "group": "2_research",
+          "group_label": "Research debate",
+          "key": "bull",
+          "role": "bull",
+          "label": "Bull case",
+          "chars": 8567,
+          "truncated": false,
+          "markdown": "Bull Analyst: Let me open the debate, since the bear hasn't spoken yet."
+        },
+        {
+          "order": 5,
+          "group": "2_research",
+          "group_label": "Research debate",
+          "key": "manager",
+          "role": "manager",
+          "label": "Research manager",
+          "chars": 5475,
+          "truncated": false,
+          "markdown": "**Recommendation**: Hold"
+        },
+        {
+          "order": 6,
+          "group": "3_trading",
+          "group_label": "Trader",
+          "key": "trader",
+          "role": "trader",
+          "label": "Trade plan",
+          "chars": 1106,
+          "truncated": false,
+          "markdown": "**Action**: Hold"
+        },
+        {
+          "order": 7,
+          "group": "4_risk",
+          "group_label": "Risk debate",
+          "key": "aggressive",
+          "role": "aggressive",
+          "label": "Aggressive risk analyst",
+          "chars": 3870,
+          "truncated": false,
+          "markdown": "Aggressive Analyst: Let me open the debate, since neither the conservative nor neutral analyst has spoken yet."
+        },
+        {
+          "order": 8,
+          "group": "4_risk",
+          "group_label": "Risk debate",
+          "key": "conservative",
+          "role": "conservative",
+          "label": "Conservative risk analyst",
+          "chars": 3657,
+          "truncated": false,
+          "markdown": "Conservative Analyst: Let me push back directly on the aggressive analyst's case, because several of these arguments sound compelling but don't hold up under a capital-preservation mandate."
+        },
+        {
+          "order": 9,
+          "group": "4_risk",
+          "group_label": "Risk debate",
+          "key": "neutral",
+          "role": "neutral",
+          "label": "Neutral risk analyst",
+          "chars": 3313,
+          "truncated": false,
+          "markdown": "Neutral Analyst: Both sides are overreaching from the same data set, and it's worth naming exactly where each one slips."
+        },
+        {
+          "order": 10,
+          "group": "5_portfolio",
+          "group_label": "Portfolio manager",
+          "key": "decision",
+          "role": "portfolio",
+          "label": "Portfolio decision",
+          "chars": 4759,
+          "truncated": false,
+          "markdown": "**Rating**: Hold"
+        }
+      ]
+    }
+  };
+
   const orders = { fills: [], open_orders: [], error: null };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications,
+    schedule, operations, notifications, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity,
   };
 })();

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Lab · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css" />
+<link rel="stylesheet" href="assets/lab.css" />
+</head>
+<body>
+<main id="content" class="lab-page" hidden data-i18n-title="lab.title">
+  <div class="lab-container">
+    <section class="lab-now" aria-label="Current activity" aria-live="polite">
+      <span class="lab-now-label" data-i18n="lab.now">Now</span>
+      <div class="lab-now-copy"><strong id="now-title"></strong><span id="now-caption"></span></div>
+      <div class="lab-budget"></div>
+    </section>
+
+    <div class="lab-workbar">
+      <div class="lab-instrument" role="group" aria-label="Instrument type">
+        <button data-instrument="stock" data-i18n="lab.stock">Stocks</button>
+        <button data-instrument="crypto" data-i18n="lab.crypto">Crypto</button>
+        <button data-instrument="etf" aria-pressed="true">ETF</button>
+      </div>
+      <div class="lab-run-choice"><span id="symbol">SPY</span><select id="mode" aria-label="Which run to show"></select></div>
+    </div>
+
+    <div class="lab-workspace">
+      <section class="lab-office" aria-label="Research office">
+        <div class="lab-scene-head"><div><span class="eyebrow">RESEARCH FLOOR</span><h1 id="office-title"></h1></div><span id="mode-badge" class="lab-mode-badge"></span></div>
+        <div class="lab-scene" id="scene"><div class="lab-scene-canvas">
+          <canvas id="pixel-office" width="320" height="296" role="img" aria-label="Pixel research office with four connected work areas"></canvas>
+          <div id="gestures" aria-hidden="true"></div><div id="vacancies" aria-hidden="true"></div><div id="rig-seat"></div>
+          <div class="lab-office-labels" aria-hidden="true"><span style="left:15%;top:15.5%" data-i18n="lab.zone.analysis">Analysis</span><span style="left:68%;top:17%" data-i18n="lab.zone.debate">Debate</span><span style="left:12%;top:65%" data-i18n="lab.zone.trade">Trading & rating</span><span style="left:63%;top:64%" data-i18n="lab.zone.risk">Risk</span></div>
+          <div id="people" class="lab-people"></div>
+          <div id="walker" hidden aria-hidden="true"><span></span><small id="walk-speech" hidden></small></div>
+          <div id="ambient-bubbles" class="lab-ambient-bubbles" aria-hidden="true"></div>
+          <div id="flying-file" class="lab-flying-file" hidden aria-hidden="true">▤</div>
+        </div></div>
+        <div class="lab-scene-bottom"><span id="scene-caption"></span><button id="walk" class="lab-text-button" data-i18n="lab.walk">Send selected Agent to talk ↗</button></div>
+        <div class="lab-ambience"><span data-i18n="lab.motion">Pixel office · typing / reading / visits</span><button id="ambient" class="lab-text-button" aria-pressed="true"></button></div>
+        <div class="lab-demo-note" hidden></div>
+        <div class="lab-replay-controls" id="replay-controls"><button id="previous" class="btn btn-secondary" data-i18n="lab.previous">Previous event</button><div><span id="event-number"></span><small data-i18n="lab.byEvent">Event replay</small></div><button id="next" class="btn btn-primary" data-i18n="lab.next">Next event</button></div>
+        <div id="rest-note" class="lab-rest-note" hidden></div>
+      </section>
+
+      <aside class="lab-sidebar">
+        <section class="lab-panel" aria-live="polite">
+          <div class="lab-section-top"><span class="eyebrow">DESK / <span id="selected-zone"></span></span><span id="selected-state" class="lab-state-tag"></span></div>
+          <div class="lab-selected-title"><div id="portrait" class="lab-portrait"></div><div><h2 id="selected-name"></h2><p id="selected-meta"></p></div></div>
+          <blockquote id="selected-bubble"></blockquote><div id="selected-reason" class="lab-reason"></div>
+        </section>
+        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.desks">Desks</h2><span id="team-count" class="lab-muted"></span></div><div id="roster"></div></section>
+        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.rules">Rules & approval</h2><span class="lab-rule-label" data-i18n="lab.deterministic">Deterministic rules</span></div><div id="gate-result"></div><button class="lab-approval approval" disabled></button><p class="lab-caption" data-i18n="lab.managerLimit">The portfolio manager rates; rules and you still decide execution.</p></section>
+        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.activity">Activity</h2><span class="lab-muted" data-i18n="lab.events">Discrete events</span></div><ol id="events" class="lab-events"></ol></section>
+      </aside>
+    </div>
+
+    <details class="lab-state-studio"><summary data-i18n="lab.inspect">Design review · seven desk states</summary><p data-i18n="lab.inspectHelp">Select a desk and a state to review its treatment.</p><div id="state-options" class="lab-state-options"></div><div id="state-description" aria-live="polite"></div><button id="clear-state" class="lab-text-button" data-i18n="lab.clearState">Return to sample event</button></details>
+  </div>
+</main>
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/lab/pixel-office.js"></script>
+<script src="assets/pages/lab.js"></script>
+</body>
+</html>
