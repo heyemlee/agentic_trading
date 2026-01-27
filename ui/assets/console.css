@@ -287,6 +287,42 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
 .blank-state .blank-mark svg { width: 20px; height: 20px; }
 .blank-state p { margin: 0; font-size: var(--text-sm); }
 
+/* ─── the debate table on the sign-in screen ─────────────────────────
+   pixel-office.js draws the whole 320x296 room; only the debate table is
+   wanted here, so the canvas is drawn at a whole-number scale and offset
+   inside a window cut to that corner. Pixel art only survives integer
+   scaling — 3x keeps every edge, any fraction would soften them.
+
+   Bubble rules are scoped to this block: lab.css defines its own and loads
+   after this file on the lab page, so neither treatment reaches the other. */
+.login-office {
+  --px: 3;                       /* whole pixels only */
+  --crop-x: 200; --crop-y: 56;   /* top-left of the debate table, in room pixels */
+  --crop-w: 96;  --crop-h: 90;   /* stops short of the plant at x294,y38 */
+  margin: 0 0 var(--space-8);
+}
+.login-office-frame {
+  position: relative; overflow: hidden; margin-inline: auto;
+  width: calc(var(--crop-w) * var(--px) * 1px);
+  height: calc(var(--crop-h) * var(--px) * 1px);
+  max-width: 100%;
+  border: 1px solid var(--divider); border-radius: var(--radius-md);
+  background: #e9e5da;
+}
+.login-office canvas {
+  position: absolute;
+  width: calc(320px * var(--px)); height: calc(296px * var(--px));
+  left: calc(var(--crop-x) * var(--px) * -1px);
+  top: calc(var(--crop-y) * var(--px) * -1px);
+  image-rendering: pixelated;
+}
+.login-office-bubbles { position: absolute; inset: 0; pointer-events: none; }
+.login-office figcaption { margin-top: var(--space-3); text-align: center; }
+/* Narrow phones cannot hold 3x; 2x still lands on whole pixels. */
+@media (max-width: 360px) { .login-office { --px: 2; } }
+/* A short viewport belongs to the form. */
+@media (max-height: 700px) { .login-office { display: none; } }
+
 /* ─── picker rows — a setting you choose, then confirm ───────────────
    Used by the language sheet. Tapping a row only marks the choice; nothing
    changes until Confirm, so a stray tap costs nothing. */

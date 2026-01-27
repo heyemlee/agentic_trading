@@ -309,6 +309,57 @@ test('portfolio keeps broker snapshots separate from strategy money and labels s
   assert.equal(c.element('broker-stamp').textContent, 'ai.empty');
 });
 
+function portfolioPage(post, advisor) {
+  const c = context(); c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => {}, post };
+  c.CT.advisor = advisor;
+  c.run('pages/portfolio.js');
+  return c;
+}
+const savedSnapshot = { fetched_at: '2026-09-09T12:00:00Z', accounts: [] };
+
+/* The snapshot is refreshed by an assistant job, and the button that starts
+   one is on another screen. Without this the page tells the reader to refresh
+   and offers nothing to press — which is how a day-old position list came to
+   be read as live. */
+test('a stale broker snapshot refreshes itself once per visit, not once per poll', async () => {
+  const sent = [];
+  const c = portfolioPage(async (path, body) => { sent.push([path, body]); return { run_key: 'advisor_1' }; },
+                          { stale: true, jobs: [], snapshot: savedSnapshot });
+  await flush();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], '/advisor/jobs');
+  assert.equal(sent[0][1].kind, 'refresh');
+
+  c.CT.advisor = { stale: true, snapshot: savedSnapshot,
+                   jobs: [{ run_key: 'advisor_1', state: 'RUNNING', task: { kind: 'refresh' } }] };
+  c.render(); c.render(); await flush();
+  assert.equal(sent.length, 1, 'a running refresh must not be queued again every second');
+  assert.match(c.element('broker-stamp').textContent, /ux.refreshing/);
+
+  c.CT.advisor = { stale: true, snapshot: savedSnapshot,
+                   jobs: [{ run_key: 'advisor_1', state: 'FAILED', task: { kind: 'refresh' },
+                            error: 'Robinhood login expired' }] };
+  c.render(); await flush();
+  assert.match(c.element('broker-stamp').textContent, /ux.refreshFailed Robinhood login expired/);
+  assert.equal(sent.length, 1, 'a failed refresh is reported, never retried in a loop');
+});
+
+test('a current snapshot, and one already being refreshed elsewhere, are left alone', async () => {
+  const fresh = portfolioPage(async () => { throw Error('nothing should be posted'); },
+                              { stale: false, jobs: [], snapshot: savedSnapshot });
+  await flush();
+  assert.match(fresh.element('broker-stamp').textContent, /ai.fresh/);
+
+  const busy = portfolioPage(async () => { throw Error('nothing should be posted'); },
+                             { stale: true, snapshot: savedSnapshot,
+                               jobs: [{ run_key: 'from_assistant', state: 'QUEUED', task: { kind: 'refresh' } }] });
+  await flush();
+  assert.match(busy.element('broker-stamp').textContent, /ai.stale/);
+});
+
 test('shared notice card keeps the full warning and escapes its text', () => {
   const c = context(); c.run('console.js');
   const html = c.Console.noticeCard('Trading blocked <script> details', 0);

@@ -1,13 +1,49 @@
 (function () {
-  const C = window.Console, D = C.D;
+  const C = window.Console, D = C.D, API = window.CT_API;
   C.mount('portfolio');
+
+  /* The Robinhood block is a saved snapshot, written by an assistant refresh
+     job and never by this page's own reads. The only control that starts one
+     is on the assistant screen, so arriving here on a day-old snapshot used to
+     mean reading "refresh for current data" with nothing on the page to press.
+     Ask for one refresh per visit when what is saved has already gone stale.
+
+     A refresh is not free: it is a worker process out of the same concurrency
+     pool as research runs, and it leaves a job and a log behind. So it is
+     asked for only with the tab in front, never while one is already queued or
+     running, and never twice inside a minute of tab-flipping. */
+  const ACTIVE = (job) => job.state === 'QUEUED' || job.state === 'RUNNING';
+  const refreshJobs = (saved) => (saved.jobs || []).filter((job) => (job.task || {}).kind === 'refresh');
+  let armed = true, askedAt = 0, askedFor = null, askError = '';
+  document.addEventListener('visibilitychange', () => { if (document.hidden) armed = true; });
+
+  async function askRefresh(saved) {
+    if (!armed || document.hidden || !API.writesEnabled || !API.isLive('advisor')) return;
+    if (!saved.stale || refreshJobs(saved).some(ACTIVE) || Date.now() - askedAt < 60000) return;
+    armed = false; askedAt = Date.now(); askError = '';
+    try {
+      const job = await API.post('/advisor/jobs', {
+        kind: 'refresh', language: window.I18N.lang, request_id: crypto.randomUUID() });
+      if (job.blocked) return;
+      askedFor = job.run_key;
+      await API.readOnce('advisor');
+    } catch (error) { askError = error.message; }
+  }
 
   /* Everything below is re-run on every poll cycle. */
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
-    const live = window.CT_API.isLive('advisor');
-    document.getElementById('broker-stamp').textContent = snapshot.fetched_at
-      ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) }) : C.t('ai.empty');
+    const live = API.isLive('advisor');
+    /* Only the refresh this page asked for speaks here. An older failure
+       belongs to whoever started it, on the screen they started it from. */
+    const mine = refreshJobs(saved).find((job) => job.run_key === askedFor);
+    document.getElementById('broker-stamp').textContent =
+      askError ? C.t('ux.refreshFailed', { error: askError })
+      : mine && ACTIVE(mine) ? C.t('ux.refreshing')
+      : mine && mine.state !== 'COMPLETE' ? C.t('ux.refreshFailed', { error: mine.error || C.code(mine.state) })
+      : snapshot.fetched_at ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) })
+      : C.t('ai.empty');
+    askRefresh(saved);
     const money = value => value == null ? '—' : C.usd(value);
     document.getElementById('broker-accounts').innerHTML = (snapshot.accounts || []).map(a =>
       '<article class="account-glass"><div class="section-head"><h2>' + C.escapeHtml(a.label) + '</h2><span class="chip">' + C.t('ai.readOnly') + '</span></div>' +

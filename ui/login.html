@@ -20,6 +20,18 @@
 </div></header>
 
 <main class="container section" id="content">
+  <!-- Decoration that must never block the way in: if the sprites fail to load,
+       pixel-office.js writes the reason into the caption and the form below is
+       untouched. -->
+  <figure class="login-office" id="login-office">
+    <div class="login-office-frame">
+      <canvas id="pixel-office" width="320" height="296" role="img"
+              data-i18n-aria="login.office" aria-label="The research floor"></canvas>
+      <div id="ambient-bubbles" class="login-office-bubbles" aria-hidden="true"></div>
+    </div>
+    <figcaption id="scene-caption" class="body-sm body-muted"></figcaption>
+  </figure>
+
   <h1 data-i18n="login.title">Sign in</h1>
   <p class="body-muted" data-i18n="login.subtitle">Agentic Trading · personal console</p>
 
@@ -38,5 +50,7 @@
 
 <script src="assets/i18n.js"></script>
 <script src="assets/login.js"></script>
+<script src="assets/lab/pixel-office.js"></script>
+<script src="assets/lab/login-office.js"></script>
 </body>
 </html>

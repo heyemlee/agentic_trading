@@ -62,6 +62,15 @@ One healthy endpoint cannot clear another endpoint's error. Order responses can
 still show local records when the venue portion fails, with an incomplete-data
 warning. Approval requires all of its critical resources to be current.
 
+One screen also writes without being asked. The Robinhood block on the
+Portfolio screen is a snapshot maintained by an assistant `refresh` job, and
+the button that starts one is on the Assistant screen — so when that snapshot
+is already stale on arrival, the Portfolio page posts a single refresh for it,
+with the tab in front, never while one is already queued or running, and at
+most once a minute. The wait and any failure are written into the timestamp
+line above the accounts. Nothing else in the console posts without a click,
+and this one reaches no order, proposal or approval.
+
 ## Agent trace
 
 `GET /research/{run_id}/trace` returns the run's decision record plus every
