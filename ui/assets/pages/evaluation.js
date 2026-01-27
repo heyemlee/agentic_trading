@@ -2,7 +2,7 @@
   'use strict';
   const C = window.Console, D = C.D;
   const $ = (id) => document.getElementById(id);
-  C.mount('more');
+  C.mount('evaluation');
   $('content').hidden = false;
 
   const percent = (value, signed) => value == null ? '—' :

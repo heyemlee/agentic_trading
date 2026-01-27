@@ -5,6 +5,7 @@ window.CT_API = (function () {
   const demo = window.CT_DEMO === true;
   const TIMEOUT_MS = 15000;
   let activeRun = null;
+  let pickedProposal = null;
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   const SOURCES = {
@@ -30,8 +31,13 @@ window.CT_API = (function () {
     proposalDetail: {
       ms: 15000,
       path: () => {
-        const open = (window.CT.proposals || [])[0];
-        return open ? '/proposals/' + encodeURIComponent(open.proposal_id) : null;
+        /* The reader's pick wins for as long as it is still open. Once it
+           closes — approved, declined, expired — it drops off this list and
+           the queue falls back to the first, so the page is never blank while
+           something is still waiting. */
+        const list = window.CT.proposals || [];
+        const chosen = list.find((p) => p.proposal_id === pickedProposal) || list[0];
+        return chosen ? '/proposals/' + encodeURIComponent(chosen.proposal_id) : null;
       },
     },
   };
@@ -171,14 +177,30 @@ window.CT_API = (function () {
     if (path === '/auth/logout') unauthorized();
     return result;
   }
+  /* Which of several waiting proposals is on screen. Mirrors watchRun: the
+     source path reads it, so changing it re-points the same polled resource. */
+  function selectProposal(proposalId) {
+    if (proposalId === pickedProposal) return pickedProposal;
+    pickedProposal = proposalId || null;
+    /* Clearing the detail first avoids showing the old proposal's terms under
+       the new one's heading while the read is in flight. Demo has no read to
+       make, so there would be nothing to put back — leave it alone there. */
+    if (!demo) {
+      window.CT.proposalDetail = null;
+      readOnce('proposalDetail');
+    }
+    return pickedProposal;
+  }
+
   function watchRun(runKey) {
     activeRun = runKey || null;
     window.CT.researchRun = null;
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, fetchJSON, readOnce, start, stop, post, isLive,
+  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, isLive,
     get activeRun() { return activeRun; },
+    get pickedProposal() { return pickedProposal; },
     get writesEnabled() { return !demo && auth.authenticated === true; },
     get authenticated() { return auth.authenticated === true; },
     get username() { return auth.authenticated ? auth.username : null; },

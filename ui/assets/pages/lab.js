@@ -34,7 +34,7 @@
                     aggressive: 'portfolio', neutral: 'portfolio', conservative: 'portfolio' };
 
   /* Reader's choices. None of these changes what the engine did. */
-  let chosenRun = null, chosenRole = null, cursor = null, preview = null, override = null;
+  let chosenRun = null, chosenRole = null, cursor = null, preview = null;
   let ambientEnabled = true, fileTimer = null, epoch = 0;
   const traces = new Map();
   const walking = new Set();
@@ -225,7 +225,6 @@
     paintRoster(v);
     paintGate(v);
     paintFeed(v);
-    paintStudio(v);
     startAmbience(v);
   }
 
@@ -354,7 +353,7 @@
 
   function paintSelected(v) {
     const desk = v.desks.find((d) => d.key === chosenRole) || v.desks[0];
-    const state = override || desk.state;
+    const state = desk.state;
     const index = SEATS.indexOf(desk.key);
     const portrait = q('#portrait');
     portrait.style.backgroundImage = "url('assets/lab/pixel-agents/characters/char_" +
@@ -370,10 +369,7 @@
       : state === 'stalled' ? 'var(--lab-warning)' : '';
 
     let meta = '', bubble = '';
-    if (override) {
-      meta = C.t('lab.previewState');
-      bubble = label('lab.description.' + override, override);
-    } else if (state === 'disabled') {
+    if (state === 'disabled') {
       meta = C.t('lab.notApplicable');
       bubble = desk.reason || '';
     } else if (state === 'done' && desk.step) {
@@ -488,14 +484,6 @@
     return name;
   }
 
-  function paintStudio(v) {
-    const states = ['disabled', 'waiting', 'thinking', 'research', 'done', 'stalled', 'error'];
-    q('#state-options').innerHTML = states.map((key) =>
-      '<button data-demo="' + key + '" aria-pressed="' + (override === key) + '">' +
-      C.escapeHtml(label('lab.state.' + key, key)) + '</button>').join('');
-    q('#state-description').textContent = override
-      ? label('lab.description.' + override, override) : C.t('lab.chooseState');
-  }
 
   /* ── motion ───────────────────────────────────────────────────────── */
   function startAmbience(v) {
@@ -570,23 +558,20 @@
   /* ── input ────────────────────────────────────────────────────────── */
   document.addEventListener('click', (event) => {
     const desk = event.target.closest && event.target.closest('[data-role]');
-    if (desk) { chosenRole = desk.dataset.role; override = null; render(); return; }
-    const demo = event.target.closest && event.target.closest('[data-demo]');
-    if (demo) { stopMotion(); override = demo.dataset.demo; render(); return; }
+    if (desk) { chosenRole = desk.dataset.role; render(); return; }
     const instrument = event.target.closest && event.target.closest('[data-instrument]');
     if (instrument) {
       stopMotion();
       const run = selectedRun();
       /* Choosing the run's own instrument means "stop previewing", not "preview this". */
       preview = run && run.instrument === instrument.dataset.instrument ? null : instrument.dataset.instrument;
-      override = null;
       render();
     }
   });
   q('#mode').addEventListener('change', (e) => {
     stopMotion();
     chosenRun = e.target.value || null;
-    cursor = null; preview = null; override = null; chosenRole = null;
+    cursor = null; preview = null; chosenRole = null;
     render();
   });
   q('#previous').addEventListener('click', () => step(-1));
@@ -595,14 +580,12 @@
     const v = view();
     if (!v.steps.length) return;
     stopMotion();
-    override = null;
     cursor = Math.max(0, Math.min(v.steps.length - 1, v.position + delta));
     const current = v.steps[cursor];
     if (current) chosenRole = current.role;
     render();
     if (delta > 0 && current) flyFile(current.role);
   }
-  q('#clear-state').addEventListener('click', () => { stopMotion(); override = null; cursor = null; render(); });
   q('#walk').addEventListener('click', startWalk);
   q('#ambient').addEventListener('click', () => { ambientEnabled = !ambientEnabled; stopMotion(); render(); });
   reduced.addEventListener('change', () => { stopMotion(); render(); });

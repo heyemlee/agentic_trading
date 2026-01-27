@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>登录 · Agentic Trading</title>
+<title>Sign in · Agentic Trading</title>
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -13,18 +13,30 @@
 <link rel="stylesheet" href="assets/console.css" />
 </head>
 <body>
-<main class="container section">
-<h1>登录 / Sign in</h1>
-<p class="body-muted">Agentic Trading · 个人控制台</p>
-<form id="login-form" class="card stack stack-4" style="margin-top:24px;">
-<label class="field">账号 / Username<input class="input" name="username" value="owner" autocomplete="username" required maxlength="100" /></label>
-<label class="field">密码 / Password<input class="input" type="password" name="password" autocomplete="current-password" required maxlength="1024" /></label>
-<button class="btn btn-green" type="submit">登录 / Sign in</button>
-<p id="login-result" role="status" aria-live="polite"></p>
-</form>
-<p style="margin-top:20px;">首次使用请在运行后端的电脑执行 <code>uv run ct-auth</code> 设置密码。</p>
-<a href="index.html?demo=1">查看演示 / View demo</a>
+<!-- No tab bar here on purpose: signed out, none of those destinations work.
+     The way out is the back link, which returns to the page that sent you. -->
+<header class="topnav"><div class="topnav-inner">
+  <a class="backlink" href="index.html" id="login-back" data-od-id="login-back"></a>
+</div></header>
+
+<main class="container section" id="content">
+  <h1 data-i18n="login.title">Sign in</h1>
+  <p class="body-muted" data-i18n="login.subtitle">Agentic Trading · personal console</p>
+
+  <form id="login-form" class="stack stack-4" style="margin-top:24px;">
+    <label class="field"><span data-i18n="login.username">Username</span>
+      <input class="input" name="username" value="owner" autocomplete="username" required maxlength="100" /></label>
+    <label class="field"><span data-i18n="login.password">Password</span>
+      <input class="input" type="password" name="password" autocomplete="current-password" required maxlength="1024" /></label>
+    <button class="btn btn-green" type="submit" id="login-submit" data-i18n="login.submit">Sign in</button>
+    <p id="login-result" class="body-sm" role="status" aria-live="polite"></p>
+  </form>
+
+  <p class="body-sm body-muted" style="margin-top:24px;" id="login-setup"></p>
+  <p style="margin-top:12px;"><a class="linkish body-sm" href="index.html?demo=1" data-i18n="login.demo">View the demo instead</a></p>
 </main>
+
+<script src="assets/i18n.js"></script>
 <script src="assets/login.js"></script>
 </body>
 </html>

@@ -48,6 +48,7 @@
 
   --danger:      var(--danger-base);
   --danger-tint: color-mix(in oklab, var(--danger) 8%, var(--bg));
+  --danger-ink:  color-mix(in oklab, var(--danger), var(--fg) 18%); /* 6:1 on white */
   --warn-ink:    color-mix(in oklab, #b06a00, var(--fg) 10%);
   --warn-tint:   color-mix(in oklab, #b06a00 10%, var(--bg));
 
@@ -88,6 +89,10 @@
   --column:    640px;
   --gutter:    20px;
   --nav-h:     56px;
+  /* How far the top chrome currently sits from the viewport edge. Anything
+     sticky that parks under the header reads this instead of --nav-h, so it
+     follows the header up when the header leaves. */
+  --chrome-offset: var(--nav-h);
   --tabbar-h:  60px;
 }
 
@@ -177,6 +182,24 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
   background: var(--green); color: var(--fg);
   display: grid; place-items: center; font-size: 10px; font-weight: 700; letter-spacing: 0;
 }
+/* ─── back to the parent section ─────────────────────────────────────
+   Secondary pages are reached by a link, and the tab bar only returns you to
+   a section root. These pages get a real back control in place of the brand
+   mark — which is redundant once you are inside a section. It lives in the
+   chrome, so it is present before any data arrives, and stays if none does. */
+.backlink {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  min-height: 44px; margin-left: -10px; padding-inline: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-base); font-weight: 600; letter-spacing: -0.01em;
+  color: var(--fg); -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-fast) var(--ease);
+}
+.backlink svg { width: 21px; height: 21px; flex: none; }
+/* hover raises contrast, never lowers it: --fg stays, the surface steps in */
+.backlink:hover { background: var(--surface); color: var(--fg); }
+.backlink:active { transform: scale(0.96); transition: transform var(--motion-press) var(--ease); }
+
 .navlinks { display: none; }             /* desktop uses the same tab bar */
 .nav-status {
   display: inline-flex; align-items: center; gap: 6px;
@@ -187,9 +210,22 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
 @media (max-width: 540px) {
   .topnav-inner { gap: 8px; }
   .topnav-inner .spacer { display: none; }
-  .brand { flex: 1; min-width: 0; }
-  .brand > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand, .backlink { flex: 1; min-width: 0; }
+  .brand > span:last-child,
+  .backlink > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+/* ─── chrome autohide ────────────────────────────────────────────────
+   The bars give the page its space back while you move through it and come
+   back the moment you stop. Transform, not display: nothing reflows, and a
+   half-finished slide can reverse mid-flight. */
+.topnav, .tabbar { transition: transform var(--motion-base) var(--ease); }
+body.chrome-away { --chrome-offset: 0px; }
+body.chrome-away .topnav { transform: translateY(-100%); }
+/* The tab bar floats clear of the edge and casts a shadow, so it has further
+   to travel than its own height. */
+body.chrome-away .tabbar { transform: translateY(calc(100% + 28px)); }
+@media (prefers-reduced-motion: reduce) { .topnav, .tabbar { transition: none; } }
 
 /* ─── bottom tab bar — at every width, this is an app ───────────────── */
 body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
@@ -221,16 +257,53 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   background: var(--green); box-shadow: 0 0 0 2px var(--bg);
 }
 
-/* ─── language switch ───────────────────────────────────────────────── */
-.langswitch {
-  flex: none; background: var(--surface); border: 0;
-  padding: 5px 11px; border-radius: var(--radius-pill);
-  font-size: var(--text-sm); font-weight: 600; color: var(--muted);
-  letter-spacing: 0; -webkit-tap-highlight-color: transparent;
-  transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
+/* Sits at the end of the connection bar. `flex: none` + `nowrap` because the
+   bar is a flex row: without them the link is squeezed to its minimum width
+   and "Sign in" breaks across two lines. */
+.conn-msg { flex: 1 1 12ch; min-width: 0; }
+.conn-signin {
+  flex: none; white-space: nowrap;
+  display: inline-flex; align-items: center; min-height: 44px; padding-inline: 16px;
+  border-radius: var(--radius-pill); background: var(--bg); color: var(--fg);
+  font-size: var(--text-sm); font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--divider);
+  transition: background var(--motion-fast) var(--ease);
 }
-.langswitch:hover { background: var(--surface-2); color: var(--fg); }
-.langswitch:active { transform: scale(0.94); transition: transform var(--motion-press) var(--ease); }
+.conn-signin:hover { background: var(--surface); color: var(--fg); }
+
+/* A control whose identity needs an async lookup still occupies space while
+   the lookup runs — otherwise the section collapses, then shoves the page
+   down when the answer arrives. */
+.btn-row[data-pending="true"] { min-height: 48px; }
+
+.blank-state {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  margin-inline: max(var(--gutter), calc((100% - var(--column)) / 2));
+  padding: var(--space-16) var(--space-4);
+  color: var(--muted); text-align: center;
+}
+.blank-state .blank-mark { display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 50%; background: var(--surface); color: var(--muted); }
+.blank-state .blank-mark svg { width: 20px; height: 20px; }
+.blank-state p { margin: 0; font-size: var(--text-sm); }
+
+/* ─── picker rows — a setting you choose, then confirm ───────────────
+   Used by the language sheet. Tapping a row only marks the choice; nothing
+   changes until Confirm, so a stray tap costs nothing. */
+.option-row {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-3); min-height: 56px; padding: 14px 2px;
+  background: none; border: 0; border-bottom: 1px solid var(--divider);
+  color: var(--fg); font-size: var(--text-base); text-align: left;
+  transition: background var(--motion-fast) var(--ease);
+}
+.option-row:last-child { border-bottom: 0; }
+.option-row:hover { background: var(--surface); color: var(--fg); }
+.option-row:active { transform: scale(0.99); transition: transform var(--motion-press) var(--ease); }
+.option-row .option-mark { flex: none; opacity: 0; color: var(--green-ink); }
+.option-row .option-mark svg { width: 20px; height: 20px; }
+.option-row[aria-checked="true"] .option-mark { opacity: 1; }
+.option-row[aria-checked="true"] .option-name { font-weight: 600; }
 /* Chinese wants a slightly looser rhythm than the negative tracking above */
 html[lang^="zh"] body { letter-spacing: 0; }
 html[lang^="zh"] h1, html[lang^="zh"] h2, html[lang^="zh"] h3,
@@ -406,15 +479,27 @@ a.list-row:active .chevron { transform: translateX(2px); }
 .btn-outline:hover { background: var(--surface); }
 
 .btn:disabled { cursor: not-allowed; opacity: 0.35; }
-.btn:disabled:hover { background: var(--green); }
-.btn-secondary:disabled:hover, .btn-outline:disabled:hover, .btn-ghost:disabled:hover { background: var(--surface); }
+/* Disabled is the one state allowed to reduce contrast — but it must not
+   change colour on hover, which reads as "still clickable". Every variant
+   holds its own default fill. */
+.btn-green:disabled:hover, .btn-primary:disabled:hover { background: var(--green); }
+.btn-secondary:disabled:hover { background: var(--surface); }
+.btn-outline:disabled:hover, .btn-ghost:disabled:hover, .btn-danger:disabled:hover { background: none; }
+.btn-danger-solid:disabled:hover { background: var(--danger-ink); }
 .btn-row { display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* a horizontal row of small stats, the way the app shows a quote's figures */
 .stat-row { display: flex; gap: var(--space-4); }
 .stat-row > * { flex: 1 1 0; min-width: 0; }
 
-/* destructive / neutral confirm — black, never green */
+/* ─── destructive ────────────────────────────────────────────────────
+   An irreversible action must never share a shape with a retry. Reject is a
+   text action in danger ink; only its confirmation dialog goes solid. */
+.btn-danger { background: none; color: var(--danger-ink); min-height: 44px; padding: 10px 12px; }
+.btn-danger:hover { background: var(--danger-tint); color: var(--danger-ink); }
+.btn-danger-solid { background: var(--danger-ink); color: var(--bg); width: 100%; }
+.btn-danger-solid:hover { background: var(--danger); color: var(--bg); }
+
 .btn-dark { background: var(--fg); color: var(--bg); width: 100%; }
 .btn-dark:hover { background: color-mix(in oklab, var(--fg) 86%, var(--bg)); color: var(--bg); }
 .btn-dark:disabled:hover { background: var(--fg); }
@@ -542,7 +627,7 @@ a.list-row:active .chevron { transform: translateX(2px); }
 
 /* ─── connection banner — sample data must never look live ──────────── */
 .conn-bar {
-  display: flex; align-items: flex-start; gap: var(--space-2);
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
   margin-block: var(--space-3) 0;
   margin-inline: max(var(--gutter), calc((100% - var(--column)) / 2));
   padding: var(--space-3) var(--space-4);
@@ -551,7 +636,7 @@ a.list-row:active .chevron { transform: translateX(2px); }
   font-size: var(--text-sm); line-height: 1.45;
 }
 .conn-bar[hidden] { display: none; }
-.conn-bar .dot { margin-top: 6px; }
+.conn-bar .dot { flex: none; }
 .conn-bar.is-offline { background: var(--warn-tint); color: var(--warn-ink); }
 .conn-bar strong { color: inherit; }
 
@@ -701,7 +786,6 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 .topnav-inner { min-height: 62px; }
 .brand { font-size: 20px; }
 .brand-mark { width: 30px; height: 30px; box-shadow: inset 0 1px 1px #ffffff99; }
-.langswitch { min-width: 44px; min-height: 44px; background: var(--glass); border: 1px solid #ffffffb3; }
 .tabbar { left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: 560px; margin-inline: auto; padding: 6px; border-radius: 32px; border: 1px solid #fff; background: var(--glass); -webkit-backdrop-filter: blur(28px) saturate(175%); backdrop-filter: blur(28px) saturate(175%); box-shadow: 0 12px 40px #142a191a, 0 2px 6px #142a190a, inset 0 1px 2px #fff; }
 .tabbar-inner { gap: 4px; }
 .tabitem { min-height: 56px; border-radius: 26px; font-size: 11px; color: #555b56; transition: background 180ms, transform 180ms; }
@@ -760,7 +844,7 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 .event-card time { font-size: 12px; color: var(--muted); margin-top: 5px; }
 .event-card > p { padding: 16px; font-size: 13px; overflow-wrap: anywhere; color: var(--muted); }
 :root { --glass-edge: rgba(255,255,255,.94); --soft-shadow: 0 6px 24px #21362609, inset 0 1px 0 #fff; }
-.circle-control { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--glass-edge); background: #edf2ecc9; color: #344236; font-size: 26px; padding: 10px; box-shadow: var(--soft-shadow); }
+.circle-control { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--glass-edge); background: #edf2ecc9; color: #344236; padding: 10px; box-shadow: var(--soft-shadow); }
 .circle-control svg { width: 18px; height: 18px; }
 .circle-control:active { transform: scale(.92); }
 .circle-control, .sync-pill, .search-submit { transition: transform 160ms ease, background 160ms ease; }
@@ -789,7 +873,28 @@ dialog.glass-sheet.is-closing { animation: glass-away 150ms ease-in forwards; }
 .source-row { display: flex; align-items: center; gap: 14px; padding: 18px 0; border-bottom: 1px solid #e6eae3; }
 .source-row > div { flex: 1; }
 .source-row strong { font-size: 15px; font-weight: 550; }
+.source-row { align-items: flex-start; }
+.source-row .dot { margin-top: 6px; }
 .source-row p, .source-row time { font-size: 12px; color: var(--muted); }
+/* The engine's own sentence about why a read failed. */
+.source-why { margin-top: 4px; line-height: 1.5; color: var(--fg-2) !important; }
+/* The payload it came from — available, never in the way. */
+.source-raw { margin-top: 6px; }
+.source-raw summary {
+  display: flex; align-items: center; min-height: 32px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--meta);
+  cursor: pointer; list-style: none;
+}
+.source-raw summary::-webkit-details-marker { display: none; }
+.source-raw summary::after { content: '+'; margin-left: 6px; }
+.source-raw[open] summary::after { content: '−'; }
+.source-raw summary:hover { color: var(--fg); }
+.source-raw pre {
+  margin: 4px 0 0; padding: 8px 10px; border-radius: 8px;
+  background: var(--surface); color: var(--fg-2);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
 .editor-label { font-size: 12px; color: #5d6d60; font-weight: 600; display: block; margin-bottom: 10px; }
 .glass-editor { width: 100%; min-height: 180px; resize: vertical; padding: 20px; border: 1px solid #dfe8da; border-radius: 24px; font: inherit; font-size: 16px; line-height: 1.65; color: var(--fg); background: #ffffffc9; box-shadow: inset 0 2px 5px #23331e04; }
 .glass-editor:focus { outline: 2px solid #71896b; outline-offset: 3px; }

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My personal context · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" hidden data-i18n-title="ai.personal">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="ai.personal">My personal context</h1>
+      <p class="body-muted" data-i18n="ai.notesHint">Add goals, when you need the money, income stability, plans or communication preferences.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;" data-od-id="notes">
+    <div class="container">
+      <div class="card">
+        <div class="field">
+          <label for="profile-notes" data-i18n="ux.personalHint">Your goals, timeline &amp; preferences</label>
+          <textarea id="profile-notes" class="textarea" rows="8" maxlength="4000"
+                    data-i18n-ph="ux.notesExample" placeholder=""></textarea>
+        </div>
+        <p class="body-sm body-muted" style="margin-top:12px;" data-i18n="ai.notesBoundary">These notes do not change trading permissions or risk limits.</p>
+        <div class="btn-row" style="margin-top:20px;">
+          <button class="btn btn-green" type="button" id="profile-save" data-od-id="cta-save-notes" data-i18n="ai.save">Save</button>
+        </div>
+        <p class="body-sm" style="margin-top:12px;" id="profile-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/pages/profile.js"></script>
+</body>
+</html>

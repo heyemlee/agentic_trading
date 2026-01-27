@@ -54,13 +54,14 @@
 [role="tabpanel"]:not([hidden]) { animation: panel-arrive 240ms ease-out; }
 .chat-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 0 20px; }
 .history-control { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; min-height: 44px; font-size: 14px; color: #516253; }
-.mini-orb { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #eaf0e5; color: #58714f; font-size: 22px; flex: none; padding: 8px; }
+.mini-orb { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #eaf0e5; color: #58714f; flex: none; padding: 8px; }
 .mini-orb svg { width: 18px; height: 18px; }
 .utility-section { margin-top: 16px; }
 .utility-card, .research-tile, .conversation-option { width: 100%; text-align: left; display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid #e7ede2; border-radius: 24px; background: linear-gradient(125deg,#f6f9f2f5,#ffffffed); color: var(--fg); box-shadow: var(--soft-shadow); transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
 .utility-card:hover, .research-tile:hover, .conversation-option:hover { border-color: #cfdcc7; box-shadow: 0 6px 24px #233a200d; }
 .utility-card:active, .research-tile:active, .conversation-option:active { transform: scale(.984); }
-.utility-orb { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 16px; background: linear-gradient(145deg,#e7efdf,#f7faf4); box-shadow: inset 0 1px 0 #fff; color: #61795a; font-size: 26px; }
+.utility-orb { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 16px; background: linear-gradient(145deg,#e7efdf,#f7faf4); box-shadow: inset 0 1px 0 #fff; color: #61795a; }
+.utility-orb svg { width: 21px; height: 21px; }
 .utility-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .utility-copy strong { font-size: 15px; font-weight: 600; line-height: 1.4; }
 .utility-copy > span { font-size: 12px; color: #778071; line-height: 1.4; }

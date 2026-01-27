@@ -34,6 +34,13 @@
     </div>
   </section>
 
+  <section class="section" style="padding-top:0;" id="queue-wrap" data-od-id="queue" hidden>
+    <div class="container">
+      <p class="eyebrow" data-i18n="ap.queue">Waiting on you — pick one</p>
+      <div id="queue-list" role="radiogroup" aria-labelledby="queue-count"></div>
+    </div>
+  </section>
+
   <section class="section" style="padding-top:0;" data-od-id="queue-empty-wrap">
     <div class="container">
       <div class="empty" id="queue-empty" hidden>
@@ -83,7 +90,7 @@
         <div class="row" style="justify-content:center;gap:4px;margin-top:8px;">
           <button class="btn btn-ghost" id="btn-reanalyze" data-od-id="cta-reanalyze" data-i18n="ap.freshResearch">—</button>
           <span class="body-sm body-muted" aria-hidden="true">·</span>
-          <button class="btn btn-ghost" id="btn-reject" data-od-id="cta-reject" data-i18n="ap.decline">—</button>
+          <button class="btn btn-danger" id="btn-reject" data-od-id="cta-reject" data-i18n="ap.decline">—</button>
         </div>
         <div id="result-slot"></div>
       </div>
@@ -161,7 +168,7 @@
 </main>
 
 <!-- ── dialogs ────────────────────────────────────────────────────── -->
-<dialog class="modal" id="approve-dialog" data-od-id="approve-dialog">
+<dialog class="modal" data-sheet id="approve-dialog" data-od-id="approve-dialog">
   <form method="dialog" class="dialog-body">
     <h2 id="approve-dialog-title">—</h2>
     <p id="approve-dialog-terms" class="body-sm"></p>
@@ -181,7 +188,7 @@
   </div>
 </dialog>
 
-<dialog class="modal" id="reject-dialog" data-od-id="reject-dialog">
+<dialog class="modal" data-sheet id="reject-dialog" data-od-id="reject-dialog">
   <form method="dialog" class="dialog-body">
     <h2 data-i18n="ap.declineTitle">Decline this proposal</h2>
     <p class="body-sm body-muted" style="margin-top:8px;" data-i18n="ap.declineBody">…</p>
@@ -191,7 +198,7 @@
     </div>
   </form>
   <div class="dialog-foot">
-    <button class="btn btn-dark" id="reject-submit" data-i18n="ap.decline">—</button>
+    <button class="btn btn-danger-solid" id="reject-submit" data-i18n="ap.decline">—</button>
     <button class="btn btn-secondary" id="reject-cancel" data-i18n="ap.keepOpen">—</button>
   </div>
 </dialog>

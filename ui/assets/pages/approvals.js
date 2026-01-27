@@ -13,6 +13,31 @@
   const set = (id, v) => { document.getElementById(id).textContent = v; };
   const plainRows = (arr) => (arr || []).map((x) => C.listRow({ title: x })).join('');
 
+  /* With one proposal there is nothing to choose, so the queue stays out of
+     the way. With several, the page used to show the first and give no way to
+     reach the rest — the count said "3 waiting" and only one was reachable. */
+  function renderQueue(current) {
+    const waiting = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL');
+    const wrap = document.getElementById('queue-wrap');
+    wrap.hidden = waiting.length < 2;
+    if (wrap.hidden) return;
+    document.getElementById('queue-list').innerHTML = waiting.map((x) =>
+      '<button class="option-row" type="button" role="radio" data-proposal="' +
+        C.escapeHtml(x.proposal_id) + '" aria-checked="' +
+        (current && x.proposal_id === current.proposal_id ? 'true' : 'false') + '">' +
+        '<span class="option-name">' + C.escapeHtml(x.ticker) + ' · ' + C.usd(x.notional_usd) +
+          (x.is_real_money ? ' <span class="chip chip-accent">' + C.t('bucket.realShort') + '</span>' : '') +
+        '</span><span class="option-mark" aria-hidden="true">' + C.ICON.check + '</span></button>').join('');
+  }
+
+  /* Switching mid-approval would swap the terms under a request already in
+     flight, so the queue is inert until that settles. */
+  document.getElementById('queue-list').addEventListener('click', (event) => {
+    const row = event.target.closest('[data-proposal]');
+    if (!row || inFlight) return;
+    CT_API.selectProposal(row.dataset.proposal);
+  });
+
   /* Re-read the detail from window.CT on every call — the polling layer
      replaces it in place, so nothing here may capture it in a closure. */
   function renderDetail() {
@@ -32,8 +57,10 @@
       empty.hidden = false;
       document.getElementById('live-conditions').hidden = true;
       set('queue-count', C.t('common.open', { n: C.openCount() }));
+      renderQueue(null);
       return;
     }
+    renderQueue(p);
     detail.hidden = false;
     empty.hidden = true;
     document.getElementById('live-conditions').hidden = false;
@@ -171,7 +198,6 @@
     } catch (err) { errPanel('ap.verbCheck', err); }
   });
 
-  const dlg = document.getElementById('approve-dialog');
   const confirmBox = document.getElementById('approve-confirm');
   const submitBtn = document.getElementById('approve-submit');
   approveBtn.addEventListener('click', () => {
@@ -186,17 +212,17 @@
       C.bucket(intent.bucket) + ' · ' + (D.proposalDetail.is_real_money ? 'REAL MONEY / 真金' : 'SIMULATED / 模拟') +
       (intent.sell_quantity != null ? ' · ' + intent.sell_quantity + ' shares' : '') +
       ' · ' + intent.proposal_id;
-    dlg.showModal();
+    C.openSheet('approve-dialog');
   });
   confirmBox.addEventListener('change', () => {
     submitBtn.disabled = !confirmBox.checked || !canApprove() || !window.ApprovalIntent.matches(intent, D.proposalDetail);
   });
-  document.getElementById('approve-cancel').addEventListener('click', () => { intent = null; dlg.close(); });
+  document.getElementById('approve-cancel').addEventListener('click', () => { intent = null; C.closeSheet('approve-dialog'); });
   submitBtn.addEventListener('click', async () => {
     if (!confirmBox.checked || !canApprove() || inFlight || !window.ApprovalIntent.matches(intent, D.proposalDetail)) return;
     const approved = intent;
     inFlight = true; submitBtn.disabled = true; approveBtn.disabled = true;
-    dlg.close();
+    C.closeSheet('approve-dialog');
     panel(C.t('ap.revalidating'), 'quiet', C.t('ap.revalidatingBody'), []);
     const { proposal_id, ...terms } = approved;
     try {
@@ -219,14 +245,13 @@
     }
   });
 
-  const rdlg = document.getElementById('reject-dialog');
   let rejectedId = null;
-  document.getElementById('btn-reject').addEventListener('click', () => { rejectedId = pid(); rdlg.showModal(); });
-  document.getElementById('reject-cancel').addEventListener('click', () => rdlg.close());
+  document.getElementById('btn-reject').addEventListener('click', () => { rejectedId = pid(); C.openSheet('reject-dialog'); });
+  document.getElementById('reject-cancel').addEventListener('click', () => C.closeSheet('reject-dialog'));
 
   /* POST /proposals/{id}/reject */
   document.getElementById('reject-submit').addEventListener('click', async () => {
-    rdlg.close();
+    C.closeSheet('reject-dialog');
     try {
       const res = await CT_API.post('/proposals/' + encodeURIComponent(rejectedId) + '/reject', {
         reason: document.getElementById('reject-reason').value.trim() || null,
@@ -241,15 +266,25 @@
 
   /* POST /proposals/{id}/reanalyze — marks it and starts a fresh run. */
   document.getElementById('btn-reanalyze').addEventListener('click', async () => {
+    /* This starts a fresh run, which spends daily budget. Say so before the
+       request goes out — silence is what makes people click twice — and hold
+       the button until it comes back. */
+    const button = document.getElementById('btn-reanalyze');
+    if (button.disabled) return;
+    button.disabled = true;
+    panel(C.t('ap.reanalysisStarted'), 'quiet', C.t('ap.reanalysisBody'), []);
     try {
       const res = await CT_API.post('/proposals/' + encodeURIComponent(pid()) + '/reanalyze', {});
-      if (res.blocked) return blockedPanel('ap.verbReanalyze');
+      if (res.blocked) { button.disabled = false; return blockedPanel('ap.verbReanalyze'); }
       approveBtn.disabled = true;
       panel(C.code(res.status) || C.t('ap.reanalysisStarted'), 'quiet',
         res.message || '' || C.t('ap.reanalysisBody'),
         res.reasons || (res.run_key ? ['run ' + res.run_key] : []));
       CT_API.readOnce('proposals');
-    } catch (err) { errPanel('ap.verbReanalyze', err); }
+    } catch (err) {
+      button.disabled = false;
+      errPanel('ap.verbReanalyze', err);
+    }
   });
 
   /* Live writes require a verified session; demo never calls the API. */

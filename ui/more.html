@@ -59,7 +59,7 @@
 
         <p class="more-section-label" data-i18n="more.preferences">Preferences</p>
         <div class="more-actions">
-          <a class="more-action" href="advisor.html#personal-sheet">
+          <a class="more-action" href="profile.html">
             <span class="more-link-icon" data-icon="personal"></span>
             <span class="list-main"><span class="list-title" data-i18n="ai.personal">My personal context</span><span class="list-sub" data-i18n="more.personalHint">Goals, timeline and communication preferences</span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
@@ -69,7 +69,7 @@
             <span class="list-main"><span class="list-title" data-i18n="more.language">Language</span><span class="list-sub" id="more-language-value"></span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
           </button>
-          <a class="more-action" href="system.html#push">
+          <a class="more-action" href="notifications.html">
             <span class="more-link-icon" data-icon="notifications"></span>
             <span class="list-main"><span class="list-title" data-i18n="more.notifications">Notifications</span><span class="list-sub" data-i18n="more.notificationsHint">Push status, test and subscribed devices</span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
@@ -89,6 +89,21 @@
     </div>
   </section>
 </main>
+
+<dialog id="language-sheet" class="glass-sheet" data-sheet aria-labelledby="language-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="language-title" data-i18n="more.language">Language</h2>
+    <button class="circle-control" type="button" data-close-sheet="language-sheet"
+            data-i18n-aria="common.close" aria-label="Close" id="language-close"></button>
+  </div>
+  <div id="language-options" role="radiogroup" aria-labelledby="language-title"></div>
+  <p class="body-sm body-muted" style="margin-top:12px;" data-i18n="more.languageHint">Applies after you confirm</p>
+  <div class="btn-row" style="margin-top:20px;">
+    <button class="btn btn-green" type="button" id="language-confirm" data-i18n="common.confirm">Confirm</button>
+    <button class="btn btn-secondary" type="button" data-close-sheet="language-sheet" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
 
 <script src="assets/i18n.js?v=personal-center-page"></script>
 <script src="assets/data.js"></script>

@@ -42,6 +42,12 @@
   const paint = (id, html) => { if (painted.get(id) !== html) { el(id).innerHTML = html; painted.set(id, html); } };
   let decisionDetails = new Map();
   C.mount('advisor');
+
+  /* Monoline SVG, never a typographic character: ◎ ◷ ＋ come from three
+     different fonts, so their weight, size and baseline never agreed. */
+  document.querySelectorAll('[data-icon]').forEach((el) => {
+    el.innerHTML = C.ICON[el.dataset.icon] || '';
+  });
   const views = ['chat', 'holdings', 'discover'];
   function showView(view, focus = false) {
     if (!views.includes(view)) view = 'chat';
@@ -309,10 +315,8 @@
     if (busy || (hasDraft && !storageOK)) { e.preventDefault(); e.returnValue = ''; }
   });
   window.addEventListener?.('pagehide', remember);
-  const revealPersonalContext = () => {
-    if (window.location.hash === '#personal-sheet') C.openSheet('personal-sheet');
-  };
-  revealPersonalContext();
-  window.addEventListener?.('hashchange', revealPersonalContext);
+  /* The personal context has its own page now. Borrowing this one as a
+     container left people on the Assistant after they closed the sheet, so
+     the deep link is gone; the sheet stays for editing mid-conversation. */
   C.live(['advisor'], render);
 })();

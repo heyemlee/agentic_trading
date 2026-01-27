@@ -28,11 +28,11 @@
     <div class="stack stack-4">
       <div class="card" id="panel-chat" role="tabpanel" aria-labelledby="view-chat">
         <div class="chat-toolbar">
-          <button class="history-control" data-open-sheet="conversation-sheet" aria-haspopup="dialog"><span class="mini-orb" aria-hidden="true">◷</span><span id="conversation-label" data-i18n="ai.history">历史对话</span><span class="ux-chevron"></span></button>
+          <button class="history-control" data-open-sheet="conversation-sheet" aria-haspopup="dialog"><span class="mini-orb" data-icon="history" aria-hidden="true"></span><span id="conversation-label" data-i18n="ai.history">历史对话</span><span class="ux-chevron"></span></button>
           <div class="chat-tools">
-          <button class="circle-control" data-open-sheet="personal-sheet" data-i18n-aria="ai.personal" aria-label="My personal context">◎</button>
-          <button class="circle-control" data-open-sheet="jobs-sheet" data-i18n-aria="ux.activity" aria-label="Activity">◷</button>
-          <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" aria-label="New conversation">＋</button>
+          <button class="circle-control" data-open-sheet="personal-sheet" data-i18n-aria="ai.personal" aria-label="My personal context" data-icon="personal"></button>
+          <button class="circle-control" data-open-sheet="jobs-sheet" data-i18n-aria="ux.activity" aria-label="Activity" data-icon="activity"></button>
+          <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" aria-label="New conversation" data-icon="plus"></button>
           </div>
         </div>
         <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
@@ -71,10 +71,10 @@
         <div id="candidate-list" class="candidate-list"></div>
       </div>
       <div id="panel-personal" class="utility-section">
-        <button class="utility-card" data-open-sheet="personal-sheet"><span class="utility-orb" aria-hidden="true">◎</span><span class="utility-copy"><strong data-i18n="ai.personal">我的个人情况</strong><span id="notes-preview" data-i18n="ux.personalHint">目标、期限与偏好</span></span><span class="ux-chevron"></span></button>
+        <button class="utility-card" data-open-sheet="personal-sheet"><span class="utility-orb" data-icon="personal" aria-hidden="true"></span><span class="utility-copy"><strong data-i18n="ai.personal">我的个人情况</strong><span id="notes-preview" data-i18n="ux.personalHint">目标、期限与偏好</span></span><span class="ux-chevron"></span></button>
       </div>
       <div class="utility-section">
-        <button class="utility-card" data-open-sheet="jobs-sheet"><span class="utility-orb" aria-hidden="true">◷</span><span class="utility-copy"><strong data-i18n="ux.activity">任务动态</strong><span id="jobs-preview"></span></span><span id="jobs-count" class="count-bubble">0</span><span class="ux-chevron"></span></button>
+        <button class="utility-card" data-open-sheet="jobs-sheet"><span class="utility-orb" data-icon="activity" aria-hidden="true"></span><span class="utility-copy"><strong data-i18n="ux.activity">任务动态</strong><span id="jobs-preview"></span></span><span id="jobs-count" class="count-bubble">0</span><span class="ux-chevron"></span></button>
       </div>
       <details class="card app-disclosure" id="panel-tools" hidden>
         <summary data-i18n="ai.reuse">Robinhood 已有工具</summary>
@@ -85,12 +85,12 @@
     </div>
   </div></section>
 </main>
-<dialog id="conversation-sheet" class="glass-sheet" data-glass-sheet aria-labelledby="conversation-title">
-  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="conversation-title" data-i18n="ai.history">历史对话</h2><button class="circle-control" data-close-sheet="conversation-sheet" data-i18n-aria="common.close" aria-label="Close">×</button></div>
+<dialog id="conversation-sheet" class="glass-sheet" data-sheet aria-labelledby="conversation-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="conversation-title" data-i18n="ai.history">历史对话</h2><button class="circle-control" data-close-sheet="conversation-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
   <div id="conversations" class="conversation-options"></div>
 </dialog>
-<dialog id="personal-sheet" class="glass-sheet" data-glass-sheet aria-labelledby="personal-title">
-  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="personal-title" data-i18n="ai.personal">我的个人情况</h2><button class="circle-control" data-close-sheet="personal-sheet" data-i18n-aria="common.close" aria-label="Close">×</button></div>
+<dialog id="personal-sheet" class="glass-sheet" data-sheet aria-labelledby="personal-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="personal-title" data-i18n="ai.personal">我的个人情况</h2><button class="circle-control" data-close-sheet="personal-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
   <p class="sheet-description" data-i18n="ai.notesHint">补充目标、用钱时间和沟通偏好。</p>
   <label for="personal-notes" class="editor-label" data-i18n="ux.personalHint">目标、期限与偏好</label>
   <textarea id="personal-notes" class="glass-editor" rows="6" maxlength="4000" data-i18n-ph="ux.notesExample"></textarea>
@@ -98,12 +98,12 @@
   <p class="sheet-fineprint" data-i18n="ai.notesBoundary">不会修改交易权限或风控参数。</p>
   <button id="save-notes" class="btn btn-green sheet-primary" data-i18n="ai.save">保存</button>
 </dialog>
-<dialog id="jobs-sheet" class="glass-sheet" data-glass-sheet aria-labelledby="jobs-title">
-  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="jobs-title" data-i18n="ux.activity">任务动态</h2><button class="circle-control" data-close-sheet="jobs-sheet" data-i18n-aria="common.close" aria-label="Close">×</button></div>
+<dialog id="jobs-sheet" class="glass-sheet" data-sheet aria-labelledby="jobs-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="jobs-title" data-i18n="ux.activity">任务动态</h2><button class="circle-control" data-close-sheet="jobs-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
   <div id="advisor-jobs" class="task-timeline"></div>
 </dialog>
-<dialog id="decision-sheet" class="glass-sheet" data-glass-sheet aria-labelledby="decision-title">
-  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="decision-title" data-i18n="ux.researchDetail">研究详情</h2><button class="circle-control" data-close-sheet="decision-sheet" data-i18n-aria="common.close" aria-label="Close">×</button></div>
+<dialog id="decision-sheet" class="glass-sheet" data-sheet aria-labelledby="decision-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="decision-title" data-i18n="ux.researchDetail">研究详情</h2><button class="circle-control" data-close-sheet="decision-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
   <div id="decision-detail"></div>
 </dialog>
 <script src="assets/i18n.js"></script>

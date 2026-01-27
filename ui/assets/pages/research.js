@@ -117,8 +117,8 @@
      The pipeline writes one report per agent under runs/<id>/reports. The
      endpoint returns them in order, so a run reads as a sequence of steps. */
   const traceSheet = document.getElementById('trace-sheet');
-  document.getElementById('trace-close').addEventListener('click', () => traceSheet.close());
-  traceSheet.addEventListener('click', (e) => { if (e.target === traceSheet) traceSheet.close(); });
+  document.getElementById('trace-close').addEventListener('click', () => C.closeSheet('trace-sheet'));
+  /* backdrop click and Esc are handled once, in the shared chrome */
   document.addEventListener('click', (e) => {
     const row = e.target.closest && e.target.closest('[data-trace]');
     if (!row) return;
@@ -131,7 +131,7 @@
     const list = document.getElementById('trace-steps');
     head.innerHTML = '<p class="agent-state">' + C.escapeHtml(runId) + '</p>';
     list.innerHTML = '<p class="body-sm body-muted" style="padding-top:12px;">' + C.t('rs.traceLoading') + '</p>';
-    traceSheet.showModal();
+    C.openSheet('trace-sheet');
 
     let t;
     try {
@@ -250,6 +250,11 @@
      obeys the same switch as every other write. */
   document.getElementById('run-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    /* A run spends one of a limited number of analyses for the day, so a
+       second click while the first is still in flight costs real budget. */
+    const start = document.querySelector('#run-form button[type="submit"]');
+    if (start.disabled) return;
+    start.disabled = true;
     const body = {
       ticker: document.getElementById('f-ticker').value.trim().toUpperCase(),
       bucket: bucketSel.value,
@@ -265,13 +270,16 @@
     } catch (err) {
       progress.innerHTML = '<hr style="margin-block:20px;" />' +
         '<div class="banner"><p>' + C.escapeHtml(C.t('rs.startFailed', { err: err.message })) + '</p></div>';
+      start.disabled = false;
       return;
     }
     if (res.blocked) {
       progress.innerHTML = '<hr style="margin-block:20px;" />' +
         '<div class="banner"><p>' + C.t('rs.writesOff') + '</p></div>';
+      start.disabled = false;
       return;
     }
+    start.disabled = false;
     CT_API.watchRun(res.run_key);
   });
 

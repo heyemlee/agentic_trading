@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Notifications · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" hidden data-i18n-title="nav.notifications">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="nav.notifications">Notifications</h1>
+      <p class="body-muted" data-i18n="more.notificationsHint">Push status, test and subscribed devices</p>
+    </div>
+  </section>
+
+<section class="section" id="devices" style="padding-top:0;" data-od-id="devices">
+  <div class="container">
+    <div class="card">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="sy.devices">Signed-in devices</p>
+        <span class="chip" id="dev-count">—</span>
+      </div>
+      <div class="list list-inset" style="margin-top:12px;" id="device-list"></div>
+      <p class="body-sm body-muted" style="margin-top:12px;" id="dev-note"></p>
+      <div class="btn-row" style="margin-top:16px;">
+        <button class="btn btn-secondary btn-sm" type="button" id="dev-revoke-others"
+                data-od-id="cta-revoke-others" data-i18n="sy.revokeOthers">Sign out every other device</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── notifications on this device ──────────────────────────────── -->
+<section class="section" id="push" style="padding-top:0;" data-od-id="push">
+  <div class="container">
+    <div class="card">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="sy.push">Notifications on this device</p>
+        <span class="chip" id="push-state" data-i18n="sy.pushChecking">Checking…</span>
+      </div>
+      <p class="body-sm body-muted" style="margin-top:6px;" id="push-detail"></p>
+      <div class="btn-row" id="push-actions" data-pending="true" style="margin-top:16px;">
+        <button class="btn btn-green" id="push-enable" data-i18n="sy.pushEnable" hidden>Turn on notifications</button>
+        <button class="btn btn-secondary" id="push-test" data-i18n="sy.pushTest" hidden>Send a test</button>
+        <button class="btn btn-danger" id="push-disable" data-i18n="sy.pushDisable" hidden>Turn off on this device</button>
+      </div>
+      <div class="list list-inset" style="margin-top:16px;" id="push-devices"></div>
+    </div>
+  </div>
+</section>
+
+
+</main>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/push.js"></script>
+<script src="assets/pages/notifications.js"></script>
+</body>
+</html>

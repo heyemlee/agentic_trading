@@ -29,7 +29,6 @@
 
     renderSchedule();
     renderOperations();
-    renderDevices();
 
     document.getElementById('warn-count').textContent = C.t('common.open', { n: warnings.length });
     document.getElementById('warning-list').innerHTML = warnings.length
@@ -102,7 +101,6 @@
       : C.t('sy.disk', { f: disk.free_gb.toFixed(1), p: disk.free_pct.toFixed(0),
                          r: (ops.retention || {}).runs_days });
     renderNotifications();
-    renderPush();
   }
 
   /* Whether anything would actually reach a phone. Silence has two causes —
@@ -122,183 +120,6 @@
     $('nt-detail').textContent = n.detail || '';
   }
 
-  /* ── signed-in devices ───────────────────────────────────────────
-     A 30-day session is what keeps the phone from asking for a password
-     every day. The cost is that a device left behind stays signed in, so
-     each one is listed with when it was last used and can be signed out on
-     its own — without changing the password and taking every other device
-     down with it. */
-  function renderDevices() {
-    const $ = (id) => document.getElementById(id);
-    const data = D.authSessions;
-    const others = $('dev-revoke-others');
-    if (!data) {
-      $('dev-count').textContent = C.t('sy.unknown');
-      $('device-list').innerHTML = '';
-      $('dev-note').textContent = '';
-      others.hidden = true;
-      return;
-    }
-    const rows = data.sessions || [];
-    $('dev-count').textContent = C.t('sy.deviceCount', { n: rows.length });
-    $('device-list').innerHTML = rows.map((row) => {
-      const idle = (Date.now() - Date.parse(row.last_seen_at)) / 60000;
-      return '<div class="list-row" data-od-id="device-' + C.escapeHtml(row.session_id) + '">' +
-        '<span class="list-main">' +
-          '<span class="list-title">' + C.escapeHtml(row.label) +
-            (row.current ? ' <span class="chip chip-accent">' + C.t('sy.thisDevice') + '</span>' : '') +
-          '</span>' +
-          '<span class="list-sub">' +
-            C.escapeHtml(idle < 2 ? C.t('sy.justUsed')
-                                  : C.t('sy.lastUsed', { d: C.duration(idle) })) + ' · ' +
-            C.escapeHtml(C.t('sy.expiresIn', { d: Math.max(0, row.days_left).toFixed(0) })) +
-          '</span>' +
-        '</span>' +
-        '<span class="list-side">' +
-          '<button class="btn btn-secondary btn-sm" type="button" data-revoke="' +
-            C.escapeHtml(row.session_id) + '">' + C.t('sy.signOut') + '</button>' +
-        '</span></div>';
-    }).join('');
-    $('dev-note').textContent = C.t('sy.deviceNote');
-    others.textContent = C.t('sy.revokeOthers');
-    others.hidden = rows.filter((row) => !row.current).length === 0;
-
-    $('device-list').querySelectorAll('[data-revoke]').forEach((button) => {
-      button.addEventListener('click', () => revoke(button.getAttribute('data-revoke'), button));
-    });
-  }
-
-  /* POST /auth/sessions/{id}/revoke — signing out the device you are holding
-     ends this session too, so the page goes back to the login screen rather
-     than polling with a cookie the server has already forgotten. */
-  async function revoke(sessionId, button) {
-    const mine = (((D.authSessions || {}).sessions) || [])
-      .some((row) => row.session_id === sessionId && row.current);
-    button.disabled = true;
-    button.textContent = C.t('sy.signingOut');
-    try {
-      const res = await CT_API.post('/auth/sessions/' + encodeURIComponent(sessionId) + '/revoke', {});
-      if (res.blocked) { button.textContent = C.t('sy.switchWritesOff'); return; }
-      if (mine) { window.location.assign('login.html'); return; }
-      CT_API.readOnce('authSessions');
-    } catch (err) {
-      button.disabled = false;
-      button.textContent = C.t('sy.deviceFailed', { err: err.message });
-    }
-  }
-
-  document.getElementById('dev-revoke-others').addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-      const res = await CT_API.post('/auth/sessions/revoke-others', {});
-      if (!res.blocked) {
-        document.getElementById('dev-note').textContent =
-          C.t('sy.revokedOthers', { n: res.revoked });
-        CT_API.readOnce('authSessions');
-      }
-    } catch (err) {
-      document.getElementById('dev-note').textContent = C.t('sy.deviceFailed', { err: err.message });
-    } finally {
-      button.disabled = false;
-    }
-  });
-
-  /* ── notifications on this device ────────────────────────────────
-     iOS delivers web push only to a page opened from its home-screen icon,
-     and only after an explicit tap grants permission. Both fail quietly, so
-     every state here says what it is and what to do about it. */
-  async function renderPush() {
-    const $ = (id) => document.getElementById(id);
-    const chip = $('push-state'), detail = $('push-detail');
-    const enable = $('push-enable'), test = $('push-test'), off = $('push-disable');
-    if (!chip || !window.CT_PUSH) return;
-
-    const blocked = CT_PUSH.why();
-    const subscription = blocked ? null : await CT_PUSH.current().catch(() => null);
-    const devices = (D.pushDevices || {}).devices || [];
-
-    chip.textContent = C.t(blocked ? 'sy.pushBlocked' : subscription ? 'sy.pushOn' : 'sy.pushOff');
-    chip.className = 'chip' + (subscription ? ' chip-accent' : blocked ? ' chip-warn' : '');
-    detail.textContent = blocked ? blocked
-      : subscription ? C.t('sy.pushReady') : C.t('sy.pushIdle');
-
-    enable.hidden = Boolean(blocked) || Boolean(subscription);
-    test.hidden = !subscription;
-    off.hidden = !subscription;
-    enable.textContent = C.t('sy.pushEnable');
-    test.textContent = C.t('sy.pushTest');
-    off.textContent = C.t('sy.pushDisable');
-
-    $('push-devices').innerHTML = devices.map((device) =>
-      '<div class="list-row" data-od-id="push-device-' + C.escapeHtml(device.device_id) + '">' +
-        '<span class="list-main"><span class="list-title">' + C.escapeHtml(device.label) + '</span>' +
-        '<span class="list-sub">' + C.escapeHtml(C.t('sy.pushDevice', { d: C.dateOnly(device.created_at) })) + '</span></span>' +
-        '<span class="list-side"><span class="list-vals"><span class="list-note">' +
-          C.escapeHtml(device.last_sent_at ? C.dateTime(device.last_sent_at) : '—') + '</span></span>' +
-        '<button class="btn btn-secondary btn-sm" type="button" data-push-remove="' + C.escapeHtml(device.device_id) + '">' +
-          C.t('sy.pushRemove') + '</button></span></div>').join('');
-  }
-
-  function wirePush() {
-    const $ = (id) => document.getElementById(id);
-    if (!$('push-enable') || !window.CT_PUSH) return;
-    const detail = $('push-detail');
-
-    $('push-enable').addEventListener('click', async () => {
-      const button = $('push-enable');
-      button.disabled = true;
-      button.textContent = C.t('sy.pushWorking');
-      try {
-        await CT_PUSH.enable();
-        CT_API.readOnce('pushDevices');
-      } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
-      } finally {
-        button.disabled = false;
-        renderPush();
-      }
-    });
-
-    $('push-test').addEventListener('click', async () => {
-      try {
-        await CT_API.post('/notifications/test', {});
-        detail.textContent = C.t('sy.pushSent');
-      } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
-      }
-    });
-
-    $('push-disable').addEventListener('click', async () => {
-      try {
-        const result = await CT_PUSH.disable();
-        if (result.deviceId) await CT_API.post('/notifications/devices/' + encodeURIComponent(result.deviceId) + '/unsubscribe', {});
-        CT_API.readOnce('pushDevices');
-        renderPush();
-      } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
-      }
-    });
-
-    $('push-devices').addEventListener('click', async (event) => {
-      const button = event.target.closest('[data-push-remove]');
-      if (!button || button.disabled) return;
-      button.disabled = true;
-      button.textContent = C.t('sy.pushRemoving');
-      try {
-        await CT_API.post('/notifications/devices/' + encodeURIComponent(button.dataset.pushRemove) + '/unsubscribe', {});
-        await CT_API.readOnce('pushDevices');
-        detail.textContent = C.t('sy.pushRemoved');
-        renderPush();
-      } catch (err) {
-        button.disabled = false;
-        button.textContent = C.t('sy.pushRemove');
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
-      }
-    });
-  }
-  wirePush();
-
   function revealLinkedSetting() {
     const target = window.location.hash && document.getElementById(window.location.hash.slice(1));
     const group = target && (target.matches('details') ? target : target.closest('details'));
@@ -312,7 +133,6 @@
   const title = document.getElementById('switch-title');
   const copy = document.getElementById('switch-copy');
   const btn = document.getElementById('switch-btn');
-  const dlg = document.getElementById('switch-dialog');
 
   function paint() {
     const paused = C.isPaused();
@@ -325,6 +145,10 @@
     C.paintNavStatus();
   }
 
+  /* A reason left in the box would ride along on the next pause, which is
+     the most destructive action in the app. Clear it on every exit. */
+  const clearReason = () => { document.getElementById('switch-reason').value = ''; };
+
   btn.addEventListener('click', () => {
     const paused = C.isPaused();
     document.getElementById('dialog-title').textContent = C.t(paused ? 'sy.release' : 'sy.engage');
@@ -333,12 +157,15 @@
     document.getElementById('reason-field').hidden = paused;
     document.getElementById('switch-confirm').textContent =
       C.t(paused ? 'sy.releaseBtn' : 'sy.pauseBtn');
-    dlg.showModal();
+    C.openSheet('switch-dialog');
   });
-  document.getElementById('switch-cancel').addEventListener('click', () => dlg.close());
+  document.getElementById('switch-cancel').addEventListener('click', () => {
+    C.closeSheet('switch-dialog');
+    clearReason();
+  });
   /* POST /system/pause | /system/resume — the only state this console writes. */
   document.getElementById('switch-confirm').addEventListener('click', async () => {
-    dlg.close();
+    C.closeSheet('switch-dialog');
     const wasPaused = C.isPaused();
     btn.disabled = true;
     try {
@@ -356,6 +183,7 @@
       /* Trust the server's answer, not the local guess. */
       C.setPaused(res.paused !== undefined ? !!res.paused : !wasPaused);
       CT_API.readOnce('health');
+      clearReason();
     } catch (err) {
       copy.textContent = C.t('sy.switchFailed', { err: err.message });
     } finally {
@@ -364,6 +192,6 @@
     }
   });
 
-  C.live(['health', 'microLive', 'schedule', 'operations', 'notifications', 'authSessions'],
+  C.live(['health', 'microLive', 'schedule', 'operations', 'notifications'],
          renderHealth);
 })();
