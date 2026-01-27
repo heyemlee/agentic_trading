@@ -309,5 +309,10 @@
     if (busy || (hasDraft && !storageOK)) { e.preventDefault(); e.returnValue = ''; }
   });
   window.addEventListener?.('pagehide', remember);
+  const revealPersonalContext = () => {
+    if (window.location.hash === '#personal-sheet') C.openSheet('personal-sheet');
+  };
+  revealPersonalContext();
+  window.addEventListener?.('hashchange', revealPersonalContext);
   C.live(['advisor'], render);
 })();

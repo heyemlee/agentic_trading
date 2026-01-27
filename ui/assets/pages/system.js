@@ -299,6 +299,14 @@
   }
   wirePush();
 
+  function revealLinkedSetting() {
+    const target = window.location.hash && document.getElementById(window.location.hash.slice(1));
+    const group = target && (target.matches('details') ? target : target.closest('details'));
+    if (group) group.open = true;
+  }
+  revealLinkedSetting();
+  window.addEventListener?.('hashchange', revealLinkedSetting);
+
   /* ── kill switch: POST /system/pause | /system/resume ────────────── */
   const pill = document.getElementById('switch-pill');
   const title = document.getElementById('switch-title');

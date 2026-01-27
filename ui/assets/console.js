@@ -122,9 +122,15 @@
     approvals: sv('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>'),
     research: sv('<circle cx="10.8" cy="10.8" r="6.3"/><path d="M15.4 15.4L20 20"/>'),
     lab: sv('<path d="M8 3v5l-4 9a2.5 2.5 0 002.3 3.5h11.4A2.5 2.5 0 0020 17l-4-9V3M7 12h10M7 3h10"/>'),
-    more: sv('<circle cx="5.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>' +
-             '<circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>' +
-             '<circle cx="18.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>'),
+    more: sv('<circle cx="12" cy="8" r="3.25"/><path d="M5.5 20a6.5 6.5 0 0113 0"/>'),
+    risk: sv('<path d="M12 3l7 3v5c0 4.7-2.8 8-7 10-4.2-2-7-5.3-7-10V6z"/><path d="M9.2 12.2l2 2 3.8-4"/>'),
+    activity: sv('<path d="M7 5h13M7 12h13M7 19h13"/><circle cx="3.5" cy="5" r=".8" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="3.5" cy="19" r=".8" fill="currentColor" stroke="none"/>'),
+    system: sv('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1 .6 1.7 1.7 0 00-.4 1v.1H9.5V21a1.7 1.7 0 00-1.1-1.6 1.7 1.7 0 00-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 004 15a1.7 1.7 0 00-1.6-1.1h-.1V10h.1A1.7 1.7 0 004 9a1.7 1.7 0 00-.34-1.88l-.06-.06L6.46 4.2l.06.06A1.7 1.7 0 008.4 4a1.7 1.7 0 001.1-1.6v-.1h4.1v.1A1.7 1.7 0 0015 4a1.7 1.7 0 001.88.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.6 1h.1v3.9H21a1.7 1.7 0 00-1.6 1.1z"/>'),
+    language: sv('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>'),
+    session: sv('<path d="M10 5H5.5A1.5 1.5 0 004 6.5v11A1.5 1.5 0 005.5 19H10M14.5 8l4 4-4 4M8 12h10"/>'),
+    personal: sv('<circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0112 0M18 5v4M16 7h4"/>'),
+    notifications: sv('<path d="M6.5 10a5.5 5.5 0 0111 0c0 6 2.5 6 2.5 7H4c0-1 2.5-1 2.5-7M9.5 20h5"/>'),
+    evaluation: sv('<path d="M4 19V9M10 19V5M16 19v-7M3 19h18M15.5 6.5L19 3l2 2"/>'),
   };
 
   const CHEVRON = '<svg class="chevron" viewBox="0 0 8 14" fill="none" stroke="currentColor" ' +
@@ -139,9 +145,9 @@
     { href: 'advisor.html',   key: 'advisor',   icon: 'research',  tab: true },
     { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
     { href: 'research.html',  key: 'research',  icon: 'research' },
-    { href: 'risk.html',      key: 'risk' },
-    { href: 'activity.html',  key: 'activity' },
-    { href: 'system.html',    key: 'system' },
+    { href: 'risk.html',      key: 'risk',     icon: 'risk' },
+    { href: 'activity.html',  key: 'activity', icon: 'activity' },
+    { href: 'system.html',    key: 'system',   icon: 'system' },
   ];
   const openCount = () => D.proposals.filter((p) => p.status === 'WAITING_FOR_APPROVAL').length;
 
@@ -157,19 +163,11 @@
         ' data-od-id="tab-' + n.key + '">' + ICON[n.icon] + dot +
         '<span data-nav-label="' + n.key + '">' + t('nav.' + n.key) + '</span></a>';
     }).join('') +
-      '<button class="tabitem" type="button" id="tab-more" aria-expanded="false"' +
-      (inOverflow ? ' aria-current="page"' : '') +
-      ' aria-haspopup="dialog" data-od-id="tab-more">' + ICON.more +
+      '<a class="tabitem" href="more.html" id="tab-more"' +
+      (activeKey === 'more' ? ' aria-current="page"' : (inOverflow ? ' data-section-active="true"' : '')) +
+      ' data-od-id="tab-more">' + ICON.more +
       '<span id="more-badge" class="tabdot"' + (open ? '' : ' hidden') + '></span>' +
-      '<span data-nav-label="more">' + t('nav.more') + '</span></button>';
-
-    const sheetLinks = overflow.map((n) =>
-      '<a class="list-row" href="' + n.href + '" data-od-id="sheet-' + n.key + '">' +
-        '<span class="list-main"><span class="list-title" data-nav-label="' + n.key + '">' +
-          t('nav.' + n.key) + '</span>' +
-        '<span class="list-sub" data-nav-hint="' + n.key + '">' + t('nav.hint.' + n.key) + '</span></span>' +
-        '<span class="list-side">' + CHEVRON + '</span>' +
-      '</a>').join('');
+      '<span data-nav-label="more">' + t('nav.more') + '</span></a>';
 
     return '' +
       '<a class="skip-link" href="#content">' + t('common.skip') + '</a>' +
@@ -181,13 +179,7 @@
         '<a class="nav-status" href="system.html" id="nav-status" data-od-id="nav-status">' +
           '<span class="dot"></span><span>' + t('nav.status') + '</span></a>' +
       '</div></header>' +
-      '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner">' + tabs + '</div></nav>' +
-      '<dialog class="sheet" id="more-sheet" aria-label="' + t('nav.more') + '" data-od-id="more-sheet"><div class="sheet-inner">' +
-        '<div class="sheet-grip" aria-hidden="true"></div>' +
-        '<div class="list">' + sheetLinks + '</div>' +
-        '<button class="btn btn-secondary" id="more-close" data-i18n="common.close" style="margin-top:16px;">' +
-          t('common.close') + '</button>' +
-      '</div></dialog>';
+      '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner">' + tabs + '</div></nav>';
   }
 
 
@@ -297,23 +289,6 @@
     if (header) header.insertAdjacentHTML('afterend', '<div class="conn-bar" id="conn-bar" hidden></div>');
     window.I18N.applyStatic();
     paintLang();
-    const sessionLink = document.createElement('a');
-    sessionLink.href = 'login.html'; sessionLink.className = 'body-sm linkish session-link';
-    const paintSession = () => {
-      sessionLink.textContent = window.I18N.lang === 'zh'
-        ? (CT_API.authenticated ? '退出' : '登录') : (CT_API.authenticated ? 'Sign out' : 'Sign in');
-    };
-    paintSession();
-    document.querySelector('#more-sheet .sheet-inner').appendChild(sessionLink);
-    document.addEventListener('ct:auth', paintSession);
-    document.addEventListener('ct:lang', paintSession);
-    sessionLink.addEventListener('click', async event => {
-      if (CT_API.authenticated) {
-        event.preventDefault();
-        await CT_API.post('/auth/logout', {});
-        window.location.assign('login.html');
-      }
-    });
     if (window.CT_DEMO) document.addEventListener('click', event => {
       const link = event.target.closest('a[href]');
       if (!link) return;
@@ -329,7 +304,6 @@
     /* A language change repaints the chrome and re-runs every screen render. */
     document.addEventListener('ct:lang', () => {
       paintLang();
-      document.getElementById('more-sheet').setAttribute('aria-label', t('nav.more'));
       document.querySelectorAll('[data-nav-label]').forEach((el) => {
         el.textContent = t('nav.' + el.getAttribute('data-nav-label'));
       });
@@ -341,15 +315,6 @@
     });
     try { paintNavStatus(); paintFoot(); } catch (e) { /* chrome only */ }
     document.addEventListener('ct:pause-changed', paintNavStatus);
-
-    const sheet = document.getElementById('more-sheet');
-    const moreBtn = document.getElementById('tab-more');
-    if (sheet && moreBtn) {
-      moreBtn.addEventListener('click', () => { sheet.showModal(); moreBtn.setAttribute('aria-expanded', 'true'); });
-      sheet.addEventListener('close', () => { moreBtn.setAttribute('aria-expanded', 'false'); moreBtn.focus(); });
-      document.getElementById('more-close').addEventListener('click', () => sheet.close());
-      sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
-    }
   }
 
   /* ─── live(): bind a screen to the polling layer ──────────────────

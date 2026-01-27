@@ -41,7 +41,7 @@
     <div class="section-head"><h2 data-i18n="sy.notices">Notices</h2><span class="chip" id="warn-count">—</span></div>
     <div class="stack stack-3" id="warning-list"></div>
   </div></section>
-  <details class="container settings-group"><summary data-i18n="ux.diagnostics">System diagnostics & schedules</summary>
+  <details class="container settings-group" id="diagnostics"><summary data-i18n="ux.diagnostics">System diagnostics & schedules</summary>
   <section class="section" style="padding-top:0;" data-od-id="health">
     <div class="container grid-3">
       <div class="card" data-od-id="health-market">
@@ -118,8 +118,8 @@
 
   <!-- ── signed-in devices ─────────────────────────────────────────── -->
   </details>
-  <details class="container settings-group"><summary data-i18n="ux.devices">Devices & notifications</summary>
-  <section class="section" style="padding-top:0;" data-od-id="devices">
+  <details class="container settings-group" id="device-settings"><summary data-i18n="ux.devices">Devices & notifications</summary>
+  <section class="section" id="devices" style="padding-top:0;" data-od-id="devices">
     <div class="container">
       <div class="card">
         <div class="section-head">
@@ -137,7 +137,7 @@
   </section>
 
   <!-- ── notifications on this device ──────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="push">
+  <section class="section" id="push" style="padding-top:0;" data-od-id="push">
     <div class="container">
       <div class="card">
         <div class="section-head">

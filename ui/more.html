@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Me · Conservative Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css?v=personal-center-page" />
+</head>
+<body>
+
+<main id="content" class="more-page" hidden data-i18n-title="nav.more">
+  <section class="section pagehead">
+    <div class="container">
+      <h1 data-i18n="nav.more">Me</h1>
+      <p class="body-muted" data-i18n="more.pageIntro">Your console, preferences and supporting tools.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:0;">
+    <div class="container">
+      <div class="more-page-card">
+        <div class="more-head">
+          <div class="more-avatar" aria-hidden="true">CT</div>
+          <div class="more-identity">
+            <p class="eyebrow" data-i18n="more.kicker">PERSONAL CONSOLE</p>
+            <h2 data-i18n="more.title">Control center</h2>
+            <p class="body-sm body-muted" data-i18n="more.subtitle">Your local, single-user workspace</p>
+          </div>
+        </div>
+
+        <a class="more-status" href="system.html" data-od-id="more-status">
+          <span class="dot" id="more-status-dot"></span>
+          <span class="list-main"><span class="list-title" data-i18n="more.status">System status</span><span class="list-sub" id="more-status-copy">—</span></span>
+          <span data-icon="chevron" aria-hidden="true"></span>
+        </a>
+
+        <p class="more-section-label" data-i18n="more.workspace">Workspace</p>
+        <div class="more-grid">
+          <a class="more-link" href="approvals.html"><span class="more-link-icon" data-icon="approvals"></span><span class="list-main"><span class="list-title" data-i18n="nav.approvals">Approvals</span></span></a>
+          <a class="more-link" href="research.html"><span class="more-link-icon" data-icon="research"></span><span class="list-main"><span class="list-title" data-i18n="nav.research">Research</span></span></a>
+          <a class="more-link" href="risk.html"><span class="more-link-icon" data-icon="risk"></span><span class="list-main"><span class="list-title" data-i18n="nav.risk">Risk</span></span></a>
+          <a class="more-link" href="activity.html"><span class="more-link-icon" data-icon="activity"></span><span class="list-main"><span class="list-title" data-i18n="nav.activity">Activity</span></span></a>
+        </div>
+
+        <p class="more-section-label" data-i18n="more.records">Records</p>
+        <div class="more-actions">
+          <a class="more-action" href="evaluation.html">
+            <span class="more-link-icon" data-icon="evaluation"></span>
+            <span class="list-main"><span class="list-title" data-i18n="evl.title">Evaluation</span><span class="list-sub" data-i18n="more.evaluationHint">Strategy record against its declared benchmark</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
+        </div>
+
+        <p class="more-section-label" data-i18n="more.preferences">Preferences</p>
+        <div class="more-actions">
+          <a class="more-action" href="advisor.html#personal-sheet">
+            <span class="more-link-icon" data-icon="personal"></span>
+            <span class="list-main"><span class="list-title" data-i18n="ai.personal">My personal context</span><span class="list-sub" data-i18n="more.personalHint">Goals, timeline and communication preferences</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
+          <button class="more-action" id="more-language" type="button">
+            <span class="more-link-icon" data-icon="language"></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.language">Language</span><span class="list-sub" id="more-language-value"></span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </button>
+          <a class="more-action" href="system.html#push">
+            <span class="more-link-icon" data-icon="notifications"></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.notifications">Notifications</span><span class="list-sub" data-i18n="more.notificationsHint">Push status, test and subscribed devices</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
+          <a class="more-action" id="more-session" href="login.html">
+            <span class="more-link-icon" data-icon="session"></span>
+            <span class="list-main"><span class="list-title" id="more-session-label"></span><span class="list-sub" id="more-session-hint"></span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
+          <button class="more-action" id="more-logout" type="button" hidden>
+            <span class="more-link-icon" data-icon="session"></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.signOut">Sign out</span><span class="list-sub" data-i18n="more.signOutHint">End the session on this device</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="assets/i18n.js?v=personal-center-page"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js?v=personal-center-page"></script>
+<script src="assets/pages/more.js?v=personal-center-page"></script>
+</body>
+</html>

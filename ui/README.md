@@ -1,6 +1,6 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Seven screens, one shared
+Frontend for the local API in `agentic_trading`. Eleven screens, one shared
 asset layer, no build step.
 
 ```
@@ -11,6 +11,10 @@ research.html    Research  decision strength, run history, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, open orders, audit trail
 system.html      System    health, notices, kill switch
+advisor.html     Assistant personal context, holdings review, candidates, chat
+lab.html         Lab       visual research-agent state and report handoffs
+evaluation.html  Evaluation forward record against the declared benchmark
+more.html        Me        preferences, account/device and supporting-tool links
 
 assets/console.css   tokens, components, motion
 assets/console.js    chrome, formatting, live() binding
