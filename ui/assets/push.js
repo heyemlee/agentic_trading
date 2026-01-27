@@ -75,8 +75,15 @@ window.CT_PUSH = (function () {
 
   async function disable() {
     const subscription = await current();
+    let deviceId = null;
+    if (subscription && window.crypto && crypto.subtle) {
+      const bytes = new TextEncoder().encode(subscription.endpoint);
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      deviceId = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0'))
+        .join('').slice(0, 16);
+    }
     if (subscription) await subscription.unsubscribe();
-    return { unsubscribed: Boolean(subscription) };
+    return { unsubscribed: Boolean(subscription), deviceId };
   }
 
   return { supported, standalone, isIOS, why, enable, disable, current };

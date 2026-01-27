@@ -230,12 +230,14 @@
     test.textContent = C.t('sy.pushTest');
     off.textContent = C.t('sy.pushDisable');
 
-    $('push-devices').innerHTML = devices.map((device) => C.listRow({
-      id: 'push-device-' + device.device_id,
-      title: device.label,
-      sub: C.t('sy.pushDevice', { d: C.dateOnly(device.created_at) }),
-      value: device.last_sent_at ? C.dateTime(device.last_sent_at) : '—',
-    })).join('');
+    $('push-devices').innerHTML = devices.map((device) =>
+      '<div class="list-row" data-od-id="push-device-' + C.escapeHtml(device.device_id) + '">' +
+        '<span class="list-main"><span class="list-title">' + C.escapeHtml(device.label) + '</span>' +
+        '<span class="list-sub">' + C.escapeHtml(C.t('sy.pushDevice', { d: C.dateOnly(device.created_at) })) + '</span></span>' +
+        '<span class="list-side"><span class="list-vals"><span class="list-note">' +
+          C.escapeHtml(device.last_sent_at ? C.dateTime(device.last_sent_at) : '—') + '</span></span>' +
+        '<button class="btn btn-secondary btn-sm" type="button" data-push-remove="' + C.escapeHtml(device.device_id) + '">' +
+          C.t('sy.pushRemove') + '</button></span></div>').join('');
   }
 
   function wirePush() {
@@ -268,9 +270,31 @@
     });
 
     $('push-disable').addEventListener('click', async () => {
-      await CT_PUSH.disable().catch(() => {});
-      CT_API.readOnce('pushDevices');
-      renderPush();
+      try {
+        const result = await CT_PUSH.disable();
+        if (result.deviceId) await CT_API.post('/notifications/devices/' + encodeURIComponent(result.deviceId) + '/unsubscribe', {});
+        CT_API.readOnce('pushDevices');
+        renderPush();
+      } catch (err) {
+        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+      }
+    });
+
+    $('push-devices').addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-push-remove]');
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      button.textContent = C.t('sy.pushRemoving');
+      try {
+        await CT_API.post('/notifications/devices/' + encodeURIComponent(button.dataset.pushRemove) + '/unsubscribe', {});
+        await CT_API.readOnce('pushDevices');
+        detail.textContent = C.t('sy.pushRemoved');
+        renderPush();
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = C.t('sy.pushRemove');
+        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+      }
     });
   }
   wirePush();

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evaluation · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css?v=evaluation-page" />
+</head>
+<body>
+<main id="content" hidden data-i18n-title="evl.title">
+  <section class="section pagehead"><div class="container">
+    <h1 data-i18n="evl.title">Evaluation</h1>
+    <p class="body-muted" data-i18n="evl.intro">The forward record against the benchmark declared before the study began.</p>
+  </div></section>
+
+  <section class="section" style="padding-top:0;"><div class="container">
+    <div id="evaluation-loading" class="empty"><p data-i18n="common.loading">Loading…</p></div>
+    <div id="evaluation-empty" class="empty" hidden><p class="empty-title" data-i18n="evl.unavailable">No evaluation record is available</p><p id="evaluation-error"></p></div>
+    <div id="evaluation-report" hidden>
+      <div class="card-tinted">
+        <div class="row-between row-wrap"><div><p class="eyebrow" data-i18n="evl.study">Forward study</p><h2 id="ev-state" style="margin-top:4px;">—</h2></div><span class="chip" id="ev-days">—</span></div>
+        <p class="body-sm body-muted" id="ev-period" style="margin-top:8px;"></p>
+      </div>
+
+      <div class="grid-2" style="margin-top:24px;">
+        <section class="card-tinted"><p class="eyebrow" data-i18n="evl.strategy">Strategy</p><p class="figure figure-sm" id="ev-strategy-return">—</p><dl class="kv" style="margin-top:12px;"><div class="kv-row"><dt data-i18n="evl.drawdown">Max drawdown</dt><dd id="ev-strategy-dd">—</dd></div><div class="kv-row"><dt data-i18n="evl.equity">Equity</dt><dd id="ev-strategy-equity">—</dd></div></dl></section>
+        <section class="card-tinted"><p class="eyebrow" data-i18n="evl.benchmark">Benchmark</p><p class="figure figure-sm" id="ev-benchmark-return">—</p><dl class="kv" style="margin-top:12px;"><div class="kv-row"><dt data-i18n="evl.drawdown">Max drawdown</dt><dd id="ev-benchmark-dd">—</dd></div><div class="kv-row"><dt data-i18n="evl.mix">Declared mix</dt><dd id="ev-benchmark-mix">—</dd></div></dl></section>
+      </div>
+
+      <section class="section" style="padding-inline:0;"><div class="card-tinted"><p class="eyebrow" data-i18n="evl.relative">Strategy minus benchmark</p><p class="figure figure-sm" id="ev-lead">—</p><p class="body-sm body-muted" id="ev-interpretation" style="margin-top:6px;"></p></div></section>
+
+      <section><div class="section-head"><h2 data-i18n="evl.record">What the record includes</h2></div><div class="list" id="ev-decisions"></div></section>
+
+      <section class="section" style="padding-inline:0;"><div class="section-head"><h2 data-i18n="evl.integrity">Study integrity</h2></div><div class="list" id="ev-integrity"></div><div class="banner" id="ev-caveat" style="margin-top:16px;"></div></section>
+    </div>
+  </div></section>
+</main>
+<script src="assets/i18n.js?v=evaluation-page"></script>
+<script src="assets/data.js?v=evaluation-page"></script>
+<script src="assets/api.js?v=evaluation-page"></script>
+<script src="assets/console.js?v=evaluation-page"></script>
+<script src="assets/pages/evaluation.js?v=evaluation-page"></script>
+</body>
+</html>

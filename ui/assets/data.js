@@ -13,6 +13,7 @@ window.CT = (function () {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
     schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
+    evaluation: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
     labRoster: null, labTrace: {},
@@ -362,6 +363,25 @@ window.CT = (function () {
     last_dispatch_at: "2026-09-04T20:32:01+00:00", events: {},
   };
 
+  const evaluation = {
+    study_id: "demo-forward-record", state: "RUNNING", started_on: "2026-09-01",
+    days_recorded: 1, config_drifted: false, readable: false, conclusive: false,
+    declared: {
+      observation_days: 30, minimum_days_for_judgement: 180,
+      benchmark_weights_pct: { VTI: 60, BND: 40 },
+      stop_rules: { max_drawdown_pct: -15, trails_benchmark_pct_points: -10 },
+    },
+    strategy: { return_pct: 0, max_drawdown_pct: 0, equity_usd: 3000, net_deposits_usd: 3000 },
+    benchmark: { return_pct: 0, max_drawdown_pct: 0, equity_usd: 3000, weights_pct: { VTI: 60, BND: 40 } },
+    strategy_minus_benchmark_pct_points: 0,
+    decisions: { research_runs: 0, run_outcomes: {}, job_states: {}, proposal_statuses: {},
+      incomplete_data_rate_pct: null, llm_calls: 0, human_decision_minutes: { median: null } },
+    execution: { fills: 0, traded_usd: 0, turnover_pct_of_equity: 0,
+      slippage_bps: { count: 0, median: null }, commission_usd: 0 },
+    stop_rules_triggered: [],
+    caveat: "1 day(s) recorded. This is a record of what happened, not evidence about the strategy: 180 days were declared as the minimum before it can support a judgement.",
+  };
+
   const authSessions = {
     max_age_days: 30,
     sessions: [
@@ -677,7 +697,7 @@ window.CT = (function () {
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications, labRoster, labTrace,
+    schedule, operations, notifications, evaluation, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity,
   };
 })();
