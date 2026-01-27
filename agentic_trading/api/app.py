@@ -18,6 +18,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -121,7 +122,14 @@ async def security_boundary(request: Request, call_next):
               or (path.startswith("/ui/") and request.query_params.get("demo") == "1" and not unsafe))
     if response is None and not public and session is None:
         if path.startswith("/ui"):
-            response = RedirectResponse("/ui/login.html", status_code=303)
+            # Carry where they were going. A push notification about a waiting
+            # approval, opened on an expired session, would otherwise land on
+            # Home with its subject lost. Only this origin's path and query
+            # travel, fully encoded so they cannot break out of the parameter,
+            # and the console re-checks the value before following it back.
+            here = path + (f"?{request.url.query}" if request.url.query else "")
+            response = RedirectResponse("/ui/login.html?next=" + quote(here, safe=""),
+                                        status_code=303)
         else:
             configured = _auth.credentials() is not None
             response = JSONResponse({"detail": "login required" if configured else
