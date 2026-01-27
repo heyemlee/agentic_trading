@@ -23,6 +23,16 @@ Real-money execution is enabled for the `micro_live` bucket.
 - Editing `config/*.yaml` changes the running system's behaviour, not just the development copy.
 - `state/` holds the ledger, the SQLite audit database and the drawdown high-water marks. Never
   move, rename or hand-edit anything in it, symlink or not. Use `ct-state`.
+- **Never `git checkout`/`switch` to another branch or ref in this checkout.** The `state`/`runs`/
+  `.env` symlinks only stop a *destructive* git accident (`clean -xdf`, `rm -rf`); they do nothing
+  against a normal checkout. If the target ref tracks a real file at one of those names — an
+  older `main` once tracked `state/*.example.yaml` — git deletes the symlink and writes a real
+  file or directory in its place, and every other tracked path (`config/`, `agentic_trading/`,
+  `ui/`, …) changes under the running system too. This happened on 2026-09-10: `git checkout
+  main` replaced the `state` symlink with a real directory; the live ledger was untouched only
+  because it lives at the symlink's target, but the API kept writing to the new empty directory
+  until it was found and restarted. To land a branch on `main`, push a refspec instead —
+  `git push origin <branch>:main` (fast-forward) or open a PR — and never move `HEAD` here.
 - Before stopping or restarting the live API by hand: `deploy/macos/checks.sh`'s
   `--fail-on-unsettled` guard (see `release.sh publish`) is the check to run first, not a guess.
   `start.sh`'s port cleanup calls `lsof -ti :PORT` without filtering to `LISTEN`, so it will list
@@ -37,7 +47,7 @@ Real-money execution is enabled for the `micro_live` bucket.
   commit is pinned in `pyproject.toml` and recorded in `agentic_trading/__init__.py`. Personal
   preferences go in `config/`, not upstream.
 - **Never set `ANTHROPIC_API_KEY`,** in `.env`, in a shell, or in a test. The LLM layer runs on
-  the owner's Codex subscription through the Codex CLI; an API key silently switches
+  the owner's Claude subscription through the Claude Code CLI; an API key silently switches
   billing to pay-as-you-go. The adapter strips these variables before every call.
 - **Safety limits are enforced by deterministic code, never by prompts.** Agents own research
   and produce proposals. `risk/`, `policy.py` and `execution.py` decide what may happen. A
@@ -67,7 +77,7 @@ agentic_trading/     the package
   service/           every product operation, plain Python, no HTTP; shared by the CLI, the
                      scheduler and the API
   broker/            venue adapters (simulated, Robinhood)
-  llm/               Codex adapter and the MCP tool server
+  llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime
 config/              profiles, the mandate, the prompt context — live, read by the running
                      service, and (unlike state/runs/.env) tracked in git on purpose

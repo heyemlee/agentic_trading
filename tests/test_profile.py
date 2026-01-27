@@ -1,3 +1,4 @@
+import re
 import shutil
 
 import pytest
@@ -144,3 +145,33 @@ def test_the_old_positional_signature_still_means_what_it_did(profiles):
     assert cfg.floor("core", "etf", "small") == 65
     assert cfg.floor("core", "stock", "normal") == 75
     assert cfg.floor("sandbox", "etf", "small") == 65
+
+
+# Top-level risk_profile keys that no code reads, each with the reason it is allowed to stay.
+# The failure mode this guards is silent: a limit is tightened here, nothing reads it, and the
+# profile goes on reading as though the system had been tightened.
+UNREAD_RISK_KEYS = {
+    "profile_name": "a label for this profile, not a limit",
+    "fail_closed_conditions": "a declaration of intent; each condition is enforced in code under "
+                              "its own name, not by walking this list",
+    "market_data_freshness": "superseded by data_freshness, which is what the code reads; the two "
+                             "disagree, so delete it rather than trusting it",
+    "broker_side_settings": "superseded by the broker and robinhood blocks",
+}
+
+
+def test_every_risk_profile_top_level_key_has_a_reader(config_dir):
+    """A limit nobody reads is worse than a missing one: it reads as though it applied.
+
+    Substring matching over the package is deliberately crude — a key named in a docstring
+    counts as read. It is enough to catch a whole block that was declared and then never wired
+    up, which has happened here more than once.
+    """
+    keys = yaml.safe_load((config_dir / "risk_profile.yaml").read_text())
+    source = "\n".join(p.read_text() for p in (config_dir.parent / "agentic_trading").rglob("*.py"))
+    unread = {k for k in keys if not re.search(rf"""["']{re.escape(k)}["']""", source)}
+
+    assert unread == set(UNREAD_RISK_KEYS), (
+        "risk_profile.yaml top-level keys with no reader changed.\n"
+        f"newly unread: {sorted(unread - set(UNREAD_RISK_KEYS))}\n"
+        f"now read, drop from UNREAD_RISK_KEYS: {sorted(set(UNREAD_RISK_KEYS) - unread)}")

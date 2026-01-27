@@ -23,6 +23,16 @@ Real-money execution is enabled for the `micro_live` bucket.
 - Editing `config/*.yaml` changes the running system's behaviour, not just the development copy.
 - `state/` holds the ledger, the SQLite audit database and the drawdown high-water marks. Never
   move, rename or hand-edit anything in it, symlink or not. Use `ct-state`.
+- **Never `git checkout`/`switch` to another branch or ref in this checkout.** The `state`/`runs`/
+  `.env` symlinks only stop a *destructive* git accident (`clean -xdf`, `rm -rf`); they do nothing
+  against a normal checkout. If the target ref tracks a real file at one of those names — an
+  older `main` once tracked `state/*.example.yaml` — git deletes the symlink and writes a real
+  file or directory in its place, and every other tracked path (`config/`, `agentic_trading/`,
+  `ui/`, …) changes under the running system too. This happened on 2026-09-10: `git checkout
+  main` replaced the `state` symlink with a real directory; the live ledger was untouched only
+  because it lives at the symlink's target, but the API kept writing to the new empty directory
+  until it was found and restarted. To land a branch on `main`, push a refspec instead —
+  `git push origin <branch>:main` (fast-forward) or open a PR — and never move `HEAD` here.
 - Before stopping or restarting the live API by hand: `deploy/macos/checks.sh`'s
   `--fail-on-unsettled` guard (see `release.sh publish`) is the check to run first, not a guess.
   `start.sh`'s port cleanup calls `lsof -ti :PORT` without filtering to `LISTEN`, so it will list

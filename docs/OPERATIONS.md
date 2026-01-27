@@ -201,10 +201,56 @@ as its skip reason. One setting, one behaviour, in the code and here.
 ### Real money
 
 `micro_live_execution.enabled` in `config/risk_profile.yaml` is the master switch and is
-`false`. It is deliberately not changeable through the API. Before it can be turned on,
-`uv run ct-robinhood preflight` must be green, which additionally requires accepting the
-documented risk defaults (`accept_all_recommended_defaults`) or replacing them with explicit
-values.
+**`true`**, armed 2026-09-08 after `uv run ct-robinhood preflight` came back green — which
+additionally requires accepting the documented risk defaults (`accept_all_recommended_defaults`)
+or replacing them with explicit values. It is deliberately not changeable through the API: the
+switch can only be moved by editing that file on this Mac, and the console has no endpoint that
+writes configuration.
+
+Arming it submits nothing by itself. Every real order still needs a human approval, the
+revalidation above, and Hard Risk twice; what the switch changes is that an approval can now
+reach the venue instead of stopping at a simulated one. The emergency control from a phone is
+`POST /system/pause`, which stops orders immediately and leaves research running.
+
+### Autonomy
+
+Autonomy is built and entirely switched off. Nothing in this section is running today; it is
+written down so that arming it is a decision with a checklist rather than a flag someone finds.
+
+Two blocks configure it, and they are independent:
+
+| Config | Capabilities | State |
+| --- | --- | --- |
+| `execution_policy.autonomy` | `defensive`, `conservative`, `experimental` — the conceptual buckets | all `enabled: false` |
+| `buckets.micro_live.autonomy` | `reduce`, `open` — the real-money pair | both `enabled: false` |
+
+`reduce` and `open` are separate switches because they are different acts: one cuts risk, the
+other creates it, and the cost of getting each wrong is not the same. Turning one on never turns
+on the other, and they count against separate daily allowances. `open` additionally restricts
+*what* may be bought to `classes`; an empty list there means refuse, never "no restriction".
+
+No autonomous action bypasses the Hard Risk Layer, and `SELL` is never autonomous — a full close
+is always a person's decision.
+
+**Arming order.** Each step is a separate decision, and none of them is code work:
+
+1. Positions exist, bought by hand, and their decision records read well.
+2. Arm `reduce` only. Watch it on real fills until the daily loss gate has been seen to work.
+3. Populate `config/event_calendar.yaml` and set `maintained_through`. An autonomous open fails
+   closed while that calendar is empty or expired, which is the current state and is deliberate:
+   a blackout calendar carrying guessed dates is worse than none.
+4. Arm `open` last.
+
+**Stopping.** One gesture, no config editing:
+
+```bash
+uv run ct-autonomy status                      # what autonomy may do right now
+uv run ct-autonomy stop --note "why"           # halt autonomous action; the note is recorded
+uv run ct-autonomy resume --note "why"         # deliberately separate, deliberately manual
+```
+
+The stop flag is sticky on purpose: `resume` is a second decision, so that whatever caused the
+stop gets looked at before it is cleared.
 
 ### FRED macro data (optional)
 
@@ -431,13 +477,36 @@ Three buckets, three ledgers, three drawdown ladders. They never fund each other
 |---|---|---|---|
 | Core | $2,500 conceptual | none | `state/portfolio.yaml` |
 | Sandbox | $500 conceptual, max | none | `state/portfolio.yaml` |
-| Micro-Live | **$100 real**, hard cap | Robinhood Agentic | `state/micro_live_portfolio.yaml` |
+| Micro-Live | **real**, funded $100, ceiling $2,000 | Robinhood Agentic | `state/micro_live_portfolio.yaml` |
 
-The $100 boundary is enforced in four independent places: the bucket allocation the sizing
-rules work from, the deployed-cost cap (HR07c), a live check of the Agentic account's equity
-before every order, and an outright refusal to trade if that account holds more than $150.
+Micro-Live sizes against what the account actually holds. Every cap in the engine is a
+percentage of the bucket's allocation, and for this bucket that allocation follows live equity
+rather than a number typed into a file: a deposit widens the caps without a config edit, and —
+the half that matters more — a loss narrows them without anyone having to remember to.
+
+What bounds it is `micro_live_execution.max_capital_usd`, **$2,000**, with $50 of tolerance for
+market drift above it. Raising that number is the deliberate act that widens the mandate, and it
+is the one thing the console cannot do: tightening is a phone gesture, loosening is a file edit
+on this Mac. The ceiling is enforced twice, independently — in the bucket's own accounting and
+again in the broker adapter (`refuse_if_account_equity_above_usd`) — so one edited number is not
+enough to move the boundary everywhere.
+
+Within that, order size is capped per instrument class, as a share of the account and in dollars:
+
+| Tier | Classes | Share of account | Max order |
+|---|---|---|---|
+| low | broad diversified ETF, bond or cash-like ETF | 60% | $200 |
+| mid | sector, factor or thematic ETF | 25% | $80 |
+| high | individual stock | 15% | $50 |
+
+Funding the account should always be recorded with `ct-state cashflow`, or the drawdown ladder
+reads the deposit as performance.
 
 ## Not built, by design
 
-Evaluation harness and benchmark comparison, autonomy of any kind, additional brokers,
-additional model providers, backtesting platform, and multi-host high availability.
+Additional brokers, additional model providers, a backtesting platform, and multi-host high
+availability.
+
+Two things that used to be on this list have since been built and are described above: the
+evaluation harness and its benchmark comparison, under [Does any of this work?](#does-any-of-this-work),
+and autonomy, which exists in code and is switched entirely off, under [Autonomy](#autonomy).
