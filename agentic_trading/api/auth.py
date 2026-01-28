@@ -60,9 +60,44 @@ def password_hash(password: str, salt: str) -> str:
                           r=8, p=1, dklen=32).hex()
 
 
+#: Two ways to be strong enough, because they are two different defences. Length alone is what
+#: a passphrase buys, and nothing further is asked of one that long. Below that, all four
+#: character classes have to do the work instead. The console is reachable from the tailnet, so
+#: this is the whole guard in front of a real-money account; five failures in five minutes is
+#: the other half of it (see login), which keeps the short form a keyspace question rather than
+#: an online-guessing one.
+PASSWORD_MIN = 8            # accepted only with all four character classes
+PASSPHRASE_MIN = 16         # accepted on length alone
+PASSWORD_MAX = 1024
+
+CLASSES = (
+    ("an upper-case letter", str.isupper),
+    ("a lower-case letter", str.islower),
+    ("a digit", str.isdigit),
+    ("a symbol", lambda c: not c.isalnum()),
+)
+
+
+def password_complaint(password: str) -> str | None:
+    """What is wrong with this password, in one phrase, or None if nothing is."""
+    if len(password) > PASSWORD_MAX:
+        return f"use a password of at most {PASSWORD_MAX} characters"
+    if len(password) >= PASSPHRASE_MIN:
+        return None
+    if len(password) < PASSWORD_MIN:
+        return (f"use a passphrase of {PASSPHRASE_MIN} characters or more, or a password of at "
+                f"least {PASSWORD_MIN} with upper case, lower case, a digit and a symbol")
+    missing = [name for name, present in CLASSES if not any(present(c) for c in password)]
+    if missing:
+        return (f"a password under {PASSPHRASE_MIN} characters still needs " + ", ".join(missing)
+                + f"; at {PASSPHRASE_MIN} characters or more none of that is asked")
+    return None
+
+
 def configure_password(path: Path, username: str, password: str) -> None:
-    if len(password) < 14 or len(password) > 1024:
-        raise ValueError("use a password of 14–1024 characters")
+    complaint = password_complaint(password)
+    if complaint is not None:
+        raise ValueError(complaint)
     if not username.strip() or len(username) > 100:
         raise ValueError("provide an owner username of 1–100 characters")
     salt = secrets.token_hex(16)
@@ -268,7 +303,9 @@ def main(argv=None) -> int:
     parser.add_argument("--file", type=Path, default=Path(os.environ.get("CT_AUTH_FILE", "state/console_auth.json")))
     parser.add_argument("--username", default="owner")
     args = parser.parse_args(argv)
-    first = getpass.getpass("New console password (14+ characters): ")
+    first = getpass.getpass(
+        f"New console password ({PASSPHRASE_MIN}+ characters, or {PASSWORD_MIN}+ with upper case, "
+        "lower case, a digit and a symbol): ")
     if first != getpass.getpass("Repeat password: "):
         parser.error("passwords do not match")
     try:

@@ -49,7 +49,7 @@ def console_auth(monkeypatch, tmp_path):
     from agentic_trading.api.auth import ConsoleAuth, configure_password
 
     path = tmp_path / "auth.json"
-    configure_password(path, "test-owner", "test-only-password-for-console")
+    configure_password(path, "test-owner", "Test-Only-Console-Pw1")
     auth = ConsoleAuth(path, ["https://testserver"])
     monkeypatch.setattr(import_module("agentic_trading.api.app"), "_auth", auth)
     return auth
@@ -64,7 +64,7 @@ def auth_client(console_auth):
     client = TestClient(app, base_url="https://testserver")
     client.headers.update({"Origin": "https://testserver", "X-CT-Request": "1"})
     response = client.post("/auth/login", json={
-        "username": "test-owner", "password": "test-only-password-for-console"})
+        "username": "test-owner", "password": "Test-Only-Console-Pw1"})
     assert response.status_code == 200
     client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
     yield client

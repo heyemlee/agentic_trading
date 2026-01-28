@@ -30,7 +30,7 @@ when it exists, so the console is same-origin with the API and no CORS
 middleware is needed.
 
 ```bash
-uv run ct-auth         # set your own password locally (14+ characters)
+uv run ct-auth         # a 16+ passphrase, or 8+ with upper, lower, a digit and a symbol
 uv run ct-api          # http://127.0.0.1:8787/ui/
 ```
 

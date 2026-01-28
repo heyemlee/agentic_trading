@@ -46,7 +46,7 @@ def test_csrf_host_and_fetch_metadata_checks(auth_client):
 def test_login_cookie_logout_and_headers(console_auth):
     client = TestClient(app, base_url='https://testserver', headers={
         'Origin': 'https://testserver', 'X-CT-Request': '1'})
-    result = client.post('/auth/login', json={'username': 'test-owner', 'password': 'test-only-password-for-console'})
+    result = client.post('/auth/login', json={'username': 'test-owner', 'password': 'Test-Only-Console-Pw1'})
     cookie = result.headers['set-cookie'].lower()
     assert all(flag in cookie for flag in ['httponly', 'secure', 'samesite=strict'])
     assert 'max-age=2592000' in cookie
@@ -61,8 +61,53 @@ def test_login_cookie_logout_and_headers(console_auth):
     assert ui.headers['x-frame-options'] == 'DENY'
 
 
+@pytest.mark.parametrize('password', [
+    'Aa1!aaa',                 # seven characters, even with every class present
+    'aa1!aaaa',                # no upper case
+    'AA1!AAAA',                # no lower case
+    'Aa!aaaaa',                # no digit
+    'Aa1aaaaa',                # no symbol
+    'Aa1!' + 'a' * 1021,       # nothing rescues a password past the ceiling
+])
+def test_weak_passwords_are_refused(tmp_path, password):
+    """Eight characters is the floor only because all four classes are mandatory."""
+    with pytest.raises(ValueError):
+        configure_password(tmp_path / 'auth.json', 'test-owner', password)
+    assert not (tmp_path / 'auth.json').exists()
+
+
+@pytest.mark.parametrize('password', ['Aa1!aaaa', 'Tr4de$!!', 'Test-Only-Console-Pw1'])
+def test_shortest_acceptable_password_signs_in(tmp_path, password):
+    path = tmp_path / 'auth.json'
+    configure_password(path, 'test-owner', password)
+    assert ConsoleAuth(path, ['https://testserver']).login('test-owner', password)[1] == 'ok'
+
+
+@pytest.mark.parametrize('password', [
+    'correct-horse-battery-staple',        # no upper case, no digit, no symbol
+    'test-only-password-for-console',
+])
+def test_a_passphrase_is_accepted_on_its_length_alone(tmp_path, password):
+    """The four classes are what a short password owes instead of length, not as well as it.
+
+    Requiring them at every length rejected a thirty-character passphrase for having no digit —
+    the one kind of password worth encouraging — and made every password in this suite shorter.
+    """
+    path = tmp_path / 'auth.json'
+    configure_password(path, 'test-owner', password)
+    assert ConsoleAuth(path, ['https://testserver']).login('test-owner', password)[1] == 'ok'
+
+
+def test_one_character_short_of_a_passphrase_still_owes_its_classes(tmp_path):
+    fifteen = 'a-short-passwrd'
+    assert len(fifteen) == 15
+    with pytest.raises(ValueError):
+        configure_password(tmp_path / 'auth.json', 'test-owner', fifteen)
+    configure_password(tmp_path / 'auth.json', 'test-owner', fifteen + 'x')
+
+
 def test_password_rotation_revokes_sessions(auth_client, console_auth):
-    configure_password(console_auth.path, 'test-owner', 'replacement-test-password')
+    configure_password(console_auth.path, 'test-owner', 'Replacement-Test-Pw2')
     assert auth_client.get('/portfolio').status_code == 401
 
 
@@ -83,7 +128,7 @@ def test_expiry_and_rate_limit(auth_client, console_auth):
     assert auth_client.get('/portfolio').status_code == 401
     for _ in range(5):
         assert console_auth.login('test-owner', 'wrong')[1] == 'invalid'
-    assert console_auth.login('test-owner', 'test-only-password-for-console')[1] == 'rate_limited'
+    assert console_auth.login('test-owner', 'Test-Only-Console-Pw1')[1] == 'rate_limited'
 
 
 def test_identity_is_from_session_not_payload(auth_client, monkeypatch):
@@ -106,7 +151,7 @@ LAPTOP = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
           '(KHTML, like Gecko) Chrome/130.0 Safari/537.36')
 
 
-def sign_in(console_auth, agent, password='test-only-password-for-console'):
+def sign_in(console_auth, agent, password='Test-Only-Console-Pw1'):
     """A second browser signing in, with its own cookie jar."""
     client = TestClient(app, base_url='https://testserver', headers={
         'Origin': 'https://testserver', 'X-CT-Request': '1', 'User-Agent': agent})
@@ -202,7 +247,7 @@ def test_a_session_that_reaches_thirty_days_is_gone_however_active_it_was(consol
 
 def test_password_rotation_signs_every_device_out(console_auth):
     phone, laptop = sign_in(console_auth, IPHONE), sign_in(console_auth, LAPTOP)
-    configure_password(console_auth.path, 'test-owner', 'a-replacement-password-here')
+    configure_password(console_auth.path, 'test-owner', 'A-Replacement-Pw3-Here')
     for client in (phone, laptop):
         assert client.get('/portfolio').status_code == 401
     assert console_auth.sessions() == []
@@ -242,7 +287,7 @@ def test_upgrading_a_deployed_database_keeps_its_sessions(tmp_path):
     from agentic_trading.state_db import StateDB
 
     path = tmp_path / 'auth.json'
-    configure_password(path, 'test-owner', 'test-only-password-for-console')
+    configure_password(path, 'test-owner', 'Test-Only-Console-Pw1')
     database = StateDB(path).path
     with sqlite3.connect(database) as connection:      # recreate the pre-upgrade shape
         connection.execute('DROP TABLE console_sessions')
@@ -302,7 +347,7 @@ def test_a_migrated_database_still_accepts_a_login_from_the_release_before_it(co
                                ('older', 'test-owner', 'csrf', 'gen', 1.0, 1.0, 9e9))
 
     # and what this release does instead, which survives any further column being added
-    assert console_auth.login('test-owner', 'test-only-password-for-console')[1] == 'ok'
+    assert console_auth.login('test-owner', 'Test-Only-Console-Pw1')[1] == 'ok'
     assert len(console_auth.sessions()) == 2
 
 
