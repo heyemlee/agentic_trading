@@ -14,7 +14,7 @@ import pytest
 
 from agentic_trading import webpush
 from agentic_trading.service import Service
-from tests.conftest import ROOT
+from tests.conftest import ROOT, copy_example_ledger
 
 ENDPOINT = "https://web.push.apple.com/QABC123-secret-capability-url"
 SUBSCRIPTION = {"endpoint": ENDPOINT,
@@ -27,7 +27,7 @@ def service(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
     return Service(cfg)
 
 

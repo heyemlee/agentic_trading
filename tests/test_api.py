@@ -29,7 +29,7 @@ from agentic_trading.service.status import (
     SystemStatus,
     proposal_status,
 )
-from tests.conftest import ROOT
+from tests.conftest import ROOT, copy_example_ledger
 
 
 @pytest.fixture
@@ -39,8 +39,8 @@ def sandbox_service(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"
     state.mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
-    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     (tmp_path / "runs").mkdir()
     disarm(cfg / "risk_profile.yaml")
     return Service(cfg)

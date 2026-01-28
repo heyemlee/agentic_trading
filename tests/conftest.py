@@ -1,8 +1,45 @@
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def recent_session() -> str:
+    """The most recent weekday, as a fixture's idea of "a session that just closed".
+
+    Not `service._last_session()`: that one probes the data vendor for a usable
+    bar, and this suite is offline. A holiday would only mean the fixture is
+    dated a day the market was shut, which nothing here asserts on.
+    """
+    day = datetime.now(UTC).date()
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
+def copy_example_ledger(name: str, destination: Path, as_of: str | None = None) -> Path:
+    """Copy a template ledger from config/examples, dated the last session.
+
+    Pass `as_of` where the ledger has to line up with a fixed scenario date
+    instead: a snapshot dated after the session being researched fails closed
+    too, from the other side.
+
+    `portfolio_state.max_age_days` fails a snapshot closed once it is older than
+    the limit, deliberately: nothing should trade off a ledger nobody has
+    confirmed. A fixture that keeps the template's own fixed date therefore
+    turns the suite red on one particular calendar day, long after anyone chose
+    that date — and from there the cheapest-looking way back to green is to
+    widen the very limit the guard is made of. The date is what rots, so the
+    fixture owns the date.
+    """
+    text = (ROOT / "config" / "examples" / name).read_text(encoding="utf-8")
+    dated, found = re.subn(r"(?m)^as_of: .*$", "as_of: " + (as_of or recent_session()), text, count=1)
+    assert found == 1, f"{name} carries no as_of line to date"
+    destination.write_text(dated, encoding="utf-8")
+    return destination
 
 
 @pytest.fixture

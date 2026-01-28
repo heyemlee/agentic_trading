@@ -8,6 +8,7 @@ from agentic_trading import cli, risk_scenarios
 from agentic_trading.portfolio import build_snapshot
 from agentic_trading.profile import load_profiles
 from agentic_trading.state_db import StateDB
+from tests.conftest import copy_example_ledger
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_IDENTITY = {"company_name": "Test Fund", "quote_type": "ETF", "exchange": "PCX"}
@@ -19,7 +20,8 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     shutil.copytree(ROOT / "config", cfg_dir)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state_dir / "portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", state_dir / "portfolio.yaml",
+                        as_of=risk_scenarios.TRADE_DATE)
     profiles = load_profiles(cfg_dir)
     profiles.risk["portfolio_state"]["file"] = "state/portfolio.yaml"
     profiles.risk["portfolio_state"]["risk_state_file"] = "state/risk_state.json"

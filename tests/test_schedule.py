@@ -15,7 +15,7 @@ from agentic_trading.profile import load_profiles
 from agentic_trading.service import Service
 from agentic_trading.state_db import StateDB
 from agentic_trading.triggers import scheduled_review
-from tests.conftest import ROOT
+from tests.conftest import ROOT, copy_example_ledger
 
 FRIDAY_AFTER_CLOSE = datetime(2026, 9, 4, 21, 0, tzinfo=UTC)     # 17:00 New York
 FRIDAY_DURING_SESSION = datetime(2026, 9, 4, 16, 0, tzinfo=UTC)  # 12:00 New York
@@ -30,9 +30,8 @@ def sandbox(tmp_path):
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
-    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml",
-                tmp_path / "state" / "micro_live_portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    copy_example_ledger("micro_live_portfolio.example.yaml", tmp_path / "state" / "micro_live_portfolio.yaml")
     return Service(cfg), StateDB(tmp_path / "state" / "proposals.json")
 
 

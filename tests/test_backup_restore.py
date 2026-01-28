@@ -19,7 +19,7 @@ from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.portfolio import load_portfolio, migrate_portfolio
 from agentic_trading.proposals import PROPOSED, ProposalStore
 from agentic_trading.state_db import StateDB
-from tests.conftest import ROOT
+from tests.conftest import ROOT, copy_example_ledger
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def project(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
     migrate_portfolio(state / "portfolio.yaml")
     ProposalStore(state / "proposals.json").save(_proposal(status=PROPOSED))
     StateDB(state / "proposals.json").write_document(state / "risk_state.json",

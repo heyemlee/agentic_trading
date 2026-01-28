@@ -15,7 +15,7 @@ from agentic_trading import notify
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import PROPOSED, ProposalStore
 from agentic_trading.service import Service
-from tests.conftest import ROOT
+from tests.conftest import ROOT, copy_example_ledger
 
 
 @pytest.fixture
@@ -25,9 +25,8 @@ def service(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
     (tmp_path / "runs").mkdir()
-    shutil.copy(ROOT / "config" / "examples" / "portfolio.example.yaml", state / "portfolio.yaml")
-    shutil.copy(ROOT / "config" / "examples" / "micro_live_portfolio.example.yaml",
-                state / "micro_live_portfolio.yaml")
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     return Service(cfg)
 
 

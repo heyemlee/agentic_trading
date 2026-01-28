@@ -539,7 +539,7 @@ function systemPage(overrides) {
   c.CT_API = { canAct: () => true, isLive: () => true,
     readOnce: async () => {},
     post: async (url, body) => { c.posted.push({ url, body }); return { revoked: 1 }; } };
-  c.run('pages/system.js');
+  c.run('pages/notifications.js');
   return c;
 }
 
