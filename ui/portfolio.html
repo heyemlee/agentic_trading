@@ -27,6 +27,13 @@
   <section class="section"><div class="container">
       <h2 data-i18n="ux.strategyFunds">Strategy-managed funds</h2>
       <p class="body-sm body-muted" data-i18n="ux.strategyBoundary">Separate view of strategy funds, not your total Robinhood assets. Do not add these amounts to the accounts above.</p>
+      <div class="card" id="ledger-notice" style="margin-top:12px;" hidden>
+        <p class="body-sm" data-i18n="pf.ledgerHeld">These figures are held back until the ledger is confirmed.</p>
+        <p class="body-sm body-muted" style="margin-top:6px;" id="ledger-reason"></p>
+        <button id="confirm-ledger" class="btn btn-secondary btn-sm" style="margin-top:12px;"
+                data-i18n="pf.confirmLedger">Confirm the ledger</button>
+        <p class="body-sm body-muted" style="margin-top:8px;" id="confirm-status"></p>
+      </div>
       <p class="figure figure-lg" style="margin-top:12px;" id="pf-total">—</p>
       <p class="body-sm body-muted" style="margin-top:6px;" id="pf-asof"></p>
     </div>

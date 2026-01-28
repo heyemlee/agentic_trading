@@ -109,9 +109,17 @@ window.CT_API = (function () {
         const payloadError = data && !Array.isArray(data) &&
           (data.error || data.errors && Object.keys(data.errors).length && JSON.stringify(data.errors));
         if (payloadError) {
-          // Orders include local records even if the venue is unavailable. Keep those
-          // records visible while explicitly marking the resource as incomplete.
-          if (key === 'orders' && Array.isArray(data.fills) && Array.isArray(data.open_orders)) {
+          /* Two payloads carry their own failure and are still worth reading.
+             Orders include local records even if the venue is unavailable. A ledger
+             that has gone unconfirmed answers with its buckets emptied and the reason
+             in errors, and the pages are written for exactly that shape — a gap and the
+             reason, never a zero. Throwing it away instead leaves the reader on a blank
+             screen that cannot say why or offer the way out. Both stay marked incomplete,
+             so canAct() still refuses and nothing may be approved against them. */
+          const partial = key === 'orders' ? Array.isArray(data.fills) && Array.isArray(data.open_orders)
+                        : key === 'portfolio' ? !!data.buckets && !!data.accounts
+                        : false;
+          if (partial) {
             window.CT[key] = data;
             state.resources[key] = { ...(state.resources[key] || {}), receivedAt: Date.now(), error: String(payloadError), path };
             return;

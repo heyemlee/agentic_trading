@@ -91,6 +91,13 @@ the same question the release path asks — and a refusal leaves the date where 
 here widens `max_age_days`: raising that limit clears the same error by making the guard stop
 looking, on a real-money account, and the ledger is left as unconfirmed as it was.
 
+The Portfolio screen carries the same action. While a ledger is unconfirmed the strategy
+figures show a gap rather than a zero — the money is there, it is the ledger's claim about
+itself that expired — with the API's own reason underneath and a **Confirm the ledger**
+button that posts to `/portfolio/confirm`. That endpoint calls the same function as the CLI,
+so the console cannot clear a ledger the CLI would have refused, and a refusal is printed
+where the reader asked for it.
+
 ## Brokers
 
 `config/risk_profile.yaml` selects the adapter. Broker code lives only behind

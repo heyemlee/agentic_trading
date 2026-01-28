@@ -360,6 +360,80 @@ test('a current snapshot, and one already being refreshed elsewhere, are left al
   assert.match(busy.element('broker-stamp').textContent, /ai.stale/);
 });
 
+/* The ledger fails closed once nothing has confirmed it for max_age_days, and the API then
+   answers 200 with its buckets emptied and the reason in errors. Throwing that payload away
+   left the reader on a blank screen: no figure, no reason, and no way to fix it from the one
+   screen the money is on. */
+test('an unconfirmed ledger still reaches the page, and still cannot be approved against', async () => {
+  const c = context();
+  const held = { as_of: '2026-09-11', buckets: {}, accounts: {}, combined: { equity_usd: 0 },
+                 errors: { micro_live: 'portfolio state as_of 2026-09-03 is 8 days older than 2026-09-11 (limit 7)' } };
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'csrf' })
+    : url === '/health' ? response({ status: 'READY' }) : response(held);
+  c.run('api.js'); c.CT_API.start(['health', 'portfolio']); await flush();
+
+  assert.deepEqual(c.CT.portfolio, held, 'the page needs the payload to say why it is empty');
+  assert.equal(c.CT_API.isLive('portfolio'), false, 'it is still incomplete');
+  assert.equal(c.CT_API.canAct(['health', 'portfolio']), false, 'and nothing may be approved against it');
+  assert.equal(c.CT_API.loaded(['portfolio']), true);
+});
+
+function ledgerPage(post, portfolio) {
+  const c = context(); c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => { c.reread = true; }, post };
+  c.CT.advisor = { stale: false, jobs: [], snapshot: { fetched_at: '2026-09-11T12:00:00Z', accounts: [] } };
+  c.CT.portfolio = portfolio;
+  c.run('pages/portfolio.js');
+  return c;
+}
+const heldBack = {
+  as_of: '2026-09-11', buckets: {}, accounts: {}, combined: { equity_usd: 0 },
+  errors: { micro_live: 'as_of 2026-09-03 is 8 days older than 2026-09-11 (limit 7)' },
+};
+
+test('a withheld ledger shows a gap and its reason, never a zero', () => {
+  const c = ledgerPage(async () => ({}), heldBack);
+  assert.equal(c.element('pf-total').textContent, '—', '$0.00 would be a claim about money that is still there');
+  assert.equal(c.element('ledger-notice').hidden, false);
+  assert.match(c.element('ledger-reason').textContent, /8 days older/);
+
+  const fine = ledgerPage(async () => ({}), { ...heldBack, errors: {},
+    buckets: { micro_live: { equity_usd: 100, allocation_usd: 100, cash_usd: 100, positions_value_usd: 0,
+                             positions: [], position_count: 0, sleeves_pct: {}, account: 'micro_live',
+                             is_real_money: true, venue: 'robinhood' } } });
+  assert.equal(fine.element('ledger-notice').hidden, true);
+  assert.equal(fine.element('pf-total').textContent, c.Console.usd(100));
+});
+
+test('the confirm button asks for the check and reports what it refused', async () => {
+  const sent = [];
+  const refusing = async (path, body) => {
+    sent.push([path, body]);
+    return { confirmed: false, ledgers: [{ ledger: 'micro_live', error: 'PortfolioError: cash mismatch' }] };
+  };
+  const c = ledgerPage(refusing, heldBack);
+  c.element('confirm-ledger').events.click(); await flush();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], '/portfolio/confirm');
+  assert.equal(sent[0][1].ledger, 'all');
+  assert.match(c.element('confirm-status').textContent, /pf.confirmRefused.*cash mismatch/);
+  assert.equal(c.element('ledger-notice').hidden, false, 'a refusal leaves the ledger where it was');
+
+  const ok = ledgerPage(async () => ({ confirmed: true, ledgers: [{ ledger: 'micro_live', confirmed: true }] }), heldBack);
+  ok.element('confirm-ledger').events.click(); await flush();
+  assert.match(ok.element('confirm-status').textContent, /pf.confirmed/);
+  assert.equal(ok.reread, true, 'the figures have to be read again before they can come back');
+});
+
+test('a reader who cannot write is not offered the check', () => {
+  const c = ledgerPage(async () => ({}), heldBack);
+  c.CT_API.writesEnabled = false; c.render();
+  assert.equal(c.element('confirm-ledger').disabled, true);
+});
+
 test('shared notice card keeps the full warning and escapes its text', () => {
   const c = context(); c.run('console.js');
   const html = c.Console.noticeCard('Trading blocked <script> details', 0);

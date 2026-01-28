@@ -30,6 +30,28 @@
     } catch (error) { askError = error.message; }
   }
 
+  /* The strategy figures come from the ledgers, and a ledger fails closed once nothing
+     has confirmed it for max_age_days. The API then answers with its buckets emptied and
+     the reason in errors, which is why this page shows a gap rather than a zero — a zero
+     would be a claim about money that is still there. Confirming is a check that can
+     refuse, the same one ct-state confirm makes, so this button is a request to run it,
+     not an override of it. */
+  let confirming = false, confirmStatus = '';
+  document.getElementById('confirm-ledger').addEventListener('click', async () => {
+    if (confirming || !API.writesEnabled) return;
+    confirming = true; confirmStatus = C.t('pf.confirming'); render();
+    try {
+      const report = await API.post('/portfolio/confirm', { ledger: 'all' });
+      const refusals = [...(report.ledgers || []).filter(l => l.error).map(l => l.error),
+                        ...(report.unsettled_orders || []).map(o => o.client_order_id)];
+      confirmStatus = report.confirmed ? C.t('pf.confirmed')
+        : C.t('pf.confirmRefused', { error: refusals.join(' · ') || report.detail || '' });
+      await API.readOnce('portfolio');
+    } catch (error) {
+      confirmStatus = C.t('pf.confirmRefused', { error: error.message });
+    } finally { confirming = false; render(); }
+  });
+
   /* Everything below is re-run on every poll cycle. */
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
@@ -65,6 +87,16 @@
        the cards below cannot account for. */
     const total = C.SHOW_CONCEPTUAL ? combined.equity_usd
       : order.filter((k) => B[k]).reduce((sum, k) => sum + B[k].equity_usd, 0);
+    /* Every bucket withheld and a reason given: the money is there, it is the ledger's
+       claim about itself that expired, so the figure is a gap and the reason is printed
+       verbatim as the API worded it. */
+    const failures = Object.values(D.portfolio.errors || {});
+    const withheld = failures.length > 0 && Object.keys(B).length === 0;
+    const notice = document.getElementById('ledger-notice');
+    notice.hidden = !failures.length;
+    document.getElementById('ledger-reason').textContent = failures.join(' · ');
+    document.getElementById('confirm-ledger').disabled = confirming || !API.writesEnabled;
+    document.getElementById('confirm-status').textContent = confirmStatus;
     /* Nothing conceptual is on screen, so the mixed-money warning would be
        describing a sum the reader cannot see. */
     const mixed = C.SHOW_CONCEPTUAL && combined.mixes_real_and_conceptual;
@@ -72,7 +104,7 @@
     const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--green)' };
 
     /* the header is live data, not a value baked into the markup */
-    C.tickValue(document.getElementById('pf-total'), C.usd(total));
+    C.tickValue(document.getElementById('pf-total'), withheld ? '—' : C.usd(total));
     /* A combined figure spanning a paper book and a funded account is a sum of
        two different kinds of money, so it says so rather than passing itself
        off as one portfolio. Each account below carries its own high-water mark
