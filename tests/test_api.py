@@ -341,3 +341,41 @@ def test_roster_route_is_matched_before_the_run_key_route(auth_client):
     paths = list(schema["paths"])
     assert "/research/roster" in paths
     assert paths.index("/research/roster") < paths.index("/research/{run_key}")
+
+
+def test_confirming_the_paper_book_renews_its_date_and_says_what_it_checked(sandbox_service):
+    from agentic_trading.portfolio import load_portfolio
+
+    report = sandbox_service.confirm_portfolio(ledger="conceptual")
+    assert report["confirmed"] is True, report
+    row = report["ledgers"][0]
+    assert "no venue behind this book" in row["checked_against"]
+    ledger = sandbox_service.profiles().project_dir / "state" / "portfolio.yaml"
+    assert load_portfolio(ledger).as_of == report["date"] == row["as_of"]
+
+
+def test_a_dry_run_confirmation_writes_nothing(sandbox_service):
+    from agentic_trading.portfolio import load_portfolio
+
+    ledger = sandbox_service.profiles().project_dir / "state" / "portfolio.yaml"
+    before = load_portfolio(ledger).as_of
+    report = sandbox_service.confirm_portfolio(ledger="conceptual", dry_run=True)
+    assert report["confirmed"] is True and report["dry_run"] is True
+    assert load_portfolio(ledger).as_of == before
+
+
+def test_confirm_route_needs_a_session(auth_client, monkeypatch, sandbox_service):
+    from fastapi.testclient import TestClient
+
+    from agentic_trading.api.app import app
+
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    result = auth_client.post("/portfolio/confirm", json={"ledger": "conceptual"})
+    assert result.status_code == 200
+    assert result.json()["confirmed"] is True
+
+    anonymous = TestClient(app, base_url="https://testserver")
+    anonymous.headers.update({"Origin": "https://testserver", "X-CT-Request": "1",
+                              "Content-Type": "application/json"})
+    assert anonymous.post("/portfolio/confirm", json={}).status_code in (401, 403)
+    anonymous.close()

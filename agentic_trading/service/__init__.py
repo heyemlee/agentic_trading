@@ -295,6 +295,18 @@ class Service:
         }
         return out
 
+    def confirm_portfolio(self, *, ledger: str = "all", dry_run: bool = False) -> dict[str, Any]:
+        """Renew the ledgers' as_of, but only where a check agrees with them.
+
+        The same call `ct-state confirm` makes. A console that could stamp a date the CLI
+        would have refused would be a second opinion about what confirming means, and the
+        weaker of the two would be the one reachable from a phone.
+        """
+        from ..ledger_confirm import confirm_ledgers
+
+        profiles = self.profiles()
+        return confirm_ledgers(profiles, self._store(profiles), ledger=ledger, dry_run=dry_run)
+
     def risk_state(self) -> dict[str, Any]:
         """Drawdown ladders and the market regime, in display form."""
         from ..risk import assess_regime, load_ladder_states

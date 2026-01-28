@@ -332,6 +332,18 @@ def portfolio() -> dict[str, Any]:
     return _ok(_service.portfolio)
 
 
+class PortfolioConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ledger: Literal["all", "conceptual", "micro_live"] = "all"
+    dry_run: bool = False
+
+
+@app.post("/portfolio/confirm", tags=["portfolio"],
+          summary="Confirm a ledger against what can contradict it, then renew its as_of")
+def confirm_portfolio(body: PortfolioConfirm) -> dict[str, Any]:
+    return _ok(_service.confirm_portfolio, ledger=body.ledger, dry_run=body.dry_run)
+
+
 @app.get("/risk", tags=["portfolio"], summary="Drawdown ladders and the market regime")
 def risk_state() -> dict[str, Any]:
     return _ok(_service.risk_state)
