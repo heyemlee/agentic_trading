@@ -78,7 +78,7 @@ activate() {                              # point launchd at a release and prove
   "$(venv_for "$release")/python" -m agentic_trading.launchd \
     --data-dir "$data_dir" --release-dir "$release" --launch-agents "$launch_agents"
 
-  local after
+  local after bootstrap_error=""
   for label in "${labels[@]}"; do
     # declared once above: in zsh, `local` on an already-set name prints its current value
     after="$(shasum -a 256 "$launch_agents/$label.plist" 2>/dev/null || true)"
@@ -87,10 +87,28 @@ activate() {                              # point launchd at a release and prove
     fi
     plutil -lint "$launch_agents/$label.plist" >/dev/null
     launchctl bootout "gui/$UID/$label" 2>/dev/null || true
-    for attempt in {1..10}; do
-      launchctl bootstrap "gui/$UID" "$launch_agents/$label.plist" 2>/dev/null && break
+
+    # bootout returns before the job is gone. The API holds broker sessions and is given
+    # ExitTimeOut 30 to close them, and launchd answers a bootstrap during that window with
+    # "Bootstrap failed: 5: Input/output error" — so wait for the registration to actually
+    # disappear, then keep trying for long enough to cover a slow exit.
+    #
+    # On 2026-09-12 this was five seconds of retries with their errors discarded and their
+    # result unchecked. The API took longer than that to go, every attempt failed unseen, and
+    # the publish walked on to kickstart a service that was no longer registered; under
+    # `set -e` that killed the script before the readiness check, so nothing rolled back and
+    # nothing said what had happened. The API stayed down until it was bootstrapped by hand.
+    # Registration is now proven before anything depends on it, and its error is the message.
+    for attempt in {1..60}; do
+      launchctl print "gui/$UID/$label" >/dev/null 2>&1 || break
       sleep 0.5
     done
+    for attempt in {1..60}; do
+      bootstrap_error="$(launchctl bootstrap "gui/$UID" "$launch_agents/$label.plist" 2>&1)" && break
+      sleep 0.5
+    done
+    launchctl print "gui/$UID/$label" >/dev/null 2>&1 ||
+      die "$label did not register: ${bootstrap_error:-no error reported}. The service is not running."
     launchctl enable "gui/$UID/$label"
   done
 
