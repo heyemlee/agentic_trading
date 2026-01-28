@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -450,6 +450,79 @@ def snapshot_from_broker(
     return build_snapshot(state, profiles, trade_date,
                           price_lookup=lambda sym, _d: (prices[sym.upper()], trade_date),
                           identity_lookup=identity_lookup)
+
+
+def last_session_date(today: str | None = None) -> str:
+    """The most recent weekday, by the calendar alone.
+
+    Deliberately not the service's `_last_session()`, which probes the data vendor for a
+    usable bar: confirming a ledger must work when the vendor is down, and the paper book
+    has no vendor behind it at all. A holiday only means a ledger dated a day the market
+    was shut, which no gate reads.
+    """
+    day = datetime.fromisoformat(today).date() if today else datetime.now(UTC).date()
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
+def confirm_from_broker(path: str | Path, *, account, broker_positions, profiles: Profiles,
+                        trade_date: str, identity_lookup: IdentityLookup = upstream_identity_lookup,
+                        dry_run: bool = False) -> Snapshot:
+    """Renew a venue-backed ledger's as_of, but only where the venue agrees with it.
+
+    `as_of` is the ledger's claim about when it was last known correct, and `max_age_days`
+    fails a claim closed once it is too old to trust. Renewing that claim is only worth
+    anything against something that can contradict it, so this rebuilds the state from the
+    venue's own cash and quantities through `snapshot_from_broker`, which fails closed on a
+    position the ledger cannot attribute to a bucket and on cash that does not match, and
+    writes back what it rebuilt. A date stamped without that check clears the guard while
+    leaving the ledger exactly as wrong as it was — which is the failure the guard exists for.
+    """
+    path = Path(path)
+    db = StateDB(path)
+    with db.transaction() as conn:
+        ledger = load_portfolio(path)
+        snap = snapshot_from_broker(account, broker_positions, ledger, profiles, trade_date,
+                                    identity_lookup=identity_lookup)
+        snap.state.notes = f"confirmed against the venue on {trade_date}"
+        if dry_run:
+            return snap
+        db.write_document(path, snap.state.model_dump(mode="json"), conn)
+        if not db.migrated(path):
+            raw = path.read_bytes() if path.exists() else b""
+            db.mark_migrated(conn, path, "portfolio", raw)
+        return snap
+
+
+def confirm_unbacked(path: str | Path, *, trade_date: str, executed_orders: set[str],
+                     dry_run: bool = False) -> PortfolioState:
+    """Renew a ledger with no venue behind it, once nothing this system did is missing from it.
+
+    Core and Sandbox are a paper book: there is no account to read back, so the only thing
+    that can have moved them is this system's own execution. Every order it executed for
+    these buckets being applied here is the whole available check, and it is a real one — a
+    ledger behind its own record is exactly what a renewed date would hide.
+    """
+    path = Path(path)
+    db = StateDB(path)
+    with db.transaction() as conn:
+        state = load_portfolio(path)
+        missing = sorted(order for order in executed_orders if order not in state.applied_orders)
+        if missing:
+            raise PortfolioError(
+                f"{len(missing)} executed order(s) never reached this ledger "
+                f"({', '.join(missing[:5])}{', …' if len(missing) > 5 else ''}); apply them before "
+                "confirming it, or the date would be renewed over a book that is already behind")
+        state.as_of = trade_date
+        state.notes = f"confirmed with no venue to check against on {trade_date}"
+        if dry_run:
+            return state
+        db.write_document(path, state.model_dump(mode="json"), conn)
+        if not db.migrated(path):
+            raw = path.read_bytes() if path.exists() else b""
+            db.mark_migrated(conn, path, "portfolio", raw)
+        return state
 
 
 def realized_on(state: PortfolioState, bucket: str, trade_date: str) -> float:

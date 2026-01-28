@@ -285,11 +285,76 @@ def _cashflow(profiles, args, parser) -> int:
     return 0
 
 
+def _confirm(profiles, args, store) -> int:
+    """Renew the ledgers' as_of against something that can contradict them.
+
+    `max_age_days` fails a ledger closed once nothing has confirmed it for a week. That is
+    the guard working, not a nuisance, so the way out of it is a check and not a stamp: the
+    venue-backed book is rebuilt from the account's own cash and positions, and the paper
+    book is held against this system's own executed orders. Either one can refuse, and a
+    refusal leaves the date where it was.
+    """
+    from .portfolio import confirm_from_broker, confirm_unbacked, last_session_date, load_portfolio
+    from .proposals import EXECUTED
+
+    # An order the broker still owns means the ledgers are about to change again; confirming
+    # now would date a book that is mid-flight. Same question the release path asks.
+    unsettled = unsettled_orders(store.db)
+    if unsettled:
+        print(json.dumps({"confirmed": False, "unsettled_orders": unsettled,
+                          "detail": "settle these before confirming a ledger"}, indent=2))
+        return 3
+
+    trade_date = args.date or last_session_date()
+    portfolio_cfg = profiles.risk.get("portfolio_state") or {}
+    micro_cfg = profiles.risk.get("micro_live_execution") or {}
+    wanted = {
+        "conceptual": profiles.project_dir / str(portfolio_cfg.get("file", "state/portfolio.yaml")),
+        "micro_live": profiles.project_dir / str(micro_cfg.get(
+            "ledger_file", "state/micro_live_portfolio.yaml")),
+    }
+    if args.ledger != "all":
+        wanted = {args.ledger: wanted[args.ledger]}
+
+    executed = {p.client_order_id: p.bucket for p in store.all()
+                if p.status == EXECUTED and p.client_order_id}
+    results, refused = [], False
+    for name, path in wanted.items():
+        if not path.exists() and StateDB(path).read_document(path) is None:
+            continue
+        row = {"ledger": name, "file": path.name, "confirmed": False}
+        try:
+            if name == "micro_live":
+                from .broker.robinhood import RobinhoodBroker
+
+                broker = RobinhoodBroker(profiles)
+                snapshot = confirm_from_broker(
+                    path, account=broker.get_account(), broker_positions=broker.get_positions(),
+                    profiles=profiles, trade_date=trade_date, dry_run=args.dry_run)
+                state = snapshot.state
+                row["checked_against"] = "the venue's own cash and positions"
+            else:
+                buckets = set(load_portfolio(path).buckets)
+                state = confirm_unbacked(
+                    path, trade_date=trade_date, dry_run=args.dry_run,
+                    executed_orders={cid for cid, bucket in executed.items() if bucket in buckets})
+                row["checked_against"] = "this system's executed orders; no venue behind this book"
+            row.update(confirmed=True, as_of=state.as_of, positions=len(state.positions),
+                       cash_usd=round(sum(b.cash_usd for b in state.buckets.values()), 2))
+        except Exception as exc:  # noqa: BLE001 - anything that stops the check refuses the date
+            refused = True
+            row["error"] = f"{type(exc).__name__}: {exc}"
+        results.append(row)
+
+    print(json.dumps({"date": trade_date, "dry_run": args.dry_run, "ledgers": results}, indent=2))
+    return 3 if refused else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_env()
     parser = argparse.ArgumentParser(prog="ct-state")
     parser.add_argument("action", choices=("migrate", "status", "backup", "restore",
-                                           "sessions", "cashflow"))
+                                           "sessions", "cashflow", "confirm"))
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--output", help="backup destination; defaults to state/backups/<timestamp>.sqlite3")
     parser.add_argument("--verify", action="store_true", help="backup: integrity-check the copy")
@@ -307,6 +372,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kind", choices=("deposit", "withdrawal"), default="deposit")
     parser.add_argument("--date", help="cashflow: yyyy-mm-dd, defaults to today")
     parser.add_argument("--note", default="", help="cashflow: free text")
+    parser.add_argument("--ledger", choices=("all", "conceptual", "micro_live"), default="all",
+                        help="confirm: which ledger to confirm; defaults to both")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="confirm: report what the check finds and write nothing")
     args = parser.parse_args(argv)
 
     if args.action == "restore":
@@ -344,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3 if (args.fail_on_unsettled and status["unsettled_orders"]) else 0
     if args.action == "sessions":
         return _sessions(profiles)
+    if args.action == "confirm":
+        return _confirm(profiles, args, store)
     if args.action == "cashflow":
         if not args.bucket or args.amount is None:
             parser.error("cashflow needs --bucket and --amount")

@@ -46,6 +46,8 @@ uv run ct-state status                            # integrity, record counts, un
 uv run ct-state backup --verify                   # consistent SQLite backup, integrity-checked
 uv run ct-state sessions                          # persistent console logins and their expiry
 uv run ct-state cashflow --bucket core --amount 500   # record a deposit (never a gain)
+uv run ct-state confirm --dry-run                 # check the ledgers against the venue, write nothing
+uv run ct-state confirm                           # renew as_of where the check agrees
 uv run ct-ops status                              # background activity heartbeats and free disk
 uv run ct-notify status                           # notification channel; sends nothing
 ```
@@ -55,6 +57,39 @@ fills, reservations, research jobs, drawdown ladders and portfolio ledgers. The 
 fill and ladder JSON plus portfolio YAML files are imported once and retained as migration
 sources. An empty `state/HALT` file is the kill switch. Use `ct-state migrate`, `ct-state status`
 and `ct-state backup`; never copy a live SQLite file as a backup.
+
+## Confirming a ledger
+
+`portfolio_state.max_age_days` fails a ledger closed once nothing has confirmed it for that
+many days, and the snapshot behind every proposal, the portfolio endpoint and the research run
+all stop with it:
+
+```
+portfolio state as_of 2026-09-03 is 8 days older than 2026-09-11 (limit 7)
+```
+
+That is the guard working. A stretch of NO_TRADE weeks is exactly when it fires, because
+nothing executed and so nothing advanced the date on its own. The way out is a check:
+
+```bash
+uv run ct-state confirm --dry-run    # what the check finds, writing nothing
+uv run ct-state confirm              # renew as_of on what agreed
+```
+
+What each book is held against:
+
+* **micro_live** — the account itself. The state is rebuilt from Robinhood's own cash and
+  quantities, which refuses a position the ledger cannot attribute to a bucket and cash that
+  differs by more than 0.1%. The same rebuild execution uses, so nothing new can be believed
+  here that would not be believed at order time.
+* **conceptual** (core, sandbox) — a paper book with no account to read back, so its own
+  record is the check: every order this system executed for those buckets must already be
+  applied to it.
+
+Both refuse while the broker still owns an order — `ct-state status --fail-on-unsettled` asks
+the same question the release path asks — and a refusal leaves the date where it was. Nothing
+here widens `max_age_days`: raising that limit clears the same error by making the guard stop
+looking, on a real-money account, and the ledger is left as unconfirmed as it was.
 
 ## Brokers
 
@@ -317,6 +352,7 @@ uv run ct-state backup --verify                 # consistent SQLite backup, inte
 uv run ct-state restore --source <f> --into <d> # restore, revoke sessions, list orders to check
 uv run ct-state sessions                        # persistent console logins and their expiry
 uv run ct-state cashflow --bucket core --amount 500 --kind deposit
+uv run ct-state confirm [--ledger conceptual|micro_live] [--dry-run]
 uv run ct-ops maintain                          # rotate logs, prune run artefacts, check disk
 uv run ct-notify status|pending|test            # notification channel and delivery record
 uv run ct-trigger scheduled --dry-run           # the schedule's decision, starting nothing
