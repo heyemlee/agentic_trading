@@ -741,6 +741,14 @@ test('every script and stylesheet a page loads is actually shipped', () => {
     }
 });
 
+test('the login form never falls back to putting a password in the URL', () => {
+  const html = uiFile('login.html');
+  const form = html.match(/<form\b[^>]*id="login-form"[^>]*>/)?.[0] || '';
+  assert.match(form, /\bmethod="post"/);
+  assert.match(form, /\baction="\/auth\/login"/);
+  assert.doesNotMatch(form, /\bmethod="get"/);
+});
+
 /* ── the research room ────────────────────────────────────────────────
    The office draws one run. These cases pin the line the page must not cross:
    a desk changes only because an event says so, and the decision shown in the
