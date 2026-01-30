@@ -7,7 +7,9 @@ boundary, the real-money master switch, and the bucket-to-venue binding.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +20,11 @@ from agentic_trading.broker.base import (
     DuplicateOrder,
     OrderRequest,
 )
-from agentic_trading.broker.robinhood import RobinhoodBroker
+from agentic_trading.broker.robinhood import (
+    FileTokenStorage,
+    RobinhoodBroker,
+    _prime_refresh_endpoint,
+)
 from agentic_trading.micro_live import bucket_is_executable, run_preflight
 
 # Shapes below mirror the real Robinhood MCP responses observed on 2026-09-03: every tool
@@ -36,6 +42,85 @@ PORTFOLIO = {"data": {"total_value": "100", "equity_value": "0", "cash": "100", 
                       "buying_power": {"buying_power": "100.0000"}}}
 EMPTY_POSITIONS = {"data": {"positions": []}}
 EMPTY_ORDERS = {"data": {"orders": []}}
+
+
+def token(access="access", refresh="refresh", expires_in=3600):
+    from mcp.shared.auth import OAuthToken
+
+    return OAuthToken(access_token=access, refresh_token=refresh, expires_in=expires_in)
+
+
+def test_token_storage_records_when_the_relative_lifetime_began(tmp_path):
+    path = tmp_path / "token.json"
+    storage = FileTokenStorage(path)
+    before = datetime.now(UTC).timestamp()
+
+    asyncio.run(storage.set_tokens(token(expires_in=3600)))
+
+    saved = json.loads(path.read_text())
+    assert before + 3599 <= saved["expires_at"] <= datetime.now(UTC).timestamp() + 3601
+    assert asyncio.run(storage.get_tokens()).access_token == "access"
+
+
+def test_expired_access_token_is_withheld_so_the_mcp_client_uses_its_refresh_token(tmp_path):
+    path = tmp_path / "token.json"
+    path.write_text(json.dumps({
+        "tokens": token(expires_in=60).model_dump(mode="json"),
+        "updated_at": (datetime.now(UTC) - timedelta(minutes=2)).isoformat(),
+    }))
+
+    restored = asyncio.run(FileTokenStorage(path).get_tokens())
+
+    assert restored.access_token == ""
+    assert restored.refresh_token == "refresh"
+    # Reading an expired credential must not destroy the persisted token before the refresh
+    # response arrives; a transient network failure should still be retryable later.
+    assert json.loads(path.read_text())["tokens"]["access_token"] == "access"
+
+
+def test_expired_token_discovers_robinhoods_real_refresh_endpoint_before_the_sdk_guesses(tmp_path):
+    path = tmp_path / "token.json"
+    path.write_text(json.dumps({
+        "tokens": token(expires_in=60).model_dump(mode="json"),
+        "updated_at": (datetime.now(UTC) - timedelta(minutes=2)).isoformat(),
+    }))
+    seen = []
+    metadata = {
+        "issuer": "https://agent.robinhood.com/mcp/trading",
+        "authorization_endpoint": "https://robinhood.com/oauth",
+        "token_endpoint": "https://api.robinhood.com/oauth2/token/",
+        "response_types_supported": ["code"],
+    }
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return metadata
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url):
+            seen.append(url)
+            return Response()
+
+    httpx2 = SimpleNamespace(AsyncClient=lambda **_kwargs: Client())
+    auth = SimpleNamespace(context=SimpleNamespace(oauth_metadata=None, auth_server_url=None))
+
+    asyncio.run(_prime_refresh_endpoint(
+        auth, FileTokenStorage(path), httpx2,
+        "https://agent.robinhood.com/mcp/trading", 10))
+
+    assert seen == ["https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading"]
+    assert str(auth.context.oauth_metadata.token_endpoint) == metadata["token_endpoint"]
+
+
 def quotes_now():
     """A quote stamped when it is asked for, never when this module was imported.
 
@@ -280,6 +365,27 @@ def test_preflight_passes_every_gate_with_a_funded_agentic_account(profiles):
     assert pf.account["equity"] == 100.0
 
 
+def test_the_account_the_console_receives_is_the_one_preflight_builds(profiles):
+    """MicroLiveAccount forbids extra fields, so a key added to the preflight account has to be
+    added to the model too, or /micro-live starts answering 500 the moment a venue connects.
+
+    That trade is deliberate — a dropped field would reach the screen as a silently missing
+    number about real money — but it only holds if something exercises the connected path.
+    Nothing else in the suite builds a funded account dict, so the guard lives here rather than
+    beside the other response-shape tests, where the broker is always absent.
+    """
+    from agentic_trading.service.shapes import MicroLiveAccount
+
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO})
+    pf = run_preflight(profiles, make_broker(profiles, fake, enabled=True))
+    assert pf.account is not None
+
+    account = MicroLiveAccount(**pf.account)
+    assert set(account.model_dump()) == set(pf.account)
+    assert account.equity == 100.0
+    assert account.account_id_masked.startswith("••••")   # a mask, never a number
+
+
 def test_research_runtime_cannot_reach_a_trading_tool(profiles):
     pf = run_preflight(profiles, broker=None)
     check = next(c for c in pf.checks if c.check_id == "PF11")
@@ -460,3 +566,28 @@ def test_unacknowledged_risk_defaults_block_real_money(profiles):
 
     profiles.accept_defaults = True
     assert next(c for c in run_preflight(profiles, broker).checks if c.check_id == "PF13").passed is True
+
+
+def test_closing_a_portal_gives_its_descriptors_back():
+    """A stopped event loop keeps its kqueue and self-pipe; only close() hands them back.
+
+    Every Robinhood session opens one portal, so while close() merely stopped the loop the
+    API leaked three descriptors per session. On 2026-09-15 that ended with sqlite unable to
+    open the state database at all, which is why this counts descriptors rather than asserting
+    the call was made: the call was always made, it just did not release anything.
+    """
+    import os
+
+    from agentic_trading.broker.robinhood import _Portal
+
+    def open_descriptors() -> int:
+        return len(os.listdir("/dev/fd"))
+
+    baseline = open_descriptors()
+    for _ in range(8):
+        portal = _Portal()
+        portal.close()
+        assert portal._loop.is_closed()
+    # Without the fix these eight portals leak twenty-four descriptors. The small allowance
+    # covers the directory handle the count itself opens.
+    assert open_descriptors() <= baseline + 2

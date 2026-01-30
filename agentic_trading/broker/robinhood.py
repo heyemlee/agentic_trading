@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .base import (
     Account,
@@ -125,6 +126,19 @@ def _quote_rows(payload: Any) -> list[dict[str, Any]]:
             if isinstance(row.get("quote", row), dict)]
 
 
+def _token_expiry(data: dict[str, Any]) -> float | None:
+    """Absolute access-token deadline, including files written before it was stored directly."""
+    value = data.get("expires_at")
+    try:
+        if value is not None:
+            return float(value)
+        updated = datetime.fromisoformat(str(data["updated_at"]))
+        expires_in = float((data.get("tokens") or {})["expires_in"])
+        return updated.timestamp() + expires_in
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class _Portal:
     """A private event loop on a background thread, so a sync adapter can drive an async client."""
 
@@ -142,7 +156,15 @@ class _Portal:
         return future.result(timeout=timeout)
 
     def close(self) -> None:
+        # Stopping a loop releases none of its descriptors: the kqueue and the self-pipe
+        # socketpair stay open for the life of the process. Every venue session opens one
+        # portal, so a stop-only close leaked three descriptors per session until the API
+        # could no longer open its own state database. A loop may only be closed once
+        # run_forever has returned, which is what the join waits for.
         self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        if not self._thread.is_alive():
+            self._loop.close()
 
 
 class FileTokenStorage:
@@ -169,13 +191,32 @@ class FileTokenStorage:
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
 
-        raw = self._read().get("tokens")
-        return OAuthToken.model_validate(raw) if raw else None
+        data = self._read()
+        raw = data.get("tokens")
+        if not raw:
+            return None
+        token = OAuthToken.model_validate(raw)
+
+        # OAuthToken persists a relative expires_in value. The MCP client restores the token
+        # after a process restart without reconstructing when that interval began, so its
+        # in-memory token_expiry_time is None and an old access token is treated as valid
+        # forever. Robinhood then answers 401 and the library jumps straight to a browser
+        # authorization flow, which a background service intentionally cannot open. Keep the
+        # absolute deadline beside the token and, once it is due, return no access token while
+        # preserving the refresh token. That makes OAuthClientProvider take its refresh-token
+        # branch before it sends the broker request.
+        expires_at = _token_expiry(data)
+        if expires_at is not None and expires_at <= datetime.now(UTC).timestamp() + 60:
+            return token.model_copy(update={"access_token": ""})
+        return token
 
     async def set_tokens(self, tokens) -> None:
         data = self._read()
         data["tokens"] = tokens.model_dump(mode="json")
-        data["updated_at"] = datetime.now(UTC).isoformat()
+        updated = datetime.now(UTC)
+        data["updated_at"] = updated.isoformat()
+        data["expires_at"] = (updated.timestamp() + tokens.expires_in
+                              if tokens.expires_in is not None else None)
         self._write(data)
 
     async def get_client_info(self):
@@ -192,6 +233,31 @@ class FileTokenStorage:
     @property
     def connected(self) -> bool:
         return bool(self._read().get("tokens"))
+
+
+async def _prime_refresh_endpoint(auth, storage: FileTokenStorage, httpx2, server_url: str,
+                                  timeout: float) -> None:
+    """Give the SDK the advertised token endpoint before its pre-request refresh runs.
+
+    OAuthClientProvider discovers authorization metadata only after a protected request
+    returns 401, but it attempts an expired token's refresh before that request. Without
+    metadata it guesses ``<resource-origin>/token``; Robinhood publishes its actual endpoint
+    elsewhere and the guess returns 404. Discovery is public and carries no credential.
+    """
+    token = await storage.get_tokens()
+    if not token or token.access_token or not token.refresh_token:
+        return
+    parsed = urlsplit(server_url)
+    metadata_url = (f"{parsed.scheme}://{parsed.netloc}/.well-known/oauth-authorization-server"
+                    f"{parsed.path.rstrip('/')}")
+    from mcp.shared.auth import OAuthMetadata
+
+    async with httpx2.AsyncClient(timeout=timeout) as client:
+        response = await client.get(metadata_url)
+        response.raise_for_status()
+        metadata = OAuthMetadata.model_validate(response.json())
+    auth.context.oauth_metadata = metadata
+    auth.context.auth_server_url = str(metadata.issuer)
 
 
 class RobinhoodBroker:
@@ -260,6 +326,7 @@ class RobinhoodBroker:
             server_url=self.url, client_metadata=metadata, storage=self.storage,
             redirect_handler=self._redirect_handler, callback_handler=self._callback_handler,
         )
+        await _prime_refresh_endpoint(auth, self.storage, httpx2, self.url, self.call_timeout)
         self._exit_stack = AsyncExitStack()
         http_client = await self._exit_stack.enter_async_context(
             create_mcp_http_client(
