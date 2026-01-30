@@ -186,3 +186,48 @@ def test_ct_state_confirm_reports_a_venue_it_cannot_read_instead_of_dating_the_b
     assert code == 3
     assert "no Robinhood session" in report["ledgers"][0]["error"]
     assert load_portfolio(ledger).as_of == TRADE_DATE
+
+
+class FakeVenue:
+    """A broker session that records whether it was handed back."""
+
+    def __init__(self, cash=100.0, positions=(), unreadable=False):
+        self._cash, self._positions, self._unreadable = cash, list(positions), unreadable
+        self.closed = False
+
+    def get_account(self):
+        return account(self._cash)
+
+    def get_positions(self):
+        if self._unreadable:
+            raise ConnectionError("no Robinhood session")
+        return self._positions
+
+    def close(self):
+        self.closed = True
+
+
+def micro_project(project, cash=100.0):
+    ledger = project / "state" / "micro_live_portfolio.yaml"
+    ledger.write_text(yaml.safe_dump({
+        "as_of": TRADE_DATE, "currency": "USD", "buckets": {"micro_live": {"cash_usd": cash}},
+        "positions": [], "recent_opens": []}), encoding="utf-8")
+    return ledger
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_the_venue_session_is_handed_back_however_the_check_ends(project, unreadable):
+    """Left open, the session is terminated from a finaliser at exit — after the thread pool
+    that would carry the request is gone, which printed "cannot schedule new futures after
+    shutdown" over the result of every confirm that reached the venue."""
+    from agentic_trading.ledger_confirm import confirm_ledgers
+    from agentic_trading.profile import load_profiles
+
+    micro_project(project)
+    venue = FakeVenue(unreadable=unreadable)
+    report = confirm_ledgers(load_profiles(project / "config"),
+                             ProposalStore(project / "state" / "proposals.json"),
+                             ledger="micro_live", broker_factory=lambda _p: venue)
+
+    assert venue.closed is True
+    assert report["confirmed"] is not unreadable

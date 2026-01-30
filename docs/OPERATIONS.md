@@ -131,6 +131,23 @@ Trading is confined to the dedicated Agentic account, identified by the venue's 
 `agentic_allowed` flag. Read access spans every Robinhood account; positions from the others
 are filtered out rather than treated as tradeable.
 
+Two lines in the log are the venue's server, not a fault here, and are left visible rather than
+silenced — a suppressed warning about a cleanup that did not happen is worth less than a noisy
+one that is understood:
+
+```
+GET    https://agent.robinhood.com/mcp/trading  405 Method Not Allowed
+DELETE https://agent.robinhood.com/mcp/trading  400 Bad Request
+WARNING mcp.client.streamable_http: Session termination failed: 400
+```
+
+The server implements neither the SSE stream nor session termination, so the adapter's close
+asks and is refused, and the session lapses on the server's own timeout instead. Closing is
+still done at the end of every use: an MCP session left for the interpreter to collect is
+terminated from a finaliser after the thread pool that would carry the request is gone, which
+reads as `Session termination failed: cannot schedule new futures after shutdown` printed over
+whatever the command was reporting.
+
 Two venue constraints shape the order path and were verified against the live interface:
 
 - A fractional quantity or a dollar amount is accepted **only on a market order in regular

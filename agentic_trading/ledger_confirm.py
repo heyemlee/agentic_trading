@@ -8,6 +8,7 @@ into this function, never two opinions about what confirming means.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from .portfolio import confirm_from_broker, confirm_unbacked, last_session_date,
 from .profile import Profiles
 from .proposals import EXECUTED
 from .state_db import StateDB
+
+logger = logging.getLogger(__name__)
 
 LEDGERS = ("conceptual", "micro_live")
 
@@ -33,6 +36,22 @@ def _robinhood(profiles: Profiles):
     from .broker.robinhood import RobinhoodBroker
 
     return RobinhoodBroker(profiles)
+
+
+def _hand_back(broker) -> None:
+    """Close the venue session here rather than leaving it to the interpreter.
+
+    An MCP session left open is terminated from a finaliser on the way out, by which point the
+    thread pool that would carry the request is already gone — "cannot schedule new futures
+    after shutdown", printed after every otherwise successful confirm. Closing it is also what
+    tells the venue the session is over instead of leaving it to time out.
+    """
+    try:
+        close = getattr(broker, "close", None)
+        if close is not None:
+            close()
+    except Exception as exc:  # noqa: BLE001 - a session that will not close must not fail a check
+        logger.debug("error closing the venue session: %s", exc)
 
 
 def confirm_ledgers(profiles: Profiles, store, *, ledger: str = "all", trade_date: str | None = None,
@@ -71,9 +90,12 @@ def confirm_ledgers(profiles: Profiles, store, *, ledger: str = "all", trade_dat
         try:
             if name == "micro_live":
                 broker = broker_factory(profiles)
-                state = confirm_from_broker(
-                    path, account=broker.get_account(), broker_positions=broker.get_positions(),
-                    profiles=profiles, trade_date=date, dry_run=dry_run).state
+                try:
+                    state = confirm_from_broker(
+                        path, account=broker.get_account(), broker_positions=broker.get_positions(),
+                        profiles=profiles, trade_date=date, dry_run=dry_run).state
+                finally:
+                    _hand_back(broker)
                 row["checked_against"] = "the venue's own cash and positions"
             else:
                 buckets = set(load_portfolio(path).buckets)
