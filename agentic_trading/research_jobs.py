@@ -286,30 +286,66 @@ def _scrubbed_environment() -> dict[str, str]:
     return scrubbed_environment()
 
 
-def _worker_command(pid: int) -> str:
+#: What can be known about a worker process. The middle answer used to be missing, and its
+#: absence is what let one run be worked on twice.
+WORKER_GONE = "gone"
+WORKER_OURS = "ours"
+WORKER_UNKNOWN = "unknown"
+
+
+def _worker_command(pid: int) -> str | None:
+    """The process's command line, or ``None`` when the question could not be asked at all.
+
+    Returning an empty string for an unanswerable probe made "this pid is not our worker" and
+    "ps could not be run" the same answer, and they call for opposite actions.
+    """
     try:
         result = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="], capture_output=True,
             text=True, check=False, timeout=2,
         )
-        return result.stdout
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return None
+    return result.stdout
 
 
-def _worker_alive(pid: int | None, run_key: str) -> bool:
+def _worker_state(pid: int | None, run_key: str) -> str:
+    """Whether a pid is our worker, is gone, or cannot be identified.
+
+    ``os.kill(pid, 0)`` establishes that some process holds the pid; ``ps`` is then spawned to
+    rule out pid reuse. Spawning needs file descriptors, and on 2026-09-15 the service had
+    exhausted its own: the probe raised, the helper answered with an empty command line, and
+    every living worker read as dead. The supervisor requeued a run that was still going, so
+    two workers analysed the same ticker at once, each spending the shared subscription and
+    each writing the same decision record. They disagreed, and the later one won.
+
+    An unanswerable probe is therefore its own answer, and both callers respond to it by doing
+    nothing: the supervisor keeps waiting, still bounded by the deadline it enforces above, and
+    the terminator refuses to signal a process group it cannot identify.
+    """
     if not pid:
-        return False
+        return WORKER_GONE
     try:
         os.kill(int(pid), 0)
     except (OSError, ValueError, TypeError):
-        return False
+        return WORKER_GONE
     command = _worker_command(int(pid))
-    return "agentic_trading.research_worker" in command and run_key in command
+    if command is None:
+        return WORKER_UNKNOWN
+    if "agentic_trading.research_worker" in command and run_key in command:
+        return WORKER_OURS
+    return WORKER_GONE
+
+
+def _worker_alive(pid: int | None, run_key: str) -> bool:
+    """Whether to keep waiting rather than start a second worker on the same run."""
+    return _worker_state(pid, run_key) != WORKER_GONE
 
 
 def _terminate_worker(pid: int | None, run_key: str) -> bool:
-    if not _worker_alive(pid, run_key):
+    # Signalling needs the stricter answer: a pid we could not identify may since have been
+    # reused by something that has nothing to do with this deployment.
+    if _worker_state(pid, run_key) != WORKER_OURS:
         return False
     try:
         os.killpg(int(pid), signal.SIGTERM)

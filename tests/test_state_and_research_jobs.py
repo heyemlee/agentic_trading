@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
+from agentic_trading import research_jobs
 from agentic_trading.research_jobs import ResearchJobManager, ResearchJobStore
 
 
@@ -81,6 +83,58 @@ def test_orphaned_research_requeues_same_run_id(tmp_path, monkeypatch):
     assert result["recovered"] == ["recover"]
     job = mgr.store.get("recover")
     assert job["state"] == "QUEUED" and job["attempts"] == 1
+
+
+def test_a_probe_that_cannot_run_never_starts_a_second_worker(tmp_path, monkeypatch):
+    """Not being able to ask whether a worker lives is not the same as learning it died.
+
+    The identity probe spawns ps, and spawning needs file descriptors. On 2026-09-15 the
+    service had exhausted its own, so the probe raised, every living worker read as dead, and
+    the supervisor started a second worker on a run that was still going. Both spent the
+    shared subscription and wrote the same decision record with different conclusions.
+    """
+    def no_descriptors(*_args, **_kwargs):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr("agentic_trading.research_jobs.subprocess.run", no_descriptors)
+    monkeypatch.setattr("agentic_trading.research_jobs.os.kill", lambda *_: None)
+
+    mgr = manager(tmp_path)
+    create_job(mgr.store, tmp_path, "still-running")
+    mgr.store.claim(2)
+    old = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    mgr.store.update("still-running", {"started_at": old, "pid": 4242},
+                     expected_states=("RUNNING",))
+    monkeypatch.setattr(mgr, "dispatch", list)
+
+    result = mgr.tick()
+    assert result["recovered"] == []
+    job = mgr.store.get("still-running")
+    assert job["state"] == "RUNNING" and job["attempts"] == 1
+
+
+def test_a_worker_that_cannot_be_identified_is_never_signalled(tmp_path, monkeypatch):
+    """The opposite caution for the opposite act: an unidentified pid may have been reused."""
+    monkeypatch.setattr("agentic_trading.research_jobs.subprocess.run",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError(24, "Too many open files")))
+    monkeypatch.setattr("agentic_trading.research_jobs.os.kill", lambda *_: None)
+    signalled = []
+    monkeypatch.setattr("agentic_trading.research_jobs.os.killpg",
+                        lambda *a: signalled.append(a))
+
+    assert research_jobs._worker_state(4242, "run") == research_jobs.WORKER_UNKNOWN
+    assert research_jobs._terminate_worker(4242, "run") is False
+    assert signalled == []
+
+
+def test_a_pid_belonging_to_something_else_still_counts_as_gone(tmp_path, monkeypatch):
+    """The probe answering plainly must keep working: reuse is what it exists to catch."""
+    monkeypatch.setattr("agentic_trading.research_jobs.os.kill", lambda *_: None)
+    monkeypatch.setattr("agentic_trading.research_jobs.subprocess.run",
+                        lambda *a, **k: SimpleNamespace(stdout="/usr/bin/some other program"))
+
+    assert research_jobs._worker_state(4242, "run") == research_jobs.WORKER_GONE
+    assert research_jobs._worker_alive(4242, "run") is False
 
 
 def test_research_timeout_is_terminal_and_durable(tmp_path, monkeypatch):
