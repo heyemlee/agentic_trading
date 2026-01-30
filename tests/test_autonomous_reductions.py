@@ -15,6 +15,7 @@ from agentic_trading.broker import SimulatedBroker
 from agentic_trading.execution_scenarios import PRICES, TRADE_DATE, _profiles, _proposal
 from agentic_trading.proposals import PROPOSED, ProposalStore
 from agentic_trading.service import Service, ServiceConflict
+from agentic_trading.service.shapes import MarketStatus
 
 MICRO = "micro_live"
 
@@ -39,7 +40,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "profiles", lambda: profiles)
     monkeypatch.setattr(service, "_store", lambda _: store)
     monkeypatch.setattr(service, "_broker", lambda *_: broker)
-    monkeypatch.setattr(service, "market_status", lambda: {"is_open": True})
+    monkeypatch.setattr(service, "market_status", lambda: MarketStatus(is_open=True))
     return service, profiles, store
 
 
@@ -57,7 +58,7 @@ def reduction(**over):
 def test_a_closed_market_costs_nothing_and_opens_nothing(setup, monkeypatch):
     service, _, store = setup
     store.save(reduction())
-    monkeypatch.setattr(service, "market_status", lambda: {"is_open": False})
+    monkeypatch.setattr(service, "market_status", lambda: MarketStatus(is_open=False))
     monkeypatch.setattr(service, "_broker", lambda *_: pytest.fail("no venue session when closed"))
     assert service.autonomous_reductions()["skipped"] == "the market is closed"
 

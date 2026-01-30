@@ -43,6 +43,37 @@ from ..proposals import (
 from ..research_jobs import ResearchJobManager
 from ..state_db import StateDB
 from ..storage import file_lock
+from .shapes import (
+    AdvisorConversation,
+    AdvisorDecision,
+    AdvisorJob,
+    AdvisorMessage,
+    AdvisorSnapshot,
+    AdvisorState,
+    ClaudeStatus,
+    Fill,
+    HardRiskRule,
+    HardRiskView,
+    Health,
+    MarketStatus,
+    MicroLive,
+    MicroLiveAccount,
+    OpenOrder,
+    Orders,
+    PersonalNotes,
+    Portfolio,
+    PortfolioAccount,
+    PortfolioBucket,
+    PortfolioCombined,
+    PortfolioPosition,
+    PreflightCheck,
+    ProposalDetail,
+    ProposalFreshness,
+    ProposalResearch,
+    ProposalSummary,
+    ProposalWorld,
+    TrackedOrder,
+)
 from .status import (
     FRESHNESS_LABELS,
     ProposalStatus,
@@ -106,14 +137,16 @@ class Service:
         return make_broker(profiles)
 
     # ---------------------------------------------------------------- health
-    def health(self) -> dict[str, Any]:
+    def health(self) -> Health:
         """One call a dashboard can poll: can the system act, and what is blocking it."""
         warnings: list[str] = []
         try:
             profiles = self.profiles()
         except ServiceError as exc:
-            return {"status": SystemStatus.CONFIG_ERROR, "detail": str(exc), "warnings": [],
-                    "checked_at": utcnow().isoformat()}
+            # Nothing below this line can be answered without a config, so the shape is the
+            # status, the reason and the time — and every other field is absent, not zeroed.
+            return Health(status=SystemStatus.CONFIG_ERROR, detail=str(exc),
+                          checked_at=utcnow().isoformat())
 
         halt_file = profiles.project_dir / str(
             profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
@@ -124,7 +157,7 @@ class Service:
         halted = risk.get("total", {}).get("manual_reset_required", False)
 
         claude = self.claude_status()
-        if claude["state"] == "LIMIT_REACHED":
+        if claude.state == "LIMIT_REACHED":
             status = SystemStatus.CLAUDE_LIMIT_REACHED
         elif halted:
             status = SystemStatus.HALTED
@@ -142,25 +175,25 @@ class Service:
                             "explicitly accepted; real-money execution is blocked until you do.")
 
         market = self.market_status()
-        return {
-            "status": status,
-            "detail": {
+        return Health(
+            status=status,
+            detail={
                 SystemStatus.READY: "able to research and to accept approvals",
                 SystemStatus.PAUSED: "kill switch engaged: no orders will be submitted",
                 SystemStatus.HALTED: "a drawdown ladder halt is active and needs a manual reset",
-                SystemStatus.CLAUDE_LIMIT_REACHED: claude["detail"],
+                SystemStatus.CLAUDE_LIMIT_REACHED: claude.detail,
                 SystemStatus.CONFIG_ERROR: "configuration error",
             }[status],
-            "paused": paused,
-            "stage": profiles.stage,
-            "market": market,
-            "claude": claude,
-            "micro_live_enabled": self._micro_enabled(profiles),
-            "warnings": warnings,
-            "checked_at": utcnow().isoformat(),
-        }
+            paused=paused,
+            stage=profiles.stage,
+            market=market,
+            claude=claude,
+            micro_live_enabled=self._micro_enabled(profiles),
+            warnings=warnings,
+            checked_at=utcnow().isoformat(),
+        )
 
-    def claude_status(self) -> dict[str, Any]:
+    def claude_status(self) -> ClaudeStatus:
         """Subscription state, read from the most recent runs. Never exposes credentials."""
         profiles = self.profiles()
         audit = profiles.project_dir / "runs" / "llm_calls.jsonl"
@@ -183,10 +216,11 @@ class Service:
         latest = _latest_run_error(profiles)
         if state == "OK" and latest and "limit" in latest.lower():
             state, detail = "LIMIT_REACHED", latest
-        return {"state": state, "detail": detail, "billing": "claude_subscription_no_api_charges",
-                "calls_today": calls_today, "last_call_at": last_call}
+        return ClaudeStatus(state=state, detail=detail,
+                            billing="claude_subscription_no_api_charges",
+                            calls_today=calls_today, last_call_at=last_call)
 
-    def market_status(self) -> dict[str, Any]:
+    def market_status(self) -> MarketStatus:
         try:
             import pandas as pd
 
@@ -195,11 +229,11 @@ class Service:
             cal = _nyse_calendar()
             now = pd.Timestamp.now(tz="UTC")
             is_open = bool(cal.is_open_on_minute(now, ignore_breaks=True))
-            return {"is_open": is_open, "calendar": cal.name,
-                    "next_open": str(cal.next_open(now)) if not is_open else None,
-                    "next_close": str(cal.next_close(now)) if is_open else None}
+            return MarketStatus(is_open=is_open, calendar=cal.name,
+                                next_open=str(cal.next_open(now)) if not is_open else None,
+                                next_close=str(cal.next_close(now)) if is_open else None)
         except Exception as exc:  # noqa: BLE001 - an unknown session is reported closed
-            return {"is_open": False, "calendar": None, "error": f"{type(exc).__name__}: {exc}"}
+            return MarketStatus(is_open=False, error=f"{type(exc).__name__}: {exc}")
 
     # ---------------------------------------------------------------- portfolio
     #: Which ledger owns which buckets. Two separate books: the conceptual core/sandbox
@@ -210,7 +244,7 @@ class Service:
         (MICRO_BUCKET, MICRO_BUCKET, (MICRO_BUCKET,), True, "robinhood", MICRO_BUCKET),
     )
 
-    def portfolio(self) -> dict[str, Any]:
+    def portfolio(self) -> Portfolio:
         """Every bucket a screen can show, and the account each one belongs to.
 
         Equity, funding, high-water mark and drawdown are reported per account. A figure that
@@ -223,37 +257,41 @@ class Service:
 
         profiles = self.profiles()
         trade_date = _last_session()
-        out: dict[str, Any] = {"as_of": trade_date, "buckets": {}, "accounts": {}, "errors": {}}
+        buckets_out: dict[str, PortfolioBucket] = {}
+        accounts_out: dict[str, PortfolioAccount] = {}
+        errors: dict[str, str] = {}
         for account, sample, buckets, real, venue, ladder_key in self.ACCOUNTS:
             try:
                 snap, ladders, _regime, _text = portfolio_context(profiles, trade_date, sample)
             except (PortfolioError, ServiceError, ProfileError) as exc:
-                out["errors"][account] = str(exc)
+                # One unreadable book must not take the other down with it: the reason is
+                # reported beside whatever was readable, and `combined.complete` says so.
+                errors[account] = str(exc)
                 continue
             views = {name: view for name, view in snap.buckets.items() if name in buckets}
             if not views:
                 continue
             for name, view in views.items():
-                out["buckets"][name] = {
-                    "account": account,
-                    "allocation_usd": view.allocation_usd,
-                    "cash_usd": round(view.cash_usd, 2),
-                    "positions_value_usd": round(view.market_value, 2),
-                    "equity_usd": round(view.equity, 2),
-                    "position_count": view.n_positions,
-                    "is_real_money": real,
-                    "venue": venue,
-                    "positions": [{
-                        "symbol": p.symbol, "quantity": p.quantity, "price": p.price,
-                        "market_value_usd": round(p.market_value, 2),
-                        "cost_basis_usd": round(p.cost_basis, 2),
-                        "unrealized_pct": round(p.unrealized_pct, 2),
-                        "weight_pct_of_allocation": round(p.weight_pct_of_bucket, 2),
-                        "classification": p.cls.limit_class,
-                        "exposure_group": p.cls.exposure_group,
-                    } for p in view.positions],
-                    "sleeves_pct": {k: round(v, 2) for k, v in view.sleeves_pct.items()},
-                }
+                buckets_out[name] = PortfolioBucket(
+                    account=account,
+                    allocation_usd=view.allocation_usd,
+                    cash_usd=round(view.cash_usd, 2),
+                    positions_value_usd=round(view.market_value, 2),
+                    equity_usd=round(view.equity, 2),
+                    position_count=view.n_positions,
+                    is_real_money=real,
+                    venue=venue,
+                    positions=[PortfolioPosition(
+                        symbol=p.symbol, quantity=p.quantity, price=p.price,
+                        market_value_usd=round(p.market_value, 2),
+                        cost_basis_usd=round(p.cost_basis, 2),
+                        unrealized_pct=round(p.unrealized_pct, 2),
+                        weight_pct_of_allocation=round(p.weight_pct_of_bucket, 2),
+                        classification=p.cls.limit_class,
+                        exposure_group=p.cls.exposure_group,
+                    ) for p in view.positions],
+                    sleeves_pct={k: round(v, 2) for k, v in view.sleeves_pct.items()},
+                )
             ladder = getattr(ladders, ladder_key, None)
             equity = round(sum(v.equity for v in views.values()), 2)
             # Funding is the configured allocation the bucket opened with, plus every deposit
@@ -264,36 +302,40 @@ class Service:
             opening = round(sum(profiles.capital_allocation(name) for name in views), 2)
             flows = round(sum(recorded.get(name, 0.0) for name in views), 2)
             deposits = round(opening + flows, 2)
-            out["accounts"][account] = {
-                "buckets": sorted(views),
-                "is_real_money": real,
-                "venue": venue,
-                "source": "robinhood account, reconciled" if real else "local conceptual ledger",
-                "as_of": snap.as_of,
-                "priced_for": snap.trade_date,
-                "equity_usd": equity,
-                "cash_usd": round(sum(v.cash_usd for v in views.values()), 2),
-                "positions_value_usd": round(sum(v.market_value for v in views.values()), 2),
-                "net_deposits_usd": deposits,
-                "opening_allocation_usd": opening,
-                "recorded_flows_usd": flows,
-                "net_deposits_basis": "configured allocation plus recorded deposits and withdrawals",
-                "investment_pnl_usd": round(equity - deposits, 2),
-                "return_pct": round((equity - deposits) / deposits * 100, 2) if deposits else None,
-                "high_water_mark_usd": round(ladder.high_water_mark_usd, 2) if ladder else None,
-                "drawdown_pct": round(ladder.drawdown_pct, 2) if ladder else None,
-                "ladder_level": ladder.level if ladder else None,
-            }
-        accounts = out["accounts"]
-        out["combined"] = {
-            "equity_usd": round(sum(a["equity_usd"] for a in accounts.values()), 2),
-            "accounts": sorted(accounts),
-            "complete": not out["errors"],
-            # True whenever the sum spans both books, which is precisely when it must not be
-            # compared against any single account's high-water mark.
-            "mixes_real_and_conceptual": len({a["is_real_money"] for a in accounts.values()}) > 1,
-        }
-        return out
+            accounts_out[account] = PortfolioAccount(
+                buckets=sorted(views),
+                is_real_money=real,
+                venue=venue,
+                source="robinhood account, reconciled" if real else "local conceptual ledger",
+                as_of=snap.as_of,
+                priced_for=snap.trade_date,
+                equity_usd=equity,
+                cash_usd=round(sum(v.cash_usd for v in views.values()), 2),
+                positions_value_usd=round(sum(v.market_value for v in views.values()), 2),
+                net_deposits_usd=deposits,
+                opening_allocation_usd=opening,
+                recorded_flows_usd=flows,
+                net_deposits_basis="configured allocation plus recorded deposits and withdrawals",
+                investment_pnl_usd=round(equity - deposits, 2),
+                return_pct=round((equity - deposits) / deposits * 100, 2) if deposits else None,
+                high_water_mark_usd=round(ladder.high_water_mark_usd, 2) if ladder else None,
+                drawdown_pct=round(ladder.drawdown_pct, 2) if ladder else None,
+                ladder_level=ladder.level if ladder else None,
+            )
+        return Portfolio(
+            as_of=trade_date,
+            buckets=buckets_out,
+            accounts=accounts_out,
+            errors=errors,
+            combined=PortfolioCombined(
+                equity_usd=round(sum(a.equity_usd for a in accounts_out.values()), 2),
+                accounts=sorted(accounts_out),
+                complete=not errors,
+                # True whenever the sum spans both books, which is precisely when it must not be
+                # compared against any single account's high-water mark.
+                mixes_real_and_conceptual=len({a.is_real_money for a in accounts_out.values()}) > 1,
+            ),
+        )
 
     def confirm_portfolio(self, *, ledger: str = "all", dry_run: bool = False) -> dict[str, Any]:
         """Renew the ledgers' as_of, but only where a check agrees with them.
@@ -334,7 +376,7 @@ class Service:
         return out
 
     # ---------------------------------------------------------------- micro-live
-    def micro_live(self) -> dict[str, Any]:
+    def micro_live(self) -> MicroLive:
         """Real-money workflow status, the preflight gates, and the capital boundary."""
         profiles = self.profiles()
         micro = profiles.risk.get("micro_live_execution") or {}
@@ -354,99 +396,104 @@ class Service:
             status = micro_live_status(enabled=enabled, connected=connected,
                                        preflight_ready=preflight.ready, open_proposal=open_proposal,
                                        profiles=profiles)
-            return {
-                "status": status,
-                "enabled": enabled,
-                "connected": connected,
-                "connect_error": connect_error,
-                "capital_boundary_usd": float(micro.get("max_capital_usd", 100)),
-                "account": preflight.account,
-                "preflight_ready": preflight.ready,
-                "checks": [{"id": c.check_id, "name": c.name, "passed": c.passed, "detail": c.detail}
-                           for c in preflight.checks],
-                "blocking": [c.check_id for c in preflight.failures],
-                "permissions": dict(micro.get("permissions") or {}),
-                "execution_mode": str(micro.get("execution_mode", "human_approval")),
-            }
+            return MicroLive(
+                status=status,
+                enabled=enabled,
+                connected=connected,
+                connect_error=connect_error,
+                capital_boundary_usd=float(micro.get("max_capital_usd", 100)),
+                account=MicroLiveAccount(**preflight.account) if preflight.account else None,
+                preflight_ready=preflight.ready,
+                checks=[PreflightCheck(id=c.check_id, name=c.name, passed=c.passed, detail=c.detail)
+                        for c in preflight.checks],
+                blocking=[c.check_id for c in preflight.failures],
+                permissions=dict(micro.get("permissions") or {}),
+                execution_mode=str(micro.get("execution_mode", "human_approval")),
+            )
         finally:
             if broker is not None:
                 broker.close()
 
     # ---------------------------------------------------------------- proposals
-    def proposals(self, include_closed: bool = False) -> list[dict[str, Any]]:
+    def proposals(self, include_closed: bool = False) -> list[ProposalSummary]:
         profiles = self.profiles()
         store = self._store(profiles)
         items = store.all() if include_closed else store.open_proposals(profiles)
         return [self._proposal_summary(p, profiles) for p in sorted(items, key=lambda x: x.created_at, reverse=True)]
 
-    def _proposal_summary(self, p: Proposal, profiles: Profiles) -> dict[str, Any]:
+    def _proposal_summary(self, p: Proposal, profiles: Profiles) -> ProposalSummary:
         freshness, why = p.freshness(profiles)
         rules = p.freshness_rules(profiles)
-        return {
-            "proposal_id": p.proposal_id,
-            "version": p.version(),
-            "sell_quantity": p.sell_quantity,
-            "order_status": p.order_status,
-            "reconciliation_error": p.reconciliation_error,
-            "status": proposal_status(p, profiles),
-            "ticker": p.ticker,
-            "bucket": p.bucket,
-            "is_real_money": p.bucket == MICRO_BUCKET,
-            "action": p.action,
-            "strategy": p.strategy,
-            "notional_usd": p.notional_usd,
-            "target_weight_pct": p.target_weight_pct,
-            "confidence": p.confidence,
-            "requires_human_approval": p.requires_human_approval,
-            "created_at": p.created_at,
-            "approved_at": p.approved_at,
-            "freshness": {"state": freshness, "label": FRESHNESS_LABELS.get(freshness, freshness),
-                          "detail": why, "class": p.freshness_class(profiles),
-                          "ttl_minutes": rules.get("ttl_minutes"),
-                          "age_minutes": round(p.age_minutes(), 1),
-                          "max_price_drift_pct": rules.get("max_price_drift_pct")},
-            "reference_price": p.reference_price,
-            "run_id": p.run_id,
-        }
+        return ProposalSummary(
+            proposal_id=p.proposal_id,
+            version=p.version(),
+            sell_quantity=p.sell_quantity,
+            order_status=p.order_status,
+            reconciliation_error=p.reconciliation_error,
+            status=proposal_status(p, profiles),
+            ticker=p.ticker,
+            bucket=p.bucket,
+            is_real_money=p.bucket == MICRO_BUCKET,
+            action=p.action,
+            strategy=p.strategy,
+            notional_usd=p.notional_usd,
+            target_weight_pct=p.target_weight_pct,
+            confidence=p.confidence,
+            requires_human_approval=p.requires_human_approval,
+            created_at=p.created_at,
+            approved_at=p.approved_at,
+            freshness=ProposalFreshness(
+                state=freshness, label=FRESHNESS_LABELS.get(freshness, freshness),
+                detail=why, freshness_class=p.freshness_class(profiles),
+                ttl_minutes=rules.get("ttl_minutes"),
+                age_minutes=round(p.age_minutes(), 1),
+                max_price_drift_pct=rules.get("max_price_drift_pct")),
+            reference_price=p.reference_price,
+            run_id=p.run_id,
+        )
 
-    def proposal(self, proposal_id: str) -> dict[str, Any]:
+    def proposal(self, proposal_id: str) -> ProposalDetail:
         """Full detail: the reasoning, the risk rules, and the world the proposal was born into."""
         profiles = self.profiles()
         p = self._store(profiles).get(proposal_id)
         if p is None:
             raise ServiceError(f"no proposal {proposal_id!r}")
-        detail = self._proposal_summary(p, profiles)
-        detail["history"] = p.history
-        detail["world_at_proposal"] = {
-            "ladder_level": p.ladder_level_at_proposal, "regime": p.regime_at_proposal,
-            "portfolio_equity_usd": p.portfolio_equity_at_proposal,
-            "bucket_cash_usd": p.bucket_cash_at_proposal, "data_quality": p.data_quality,
-            "evidence": p.evidence, "missing_information": p.missing_information,
-        }
+        research, hard_risk = None, None
         record = _find_record(profiles, p.run_id)
         if record:
             policy = record.get("policy") or {}
             proposal_doc = policy.get("proposal") or {}
-            detail["research"] = {
-                "portfolio_manager_rating": (record.get("upstream_decision") or {}).get("portfolio_manager_signal"),
-                "policy_action": policy.get("final_action"),
-                "policy_reasons": policy.get("reasons"),
-                "confidence": policy.get("confidence"),
-                "data_quality": proposal_doc.get("data_quality"),
-                "market_risk_level": proposal_doc.get("market_risk_level"),
-                "investment_thesis": proposal_doc.get("investment_thesis"),
-                "bull_case": proposal_doc.get("bull_case"),
-                "bear_case": proposal_doc.get("bear_case"),
-                "primary_risks": proposal_doc.get("primary_risks"),
-                "what_could_make_this_wrong": proposal_doc.get("what_could_make_this_thesis_wrong"),
-                "why_doing_nothing_may_be_better": proposal_doc.get("alternative_why_doing_nothing_may_be_preferable"),
-                "missing_information": proposal_doc.get("missing_information"),
-                "entry_logic": proposal_doc.get("entry_logic"),
-                "exit_logic": proposal_doc.get("exit_logic"),
-                "expected_holding_period": proposal_doc.get("expected_holding_period"),
-            }
-            detail["hard_risk"] = _hard_risk_view(record.get("hard_risk") or {})
-        return detail
+            research = ProposalResearch(
+                portfolio_manager_rating=(record.get("upstream_decision") or {}).get("portfolio_manager_signal"),
+                policy_action=policy.get("final_action"),
+                policy_reasons=policy.get("reasons"),
+                confidence=policy.get("confidence"),
+                data_quality=proposal_doc.get("data_quality"),
+                market_risk_level=proposal_doc.get("market_risk_level"),
+                investment_thesis=proposal_doc.get("investment_thesis"),
+                bull_case=proposal_doc.get("bull_case"),
+                bear_case=proposal_doc.get("bear_case"),
+                primary_risks=proposal_doc.get("primary_risks"),
+                what_could_make_this_wrong=proposal_doc.get("what_could_make_this_thesis_wrong"),
+                why_doing_nothing_may_be_better=proposal_doc.get("alternative_why_doing_nothing_may_be_preferable"),
+                missing_information=proposal_doc.get("missing_information"),
+                entry_logic=proposal_doc.get("entry_logic"),
+                exit_logic=proposal_doc.get("exit_logic"),
+                expected_holding_period=proposal_doc.get("expected_holding_period"),
+            )
+            hard_risk = _hard_risk_view(record.get("hard_risk") or {})
+        return ProposalDetail(
+            **self._proposal_summary(p, profiles).model_dump(),
+            history=p.history,
+            world_at_proposal=ProposalWorld(
+                ladder_level=p.ladder_level_at_proposal, regime=p.regime_at_proposal,
+                portfolio_equity_usd=p.portfolio_equity_at_proposal,
+                bucket_cash_usd=p.bucket_cash_at_proposal, data_quality=p.data_quality,
+                evidence=p.evidence, missing_information=p.missing_information,
+            ),
+            research=research,
+            hard_risk=hard_risk,
+        )
 
     # ---------------------------------------------------------------- actions
     def revalidate_proposal(self, proposal_id: str) -> dict[str, Any]:
@@ -554,7 +601,7 @@ class Service:
             report["skipped"] = ("autonomy was withdrawn and needs a manual reset: "
                                  f"{state.reason}") if state.tripped else "no autonomy is switched on"
             return report
-        if not self.market_status().get("is_open"):
+        if not self.market_status().is_open:
             report["skipped"] = "the market is closed"
             return report
 
@@ -691,14 +738,14 @@ class Service:
         return {"proposal_id": p.proposal_id, "status": ProposalStatus.INVALIDATED}
 
     # ---------------------------------------------------------------- research
-    def advisor_decisions(self, limit: int = 40) -> list[dict[str, Any]]:
+    def advisor_decisions(self, limit: int = 40) -> list[AdvisorDecision]:
         """The same decision records as the research page, including the actual policy details."""
         profiles = self.profiles()
         records = sorted((profiles.project_dir / "runs").glob("*/decision_record.json"),
                          key=lambda p: p.stat().st_mtime, reverse=True)
         job_states = {j["run_key"]: j["state"]
                       for j in self._research_manager(profiles).store.list(limit=10000)}
-        out = []
+        out: list[AdvisorDecision] = []
         for path in records:
             try:
                 record = json.loads(path.read_text(encoding="utf-8"))
@@ -708,12 +755,13 @@ class Service:
                 continue
             if record.get("advisory") and job_states.get(record.get("run_id")) != "COMPLETE":
                 continue
-            out.append({"run_id": record.get("run_id"), "ticker": record.get("ticker"),
-                        "bucket": record.get("bucket"), "account_id": record.get("account_id"),
-                        "created_at": record.get("created_at"), "trade_date": record.get("trade_date"),
-                        "action": (record.get("final_recommendation") or {}).get("action"),
-                        "policy": record.get("policy"), "advisory": bool(record.get("advisory")),
-                        "proposal_id": record.get("proposal_id")})
+            out.append(AdvisorDecision(
+                run_id=record.get("run_id"), ticker=record.get("ticker"),
+                bucket=record.get("bucket"), account_id=record.get("account_id"),
+                created_at=record.get("created_at"), trade_date=record.get("trade_date"),
+                action=(record.get("final_recommendation") or {}).get("action"),
+                policy=record.get("policy"), advisory=bool(record.get("advisory")),
+                proposal_id=record.get("proposal_id")))
             if len(out) >= limit:
                 break
         return out
@@ -730,23 +778,24 @@ class Service:
         except (OSError, ValueError):
             return None
 
-    def advisor_conversation(self, conversation_id: str = "default") -> dict[str, Any]:
+    def advisor_conversation(self, conversation_id: str = "default") -> AdvisorConversation:
         jobs = self._research_manager(self.profiles()).store.list(limit=1000)
-        messages = []
+        messages: list[AdvisorMessage] = []
         for job in sorted(jobs, key=lambda j: j["created_at"]):
             task = job.get("task") or {}
             if task.get("conversation_id") != conversation_id or not task.get("message"):
                 continue
-            messages.append({"role": "user", "content": task["message"], "run_key": job["run_key"],
-                             "state": job["state"]})
+            messages.append(AdvisorMessage(role="user", content=task["message"],
+                                           run_key=job["run_key"], state=job["state"]))
             result = self._advisor_result(job["run_key"]) if job["state"] == "COMPLETE" else None
             if result:
-                messages.append({"role": "assistant", "content": result["answer"],
-                                 "research_candidates": result.get("research_candidates", []),
-                                 "run_key": job["run_key"], "state": job["state"]})
-        return {"conversation_id": conversation_id, "messages": messages[-80:]}
+                messages.append(AdvisorMessage(
+                    role="assistant", content=result["answer"],
+                    research_candidates=result.get("research_candidates", []),
+                    run_key=job["run_key"], state=job["state"]))
+        return AdvisorConversation(conversation_id=conversation_id, messages=messages[-80:])
 
-    def advisor_state(self) -> dict[str, Any]:
+    def advisor_state(self) -> AdvisorState:
         from ..advisor import NOTES, SNAPSHOT, age
 
         db = self.state_db()
@@ -755,14 +804,18 @@ class Service:
         helper_jobs = [j for j in jobs if j.get("task")]
         conversations = list(dict.fromkeys(j["task"]["conversation_id"] for j in helper_jobs
                                           if j["task"].get("conversation_id")))
-        return {"snapshot": snapshot, "stale": age(snapshot) > 300,
-                "notes": db.read_meta(NOTES, {"text": "", "revision": 0}),
-                "jobs": [{k: j.get(k) for k in ("run_key", "ticker", "state", "error", "created_at", "task")}
-                         for j in helper_jobs[:30]],
-                "conversations": conversations[:50], "decisions": self.advisor_decisions(),
-                "coverage": "All Robinhood brokerage accounts, stocks/ETFs only; analysis is read-only."}
+        return AdvisorState(
+            snapshot=AdvisorSnapshot(**snapshot),
+            stale=age(snapshot) > 300,
+            notes=PersonalNotes(**(db.read_meta(NOTES, {"text": "", "revision": 0}) or {})),
+            jobs=[AdvisorJob(**{k: j.get(k)
+                                for k in ("run_key", "ticker", "state", "error", "created_at", "task")})
+                  for j in helper_jobs[:30]],
+            conversations=conversations[:50],
+            decisions=self.advisor_decisions(),
+            coverage="All Robinhood brokerage accounts, stocks/ETFs only; analysis is read-only.")
 
-    def advisor_notes(self, text: str, revision: int) -> dict[str, Any]:
+    def advisor_notes(self, text: str, revision: int) -> PersonalNotes:
         from ..advisor import NOTES
 
         if len(text) > 4000:
@@ -772,8 +825,9 @@ class Service:
             old = db.read_meta(NOTES, {}) or {}
             if old.get("revision", 0) != revision:
                 raise ServiceConflict("Personal notes changed on another device; reload before saving.")
-            value = {"text": text.strip(), "revision": revision + 1, "updated_at": utcnow().isoformat()}
-            db.write_meta(NOTES, value, conn)
+            value = PersonalNotes(text=text.strip(), revision=revision + 1,
+                                  updated_at=utcnow().isoformat())
+            db.write_meta(NOTES, value.model_dump(), conn)
         return value
 
     def start_advisor(self, *, kind: str, request_id: str, message: str = "",
@@ -1009,20 +1063,20 @@ class Service:
         events: list[Event] = []
 
         for proposal in self.proposals():
-            if proposal["status"] == ProposalStatus.WAITING_FOR_APPROVAL:
+            if proposal.status == ProposalStatus.WAITING_FOR_APPROVAL:
                 events.append(Event(
-                    key=f"proposal_waiting:{proposal['proposal_id']}:{proposal['version']}",
+                    key=f"proposal_waiting:{proposal.proposal_id}:{proposal.version}",
                     kind="proposal_waiting",
-                    title=f"{proposal['action']} {proposal['ticker']} needs your approval",
-                    detail=(f"${proposal['notional_usd']:,.2f} in {proposal['bucket']}"
-                            + (" (real money)" if proposal["is_real_money"] else "")),
-                    link="/ui/approvals.html", urgent=proposal["is_real_money"]))
-            if proposal.get("reconciliation_error"):
+                    title=f"{proposal.action} {proposal.ticker} needs your approval",
+                    detail=(f"${proposal.notional_usd:,.2f} in {proposal.bucket}"
+                            + (" (real money)" if proposal.is_real_money else "")),
+                    link="/ui/approvals.html", urgent=proposal.is_real_money))
+            if proposal.reconciliation_error:
                 events.append(Event(
-                    key=f"reconciliation_error:{proposal['proposal_id']}",
+                    key=f"reconciliation_error:{proposal.proposal_id}",
                     kind="reconciliation_error",
-                    title=f"{proposal['ticker']} order could not be reconciled",
-                    detail=str(proposal["reconciliation_error"])[:300],
+                    title=f"{proposal.ticker} order could not be reconciled",
+                    detail=proposal.reconciliation_error[:300],
                     link="/ui/activity.html", urgent=True))
 
         for job in self.research_jobs(limit=50):
@@ -1038,21 +1092,21 @@ class Service:
                     title="the Claude subscription limit stopped research",
                     detail=str(job.get("error") or "")[:300], link="/ui/research.html"))
 
-        for fill in self.orders(limit=10)["fills"]:
-            fill_id = fill.get("fill_id") or f"{fill.get('proposal_id')}:{fill.get('at')}"
+        for fill in self.orders(limit=10).fills:
+            fill_id = fill.fill_id or f"{fill.proposal_id}:{fill.at}"
             events.append(Event(
                 key=f"fill_recorded:{fill_id}", kind="fill_recorded",
-                title=f"{fill.get('symbol', 'an order')} filled",
-                detail=f"{fill.get('quantity')} @ {fill.get('price')}", link="/ui/activity.html"))
+                title=f"{fill.symbol or 'an order'} filled",
+                detail=f"{fill.quantity} @ {fill.price}", link="/ui/activity.html"))
 
         if self._micro_enabled(profiles):
             micro = self.micro_live()
-            if micro.get("connect_error"):
+            if micro.connect_error:
                 events.append(Event(
                     key="credential_invalid:robinhood", kind="credential_invalid",
                     title="the broker connection needs attention",
                     # The error text can name an endpoint but never a token.
-                    detail=str(micro["connect_error"])[:200], link="/ui/system.html", urgent=True))
+                    detail=micro.connect_error[:200], link="/ui/system.html", urgent=True))
 
         for name, ladder in self.risk_state().items():
             if not isinstance(ladder, dict) or "level" not in ladder:
@@ -1221,8 +1275,10 @@ class Service:
             self.state_db(profiles), profiles,
             research=self.research_history(limit=500),
             jobs=self.research_jobs(limit=500),
-            proposals=self.proposals(include_closed=True),
-            fills=self.orders(limit=200)["fills"])
+            # The study reads rows, not the response shape: dumping here keeps the evaluation
+            # module free of a model that exists for the console.
+            proposals=[p.model_dump() for p in self.proposals(include_closed=True)],
+            fills=[f.model_dump() for f in self.orders(limit=200).fills])
 
     def evaluation_snapshot(self, on: str | None = None) -> dict[str, Any]:
         """Mark the study to market for one session. Called daily by the maintenance job."""
@@ -1230,12 +1286,12 @@ class Service:
 
         profiles = self.profiles()
         portfolio = self.portfolio()
-        account = (portfolio.get("accounts") or {}).get("conceptual")
+        account = portfolio.accounts.get("conceptual")
         if account is None:
             raise ServiceError("the conceptual account could not be read")
         return evaluation.snapshot(
-            self.state_db(profiles), profiles, on=on or portfolio["as_of"],
-            equity_usd=account["equity_usd"], net_deposits_usd=account["net_deposits_usd"])
+            self.state_db(profiles), profiles, on=on or portfolio.as_of,
+            equity_usd=account.equity_usd, net_deposits_usd=account.net_deposits_usd)
 
     # ---------------------------------------------------------------- schedule
     def schedule_status(self) -> dict[str, Any]:
@@ -1249,7 +1305,7 @@ class Service:
         jobs = self.research_jobs(limit=200)
         health = self.health()
         decision = scheduling.decide(
-            profiles, health_status=health["status"], paused=bool(health.get("paused")),
+            profiles, health_status=health.status, paused=bool(health.paused),
             executed=record, jobs=jobs)
         periods = record.get("periods") or {}
         last_key = max(periods) if periods else None
@@ -1487,42 +1543,45 @@ class Service:
         return out
 
     # ---------------------------------------------------------------- orders
-    def orders(self, limit: int = 50) -> dict[str, Any]:
+    def orders(self, limit: int = 50) -> Orders:
         """Fills recorded locally, plus live order state from the venue when connected."""
         profiles = self.profiles()
         fills_path = profiles.project_dir / str(
             (profiles.risk.get("broker") or {}).get("fills_file", "state/fills.jsonl"))
-        fills = StateDB(fills_path).fills(limit)
-        if not fills and fills_path.exists() and not StateDB(fills_path).migrated(fills_path):
+        rows = StateDB(fills_path).fills(limit)
+        if not rows and fills_path.exists() and not StateDB(fills_path).migrated(fills_path):
             for line in fills_path.read_text(encoding="utf-8").splitlines()[-limit:]:
                 try:
-                    fills.append(json.loads(line))
+                    rows.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-        live: list[dict[str, Any]] = []
+        live: list[OpenOrder] = []
         error = None
         if self._micro_enabled(profiles):
             try:
                 broker = self._broker(profiles, MICRO_BUCKET)
                 try:
-                    live = [{"order_id": o.order_id, "symbol": o.symbol, "side": o.side,
-                             "status": o.status, "quantity": o.quantity,
-                             "filled_quantity": o.filled_quantity,
-                             "filled_avg_price": o.filled_avg_price, "is_open": o.is_open}
+                    live = [OpenOrder(order_id=o.order_id, symbol=o.symbol, side=o.side,
+                                      status=o.status, quantity=o.quantity,
+                                      filled_quantity=o.filled_quantity,
+                                      filled_avg_price=o.filled_avg_price, is_open=o.is_open)
                             for o in broker.get_open_orders()]
                 finally:
                     _close(broker)
             except (ServiceError, BrokerError) as exc:
+                # A venue that will not answer leaves the locally recorded orders standing:
+                # the picture is incomplete, which is not the same as there being no orders.
                 error = str(exc)
-        tracked = [{"proposal_id": p.proposal_id, "order_id": p.broker_order_id,
-                    "client_order_id": p.client_order_id, "symbol": p.ticker,
-                    "status": proposal_status(p, profiles), "venue_status": p.order_status,
-                    "bucket": p.bucket, "side": "buy" if p.action in ("BUY", "ADD") else "sell",
-                    "filled_quantity": p.filled_quantity,
-                    "filled_avg_price": p.filled_avg_price, "reconciled_at": p.reconciled_at,
-                    "reconciliation_error": p.reconciliation_error}
+        tracked = [TrackedOrder(proposal_id=p.proposal_id, order_id=p.broker_order_id,
+                                client_order_id=p.client_order_id, symbol=p.ticker,
+                                status=proposal_status(p, profiles), venue_status=p.order_status,
+                                bucket=p.bucket, side="buy" if p.action in ("BUY", "ADD") else "sell",
+                                filled_quantity=p.filled_quantity,
+                                filled_avg_price=p.filled_avg_price, reconciled_at=p.reconciled_at,
+                                reconciliation_error=p.reconciliation_error)
                    for p in self._store(profiles).all() if p.client_order_id]
-        return {"fills": list(reversed(fills)), "open_orders": live, "tracked_orders": tracked, "error": error}
+        return Orders(fills=[Fill(**row) for row in reversed(rows)],
+                      open_orders=live, tracked_orders=tracked, error=error)
 
     # ---------------------------------------------------------------- controls
     def _journal(self, profiles: Profiles, **fields: Any) -> None:
@@ -1632,20 +1691,20 @@ def _find_record(profiles: Profiles, run_id: str | None) -> dict[str, Any] | Non
         return None
 
 
-def _hard_risk_view(hard_risk: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "verdict": hard_risk.get("verdict"),
-        "final_action": hard_risk.get("final_action"),
-        "notional_usd": hard_risk.get("proposed_notional_usd"),
-        "post_trade_weight_pct": hard_risk.get("post_trade_weight_pct"),
-        "requires_human_approval": hard_risk.get("requires_human_approval", True),
-        "rules": [{"id": r.get("rule_id"), "name": r.get("name"), "passed": r.get("passed"),
-                   "detail": r.get("detail")} for r in hard_risk.get("rules", [])],
-        "failed_rule_ids": hard_risk.get("failed_rule_ids", []),
-        "advisories": hard_risk.get("advisories", []),
-        "ladder": hard_risk.get("ladder"),
-        "regime": hard_risk.get("regime"),
-    }
+def _hard_risk_view(hard_risk: dict[str, Any]) -> HardRiskView:
+    return HardRiskView(
+        verdict=hard_risk.get("verdict"),
+        final_action=hard_risk.get("final_action"),
+        notional_usd=hard_risk.get("proposed_notional_usd"),
+        post_trade_weight_pct=hard_risk.get("post_trade_weight_pct"),
+        requires_human_approval=hard_risk.get("requires_human_approval", True),
+        rules=[HardRiskRule(id=r.get("rule_id"), name=r.get("name"), passed=r.get("passed"),
+                            detail=r.get("detail")) for r in hard_risk.get("rules", [])],
+        failed_rule_ids=hard_risk.get("failed_rule_ids", []),
+        advisories=hard_risk.get("advisories", []),
+        ladder=hard_risk.get("ladder"),
+        regime=hard_risk.get("regime"),
+    )
 
 
 def _approval_message(status: ProposalStatus, result: Any) -> str:

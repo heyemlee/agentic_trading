@@ -13,9 +13,20 @@ import pytest
 from agentic_trading import schedule
 from agentic_trading.profile import load_profiles
 from agentic_trading.service import Service
+from agentic_trading.service.shapes import Health
 from agentic_trading.state_db import StateDB
 from agentic_trading.triggers import scheduled_review
 from tests.conftest import ROOT, copy_example_ledger
+
+
+def _health(status: str) -> Health:
+    """A stub health answer carrying what the real one always carries.
+
+    The scheduler reads status and paused; the shape it reads them from also always says why
+    and when, so a stub that omitted those would be exercising a response no endpoint can make.
+    """
+    return Health(status=status, detail=f"stubbed {status}", paused=False,
+                  checked_at="2026-09-10T00:00:00+00:00")
 
 FRIDAY_AFTER_CLOSE = datetime(2026, 9, 4, 21, 0, tzinfo=UTC)     # 17:00 New York
 FRIDAY_DURING_SESSION = datetime(2026, 9, 4, 16, 0, tzinfo=UTC)  # 12:00 New York
@@ -138,7 +149,7 @@ def test_next_run_is_read_from_the_same_configuration_the_job_is_written_from(cf
 
 def test_a_skipped_run_records_why_and_starts_nothing(sandbox, monkeypatch):
     service, db = sandbox
-    monkeypatch.setattr(service, "health", lambda: {"status": "HALTED", "paused": False})
+    monkeypatch.setattr(service, "health", lambda: _health("HALTED"))
     started = []
     monkeypatch.setattr(service, "start_research", lambda *a, **k: started.append(a) or {})
 
@@ -150,7 +161,7 @@ def test_a_skipped_run_records_why_and_starts_nothing(sandbox, monkeypatch):
 
 def test_a_scheduled_run_claims_its_period_then_records_the_runs_it_started(sandbox, monkeypatch):
     service, db = sandbox
-    monkeypatch.setattr(service, "health", lambda: {"status": "READY", "paused": False})
+    monkeypatch.setattr(service, "health", lambda: _health("READY"))
     monkeypatch.setattr(service, "start_research",
                         lambda ticker, **kw: {"run_key": f"key-{ticker}", "ticker": ticker,
                                               "trade_date": "2026-09-03"})
@@ -173,7 +184,7 @@ def test_the_run_anchors_to_a_session_with_data_not_to_the_calendar_date(sandbox
     does not have. The calendar decides whether to run; the data layer decides what to read.
     """
     service, db = sandbox
-    monkeypatch.setattr(service, "health", lambda: {"status": "READY", "paused": False})
+    monkeypatch.setattr(service, "health", lambda: _health("READY"))
     passed = []
 
     def start_research(ticker, **kwargs):

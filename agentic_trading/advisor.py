@@ -371,14 +371,15 @@ def run_task(profiles, job):
             record = read_only_research(profiles, job, snapshot, notes)
         else:
             context = {"profile": profile_context(profiles, notes), "snapshot": snapshot,
-                       "research": service.advisor_decisions(limit=40),
+                       # The model is handed rows, not the console's shape.
+                       "research": [d.model_dump() for d in service.advisor_decisions(limit=40)],
                        "risk": service.risk_state()}
             # Bound the shortlist, explicitly stating coverage. Never silently call it all-market.
             context["snapshot"] = {**snapshot, "candidates": snapshot.get("candidates", [])[:40],
                                    "candidate_coverage": "first 40 from saved sources and profile ETFs"}
             history = service.advisor_conversation(task.get("conversation_id", "default"))
-            messages = [{"role": m["role"], "content": m["content"]} for m in history["messages"]
-                        if m.get("run_key") != job["run_key"]]
+            messages = [{"role": m.role, "content": m.content} for m in history.messages
+                        if m.run_key != job["run_key"]]
             record["assistant_result"] = answer(profiles, context, task["message"], messages,
                                                   task.get("language", "zh"))
             if task["kind"] == "shortlist":

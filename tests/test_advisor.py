@@ -117,12 +117,69 @@ def test_chat_request_is_idempotent_and_conversations_are_serial(assistant_servi
     assert second["run_key"] != first["run_key"]
 
 
+def test_the_assistant_screen_answers_before_any_refresh_has_run(assistant_service):
+    """Cold start: nothing observed yet, and the screen still has to render.
+
+    The snapshot is a stored document that does not exist until the first refresh succeeds —
+    which is exactly what an empty meta document reads back as. Requiring any of its fields
+    would make the assistant's own screen 500 on a fresh deployment, the one moment the owner
+    is most likely to be looking at it.
+    """
+    from agentic_trading.advisor import SNAPSHOT
+
+    assistant_service.state_db().write_meta(SNAPSHOT, {})
+
+    state = assistant_service.advisor_state()
+
+    assert state.snapshot.fetched_at is None
+    assert state.snapshot.accounts == [] and state.snapshot.errors == []
+    assert state.stale is True                      # never fetched reads as stale, not as fresh
+    assert state.notes.revision == 0 and state.notes.text == ""
+    assert state.jobs == [] and state.decisions == []
+    assert state.coverage                            # the scope disclosure is never conditional
+
+
+def test_a_stored_snapshot_keeps_keys_this_version_never_declared(assistant_service):
+    """AdvisorSnapshot allows extras, and the fixture above is why.
+
+    The snapshot is written whole by the refresh task and read back later, so it carries
+    whatever the version that wrote it chose to put there — the test fixture itself has a
+    top-level `complete` no model declares. The task runner also splices `stale` and an
+    explanation into a snapshot it could not refresh, rather than discarding the last good
+    read. Forbidding extras would quietly drop both.
+    """
+    state = assistant_service.advisor_state()
+
+    assert state.snapshot.model_extra.get("complete") is True    # undeclared, and still here
+    assert state.snapshot.source == "test"
+    account = state.snapshot.accounts[0]
+    assert account.label == "••••1234" and account.positions[0].symbol == "VTI"
+    assert account.positions[0].unrealized_pct is None           # absent, not computed to zero
+    assert [c.symbol for c in state.snapshot.candidates] == ["VTI"]
+
+
+def test_an_account_that_could_not_be_totalled_reports_no_money_rather_than_none_of_it(
+        assistant_service):
+    """A figure the venue would not give is None. Zero would be a claim about the money."""
+    from agentic_trading.advisor import SNAPSHOT
+
+    blank = snapshot()
+    blank["accounts"][0].update(complete=False, equity_usd=None, cash_usd=None)
+    blank["errors"] = ["Account totals are incomplete for ••••1234."]
+    assistant_service.state_db().write_meta(SNAPSHOT, blank)
+
+    account = assistant_service.advisor_state().snapshot.accounts[0]
+    assert account.complete is False
+    assert account.equity_usd is None and account.cash_usd is None
+    assert account.positions                          # the holdings were still readable
+
+
 def test_notes_require_current_revision_and_do_not_change_risk_config(assistant_service):
     s = assistant_service
     path = s.config_dir / "risk_profile.yaml"
     before = path.read_bytes()
     result = s.advisor_notes("Need this money for a home in 2 years.", 0)
-    assert result["revision"] == 1
+    assert result.revision == 1
     with pytest.raises(ServiceConflict):
         s.advisor_notes("Stale edit", 0)
     assert path.read_bytes() == before
@@ -144,9 +201,9 @@ def test_chat_survives_reload_and_uses_profile_history_and_existing_decisions(as
     assert captured["context"]["profile"]["personal_notes"] == "Home purchase in 2 years"
     assert captured["context"]["snapshot"]["accounts"][0]["id"] == "a" * 20
     assert captured["history"] == []
-    messages = s.advisor_conversation()["messages"]
-    assert [m["role"] for m in messages] == ["user", "assistant"]
-    assert "home purchase" in messages[1]["content"]
+    messages = s.advisor_conversation().messages
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert "home purchase" in messages[1].content
     next_job = s.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="And if my timing changes?")
     assert run_task(s.profiles(), next_job) == 0
     assert len(captured["history"]) == 2
@@ -193,7 +250,7 @@ def test_readonly_analysis_reuses_upstream_graph_and_cannot_create_proposals(
     assert '"quantity": 1' in record["portfolio"]["snapshot_text"]
     write_record(s.profiles().project_dir / "runs" / job["run_key"] / "decision_record.json", record)
     s._research_manager(s.profiles()).store.update(job["run_key"], {"state": "COMPLETE"})
-    assert s.advisor_decisions()[0]["advisory"]
+    assert s.advisor_decisions()[0].advisory
 
 
 def test_readonly_analysis_requires_the_selected_holding_to_exist(assistant_service):
@@ -266,7 +323,7 @@ def test_cancelled_chat_output_is_not_presented_as_a_completed_answer(assistant_
     write_record(s.profiles().project_dir / "runs" / job["run_key"] / "decision_record.json",
                  {"assistant_result": {"answer": "A cancelled answer"}})
     s._research_manager(s.profiles()).store.update(job["run_key"], {"state": "CANCELLED"})
-    assert [m["role"] for m in s.advisor_conversation()["messages"]] == ["user"]
+    assert [m.role for m in s.advisor_conversation().messages] == ["user"]
 
 
 def test_offline_chat_discloses_staleness_and_retains_saved_context(assistant_service, monkeypatch):

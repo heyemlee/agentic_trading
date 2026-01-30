@@ -42,7 +42,7 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
     db = service.state_db(profiles)
     health = service.health()
     decision = schedule.decide(
-        profiles, health_status=health["status"], paused=bool(health.get("paused")),
+        profiles, health_status=health.status, paused=bool(health.paused),
         executed=db.read_meta(schedule.EXECUTIONS, {}) or {},
         jobs=service.research_jobs(limit=200), now=now, force=force)
     if tickers:
@@ -89,9 +89,9 @@ def event_analysis(service: Service, ticker: str, *, bucket: str = "core",
     health = service.health()
     profiles = service.profiles()
     cfg = schedule.settings(profiles)
-    if health["status"] in schedule.BLOCKING_STATUS or (
-            health.get("paused") and not cfg.get("run_while_paused", True)):
-        return {"started": None, "skipped": True, "reason": f"system status is {health['status']}"}
+    if health.status in schedule.BLOCKING_STATUS or (
+            health.paused and not cfg.get("run_while_paused", True)):
+        return {"started": None, "skipped": True, "reason": f"system status is {health.status}"}
     run = service.start_research(ticker, bucket=bucket, trigger="event")
     run["event_reason"] = reason
     return {"started": run, "skipped": False}

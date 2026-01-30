@@ -28,6 +28,19 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from ..env import load_env
 from ..service import Service, ServiceConflict, ServiceError
+from ..service.shapes import (
+    AdvisorConversation,
+    AdvisorState,
+    ClaudeStatus,
+    Health,
+    MarketStatus,
+    MicroLive,
+    Orders,
+    PersonalNotes,
+    Portfolio,
+    ProposalDetail,
+    ProposalSummary,
+)
 from ..state_db import StateConflict
 from .auth import COOKIE, SESSION_SECONDS, ConsoleAuth
 
@@ -237,17 +250,17 @@ def _ok(fn, *args, **kwargs):
 
 # ----------------------------------------------------------------- system
 @app.get("/health", tags=["system"], summary="Can the system act, and what is blocking it")
-def health() -> dict[str, Any]:
+def health() -> Health:
     return _ok(_service.health)
 
 
 @app.get("/system/claude", tags=["system"], summary="Claude subscription runtime state")
-def claude_status() -> dict[str, Any]:
+def claude_status() -> ClaudeStatus:
     return _ok(_service.claude_status)
 
 
 @app.get("/system/market", tags=["system"], summary="Market session from the exchange calendar")
-def market_status() -> dict[str, Any]:
+def market_status() -> MarketStatus:
     return _ok(_service.market_status)
 
 
@@ -328,7 +341,7 @@ def resume(request: Request) -> dict[str, Any]:
 
 # ----------------------------------------------------------------- portfolio and risk
 @app.get("/portfolio", tags=["portfolio"], summary="Every bucket, its cash, positions and sleeves")
-def portfolio() -> dict[str, Any]:
+def portfolio() -> Portfolio:
     return _ok(_service.portfolio)
 
 
@@ -350,7 +363,7 @@ def risk_state() -> dict[str, Any]:
 
 
 @app.get("/micro-live", tags=["portfolio"], summary="Real-money workflow status and preflight gates")
-def micro_live() -> dict[str, Any]:
+def micro_live() -> MicroLive:
     return _ok(_service.micro_live)
 
 
@@ -379,12 +392,12 @@ class AdvisorReview(BaseModel):
 
 
 @app.get("/advisor", tags=["assistant"])
-def advisor_state() -> dict[str, Any]:
+def advisor_state() -> AdvisorState:
     return _ok(_service.advisor_state)
 
 
 @app.get("/advisor/conversations/{conversation_id}", tags=["assistant"])
-def advisor_conversation(conversation_id: str) -> dict[str, Any]:
+def advisor_conversation(conversation_id: str) -> AdvisorConversation:
     return _ok(_service.advisor_conversation, conversation_id)
 
 
@@ -394,7 +407,7 @@ def advisor_start(body: AdvisorRequest) -> dict[str, Any]:
 
 
 @app.post("/advisor/notes", tags=["assistant"])
-def advisor_notes(body: AdvisorNotes) -> dict[str, Any]:
+def advisor_notes(body: AdvisorNotes) -> PersonalNotes:
     return _ok(_service.advisor_notes, body.text, body.revision)
 
 
@@ -461,13 +474,13 @@ def research_history(limit: Annotated[int, Query(ge=1, le=100)] = 20) -> list[di
 
 # ----------------------------------------------------------------- proposals
 @app.get("/proposals", tags=["proposals"], summary="Proposals and their product status")
-def proposals(include_closed: bool = False) -> list[dict[str, Any]]:
+def proposals(include_closed: bool = False) -> list[ProposalSummary]:
     return _ok(_service.proposals, include_closed)
 
 
 @app.get("/proposals/{proposal_id}", tags=["proposals"],
          summary="Full proposal: reasoning, bull and bear cases, Hard Risk rules")
-def proposal(proposal_id: str) -> dict[str, Any]:
+def proposal(proposal_id: str) -> ProposalDetail:
     return _ok(_service.proposal, proposal_id)
 
 
@@ -528,7 +541,7 @@ def activity(kind: Annotated[list[str] | None, Query()] = None,
 
 
 @app.get("/orders", tags=["orders"], summary="Recorded fills and live open orders")
-def orders(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> dict[str, Any]:
+def orders(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> Orders:
     return _ok(_service.orders, limit)
 
 

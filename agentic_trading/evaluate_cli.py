@@ -14,16 +14,17 @@ import sys
 from . import evaluation
 from .env import load_env
 from .service import Service, ServiceError
+from .service.shapes import PortfolioAccount
 
 
-def _account(service: Service) -> dict:
+def _account(service: Service) -> PortfolioAccount:
     """The conceptual paper account: the thing under study. Real money is not evaluated here."""
     portfolio = service.portfolio()
-    account = (portfolio.get("accounts") or {}).get("conceptual")
+    account = portfolio.accounts.get("conceptual")
     if account is None:
         raise evaluation.EvaluationError(
             "the conceptual account could not be read: " + "; ".join(
-                f"{k}: {v}" for k, v in (portfolio.get("errors") or {}).items()))
+                f"{k}: {v}" for k, v in portfolio.errors.items()))
     return account
 
 
@@ -46,12 +47,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profiles = service.profiles()
         db = service.state_db(profiles)
-        on = args.date or service.portfolio()["as_of"]
+        on = args.date or service.portfolio().as_of
 
         if args.action == "start":
             account = _account(service)
-            study = evaluation.start(db, profiles, on=on, equity_usd=account["equity_usd"],
-                                     net_deposits_usd=account["net_deposits_usd"], note=args.note)
+            study = evaluation.start(db, profiles, on=on, equity_usd=account.equity_usd,
+                                     net_deposits_usd=account.net_deposits_usd, note=args.note)
             print(json.dumps(study, indent=2))
             return 0
         if args.action == "stop":
@@ -61,8 +62,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "snapshot":
             account = _account(service)
-            result = evaluation.snapshot(db, profiles, on=on, equity_usd=account["equity_usd"],
-                                         net_deposits_usd=account["net_deposits_usd"])
+            result = evaluation.snapshot(db, profiles, on=on, equity_usd=account.equity_usd,
+                                         net_deposits_usd=account.net_deposits_usd)
             print(json.dumps(result, indent=2))
             return 0 if result.get("recorded") else 1
         if args.action == "status":
