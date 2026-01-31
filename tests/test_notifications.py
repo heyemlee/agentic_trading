@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agentic_trading import notify
+from agentic_trading import notify, operations
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import PROPOSED, ProposalStore
 from agentic_trading.service import Service
@@ -150,6 +150,53 @@ def test_the_heartbeat_is_silent_until_an_external_watcher_is_configured(service
     monkeypatch.delenv("CT_HEARTBEAT_URL", raising=False)
     result = service.send_heartbeat()
     assert result["sent"] is False and "CT_HEARTBEAT_URL" in result["reason"]
+
+
+def test_a_degraded_service_withholds_the_ping_it_would_otherwise_send(service, monkeypatch):
+    """The watcher reads silence as an outage, so a degraded deployment must stop pinging.
+
+    On 2026-09-15 this process stayed up and answered on loopback for twenty minutes while it
+    could not open its own state database. A contentless ping sent regardless would have
+    reported that as healthy, which is the one case an external watcher exists to catch.
+    """
+    monkeypatch.setenv("CT_HEARTBEAT_URL", "https://watcher.test/ping")
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: pytest.fail("a degraded service pinged"))
+
+    for activity in ("reconciliation", "research_dispatch"):
+        service.record_activity(activity, "running", min_interval_seconds=0)
+    stale = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    db = service.state_db()
+    stored = db.read_meta(operations.HEARTBEATS, {})
+    stored["reconciliation"] = {"at": stale, "detail": "stopped"}
+    db.write_meta(operations.HEARTBEATS, stored)
+
+    result = service.send_heartbeat()
+    assert result["sent"] is False and result["withheld_by"] == ["reconciliation"]
+
+
+def test_a_working_service_pings_the_watcher(service, monkeypatch):
+    """The other half of the same switch: silence must mean something, so noise must too."""
+    monkeypatch.setenv("CT_HEARTBEAT_URL", "https://watcher.test/ping")
+    posted = []
+    monkeypatch.setattr(notify, "_post", lambda url, body, token: posted.append(url) or {})
+
+    for activity in ("reconciliation", "research_dispatch"):
+        service.record_activity(activity, "running", min_interval_seconds=0)
+
+    assert service.send_heartbeat()["sent"] is True
+    assert posted == ["https://watcher.test/ping"]
+
+
+def test_state_that_cannot_be_read_is_the_loudest_blocker(service, monkeypatch):
+    """The failure that leaves the process answering while it can do nothing must stop the ping."""
+    monkeypatch.setenv("CT_HEARTBEAT_URL", "https://watcher.test/ping")
+    monkeypatch.setattr(notify, "_post", lambda *a, **k: pytest.fail("unreadable state pinged"))
+    monkeypatch.setattr(Service, "operations",
+                        lambda self: (_ for _ in ()).throw(RuntimeError("unable to open database")))
+
+    result = service.send_heartbeat()
+    assert result["sent"] is False
+    assert "unable to open database" in result["withheld_by"][0]
 
 
 def test_a_quiet_pass_writes_nothing_to_disk(service):

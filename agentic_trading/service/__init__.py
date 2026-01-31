@@ -1174,13 +1174,32 @@ class Service:
         settings = self.notification_settings(profiles)
         return dispatch(settings._db, settings, self.collect_notifications())
 
+    def heartbeat_withheld_by(self, settings) -> list[str]:
+        """Which in-process activities have stopped, so that silence can carry the news.
+
+        The watcher infers an outage from a missing ping, and only the activities that run
+        inside this process can be judged here: a weekly schedule or a daily backup is late for
+        reasons that deserve their own event, not a paging alarm. State that cannot be read at
+        all is the loudest blocker there is, because that is the failure which leaves the
+        process answering while it can do nothing.
+        """
+        required = set(settings.heartbeat_requires)
+        if not required:
+            return []
+        try:
+            activities = self.operations()["activities"]
+        except Exception as exc:  # noqa: BLE001 - unreadable state must stop the ping, not raise
+            return [f"state unreadable: {type(exc).__name__}: {exc}"[:160]]
+        return [row["id"] for row in activities if row["id"] in required and row["overdue"]]
+
     def send_heartbeat(self) -> dict[str, Any]:
-        """Ping an external watcher, if one is configured. Never raises into the caller."""
+        """Ping an external watcher, if one is configured and the work is still happening."""
         from ..notify import DeliveryError, Settings, heartbeat
 
         try:
             settings = Settings.load(self.profiles())
-            return {**heartbeat(settings), "every_minutes": settings.heartbeat_every_minutes}
+            result = heartbeat(settings, withhold=self.heartbeat_withheld_by(settings))
+            return {**result, "every_minutes": settings.heartbeat_every_minutes}
         except (DeliveryError, ServiceError) as exc:
             return {"sent": False, "reason": str(exc), "every_minutes": 15}
 

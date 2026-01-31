@@ -12,7 +12,7 @@ import json
 import sys
 
 from .env import load_env
-from .notify import DeliveryError, Event, heartbeat, send
+from .notify import DeliveryError, Event, send
 from .profile import load_profiles
 from .service import Service, ServiceError
 
@@ -47,8 +47,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(service.dispatch_notifications(), indent=2))
         return 0
     if args.action == "heartbeat":
+        # Through the service, so that running this by hand answers the same question the
+        # scheduled loop answers. A command that pinged unconditionally would report a healthy
+        # watcher for a deployment the loop had already, correctly, gone quiet about.
         try:
-            print(json.dumps(heartbeat(settings), indent=2))
+            print(json.dumps(service.send_heartbeat(), indent=2))
         except DeliveryError as exc:
             print(json.dumps({"sent": False, "error": str(exc)}, indent=2))
             return 1

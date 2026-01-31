@@ -85,6 +85,9 @@ class Settings:
     retry_backoff_seconds: int = 60
     heartbeat_url_env: str = "CT_HEARTBEAT_URL"
     heartbeat_every_minutes: int = 15
+    #: Activities that run inside the service process. While one of them is late the
+    #: deployment is degraded even though the process answers, so the ping is withheld.
+    heartbeat_requires: tuple[str, ...] = ("reconciliation", "research_dispatch")
     project_dir: Path = field(default_factory=Path)
 
     @classmethod
@@ -107,6 +110,8 @@ class Settings:
             retry_backoff_seconds=int(cfg.get("retry_backoff_seconds", 60)),
             heartbeat_url_env=str(heartbeat.get("url_env", "CT_HEARTBEAT_URL")),
             heartbeat_every_minutes=int(heartbeat.get("every_minutes", 15)),
+            heartbeat_requires=tuple(heartbeat.get("requires_healthy")
+                                     or ("reconciliation", "research_dispatch")),
             project_dir=Path(profiles.project_dir),
         )
 
@@ -262,16 +267,25 @@ def send(settings: Settings, event: Event) -> None:
           os.environ.get(settings.webhook_token_env, "").strip() or None)
 
 
-def heartbeat(settings: Settings) -> dict[str, Any]:
-    """Tell an external watcher this machine is alive.
+def heartbeat(settings: Settings, *, withhold: list[str] | None = None) -> dict[str, Any]:
+    """Tell an external watcher this deployment is still doing its work.
 
     Nothing running on this Mac can report that this Mac is gone. A watcher elsewhere that
     expects a regular ping is the only way an outage reaches a phone, so the payload is
     deliberately contentless: its arrival is the whole message.
+
+    Which is why the ping is withheld rather than annotated when the deployment is degraded.
+    A contentless ping sent unconditionally only ever covered lost power: on 2026-09-15 this
+    process stayed up and answered on loopback for twenty minutes while it could not open its
+    own state database, and an unconditional heartbeat would have called that healthy
+    throughout. Staying silent puts the degraded case under the alarm that already exists.
     """
     url = os.environ.get(settings.heartbeat_url_env, "").strip()
     if not url:
         return {"sent": False, "reason": f"{settings.heartbeat_url_env} is not set"}
+    if withhold:
+        return {"sent": False, "reason": "withheld: " + "; ".join(withhold),
+                "withheld_by": list(withhold)}
     _post(url, {"at": datetime.now(UTC).isoformat(), "source": "agentic-trading"}, None)
     return {"sent": True, "at": datetime.now(UTC).isoformat()}
 

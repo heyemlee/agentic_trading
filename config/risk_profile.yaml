@@ -725,6 +725,15 @@ notifications:
     # expects a regular ping is the only way an outage reaches a phone.
     url_env: CT_HEARTBEAT_URL
     every_minutes: 15
+    # The ping is withheld while any of these is late, so the watcher's silence covers a
+    # service that is up but no longer working, not only a machine that lost power. On
+    # 2026-09-15 this process answered on loopback for twenty minutes while it could not open
+    # its own state database; an unconditional ping would have called that healthy throughout.
+    # Weekly and daily jobs are deliberately absent: they run in their own processes and are
+    # late for reasons that deserve their own event rather than a paging alarm.
+    requires_healthy:
+      - reconciliation
+      - research_dispatch
 
 # A forward record of what this system decides, and what a passive alternative would have done.
 #
