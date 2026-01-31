@@ -119,6 +119,12 @@ async def security_boundary(request: Request, call_next):
     if not _auth.allowed_host(request.headers.get("host", "")):
         response = JSONResponse({"detail": "untrusted host"}, status_code=400)
     unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
+    # A bare origin is what a person types on a phone, and it used to answer with the API's
+    # "login required" JSON because the console is mounted under /ui. Temporary on purpose: a
+    # permanent redirect would sit in the cache of every browser that ever followed it, long
+    # outliving any decision about where the console lives.
+    if response is None and path == "/" and request.method in ("GET", "HEAD"):
+        response = RedirectResponse("/ui/", status_code=307)
     if response is None and unsafe and (
                 not _auth.allowed_origin(request.headers.get("origin"))
                 or request.headers.get("sec-fetch-site") == "cross-site"

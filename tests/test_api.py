@@ -740,3 +740,47 @@ def test_confirm_route_needs_a_session(auth_client, monkeypatch, sandbox_service
                               "Content-Type": "application/json"})
     assert anonymous.post("/portfolio/confirm", json={}).status_code in (401, 403)
     anonymous.close()
+
+
+def test_the_bare_origin_lands_on_the_console_not_on_api_json(console_auth):
+    """A phone is given the origin, not the mount path, and /ui is not something to type.
+
+    The console is mounted under /ui, so the bare origin used to answer with the API's
+    "login required" JSON. Anyone who added that page to a home screen got an icon pointing at
+    the API root, which is also the one path iOS will never deliver push from.
+    """
+    from fastapi.testclient import TestClient
+
+    from agentic_trading.api.app import app
+
+    anonymous = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    landing = anonymous.get("/")
+    assert landing.status_code == 307
+    assert landing.headers["location"] == "/ui/"
+    # Temporary on purpose: a permanent redirect outlives any decision to move the console.
+    assert "max-age" not in landing.headers.get("Cache-Control", "")
+    anonymous.close()
+
+
+def test_the_bare_origin_still_arrives_at_a_login_when_signed_out(console_auth):
+    """Following the redirect must reach the sign-in page, carrying where it was going."""
+    from fastapi.testclient import TestClient
+
+    from agentic_trading.api.app import app
+
+    anonymous = TestClient(app, base_url="https://testserver")
+    landing = anonymous.get("/")
+    assert landing.status_code == 200
+    assert landing.url.path == "/ui/login.html"
+    anonymous.close()
+
+
+def test_a_write_to_the_bare_origin_is_refused_rather_than_redirected(console_auth):
+    """A redirect that preserved the method would replay a cross-site POST against the console."""
+    from fastapi.testclient import TestClient
+
+    from agentic_trading.api.app import app
+
+    anonymous = TestClient(app, base_url="https://testserver", follow_redirects=False)
+    assert anonymous.post("/", json={}).status_code in (401, 403)
+    anonymous.close()
