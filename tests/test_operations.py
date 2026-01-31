@@ -1,6 +1,7 @@
 """Unattended-operation checks: heartbeats, log rotation, retention and the deployment jobs."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
@@ -51,6 +52,72 @@ def test_heartbeats_are_throttled_so_a_15_second_loop_is_not_15_second_disk_traf
     service.record_activity("reconciliation", "second", min_interval_seconds=3600)
     again = {r["id"]: r for r in service.operations()["activities"]}["reconciliation"]
     assert again["last_success_at"] == first["last_success_at"] and again["detail"] == "first"
+
+
+def test_a_heartbeat_read_and_write_share_one_transaction(service):
+    """Separate processes write this one document, so the read-modify-write must be serialised.
+
+    Every activity lives in a single JSON document that each writer rewrites whole. While the
+    read sat outside the transaction, the API's own heartbeat could overwrite one another
+    process had just recorded. That is why `schedule`, written weekly by ct-trigger, was
+    missing from a live document with 17,866 revisions.
+    """
+    db = service.state_db()
+    inside = {}
+    unlocked = db.read_meta
+
+    def watched(name, default=None):
+        inside[name] = db.current() is not None
+        return unlocked(name, default)
+
+    db.read_meta = watched
+    operations.record(db, "schedule", "weekly", min_interval_seconds=0)
+    assert inside[operations.HEARTBEATS] is True
+
+
+def test_recording_one_activity_keeps_every_other_activity(service):
+    """A whole-document rewrite must merge, never replace: four writers share this record."""
+    for activity in ("backup", "maintenance", "schedule"):
+        service.record_activity(activity, f"{activity} ran", min_interval_seconds=0)
+    service.record_activity("reconciliation", "0 order(s) checked", min_interval_seconds=0)
+
+    rows = {r["id"]: r for r in service.operations()["activities"]}
+    assert [rows[a]["detail"] for a in ("backup", "maintenance", "schedule")] == [
+        "backup ran", "maintenance ran", "schedule ran"]
+
+
+def test_ct_ops_status_exits_non_zero_while_an_activity_is_late(service, capsys):
+    """selfcheck.sh decides pass or fail from this exit code, so staleness must reach it.
+
+    On 2026-09-15 the API spent twenty minutes unable to open its own state database while
+    selfcheck reported "all checks passed": it printed the heartbeat ages and then ignored
+    them, because status returned zero however old they were.
+    """
+    assert operations.main(["status", "--config-dir", str(service.config_dir)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert set(report["late"]) == set(operations.ACTIVITIES)
+
+    for activity in operations.ACTIVITIES:
+        service.record_activity(activity, "just ran", min_interval_seconds=0)
+
+    assert operations.main(["status", "--config-dir", str(service.config_dir)]) == 0
+    assert json.loads(capsys.readouterr().out)["late"] == []
+
+
+def test_ct_ops_status_fails_loudly_when_the_activities_cannot_be_read(service, capsys, monkeypatch):
+    """State that cannot be read is a failed check, never a quiet pass.
+
+    This is the case the outage actually produced: the database was unreachable, so the very
+    reading that would have revealed it was the thing that broke.
+    """
+    def unreadable(self):
+        raise RuntimeError("state database is unavailable")
+
+    monkeypatch.setattr(Service, "operations", unreadable)
+
+    assert operations.main(["status", "--config-dir", str(service.config_dir)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["late"] and "state database is unavailable" in report["activities"]
 
 
 def test_log_rotation_leaves_the_path_launchd_writes_to(tmp_path):

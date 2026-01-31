@@ -31,18 +31,25 @@ def record(db, activity: str, detail: str = "", *, min_interval_seconds: float =
     per pass is far more disk traffic than the fact is worth.
     """
     try:
-        stored = db.read_meta(HEARTBEATS, {}) or {}
-        previous = (stored.get(activity) or {}).get("at")
-        now = datetime.now(UTC)
-        if previous:
-            try:
-                age = (now - datetime.fromisoformat(previous)).total_seconds()
-                if 0 <= age < min_interval_seconds:
-                    return
-            except ValueError:
-                pass
-        stored[activity] = {"at": now.isoformat(), "detail": detail}
-        db.write_meta(HEARTBEATS, stored)
+        # Every activity lives in one document that each writer rewrites whole, and the writers
+        # are separate processes: the API, the weekly ct-trigger, the backup and maintenance
+        # jobs. With the read outside the transaction the API's next heartbeat overwrote
+        # whatever another process had just recorded, which is why `schedule` was absent from a
+        # document that had been revised 17,866 times. BEGIN IMMEDIATE serialises the pair, and
+        # the context manager is re-entrant for callers that already hold a transaction.
+        with db.transaction():
+            stored = db.read_meta(HEARTBEATS, {}) or {}
+            previous = (stored.get(activity) or {}).get("at")
+            now = datetime.now(UTC)
+            if previous:
+                try:
+                    age = (now - datetime.fromisoformat(previous)).total_seconds()
+                    if 0 <= age < min_interval_seconds:
+                        return
+                except ValueError:
+                    pass
+            stored[activity] = {"at": now.isoformat(), "detail": detail}
+            db.write_meta(HEARTBEATS, stored)
     except Exception:      # a heartbeat never breaks the work it describes
         logging.getLogger(__name__).debug("could not record the %s heartbeat", activity,
                                           exc_info=True)
@@ -135,8 +142,22 @@ def main(argv: list[str] | None = None) -> int:
 
     free = disk(profiles.project_dir, float(cfg.get("low_disk_free_gb", 10)))
     if args.action == "status":
-        print(json.dumps({"disk": free, "heartbeats": heartbeats(db)}, indent=2))
-        return 0
+        # A stale heartbeat is the one symptom every quiet failure shares, so it has to reach
+        # the exit code. While this returned zero regardless, selfcheck.sh printed the ages and
+        # then reported "all checks passed" right through an outage in which the API could not
+        # open its own database: the numbers were on screen and nothing was reading them.
+        late: list[str] = []
+        activities: list[dict[str, Any]] | str
+        try:
+            from .service import Service
+
+            activities = Service(args.config_dir).operations()["activities"]
+            late = [row["id"] for row in activities if row["overdue"]]
+        except Exception as exc:  # noqa: BLE001 - unreadable state is itself a failed check
+            activities = f"{type(exc).__name__}: {exc}"
+            late = ["activities could not be read"]
+        print(json.dumps({"disk": free, "activities": activities, "late": late}, indent=2))
+        return 1 if (late or free["low"]) else 0
 
     rotated = rotate_logs(profiles.project_dir / "runs" / "service",
                           max_bytes=int(cfg.get("log_max_mb", 32)) * 1024 * 1024,
