@@ -1,4 +1,5 @@
 import re
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -85,6 +86,30 @@ def profiles():
     from agentic_trading.profile import load_profiles
 
     return load_profiles(ROOT / "config")
+
+
+@pytest.fixture
+def profiles_with_state(tmp_path):
+    """`profiles`, resolving state/ against a copy instead of this deployment's own.
+
+    PF10 is the only preflight gate that resolves a path against project_dir, and the tests
+    that assert on it were reading the live state/ symlink. That made them pass on the machine
+    the deployment runs on and fail on every checkout without one — a fresh clone, and CI,
+    where state/ is untracked and therefore absent. The rule this suite already holds itself
+    to is that whether this machine is currently trading must not decide a result; whether it
+    has ever been deployed is the same kind of fact.
+
+    The config is still the deployment's own, copied rather than invented, so these tests go on
+    exercising the real rules. Only the directory the paths hang off moves.
+    """
+    from agentic_trading.profile import load_profiles
+
+    cfg = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg)
+    state = tmp_path / "state"
+    state.mkdir()
+    copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
+    return load_profiles(cfg)
 
 
 @pytest.fixture

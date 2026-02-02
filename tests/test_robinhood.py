@@ -343,10 +343,12 @@ def test_only_the_micro_live_bucket_reaches_the_real_money_venue(profiles):
     assert bucket_is_executable(profiles, "micro_live", "simulated")[0] is False
 
 
-def test_preflight_blocks_while_the_switch_is_off_and_lists_why(profiles):
+def test_preflight_blocks_while_the_switch_is_off_and_lists_why(profiles_with_state):
     # Stated here rather than read from the deployment: whether this machine is currently
     # trading real money is an operational decision, and this test is about the gate, not
-    # about today's setting.
+    # about today's setting. PF10 reads a state directory for the same reason it takes a
+    # copied one — see profiles_with_state.
+    profiles = profiles_with_state
     profiles.risk["micro_live_execution"]["enabled"] = False
     pf = run_preflight(profiles, broker=None)
     assert pf.ready is False
@@ -357,7 +359,8 @@ def test_preflight_blocks_while_the_switch_is_off_and_lists_why(profiles):
         assert required in passed
 
 
-def test_preflight_passes_every_gate_with_a_funded_agentic_account(profiles):
+def test_preflight_passes_every_gate_with_a_funded_agentic_account(profiles_with_state):
+    profiles = profiles_with_state
     fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO})
     broker = make_broker(profiles, fake, enabled=True)
     pf = run_preflight(profiles, broker)
