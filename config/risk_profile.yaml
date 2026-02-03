@@ -703,6 +703,11 @@ notifications:
   # Where the console lives, so a notification can carry a link that actually opens. Left empty
   # the message still says what happened; it just cannot be tapped through to the right screen.
   console_url: ""
+  # channel: webpush — the contact Apple is given for this deployment. Read from the
+  # environment, never written here: it names the machine, and this repository is public.
+  # Apple validates it and answers a placeholder with 403 BadJwtToken, which is indistinguish-
+  # able from a broken key, so the value is checked before a send rather than after.
+  push_subject_env: CT_PUSH_SUBJECT
   min_interval_seconds: 900                # a standing condition notifies at most this often
   max_attempts: 5
   retry_backoff_seconds: 60

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,8 +25,15 @@ logger = logging.getLogger(__name__)
 SUBSCRIPTIONS = "push_subscriptions"
 KEY_FILE = "vapid_key.json"
 #: Apple requires a contact for the pushing party. It is sent to the push service, not to the
-#: device, and identifies the sender if a subscription misbehaves.
-DEFAULT_SUBJECT = "mailto:owner@localhost"
+#: device, and identifies the sender if a subscription misbehaves. Apple validates it: the
+#: placeholder that used to be compiled in here, ``mailto:owner@localhost``, is answered with
+#: 403 BadJwtToken on every send, so no device was ever reached. It names this deployment, so
+#: it is read from the environment beside the other endpoints rather than written into the
+#: tracked configuration, which is public.
+SUBJECT_ENV = "CT_PUSH_SUBJECT"
+#: Comfortably under Apple's 24-hour ceiling. The library's default sits exactly on it, leaving
+#: nothing for clock skew between this machine and the push service.
+TOKEN_LIFETIME_SECONDS = 12 * 3600
 MAX_SUBSCRIPTIONS = 16
 
 
@@ -137,8 +145,32 @@ def devices(db) -> list[dict[str, Any]]:
                                     key=lambda pair: pair[1].get("created_at") or "")]
 
 
+def resolve_subject(env: str = SUBJECT_ENV) -> str:
+    """The contact this deployment gives the push service, or a refusal naming what to set.
+
+    Checked here rather than left to the push service, which answers anything it dislikes with
+    one opaque status and no device reached.
+    """
+    value = os.environ.get(env, "").strip()
+    if not value:
+        raise PushError(
+            f"{env} is not set. Web push must name a contact for the sending party: set it in "
+            ".env to this console's https address, or to a mailbox you actually read.")
+    if value.startswith("mailto:"):
+        address = value[len("mailto:"):]
+        if "@" in address and "." in address.rsplit("@", 1)[-1]:
+            return value
+    elif value.startswith("https://"):
+        host = value[len("https://"):].split("/", 1)[0].split(":", 1)[0]
+        if "." in host and not host.endswith(".localhost"):
+            return value
+    raise PushError(
+        f"{env} must be an https address or a mailto: contact on a real domain. The push "
+        "service refuses anything else, and refuses it identically to a broken key.")
+
+
 def deliver(db, state_dir: Path, payload: dict[str, Any], *,
-            subject: str = DEFAULT_SUBJECT) -> dict[str, Any]:
+            subject: str | None = None, subject_env: str = SUBJECT_ENV) -> dict[str, Any]:
     """Send one payload to every subscribed device.
 
     A device that the push service reports as gone is removed: a subscription is dropped when
@@ -152,21 +184,31 @@ def deliver(db, state_dir: Path, payload: dict[str, Any], *,
     stored = dict(record.get("devices") or {})
     if not stored:
         raise PushError("no device has subscribed to push notifications yet")
+    # After the subscription check: an unconfigured contact is worth saying, but not instead of
+    # "nobody is listening", which is the one a person can act on first.
+    contact = subject or resolve_subject(subject_env)
+    expires = int(datetime.now(UTC).timestamp()) + TOKEN_LIFETIME_SECONDS
 
     sent, failed, removed = [], [], []
     for key, item in list(stored.items()):
         try:
             webpush(subscription_info=item["subscription"], data=json.dumps(payload),
                     vapid_private_key=keys["private"],
-                    vapid_claims={"sub": subject}, timeout=10)
+                    vapid_claims={"sub": contact, "exp": expires}, timeout=10)
         except WebPushException as exc:
             status = getattr(exc.response, "status_code", None)
             if status in (404, 410):
                 stored.pop(key, None)
                 removed.append(key)
             else:
+                # The push service says why in the body, and a bare status code throws that
+                # away: Apple answers a rejected VAPID identity with 403 and a named reason,
+                # which is the difference between "something is wrong" and knowing what. The
+                # body describes this sender, never the device or the payload.
                 item["failures"] = int(item.get("failures", 0)) + 1
-                failed.append({"device_id": key, "status": status})
+                detail = (getattr(exc.response, "text", "") or "").strip()[:200]
+                failed.append({"device_id": key, "status": status,
+                               **({"detail": detail} if detail else {})})
         except Exception as exc:  # noqa: BLE001 - one unreachable device must not lose the rest
             item["failures"] = int(item.get("failures", 0)) + 1
             failed.append({"device_id": key, "error": type(exc).__name__})
@@ -178,7 +220,10 @@ def deliver(db, state_dir: Path, payload: dict[str, Any], *,
     record["devices"] = stored
     db.write_meta(SUBSCRIPTIONS, record)
     if not sent and failed:
+        def described(item: dict[str, Any]) -> str:
+            status = item.get("status") or item.get("error")
+            return f"{status}: {item['detail']}" if item.get("detail") else str(status)
+
         raise PushError("no device accepted the notification: "
-                        + ", ".join(str(item.get("status") or item.get("error"))
-                                    for item in failed))
+                        + ", ".join(described(item) for item in failed))
     return {"sent": sent, "failed": failed, "removed": removed}

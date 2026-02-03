@@ -76,6 +76,7 @@ class Settings:
     wecom_url_env: str = "CT_WECOM_WEBHOOK"
     wechat_url_env: str = "CT_WECHAT_WEBHOOK"
     console_url: str = ""
+    push_subject_env: str = "CT_PUSH_SUBJECT"
     state_dir: Path = field(default_factory=Path)
     #: Set by the service so a webpush channel can see whether a device is subscribed.
     _db: Any = None
@@ -103,6 +104,7 @@ class Settings:
             wecom_url_env=str(cfg.get("wecom_url_env", "CT_WECOM_WEBHOOK")),
             wechat_url_env=str(cfg.get("wechat_url_env", "CT_WECHAT_WEBHOOK")),
             console_url=str(cfg.get("console_url", "")).rstrip("/"),
+            push_subject_env=str(cfg.get("push_subject_env", "CT_PUSH_SUBJECT")),
             state_dir=Path(profiles.project_dir) / "state",
             events=tuple(name for name in events if name in EVENTS),
             min_interval_seconds=int(cfg.get("min_interval_seconds", 900)),
@@ -252,7 +254,8 @@ def send(settings: Settings, event: Event) -> None:
     if settings.channel == "webpush":
         from . import webpush
 
-        webpush.deliver(settings._db, settings.state_dir, event.payload())
+        webpush.deliver(settings._db, settings.state_dir, event.payload(),
+                        subject_env=settings.push_subject_env)
         return
     if settings.channel == "wechat":
         reply = _post(os.environ[settings.wechat_url_env].strip(),

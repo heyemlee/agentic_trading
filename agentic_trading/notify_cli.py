@@ -60,8 +60,17 @@ def main(argv: list[str] | None = None) -> int:
     if not settings.configured():
         print(json.dumps({"sent": False, "reason": settings.why_not_configured()}, indent=2))
         return 1
-    destination = ("the local file " + settings.file_path if settings.channel == "file"
-                   else f"the endpoint in ${settings.webhook_url_env}")
+    # Every channel names where it actually went. This used to answer with the webhook variable
+    # whatever the channel was, so a successful web push reported an endpoint it had not used
+    # and a variable that was not even set.
+    destinations = {
+        "file": "the local file " + settings.file_path,
+        "webhook": f"the endpoint in ${settings.webhook_url_env}",
+        "wecom": f"the endpoint in ${settings.wecom_url_env}",
+        "wechat": f"the endpoint in ${settings.wechat_url_env}",
+        "webpush": f"{len(service.push_devices()['devices'])} subscribed device(s)",
+    }
+    destination = destinations.get(settings.channel, settings.channel)
     try:
         send(settings, Event(key="test", kind="proposal_waiting",
                              title="test message from the trading console",

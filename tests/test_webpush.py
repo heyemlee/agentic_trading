@@ -22,12 +22,15 @@ SUBSCRIPTION = {"endpoint": ENDPOINT,
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
     copy_example_ledger("portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    # A deployment names itself to the push service; the tests need one that passes the same
+    # check a real send makes, and it must not be the placeholder Apple refuses.
+    monkeypatch.setenv(webpush.SUBJECT_ENV, "https://console.example.com")
     return Service(cfg)
 
 
@@ -111,6 +114,30 @@ def test_a_transient_failure_keeps_the_device_and_counts_against_it(service, mon
     assert len(devices) == 1 and devices[0]["failures"] == 1
 
 
+def test_a_rejection_carries_what_the_push_service_said_not_just_its_number(service, monkeypatch):
+    """Apple answers a rejected VAPID identity with 403 and a named reason in the body.
+
+    Recording the status alone turned "the sender identity is wrong" into a bare number, and a
+    person reading "403" has no way to tell that from a quota or a routing problem. The body
+    describes this sender; it carries nothing about the device or the payload.
+    """
+    service.push_subscribe(SUBSCRIPTION, "iPhone")
+
+    class Refused(Exception):
+        response = type("R", (), {"status_code": 403, "text": "BadJwtToken: bad subject"})()
+
+    def fail(*_args, **_kwargs):
+        raise Refused()
+
+    monkeypatch.setitem(__import__("sys").modules, "pywebpush",
+                        type("M", (), {"webpush": staticmethod(fail), "WebPushException": Refused}))
+
+    with pytest.raises(webpush.PushError, match="BadJwtToken"):
+        webpush.deliver(service.state_db(), service.profiles().project_dir / "state",
+                        {"title": "t"})
+    assert service.push_devices()["devices"][0]["failures"] == 1
+
+
 def test_pushing_with_nobody_subscribed_says_so_rather_than_reporting_success(service):
     with pytest.raises(webpush.PushError, match="no device"):
         webpush.deliver(service.state_db(), service.profiles().project_dir / "state",
@@ -178,3 +205,29 @@ def test_subscribing_needs_a_session_and_a_csrf_token(auth_client, console_auth)
 
     assert auth_client.post("/notifications/subscribe", json={"subscription": SUBSCRIPTION},
                             headers={"X-CSRF-Token": "wrong"}).status_code == 403
+
+
+@pytest.mark.parametrize("value", ["", "mailto:owner@localhost", "mailto:owner", "http://x.test",
+                                   "https://localhost", "https://console.localhost", "owner@x.test"])
+def test_a_contact_the_push_service_would_refuse_is_refused_here_first(value, monkeypatch):
+    """Apple answers every bad VAPID contact with one opaque 403, so the check belongs here.
+
+    The shipped placeholder was mailto:owner@localhost. It looked configured, it passed every
+    offline test, and Apple rejected all eight sends with 403 BadJwtToken -- a reply that reads
+    exactly like a broken key, and sends nobody looking at the subject line.
+    """
+    monkeypatch.setenv(webpush.SUBJECT_ENV, value)
+    with pytest.raises(webpush.PushError, match=webpush.SUBJECT_ENV):
+        webpush.resolve_subject()
+
+
+@pytest.mark.parametrize("value", ["https://console.example.com", "mailto:owner@example.com",
+                                   "https://trade.example.ts.net"])
+def test_a_real_contact_is_accepted(value, monkeypatch):
+    monkeypatch.setenv(webpush.SUBJECT_ENV, value)
+    assert webpush.resolve_subject() == value
+
+
+def test_the_signed_token_expires_well_inside_the_push_service_ceiling():
+    """The library's default sits exactly on Apple's 24-hour limit, leaving nothing for skew."""
+    assert 0 < webpush.TOKEN_LIFETIME_SECONDS <= 12 * 3600

@@ -370,3 +370,31 @@ def test_the_outcome_arrives_as_well_as_the_decision(service):
     store.save(proposal)
     second = next(e for e in service.collect_notifications() if e.kind == "autonomy_acted")
     assert first.key != second.key, "a status change must not be deduplicated away"
+
+
+@pytest.mark.parametrize("channel,expected", [
+    ("file", "the local file"), ("webhook", "CT_NOTIFY_WEBHOOK"),
+    ("wecom", "CT_WECOM_WEBHOOK"), ("wechat", "CT_WECHAT_WEBHOOK"),
+    ("webpush", "subscribed device"),
+])
+def test_a_test_message_names_the_channel_it_actually_used(service, monkeypatch, capsys,
+                                                           channel, expected):
+    """Reporting the webhook variable for every channel described a send that never happened.
+
+    A web push that reached a phone was announced as having gone to an endpoint in a variable
+    nobody had set, which is the kind of true-sounding line that sends someone debugging the
+    wrong thing.
+    """
+    from agentic_trading import notify_cli
+
+    profiles = service.profiles()
+    profiles.risk["notifications"]["channel"] = channel
+    monkeypatch.setattr(notify_cli, "load_profiles", lambda *_a, **_k: profiles)
+    monkeypatch.setattr(notify.Settings, "configured", lambda self: True)
+    monkeypatch.setattr(notify, "send", lambda *_a, **_k: None)
+    monkeypatch.setattr("agentic_trading.notify_cli.send", lambda *_a, **_k: None)
+
+    assert notify_cli.main(["test", "--config-dir", str(service.config_dir)]) == 0
+    reported = json.loads(capsys.readouterr().out)
+    assert reported["sent"] is True and reported["channel"] == channel
+    assert expected in reported["to"]

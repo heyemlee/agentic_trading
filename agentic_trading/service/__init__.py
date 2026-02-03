@@ -1236,13 +1236,15 @@ class Service:
     def push_test(self) -> dict[str, Any]:
         """Send one notification on request, so a person can prove the path before relying on it."""
         from .. import webpush
+        from ..notify import Settings
 
         profiles = self.profiles()
         try:
             return webpush.deliver(self.state_db(profiles), profiles.project_dir / "state", {
                 "title": "Agentic Trading",
                 "detail": "Notifications reach this device.",
-                "link": "index.html", "key": "test", "urgent": False})
+                "link": "index.html", "key": "test", "urgent": False},
+                subject_env=Settings.load(profiles).push_subject_env)
         except webpush.PushError as exc:
             raise ServiceError(str(exc)) from exc
 
