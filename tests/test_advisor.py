@@ -42,8 +42,11 @@ def snapshot():
     return {"fetched_at": now(), "complete": True, "errors": [], "source": "test",
             "accounts": [{"id": "a" * 20, "label": "••••1234", "complete": True,
                           "cash_usd": 900, "equity_usd": 1000,
+                          # quote_at and weight_pct are written by the pricing pass, not by the
+                          # construction above, and every stored position has them.
                           "positions": [{"symbol": "VTI", "quantity": 1, "average_cost": 90,
-                                         "market_value_usd": 100, "price": 100}]}],
+                                         "market_value_usd": 100, "price": 100,
+                                         "quote_at": "2026-09-14T19:59:59Z", "weight_pct": 10.0}]}],
             "candidates": [{"symbol": "VTI", "sources": ["watchlists:My list"]}]}
 
 
@@ -156,6 +159,29 @@ def test_a_stored_snapshot_keeps_keys_this_version_never_declared(assistant_serv
     assert account.label == "••••1234" and account.positions[0].symbol == "VTI"
     assert account.positions[0].unrealized_pct is None           # absent, not computed to zero
     assert [c.symbol for c in state.snapshot.candidates] == ["VTI"]
+
+
+def test_a_priced_holding_keeps_the_fields_the_pricing_pass_wrote(assistant_service):
+    """The holding as it is actually stored, not as fetch_snapshot first builds it.
+
+    Positions are created without a price and enriched afterwards by the quote pass, which adds
+    quote_at and weight_pct. Every stored position therefore carries them and no fixture here
+    did, so a model that forbade extras passed this suite and would have answered the assistant
+    screen — polled every five seconds — with a 500 against the deployment's own saved data.
+    That is the shape of mistake a test over invented data cannot find, which is why the rule
+    for everything inside the snapshot is that it may carry more than this layer declares.
+    """
+    from agentic_trading.advisor import SNAPSHOT
+
+    stored = snapshot()
+    stored["accounts"][0]["positions"][0]["a_field_from_a_later_version"] = "kept"
+    assistant_service.state_db().write_meta(SNAPSHOT, stored)
+
+    held = assistant_service.advisor_state().snapshot.accounts[0].positions[0]
+
+    assert held.quote_at == "2026-09-14T19:59:59Z" and held.weight_pct == 10.0
+    assert held.model_extra["a_field_from_a_later_version"] == "kept"
+    assert held.symbol == "VTI" and held.price == 100
 
 
 def test_an_account_that_could_not_be_totalled_reports_no_money_rather_than_none_of_it(

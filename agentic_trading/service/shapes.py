@@ -466,9 +466,16 @@ class Health(BaseModel):
 
 
 class AdvisorPosition(BaseModel):
-    """An observed holding. A figure the venue would not give is None, never zero."""
+    """An observed holding. A figure the venue would not give is None, never zero.
 
-    model_config = ConfigDict(extra="forbid")
+    The last four fields are written by the pricing pass that runs after the positions are
+    read, not by the construction that creates them — which is how `quote_at` and `weight_pct`
+    came to be on every stored position while no fixture in the suite had them. Everything
+    inside the snapshot allows extras for the reason the snapshot itself does: see
+    [AdvisorSnapshot].
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     symbol: str
     quantity: float
@@ -476,6 +483,8 @@ class AdvisorPosition(BaseModel):
     price: float | None = None
     market_value_usd: float | None = None
     unrealized_pct: float | None = None
+    quote_at: str | None = None
+    weight_pct: float | None = None
 
 
 class AdvisorAccount(BaseModel):
@@ -486,7 +495,7 @@ class AdvisorAccount(BaseModel):
     and a zero there would be a claim about money rather than an admission of not knowing.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     id: str
     label: str
@@ -500,7 +509,7 @@ class AdvisorAccount(BaseModel):
 class AdvisorCandidate(BaseModel):
     """A symbol the assistant may consider, and where it came from."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     symbol: str
     sources: list[str] = Field(default_factory=list)
@@ -514,6 +523,10 @@ class AdvisorSnapshot(BaseModel):
     flight — a broker that will not refresh adds ``stale`` and an explanation to ``errors``
     rather than discarding what was last read. Every field is optional because the document is
     simply absent until the first refresh has run.
+
+    The rule covers everything inside it, not only this top level: an account, a holding and a
+    candidate are all parts of the same stored document, and a field one of them grew is no
+    more this layer's to reject than a field the document grew.
 
     Note that ``stale`` here is the snapshot's own account of itself. The one on ``AdvisorState``
     is computed from ``fetched_at`` on every read, and is the one a screen should trust.
