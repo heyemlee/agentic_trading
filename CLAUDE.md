@@ -23,6 +23,11 @@ Real-money execution is enabled for the `micro_live` bucket.
 - Editing `config/*.yaml` changes the running system's behaviour, not just the development copy.
 - `state/` holds the ledger, the SQLite audit database and the drawdown high-water marks. Never
   move, rename or hand-edit anything in it, symlink or not. Use `ct-state`.
+- **Edit `.env` by writing through it, never by replacing it.** `mv tmp .env`, `sed -i`, and the
+  atomic save most editors perform all unlink the path and create a new file, which silently
+  turns the symlink into an ordinary file in the checkout and leaves the real one behind,
+  unread. Open the path and write to it (`p.write_text(...)`, `cat new > .env`). The same holds
+  for anything else reached through `state/` or `runs/`.
 - **Never `git checkout`/`switch` to another branch or ref in this checkout.** The `state`/`runs`/
   `.env` symlinks only stop a *destructive* git accident (`clean -xdf`, `rm -rf`); they do nothing
   against a normal checkout. If the target ref tracks a real file at one of those names — an
@@ -84,7 +89,7 @@ config/              profiles, the mandate, the prompt context — live, read by
   examples/          state/*.yaml templates a setup script copies into the live ledger
 state/               ledgers, audit database, tokens — a symlink outside the checkout; untracked
 runs/                research artefacts and logs — a symlink outside the checkout; untracked
-ui/                  the console: seven pages, no build step, served at /ui by the API
+ui/                  the console: fourteen pages, no build step, served at /ui by the API
 deploy/macos/        launchd install, release/rollback, backup, maintenance, selfcheck
 tools/               developer utilities that are not part of the deployment
 docs/                current documentation; docs/archive/ is point-in-time and unmaintained
@@ -94,6 +99,15 @@ docs/                current documentation; docs/archive/ is point-in-time and u
 
 - Console scripts are prefixed `ct-`, environment variables `CT_`. Both are referenced from
   launchd plists, deployment scripts and `.env`; renaming one is a deployment change.
+- **Anything that names this particular deployment lives in `.env`; `config/` declares only the
+  variable's name.** The tailnet hostname, the watcher URL, the contact given to a push service:
+  none of them are credentials, and all of them would be published, because this repository is
+  public. `notifications.push_subject_env` and the `*_url_env` keys beside it exist for exactly
+  this reason.
+- **A value a remote service will reject must be rejected here first.** A push contact, an
+  endpoint, a token lifetime: the service answers all of them with one opaque status, which
+  reads identically to a broken key. `webpush.resolve_subject` is the shape to copy — validate,
+  and say in the error which variable to set.
 - The frontend deliberately has no build step and no offline caching. Approvals must never be
   queued offline and replayed later.
 - `ui/` strings the console writes itself go through `assets/i18n.js`. Anything the API returns
