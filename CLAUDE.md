@@ -28,16 +28,19 @@ Real-money execution is enabled for the `micro_live` bucket.
   turns the symlink into an ordinary file in the checkout and leaves the real one behind,
   unread. Open the path and write to it (`p.write_text(...)`, `cat new > .env`). The same holds
   for anything else reached through `state/` or `runs/`.
-- **Never `git checkout`/`switch` to another branch or ref in this checkout.** The `state`/`runs`/
-  `.env` symlinks only stop a *destructive* git accident (`clean -xdf`, `rm -rf`); they do nothing
-  against a normal checkout. If the target ref tracks a real file at one of those names — an
-  older `main` once tracked `state/*.example.yaml` — git deletes the symlink and writes a real
-  file or directory in its place, and every other tracked path (`config/`, `agentic_trading/`,
-  `ui/`, …) changes under the running system too. This happened on 2026-09-10: `git checkout
-  main` replaced the `state` symlink with a real directory; the live ledger was untouched only
-  because it lives at the symlink's target, but the API kept writing to the new empty directory
-  until it was found and restarted. To land a branch on `main`, push a refspec instead —
-  `git push origin <branch>:main` (fast-forward) or open a PR — and never move `HEAD` here.
+- **This checkout stays on `main`, and moving `HEAD` to any other ref needs a reason and a
+  check.** Since 2026-09-15 there is one branch; work is committed on `main` and pushed. The
+  `state`/`runs`/`.env` symlinks only stop a *destructive* git accident (`clean -xdf`, `rm -rf`);
+  they do nothing against a normal checkout. If the target ref tracks a real file at one of
+  those names — an older `main` once tracked `state/*.example.yaml` — git deletes the symlink
+  and writes a real file or directory in its place, and every other tracked path (`config/`,
+  `agentic_trading/`, `ui/`, …) changes under the running system too. This happened on
+  2026-09-10: `git checkout main` replaced the `state` symlink with a real directory; the live
+  ledger was untouched only because it lives at the symlink's target, but the API kept writing
+  to the new empty directory until it was found and restarted. Before any switch, prove it is
+  inert: `git ls-tree <ref> -- state runs .env` must be empty, and comparing
+  `git rev-parse <ref>^{tree}` with `HEAD^{tree}` says how much of the tree moves. To land work
+  from a side branch without moving `HEAD`, push a refspec — `git push origin <branch>:main`.
 - Before stopping or restarting the live API by hand: `deploy/macos/checks.sh`'s
   `--fail-on-unsettled` guard (see `release.sh publish`) is the check to run first, not a guess.
   `start.sh`'s port cleanup calls `lsof -ti :PORT` without filtering to `LISTEN`, so it will list
