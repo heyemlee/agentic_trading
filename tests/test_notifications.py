@@ -99,8 +99,9 @@ def test_a_waiting_proposal_is_announced_once_per_quiet_period(service):
     assert len(delivered(service)) == 2
 
 
-def test_a_failed_delivery_is_retried_with_backoff_and_then_given_up(service, monkeypatch):
-    settings = file_settings(service, max_attempts=2, retry_backoff_seconds=60)
+def test_a_failed_delivery_is_retried_with_backoff_and_then_throttled(service, monkeypatch):
+    settings = file_settings(service, max_attempts=2, retry_backoff_seconds=60,
+                             min_interval_seconds=900)
     db = service.state_db()
     event = notify.Event(key="k", kind="research_failed", title="failed")
     monkeypatch.setattr(notify, "send", lambda *a: (_ for _ in ()).throw(
@@ -113,9 +114,53 @@ def test_a_failed_delivery_is_retried_with_backoff_and_then_given_up(service, mo
     assert notify.dispatch(db, settings, [event], now=now + timedelta(seconds=90))["failed"]
 
     entry = notify.pending(db)["events"]["k"]
-    assert entry["state"] == "GAVE_UP" and entry["attempts"] == 2
-    # a dead endpoint must not be retried forever
-    assert notify.dispatch(db, settings, [event], now=now + timedelta(hours=5))["failed"] == []
+    assert entry["state"] == "THROTTLED" and entry["attempts"] == 2
+    # a dead endpoint is not hammered: the budget buys a quiet period, not silence
+    assert notify.dispatch(db, settings, [event], now=now + timedelta(minutes=5))["held"] == ["k"]
+    assert notify.dispatch(db, settings, [event], now=now + timedelta(hours=5))["failed"]
+
+
+def test_a_condition_outlives_the_outage_that_stopped_it_being_delivered(service, monkeypatch):
+    """Exhausting the retry budget against a broken channel must not retire the condition.
+
+    On 2026-09-15 nine conditions -- a disconnected broker, four failed research runs, two
+    regime changes, two stalled background jobs -- reached the end of their budget while the
+    push channel had no subscribed device. Repairing the channel would have left every one of
+    them silent for good, because the event keys are stable and the state was terminal.
+    """
+    settings = file_settings(service, max_attempts=2, retry_backoff_seconds=60,
+                             min_interval_seconds=900)
+    db = service.state_db()
+    event = notify.Event(key="credential_invalid:robinhood", kind="credential_invalid",
+                         title="the broker connection needs attention")
+    broken = lambda *a: (_ for _ in ()).throw(notify.DeliveryError("no device has subscribed"))
+    monkeypatch.setattr(notify, "send", broken)
+
+    now = datetime.now(UTC)
+    notify.dispatch(db, settings, [event], now=now)
+    notify.dispatch(db, settings, [event], now=now + timedelta(seconds=90))
+    assert notify.pending(db)["events"][event.key]["state"] == "THROTTLED"
+
+    monkeypatch.setattr(notify, "send", lambda *a: None)          # the channel is repaired
+    result = notify.dispatch(db, settings, [event], now=now + timedelta(hours=1))
+    assert result["sent"] == [event.key]
+    assert notify.pending(db)["events"][event.key]["state"] == "SENT"
+
+
+def test_an_entry_left_terminal_by_the_old_code_is_not_silent_forever(service, monkeypatch):
+    """Records already written as GAVE_UP must come back without anyone editing state by hand."""
+    settings = file_settings(service, max_attempts=2, min_interval_seconds=900)
+    db = service.state_db()
+    event = notify.Event(key="credential_invalid:robinhood", kind="credential_invalid",
+                         title="the broker connection needs attention")
+    stale = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    db.write_meta(notify.RECORD, {"events": {event.key: {
+        "kind": event.kind, "title": event.title, "state": "GAVE_UP", "attempts": 5,
+        "first_seen_at": stale, "last_seen_at": stale, "next_attempt_at": stale,
+        "error": "channel is webpush but no device has subscribed"}}})
+
+    monkeypatch.setattr(notify, "send", lambda *a: None)
+    assert notify.dispatch(db, settings, [event])["sent"] == [event.key]
 
 
 def test_a_message_carries_no_credential_or_account_number(service):

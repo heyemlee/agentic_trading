@@ -321,11 +321,17 @@ def dispatch(db, settings: Settings, events: list[Event], *,
             send(settings, event)
         except DeliveryError as exc:
             entry["attempts"] = int(entry.get("attempts", 0)) + 1
-            entry["state"] = "PENDING" if entry["attempts"] < settings.max_attempts else "GAVE_UP"
+            # Past the retry budget a condition is throttled, never retired. The budget exists
+            # so that a dead endpoint is not hammered; it was never a decision that the thing
+            # being reported would stop being worth saying. On 2026-09-15 nine conditions --
+            # a disconnected broker among them -- had exhausted it while the push channel had
+            # no subscribed device, and would have stayed silent for good once it was repaired.
+            exhausted = entry["attempts"] >= settings.max_attempts
+            entry["state"] = "THROTTLED" if exhausted else "PENDING"
             entry["error"] = str(exc)
-            entry["next_attempt_at"] = (
-                now + timedelta(seconds=settings.retry_backoff_seconds * entry["attempts"])
-            ).isoformat()
+            entry["next_attempt_at"] = (now + timedelta(
+                seconds=settings.min_interval_seconds if exhausted
+                else settings.retry_backoff_seconds * entry["attempts"])).isoformat()
             failed.append({"key": event.key, "error": str(exc)})
             changed = True
         else:
@@ -346,8 +352,9 @@ def dispatch(db, settings: Settings, events: list[Event], *,
 
 def _due(entry: dict[str, Any], settings: Settings, now: datetime) -> bool:
     state = entry.get("state")
-    if state == "GAVE_UP":
-        return False
+    # A throttled entry -- and a legacy GAVE_UP one, written before giving up had a way back --
+    # waits for its scheduled time like any other retry. Nothing is retired here: a condition
+    # still being observed outlives the outage that stopped it being delivered.
     if state == "SENT":
         sent_at = _parse(entry.get("sent_at"))
         # A condition that persists is worth repeating, but not on every poll.
