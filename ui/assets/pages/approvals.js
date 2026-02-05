@@ -71,13 +71,13 @@
     set('d-id', p.proposal_id);
     set('d-shape', C.t('ap.orderShape', { action: C.code(p.action) }));
     set('d-headline', p.ticker + ' ' + C.usd(p.notional_usd));
-    /* The position cap only exists inside the HR08 rule text, not as a field.
-       Rather than parse prose, say the part that is structured. */
-    const cap = p.hard_risk && p.hard_risk.position_cap_pct;
+    /* The position cap only exists inside the HR08 rule text, not as a field: no stored
+       decision record carries one, and HardRiskView does not project one. This used to read
+       hard_risk.position_cap_pct and fall back when it was absent, which it always was — so
+       the cap branch never ran. Saying only the structured part is what the comment always
+       described; now it is also what the code does. */
     set('d-weight', p.target_weight_pct == null ? ''
-      : cap != null
-        ? C.t('ap.weight', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket), cap: C.pct(cap) })
-        : C.t('ap.weightNoCap', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket) }));
+      : C.t('ap.weightNoCap', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket) }));
     set('d-strength', C.t('ap.notProbability', { c: p.confidence }));
     set('d-ref', p.reference_price != null ? C.usd(p.reference_price) : '—');
     set('d-drift', p.freshness && p.freshness.max_price_drift_pct != null

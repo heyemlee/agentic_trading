@@ -176,7 +176,13 @@ window.CT = (function () {
 
   const proposalDetail = {
     proposal_id: "2026-09-08-VTI-f4c6ec7f",
+    // The version is half of the identity an approval is made against, so the demo carries
+    // one even though demo mode never approves anything.
+    version: "c0ffee" + "0".repeat(58),
     status: "WAITING_FOR_APPROVAL",
+    sell_quantity: null,
+    order_status: null,
+    reconciliation_error: null,
     ticker: "VTI",
     bucket: "micro_live",
     is_real_money: true,
@@ -208,6 +214,8 @@ window.CT = (function () {
       portfolio_equity_usd: 100.0,
       bucket_cash_usd: 100.0,
       data_quality: "partial",
+      evidence: {},
+      missing_information: [],
     },
     research: {
       portfolio_manager_rating: "Buy",
@@ -692,7 +700,7 @@ window.CT = (function () {
     }
   };
 
-  const orders = { fills: [], open_orders: [], error: null };
+  const orders = { fills: [], open_orders: [], tracked_orders: [], error: null };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
