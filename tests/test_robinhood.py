@@ -594,3 +594,118 @@ def test_closing_a_portal_gives_its_descriptors_back():
     # Without the fix these eight portals leak twenty-four descriptors. The small allowance
     # covers the directory handle the count itself opens.
     assert open_descriptors() <= baseline + 2
+
+
+def _expired_token_file(path, *, client=True):
+    from mcp.shared.auth import OAuthClientInformationFull
+
+    stored = {
+        "tokens": token(access="old", refresh="refresh-me", expires_in=60).model_dump(mode="json"),
+        "updated_at": (datetime.now(UTC) - timedelta(minutes=2)).isoformat(),
+    }
+    if client:
+        stored["client"] = OAuthClientInformationFull(
+            client_id="cid", redirect_uris=["http://localhost:8765/callback"],
+            grant_types=["authorization_code", "refresh_token"], response_types=["code"],
+            token_endpoint_auth_method="none").model_dump(mode="json")
+    path.write_text(json.dumps(stored))
+    return FileTokenStorage(path)
+
+
+def _provider(storage, server):
+    from mcp.client.auth import OAuthClientProvider
+    from mcp.shared.auth import OAuthClientMetadata
+
+    # No redirect or callback handler, exactly as the unattended service builds it: reaching the
+    # browser flow raises instead of hanging, which is what a scheduled run would hit.
+    return OAuthClientProvider(
+        server_url=server, storage=storage, redirect_handler=None, callback_handler=None,
+        client_metadata=OAuthClientMetadata(
+            client_name="agentic-trading (test)",
+            redirect_uris=["http://localhost:8765/callback"],
+            grant_types=["authorization_code", "refresh_token"], response_types=["code"],
+            token_endpoint_auth_method="none"))
+
+
+def _metadata_module(metadata, seen):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return metadata
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url):
+            seen.append(url)
+            return Response()
+
+    return SimpleNamespace(AsyncClient=lambda **_kwargs: Client())
+
+
+def test_an_expired_token_refreshes_itself_without_a_browser(tmp_path):
+    """The whole unattended path, end to end and offline: the case Friday 09:02 will hit.
+
+    The access token expires about every 3.3 days while research runs weekly, so a scheduled
+    run meets an expired credential more often than a fresh one. On 2026-09-14 that ended in
+    `OAuthFlowError: No redirect handler provided for authorization code grant`, fifteen hours
+    of disconnection and a descriptor leak on every retry. The pieces are each covered above;
+    this asserts they combine into a refresh rather than a browser.
+    """
+    import httpx2
+
+    server = "https://agent.robinhood.test/mcp/trading"
+    endpoint = "https://api.robinhood.test/oauth2/token/"
+    storage = _expired_token_file(tmp_path / "token.json")
+    auth = _provider(storage, server)
+    seen: list[str] = []
+
+    async def drive():
+        await _prime_refresh_endpoint(
+            auth, storage,
+            _metadata_module({"issuer": server, "authorization_endpoint": "https://rh.test/oauth",
+                              "token_endpoint": endpoint, "response_types_supported": ["code"]},
+                             seen),
+            server, 10)
+        flow = auth.async_auth_flow(httpx2.Request("POST", server))
+        first = await flow.__anext__()
+        refreshed = httpx2.Response(
+            200, request=first,
+            json={"access_token": "fresh", "token_type": "Bearer", "expires_in": 3600,
+                  "refresh_token": "refresh-me"})
+        retried = await flow.asend(refreshed)
+        await flow.aclose()
+        return first, retried
+
+    first, retried = asyncio.run(drive())
+
+    # The advertised endpoint, not the origin-relative /token the SDK guesses without metadata.
+    assert first.method == "POST" and str(first.url) == endpoint
+    assert b"grant_type=refresh_token" in first.content
+    # The original call is then retried with the new credential, and the new one is persisted.
+    assert retried.headers["authorization"] == "Bearer fresh"
+    assert json.loads((tmp_path / "token.json").read_text())["tokens"]["access_token"] == "fresh"
+
+
+def test_without_the_discovered_endpoint_the_refresh_is_aimed_at_a_guess(tmp_path):
+    """Why the priming exists: unprimed, the SDK posts the refresh where Robinhood has nothing."""
+    import httpx2
+
+    server = "https://agent.robinhood.test/mcp/trading"
+    storage = _expired_token_file(tmp_path / "token.json")
+    auth = _provider(storage, server)
+
+    async def drive():
+        flow = auth.async_auth_flow(httpx2.Request("POST", server))
+        first = await flow.__anext__()
+        await flow.aclose()
+        return first
+
+    first = asyncio.run(drive())
+    assert str(first.url) == "https://agent.robinhood.test/token"
