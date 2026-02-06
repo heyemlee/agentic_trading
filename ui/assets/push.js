@@ -18,21 +18,19 @@ window.CT_PUSH = (function () {
   const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+  /* Every refusal is an i18n key rather than a sentence: this module decides *whether* push can
+     work, assets/i18n.js owns how that reads, and the caller renders it. Written as English here,
+     these were the one place the console spoke past the language the reader chose. */
   function why() {
-    if (!supported()) {
-      return isIOS()
-        ? 'This iPhone needs iOS 16.4 or newer for web notifications.'
-        : 'This browser cannot receive web notifications.';
-    }
-    if (isIOS() && !standalone()) {
-      return 'On iPhone, notifications only work from the home-screen icon. Tap Share, then ' +
-             '"Add to Home Screen", and open the console from there.';
-    }
-    if (Notification.permission === 'denied') {
-      return 'Notifications are blocked for this app in iOS Settings. Allow them there first.';
-    }
+    if (!supported()) return isIOS() ? 'sy.pushNoIOS' : 'sy.pushNoBrowser';
+    if (isIOS() && !standalone()) return 'sy.pushHomeScreen';
+    if (Notification.permission === 'denied') return 'sy.pushSystemBlocked';
     return null;
   }
+
+  /* An Error carrying its key separately, so a catch can tell a refusal of ours -- translatable
+     -- from an API or network failure, whose text is the system's own and renders verbatim. */
+  const refusal = (key) => Object.assign(new Error(key), { i18n: key });
 
   const decode = (base64) => {
     const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4))
@@ -54,10 +52,10 @@ window.CT_PUSH = (function () {
   /* Must be called from a tap: iOS refuses a permission prompt raised any other way. */
   async function enable() {
     const blocked = why();
-    if (blocked) throw new Error(blocked);
+    if (blocked) throw refusal(blocked);
 
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') throw new Error('Notifications were not allowed.');
+    if (permission !== 'granted') throw refusal('sy.pushNotAllowed');
 
     const { public_key: key } = await CT_API.fetchJSON('/notifications/key');
     const reg = await registration();

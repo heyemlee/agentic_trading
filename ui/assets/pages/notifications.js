@@ -108,7 +108,7 @@
       row.dataset.pending = 'false';
       chip.textContent = C.t('sy.pushBlocked');
       chip.className = 'chip chip-warn';
-      detail.textContent = blocked;
+      detail.textContent = C.t(blocked);
       enable.hidden = test.hidden = off.hidden = true;
       paintDevices();
       return;
@@ -145,6 +145,10 @@
           C.t('sy.pushRemove') + '</button></span></div>').join('');
   }
 
+  /* CT_PUSH marks its own refusals with an i18n key; anything else carries text the API or the
+     browser wrote, which renders verbatim the way every other engine string does. */
+  const reason = (err) => (err && err.i18n ? C.t(err.i18n) : err.message);
+
   function wirePush() {
     const $ = (id) => document.getElementById(id);
     if (!$('push-enable') || !window.CT_PUSH) return;
@@ -158,7 +162,7 @@
         await CT_PUSH.enable();
         CT_API.readOnce('pushDevices');
       } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+        detail.textContent = C.t('sy.pushFailed', { err: reason(err) });
       } finally {
         button.disabled = false;
         renderPush();
@@ -170,7 +174,7 @@
         await CT_API.post('/notifications/test', {});
         detail.textContent = C.t('sy.pushSent');
       } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+        detail.textContent = C.t('sy.pushFailed', { err: reason(err) });
       }
     });
 
@@ -181,7 +185,7 @@
         CT_API.readOnce('pushDevices');
         renderPush();
       } catch (err) {
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+        detail.textContent = C.t('sy.pushFailed', { err: reason(err) });
       }
     });
 
@@ -198,7 +202,7 @@
       } catch (err) {
         button.disabled = false;
         button.textContent = C.t('sy.pushRemove');
-        detail.textContent = C.t('sy.pushFailed', { err: err.message });
+        detail.textContent = C.t('sy.pushFailed', { err: reason(err) });
       }
     });
   }
