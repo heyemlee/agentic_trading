@@ -135,6 +135,13 @@ def render(*, data_dir: Path, release_dir: Path | None = None, home: Path,
             "KeepAlive": True,
             "ThrottleInterval": 10,
             "ExitTimeOut": 30,
+            # launchd hands a job 256 descriptors by default. This process runs an HTTP server
+            # alongside four background loops (notifications, reconciliation, heartbeat, research
+            # jobs), each holding sockets and log handles, so the default is tight enough that a
+            # leak reaches it quickly -- 2026-09-14 spent one on every OAuth retry. That leak is
+            # fixed; this is the second line, so the next one has room to be noticed rather than
+            # exhausting the process. Soft, so it can still be raised without reinstalling.
+            "SoftResourceLimits": {"NumberOfFiles": 4096},
             "StandardOutPath": str(logs / "api.stdout.log"),
             "StandardErrorPath": str(logs / "api.stderr.log"),
         },

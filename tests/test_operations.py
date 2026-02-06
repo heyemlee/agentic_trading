@@ -176,6 +176,23 @@ def test_reinstalling_without_an_origin_keeps_the_private_https_entry_point(tmp_
     assert launchd.installed_origins(agents) == []
 
 
+def test_the_api_job_asks_for_more_descriptors_than_launchd_hands_out(tmp_path):
+    """256 is launchd's default, and one HTTP server plus four background loops sit under it.
+
+    The 2026-09-14 leak exhausted the default on OAuth retries. The leak is fixed; this pins the
+    headroom so removing it is a decision rather than a diff nobody read.
+    """
+    import plistlib
+
+    agents = tmp_path / "LaunchAgents"
+    launchd.write(agents, launchd.render(data_dir=tmp_path, home=tmp_path, origins=[]))
+    job = plistlib.loads((agents / f"{launchd.API}.plist").read_bytes())
+    assert job["SoftResourceLimits"]["NumberOfFiles"] >= 1024
+
+    # Soft only: a hard limit could not be raised afterwards without reinstalling the job.
+    assert "HardResourceLimits" not in job
+
+
 def test_a_release_layout_runs_pinned_code_against_the_service_data(tmp_path):
     """The service keeps running one version while the checkout it came from is edited."""
     data, release = tmp_path / "data", tmp_path / "releases" / "2026-09-04"
