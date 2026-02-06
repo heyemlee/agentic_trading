@@ -61,7 +61,9 @@ execution_policy:
       require_fresh_market_data: true
       require_no_event_blackout: true
       require_daily_loss_gate_clear: true
-      require_broker_side_settings_verified: true
+      require_broker_side_settings_verified: true   # those settings live in the broker and
+                                             # robinhood blocks and in
+                                             # micro_live_execution.permissions
       require_stage_at_least: 6
     auto_downgrade:
       to_mode: human_approval
@@ -95,11 +97,6 @@ fail_closed_conditions:                    # any one => NO TRADE, reason recorde
   - clock_skew_over_5_minutes
   - llm_backend_error_or_subscription_limit
 
-market_data_freshness:
-  last_trade_max_age_minutes: 15           # free IEX feed; tighten if a paid feed is used
-  daily_bar_max_age_trading_days: 1
-  verified_snapshot_required: true         # upstream get_verified_market_snapshot output must exist for the run
-  account_snapshot_max_age_seconds: 60
 
 buckets:
   core:
@@ -446,19 +443,6 @@ confidence_requirements:                   # bands from MANDATE.md v0.1; REVIEW 
     micro_live_sector_factor_etf: 80
     micro_live_individual_stock: 85
 
-broker_side_settings:                      # applied once via update_account_config; verified before every run; mismatch => fail closed
-  paper_account_starting_balance_usd: 3000 # create the paper account at the real experiment size, not the 100k default
-  no_shorting: true
-  max_margin_multiplier: "1"
-  max_options_trading_level: 0             # raised to 2 only when sandbox options are approved
-  fractional_trading: true
-  suspend_trade: false                     # set true by the kill switch and by HARD_HALT and EMERGENCY
-  trade_confirm_email: all
-  mcp_toolsets_by_stage:
-    stages_1_2: [account, assets, stock-data, news]              # no trading toolset is loaded at all
-    stages_3_plus: [account, assets, stock-data, news, trading]
-    sandbox_crypto_when_approved: [crypto-data]
-    sandbox_options_when_approved: [options-data]
 
 # ---------------------------------------------------------------------------
 # Stage 2: portfolio awareness + deterministic Hard Risk (no broker yet)

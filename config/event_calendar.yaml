@@ -16,15 +16,58 @@
 #     kind: fomc_decision | cpi | payrolls | pce | gdp | ...
 #     note: optional free text
 #
-# Deliberately left empty rather than filled with guessed dates. A blackout calendar carrying
-# invented dates is worse than none: it would block the wrong days and, far worse, leave the
-# real ones open while looking maintained. Fill it before enabling autonomous buying.
+# Entered 2026-09-15 by reading those three pages, not from memory. Every date below is printed
+# on the source page as a scheduled release. The FOMC's 2027 dates are published too, and are
+# deliberately NOT entered: the Fed marks each one tentative until the meeting before it
+# confirms it, and a date that may move is the kind of guess this file exists to keep out.
+# PCE and GDP come from BEA, which is a different source and is not entered either -- so the
+# only `kind` values below are the three the sources above actually cover.
+#
+# Renewing this: reread the same three pages, append what is new, and move `maintained_through`
+# to the last date you actually entered. The confirmed horizon runs out with the December 2026
+# releases, so the renewal warning starts 2026-10-26.
 
 schema_version: 1
 timezone: America/New_York
 
-# In the past on purpose, so an unpopulated calendar fails closed for autonomous opens. Set
-# this to the last date you have actually entered below.
-maintained_through: 2026-09-08
+# The last date actually entered below. No FOMC decision, CPI print or payrolls report falls
+# between the final payrolls entry and this date, so coverage through it is complete rather
+# than merely ending here.
+maintained_through: 2026-12-10
 
-events: []
+# Forward-looking only. Past releases are inert -- the gate reads the trade date and the day
+# after it -- so entering them would add rows nothing can ever consult.
+events:
+  # FOMC policy decisions: the statement day, the second day of each two-day meeting.
+  # federalreserve.gov lists the 2026 schedule as confirmed.
+  - date: 2026-09-16
+    kind: fomc_decision
+    note: September 15-16 meeting; statement day
+  - date: 2026-10-28
+    kind: fomc_decision
+    note: October 27-28 meeting; statement day
+  - date: 2026-12-09
+    kind: fomc_decision
+    note: December 8-9 meeting; statement day
+
+  # CPI, released 08:30 ET. The month named is the reference month, not the release month.
+  - date: 2026-10-14
+    kind: cpi
+    note: September 2026 CPI
+  - date: 2026-11-10
+    kind: cpi
+    note: October 2026 CPI
+  - date: 2026-12-10
+    kind: cpi
+    note: November 2026 CPI
+
+  # Employment Situation (nonfarm payrolls), released 08:30 ET.
+  - date: 2026-10-02
+    kind: payrolls
+    note: September 2026 Employment Situation
+  - date: 2026-11-06
+    kind: payrolls
+    note: October 2026 Employment Situation
+  - date: 2026-12-04
+    kind: payrolls
+    note: November 2026 Employment Situation

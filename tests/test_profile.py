@@ -154,9 +154,6 @@ UNREAD_RISK_KEYS = {
     "profile_name": "a label for this profile, not a limit",
     "fail_closed_conditions": "a declaration of intent; each condition is enforced in code under "
                               "its own name, not by walking this list",
-    "market_data_freshness": "superseded by data_freshness, which is what the code reads; the two "
-                             "disagree, so delete it rather than trusting it",
-    "broker_side_settings": "superseded by the broker and robinhood blocks",
 }
 
 

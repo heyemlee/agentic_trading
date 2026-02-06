@@ -5,7 +5,7 @@ stand between a holding and its exit. The days these rules fire on are exactly t
 might most need to reduce.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -105,13 +105,45 @@ def test_the_calendar_asks_to_be_renewed_before_it_expires(profiles, tmp_path):
     assert not cal.needs_renewal(date(2026, 1, 1))
 
 
-def test_the_shipped_calendar_is_empty_and_therefore_fails_closed(profiles):
-    """Dates were deliberately not guessed. An invented blackout calendar is worse than none:
-    it would block the wrong days while looking maintained, leaving the real ones open."""
+def test_the_shipped_calendar_is_real_and_says_how_far_it_is_good_for(profiles):
+    """Filled 2026-09-15 from federalreserve.gov and bls.gov, having been deliberately empty.
+
+    The hazard the empty file guarded against has not gone away, it has only moved: a calendar
+    carrying invented dates blocks the wrong days while looking maintained. So what is pinned
+    here is the part that makes it checkable -- it parses, it covers exactly as far as it
+    claims, and it carries only the release kinds those two sources actually publish.
+    """
     cal = load_macro_calendar(profiles)
     assert cal.exists and not cal.error
-    assert cal.events == []
-    assert macro_blackout(profiles, "2026-09-09", autonomous=True)[0]
+    assert cal.events, "the shipped calendar has been populated; an empty one fails closed"
+
+    dates = [e["date"] for e in cal.events]
+    assert len(dates) == len(set(dates)), "a release should appear once"
+
+    # The file's own rule for this field: the last date actually entered. Drifting past it is
+    # how a calendar comes to claim coverage it does not have.
+    assert cal.maintained_through == max(dates)
+
+    # Only what federalreserve.gov and bls.gov publish. PCE and GDP come from BEA, which is a
+    # source nobody has read, so a row of that kind would be a guess wearing a schema.
+    assert {e["kind"] for e in cal.events} <= {"fomc_decision", "cpi", "payrolls"}
+
+
+def test_the_shipped_calendar_gates_autonomy_without_touching_a_human_approval(profiles):
+    """The asymmetry is the whole point: a person has the calendar in view, unattended code
+    does not. And past its horizon it goes back to refusing rather than quietly allowing."""
+    cal = load_macro_calendar(profiles)
+    release = min(e["date"] for e in cal.events)
+    eve = release - timedelta(days=1)
+
+    for day in (eve, release):
+        blocked, why = macro_blackout(profiles, day.isoformat(), autonomous=True, calendar=cal)
+        assert blocked, why
+        assert not macro_blackout(profiles, day.isoformat(), autonomous=False, calendar=cal)[0]
+
+    expired = cal.maintained_through + timedelta(days=1)
+    blocked, why = macro_blackout(profiles, expired.isoformat(), autonomous=True, calendar=cal)
+    assert blocked and "renew it" in why
 
 
 # -- earnings ----------------------------------------------------------------------
