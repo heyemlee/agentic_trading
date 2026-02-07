@@ -1,7 +1,8 @@
 import re
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -9,13 +10,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def recent_session() -> str:
-    """The most recent weekday, as a fixture's idea of "a session that just closed".
+    """A session the service will also treat as closed, for a fixture's dated ledger.
 
     Not `service._last_session()`: that one probes the data vendor for a usable
     bar, and this suite is offline. A holiday would only mean the fixture is
     dated a day the market was shut, which nothing here asserts on.
+
+    It has to read the market's clock, and stay a session behind it. On UTC the
+    date rolls over at 17:00 in New York, so from every evening until midnight
+    Pacific this returned a day the service had not reached, every ledger
+    fixture was rejected as dated in the future, and `deploy/checks.sh` -- the
+    gate a release is held to -- went red for the time of day.
     """
-    day = datetime.now(UTC).date()
+    day = datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=1)
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day.isoformat()
