@@ -9,11 +9,12 @@
 
 | | |
 |---|---|
-| 运行版本 | `20260915T205502Z-ac5989c`，**等于 HEAD**，无未发布提交 |
-| 工作区 HEAD | `ac5989c` |
+| 运行版本 | `20260915T205502Z-ac5989c`，**落后工作区**——但差的都是 `TODO.md`、测试和尚未发布的本轮改动 |
+| 工作区 HEAD | 见 `git rev-parse --short HEAD`；本轮改了 `config/`（事件日历、删两个过时块）、`launchd.py`、前端 i18n |
 | 测试 | 640 项 pytest + 55 项前端用例 + Ruff + 密钥扫描全绿（`deploy/checks.sh`） |
 | 真实资金 | **已开启**（2026-09-08，micro_live，上限 `max_capital_usd`）；**至今零订单、零持仓** |
 | 自主动作 | **三处全关**：`execution_policy.autonomy` 三项、`micro_live.autonomy.open`、`.reduce` |
+| 事件日历 | **已填**（2026-09-15），9 条，good through 2026-12-10；**2026-09-16 是 FOMC 决议日** |
 | 手机推送 | **已打通并实战验证**（2026-09-15），1 台设备订阅；4 条积压告警于 20:55 补发送达 |
 | 外部看门狗 | **主动决定不接**（9-15 复核，见第一节「主动决定不做」）；心跳已改成降级即静默，接上即生效 |
 | 券商 token | 2026-09-18 09:02 到期，而定时研究是当天 13:30，**过期比研究早 4.5 小时** |
@@ -236,21 +237,81 @@
 - [ ] **手动批几笔买入，攒出持仓** — 至今零订单。自主减仓要等有持仓才有意义，
       2.5–2.8 那条审批与成交链路也一直因为没有真提案而测不了。
 
-- [ ] **`config/event_calendar.yaml` 仍是空的** — `events: []`，`maintained_through: 2026-09-08`
-      已过期。空日历让自主开仓 fail-closed，这是有意设计。**要解锁自主开仓才需要填**，
-      来源在文件注释里（federalreserve.gov 的 FOMC 日历、bls.gov 的 CPI/非农发布表）。
-      故意不填猜的日期：带着编造日期的静默期比没有更糟——它会挡错日子，更糟的是让真正该挡的
-      日子敞着，同时看起来像是维护过的。
+      **没有"手动下单"这条路。**`ct-approve` 只接受一个 `proposal_id`,`ct-robinhood` 只有
+      `connect`/`status`/`preflight`,每一笔订单都必须源自一个通过 Hard Risk 的研究提案。所以这项
+      的实际做法是:`uv run ct-research <ticker> --bucket micro_live`,然后批它产出的提案。
+      **周五 13:30 那次定时研究帮不上忙**——`research_schedule.tickers: []` 表示"每个 core 敞口组
+      取一个代表",跑的是概念核心仓,不是 micro_live。
+      加钱不是前置:$100 现金配 $40 单笔上限,第一个仓的钱已经在账上。
+
+- [ ] **决定那些"推荐默认值"算不算你审过的** — `accept_all_recommended_defaults: false`,而两个
+      profile 里有约 60 处 `value: TODO`。取数走的是 `effective()`:遇到 TODO 就**静默返回
+      `recommended_default`**,并记进 `defaults_used`。实测读 micro_live 的
+      `max_single_position_pct_of_allocation` 和 `max_open_positions` 分别得到 40 和 3,两条都进了
+      `defaults_used`——**给你第一笔订单定大小的就是这两个数**。
+
+      **控制台和闸门现在在互相矛盾,两边都说错了话**(2026-09-15 离线实测):
+
+      | 谁 | 判据 | 它说什么 |
+      |---|---|---|
+      | 控制台 `/health.warnings` | `profiles.unresolved`(加载时全量扫描,68 处) | 「68 项风险参数是你没有明确接受的推荐默认值;**真钱执行被阻止,直到你接受**」 |
+      | `PF13`,真正决定的那道门 | `len(profiles.defaults_used)`(惰性填充) | 「**所有风险参数都是显式值**」—— PASS |
+
+      两句话都不成立。真钱执行没有被阻止(PF13 过了);也不是所有参数都是显式值(有 68 处 TODO
+      在回落到推荐默认值)。差别在机制:`unresolved` 是加载时一次扫完的,`defaults_used` 是取一个
+      读一个,而 preflight 跑在那些限额被读到之前,所以看到的永远是 0。
+
+      这正是 9-15 那一整天的同一个毛病——**代码把"还不知道"当成了一个确定答案**,只不过这次
+      两个地方各自当成了相反的那个。
+
+      另外 `Profiles.resolve()`——严格版、`accept_defaults` 为假时会抛错的那个——全仓库只有它自己的
+      测试在调用,生产路径一个调用点都没有。和第二节那个"声明了没人读"是同一类问题,只是这次
+      没人读的东西是一道安全门。
+
+      **为什么没有直接修**:修法本身是清楚的——PF13 改判 `profiles.unresolved` 就对了,和控制台
+      同一个判据。但那会让它当场判失败,也就是拦下你的第一笔买入。而 PF13 自己的注释写着
+      "每一个进入真实订单的风险数字都必须是投资人看过并接受的",所以把门修诚实并不是我发明新政策,
+      是恢复它本来声称的行为。
+
+      两条路,都得你选:接受这些默认值(`accept_all_recommended_defaults: true`,一行),或者把
+      micro_live 那几个数字写成显式值。**定了我就把门和告警一起修对**——现在这两句话不管留哪句
+      都在骗人。
+
+- [ ] **日历的"提前 45 天提醒"没有接线** — 这条是今天填日历顺带暴露的。
+      `event_calendar.py` 的文件注释承诺"它也会提前 45 天提醒,所以用完绝不会是个意外的急停",
+      但 `needs_renewal()`、`stale_in_days()`、`MacroCalendar.as_dict()` 和 `RENEW_WARNING_DAYS`
+      **生产路径零调用点**,只有测试在用。`macro_blackout` 本身是接着的(`risk/engine.py:301`),
+      所以拦是真的会拦——只是到期那天会直接拦,没有任何预告。
+
+      以前这条无所谓,因为日历是空的、`maintained_through` 已经过期,本来就一直 fail-closed。
+      **今天填完之后它才变成真的**:2026-12-10 之后自主开仓会开始 fail-closed,而按设计
+      2026-10-26 就该有提醒。自主开仓现在是关的,所以不急;但这是第三例"声明了没人读",
+      而且是我今天亲手让它变得有意义的那一例。接哪个渠道(`/health.warnings`?通知事件?)
+      是个小设计决定,你说一句我就接。
+
+- [x] **`config/event_calendar.yaml` 已填**（2026-09-15）— 9 条,`maintained_through: 2026-12-10`。
+      现场读三个来源页写入,不是凭记忆:federalreserve.gov 的 FOMC 日历(2026 年那批标着已确认)、
+      bls.gov 的 CPI 与 Employment Situation 发布表。**2027 年的 FOMC 日期故意没写**——美联储
+      标注每一个都是 tentative、要等前一次会议确认,会动的日期正是这个文件要挡在外面的东西。
+      PCE/GDP 属于 BEA,是另一个来源,也没写。
+
+      实测(离线):9-16 FOMC 决议日,自主开仓在 9-15 和 9-16 两天都被拦,人工审批两天都放行;
+      9-17 恢复。10-02 非农同理。续期提醒从 2026-10-26 开始(提前 45 天)。
+
+      **注意 2026-09-16 就是这次 FOMC 的决议日。**人工买入不受日历影响(设计如此:人看得见日历),
+      但第一笔真钱落在决议日这件事本身值得先想一下。
 
 - [ ] **逐项解除保险，一次一项** — 顺序和条件写在 `docs/OPERATIONS.md` 的 Autonomy 一节：
       先有人工买出来的持仓 → 只武装 `reduce`、看它在真成交上跑一段 → 填日历 → 最后才 `open`。
+      **第三步(日历)已经在 2026-09-15 提前做掉了**,因为它不需要等前两步、也不放松任何东西:
+      日历只在自主开仓时才被读,而自主开仓是最后一步。剩下的顺序不变——**持仓仍是第一步**。
 
-- [ ] **决定四个"无人读"配置块的去留** — `risk_profile.yaml` 里 `profile_name`、
-      `fail_closed_conditions`、`market_data_freshness`、`broker_side_settings` 全仓库无人引用。
-      前两个是声明性质的，留着无害；后两个是**过时副本**，尤其
-      `market_data_freshness.account_snapshot_max_age_seconds: 60` 与真正生效的
-      `data_freshness.fast.max_age_seconds: 120` 互相矛盾——照它改数字不会有任何效果。
-      建议删掉后两个（删无人读的块不改变运行行为，测试会确认）。见第三节③。
+- [x] **四个"无人读"配置块已处理**（2026-09-15）— 删掉两个过时副本 `market_data_freshness`
+      与 `broker_side_settings`（共 18 行）。留下 `profile_name` 和 `fail_closed_conditions`：
+      声明性质，留着无害，测试里各记了一条理由继续钉住。
+      `execution_policy.autonomy.common_conditions.require_broker_side_settings_verified` 原本
+      指向被删掉的那块，现在注明那些设置实际在 `broker`、`robinhood` 和
+      `micro_live_execution.permissions` 里。运行行为未变（`deploy/checks.sh` 全绿）。见第三节③。
 
 - [ ] **`schedule` 心跳现在让自检报红** — 真实情况是：周研究 9-11 确实跑过（`meta:schedule_executions`
       在 2026-09-11T20:30:06 有完整记录），但心跳被上面那个并发覆盖吃掉了，补不回来。
@@ -287,16 +348,32 @@
 
 - [ ] **10. 手机体验打磨** — 首屏突出动作/金额/阻挡原因/数据时间；中文文案补全；长文本/空态/离线/超时/会话过期验收。**建议你用一段时间后把别扭的地方告诉我再改**，否则是我在猜。
 
-- [ ] **11. 告警覆盖三个缺口** — 推送通了之后才值得做，因为现在它真的送得到人。
-      其一，**券商掉线的事件一直在产生，只是无处可去**：9-14 到 9-15 断了 15 小时无人知晓，
-      原因不是缺事件类型。`credential_invalid` 已启用，由 `collect_notifications` 在
-      `micro_live()` 报 `connect_error` 时产生，15 秒的 `dispatch_notifications` 循环每轮都会采到；
-      当时通道是 webpush 而没有任何设备订阅，所以全部停在队列里。推送打通后这条链路才真正闭合，
-      **值得做一次真实演练确认**，而不是假定它好了。
-      其二，**plist 没设描述符上限**，吃 launchd 默认的 256；漏已经堵住，但对一个带四个后台
-      循环的服务这个数字本身偏紧，加 `SoftResourceLimits` 是纵深防御。
-      其三，`push.js` 里三条拒绝提示（需要 iOS 16.4、必须从主屏幕图标打开、被系统设置屏蔽）
-      **硬写成英文，没走 `assets/i18n.js`**，中文界面下会中英混排。
+      顺手扫出来的、不用猜的一半(2026-09-15):`assets/api.js` 里还有 5 条控制台自己写的英文句子
+      没走 i18n(`Demo mode has no API access.`、`Request timed out…`、`Proposal changed while…`、
+      `Sign in before performing this action.`、`Demo mode cannot change state.`),
+      `pages/approvals.js:240` 有一条中英写死拼在一起的,`console.js:305` 用三元判断语言而不是查词典。
+      **没有一并改掉**:这些错误的显示点散在 21 个 catch 里,统一要按 push.js 那个 `.i18n` 标记
+      的办法逐个改,是一次跨整个前端的改动,不该夹在告警修复里顺手做。等你用过之后一起排。
+
+- [ ] **11. 告警覆盖三个缺口 —— 其二其三已做，其一要一次真实演练**（2026-09-15）
+
+      **其一,仍未做,而且只能由你做**:券商掉线的事件一直在产生,只是无处可去——9-14 到 9-15
+      断了 15 小时无人知晓,原因不是缺事件类型。`credential_invalid` 已启用,由
+      `collect_notifications` 在 `micro_live()` 报 `connect_error` 时产生,15 秒的
+      `dispatch_notifications` 循环每轮都会采到;当时通道是 webpush 而没有任何设备订阅,所以全部
+      停在队列里。推送打通后这条链路才真正闭合,**值得做一次真实演练确认**,而不是假定它好了。
+      演练要故意把券商 token 弄失效,那是在动实盘凭据,所以留给你决定时机——**不要在 9-18 那次
+      定时研究之前做**,那天 09:02 token 到期、13:30 研究,本来就是一次天然的实战检验。
+
+      - [x] **其二,plist 描述符上限已加** — API 任务加了 `SoftResourceLimits.NumberOfFiles: 4096`,
+        替掉 launchd 默认的 256。一个 HTTP 服务加四个后台循环(通知、对账、心跳、研究任务)各自
+        持有 socket 和日志句柄,256 紧到一次泄漏很快就能打满——9-14 每次 OAuth 重试漏一个就是。
+        泄漏本身已修,这是第二道线。只设软上限:硬上限之后不重装任务就改不动了。
+        `tests/test_operations.py` 里钉了一条,顺带钉住"不要加硬上限"。
+      - [x] **其三,`push.js` 的拒绝提示已走 i18n** — 现在 `why()` 返回的是 i18n 键而不是句子:
+        这个模块只判断"能不能推送",`assets/i18n.js` 决定它读起来是什么样。实际有**五条**不是三条
+        (还有"这个浏览器不支持"和"权限未授予"),en/zh 都已补齐。抛出的错误额外带一个 `.i18n`
+        标记,所以 catch 处能区分"我们自己的拒绝"(可翻译)和 API/网络错误(按规矩原样显示)。
 
 ### P3（有条件才做）
 
@@ -358,7 +435,7 @@ FRED 每次都排在缺失证据的第一或第二条。
 上游 `tradingagents/__init__.py` 确实会 `load_dotenv`。真正的问题是它靠工作目录向上找，
 且只有 import 了上游包的入口才会触发；这个已在 9-08 修掉（见第一节）。现在填 `.env` 就是对的。
 
-**③ 四个顶层配置块声明了但无人读 —— 已加测试盯住，去留待定**
+**③ 四个顶层配置块声明了但无人读 —— 已查清，两个已删，两个留下并继续钉住**
 
 `risk_profile.yaml` 的这四个顶层键，在整个仓库里（`.py` / `.sh` / `.js` / `.md`，配置文件本身除外）
 一次都没被引用过：
@@ -374,9 +451,19 @@ FRED 每次都排在缺失证据的第一或第二条。
 `data_freshness.fast.max_age_seconds` 是 `120`。**两者互相矛盾，且照它改不会有任何效果。**
 有人想把账户快照收紧到 60 秒，改完会以为收紧了。这正是本轮修掉的那 10 段"声明了没人读"的同一类问题。
 
-`tests/test_profile.py::test_every_risk_profile_top_level_key_has_a_reader` 现在把这四个键
-逐条记明原因钉在测试里：再多一个无人读的顶层键，测试就红；反过来，哪天其中一个真接上了，
-测试也会要求把它从名单里划掉。**删不删是你的决定**（见第二节最后一条）。
+`tests/test_profile.py::test_every_risk_profile_top_level_key_has_a_reader` 把无人读的顶层键
+逐条记明原因钉在测试里：再多一个，测试就红；反过来，哪天其中一个真接上了，测试也会要求把它
+从名单里划掉。
+
+**结果（2026-09-15）**：`market_data_freshness` 和 `broker_side_settings` 已删除，共 18 行；
+名单里只剩 `profile_name` 和 `fail_closed_conditions` 两个声明性质的键。
+`execution_policy.autonomy.common_conditions.require_broker_side_settings_verified` 原本指向
+被删掉的那块，现在注明那些设置实际住在 `broker`、`robinhood` 和
+`micro_live_execution.permissions` 里。运行行为未变，`deploy/checks.sh` 全绿。
+
+**同一类问题的第三例，这次不在配置里而在代码里**：`Profiles.resolve()` 生产路径零调用点，
+而 `PF13` 这道声称"每个进入真实订单的风险数字都被你看过"的门，判据是一个惰性填充的列表，
+在 preflight 时恒为空——见第二节新增的那一条。
 
 ---
 

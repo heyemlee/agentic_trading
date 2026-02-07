@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from datetime import UTC, datetime, timedelta
@@ -381,3 +382,36 @@ def test_a_script_run_by_hand_checks_the_deployment_not_the_checkout(tmp_path):
     fallback = subprocess.run(["zsh", str(probe)], capture_output=True, text=True,
                               env=environment, check=True, timeout=30)
     assert fallback.stdout.split()[0] == str((tmp_path / "checkout").resolve())
+
+
+def test_no_current_doc_offers_a_command_this_stage_refuses():
+    """Documentation must not hand someone a command the deployment will turn away.
+
+    cli.py's _load() refuses every entry point it guards once execution_policy.stage is above
+    2. This deployment has been at Stage 3 since real money was armed, so `ct-research`,
+    `ct-risk-check`, `ct-proposals` and `ct-approve` all answer with a refusal -- while
+    docs/OPERATIONS.md went on presenting them as the way to research and approve, in three
+    separate places. Someone following the approval section could not approve anything.
+
+    Naming them in prose is fine, and is how the refusal is explained; offering one as a
+    command to run is what this catches.
+    """
+    from agentic_trading.profile import load_profiles
+
+    stage = load_profiles(ROOT / "config").stage
+    if stage <= 2:                      # the tools are the toolkit for those stages
+        pytest.skip(f"stage {stage} still runs the research-and-recommendation tools")
+
+    gated = {"ct-research", "ct-risk-check", "ct-proposals", "ct-approve"}
+    offered: list[str] = []
+    for doc in sorted((ROOT / "docs").glob("*.md")) + [ROOT / "README.md", ROOT / "README.zh-CN.md"]:
+        if not doc.exists():
+            continue
+        for line in doc.read_text(encoding="utf-8").splitlines():
+            command = re.match(r"\s*(?:uv run |\$ )?(ct-[a-z-]+)\b", line)
+            if command and command.group(1) in gated:
+                offered.append(f"{doc.name}: {line.strip()}")
+
+    assert not offered, (
+        "these lines offer a command that stage " + str(stage) + " refuses:\n  "
+        + "\n  ".join(offered))

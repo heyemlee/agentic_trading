@@ -35,11 +35,8 @@ fresh analysis rather than executed.
 Other commands:
 
 ```bash
-uv run ct-proposals                               # open proposals and their freshness
-uv run ct-approve <proposal-id> --revalidate-only # show the revalidation, change nothing
-uv run ct-approve <proposal-id> --dry-run         # revalidate and stop before submitting
-uv run ct-approve <proposal-id>                   # approve, revalidate, then submit a paper order
-uv run ct-risk-check VTI --confidence 80          # what-if check, no model call
+uv run ct-trigger manual --bucket micro_live --ticker VTI   # research now, against real money
+uv run ct-trigger scheduled --dry-run             # what the schedule would do, starting nothing
 uv run ct-risk-scenarios                          # Hard Risk validation scenarios
 uv run ct-execution-scenarios                     # proposal / approval / execution validation
 uv run ct-state status                            # integrity, record counts, unsettled orders
@@ -236,11 +233,13 @@ the quote, the portfolio and the risk state, runs Hard Risk again, runs Robinhoo
 pre-trade review, and submits only if all of it still passes. If the world moved, the answer is
 `STALE`, `REANALYSIS_REQUIRED`, `INVALIDATED` or a rejection, never a silent send.
 
-```bash
-uv run ct-proposals                            # what is waiting
-uv run ct-approve <id> --revalidate-only       # what would happen, changing nothing
-uv run ct-approve <id>                         # authorise, revalidate, then maybe execute
-```
+Approving is done from the console, on a phone or a browser: Approvals, then the proposal.
+
+The four CLI tools that used to do this -- `ct-proposals`, `ct-approve`, `ct-research` and
+`ct-risk-check` -- refuse to run once `execution_policy.stage` is above 2, which it has been
+since Stage 3. They are the research-and-recommendation toolkit, and this deployment is past
+that. Research is started with `ct-trigger`; the approval itself has one surface, which is the
+one that carries a session, a CSRF token and a fixed proposal version.
 
 ### Pausing
 
@@ -362,12 +361,9 @@ improves macro context; nothing else is required.
 
 ```bash
 uv run ct-api                                  # backend API for the frontend
-uv run ct-trigger manual --ticker VTI          # research now
-uv run ct-research VTI --bucket micro_live     # the same run, directly
-uv run ct-proposals                            # open proposals and freshness
-uv run ct-approve <id> --revalidate-only       # preview the approval check
-uv run ct-approve <id>                         # approve, revalidate, maybe execute
-uv run ct-risk-check VTI --confidence 80       # what-if against the portfolio, no model call
+uv run ct-trigger manual --ticker VTI          # research now, conceptual core book
+uv run ct-trigger manual --bucket micro_live --ticker VTI   # research now, real money
+uv run ct-trigger scheduled --dry-run          # the schedule's decision, starting nothing
 uv run ct-robinhood status|preflight|connect   # the real-money venue
 uv run ct-risk-scenarios                       # Hard Risk validation scenarios
 uv run ct-execution-scenarios                  # proposal, approval and execution validation
