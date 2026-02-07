@@ -33,7 +33,10 @@ def test_upstream_config_merge(profiles):
 
 
 def test_todo_values_fail_closed_unless_defaults_accepted(profiles):
+    # Both states are set explicitly: this is about the mechanism, not about whichever way the
+    # deployment's own accept_all_recommended_defaults happens to be set today.
     node = {"value": "TODO", "recommended_default": 5}
+    profiles.accept_defaults = False
     with pytest.raises(ProfileError):
         profiles.resolve(node, path="x")
     profiles.accept_defaults = True

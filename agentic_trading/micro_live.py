@@ -172,15 +172,20 @@ def run_preflight(profiles: Profiles, broker: Any | None = None) -> Preflight:
 
     # Every risk number that reaches a live order must be one the investor has seen and
     # accepted, either as an explicit value or by accepting the documented defaults.
-    used = len(profiles.defaults_used)
-    acknowledged = profiles.accept_defaults or used == 0
+    # Counted from the profiles' own scan of unresolved fields, not from defaults_used. The
+    # latter fills in as values are read, and this gate runs before any limit has been read, so
+    # it was always zero: the gate reported "all risk parameters are explicit values" over a
+    # profile carrying 68 TODOs, while the console, reading the scan, said real money was
+    # blocked. Both sentences were false, and they contradicted each other.
+    unresolved = len(profiles.unresolved)
+    acknowledged = profiles.accept_defaults or unresolved == 0
     check("PF13", "risk parameters acknowledged", acknowledged,
-          "all risk parameters are explicit values" if used == 0 else
-          (f"{used} recommended defaults are in use and accepted via "
+          "all risk parameters are explicit values" if unresolved == 0 else
+          (f"{unresolved} documented defaults are in use and accepted via "
            "accept_all_recommended_defaults" if profiles.accept_defaults else
-           f"{used} risk parameters are still recommended defaults you have not accepted; set "
-           "accept_all_recommended_defaults: true in config/investor_profile.yaml, or replace the "
-           "values you want to change, before real money moves"))
+           f"{unresolved} risk parameters are still recommended defaults you have not accepted; "
+           "set accept_all_recommended_defaults: true in config/investor_profile.yaml, or replace "
+           "the values you want to change, before real money moves"))
 
     ok, detail = _research_runtime_is_broker_free(profiles)
     check("PF11", "research runtime has no broker tools", ok, detail)

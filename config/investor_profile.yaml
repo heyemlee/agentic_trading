@@ -9,7 +9,13 @@ profile_name: conservative_stable_v1
 base_currency: USD
 created: 2026-09-03
 unresolved_policy: fail_closed
-accept_all_recommended_defaults: false   # true = adopt every recommended_default in both files at once
+accept_all_recommended_defaults: true    # investor decision, 2026-09-15: every recommended_default
+                                         # in both files is adopted as reviewed. Each carries its
+                                         # reasoning beside it; the numbers that size a real order
+                                         # are micro_live's 40% single-position cap and 3 open
+                                         # positions, under micro_live_execution's own $40 per
+                                         # order. Setting this to false again re-blocks real money
+                                         # until every TODO is replaced by an explicit value.
 
 objective:
   primary: stable_investing

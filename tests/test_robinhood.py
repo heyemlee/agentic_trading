@@ -709,3 +709,29 @@ def test_without_the_discovered_endpoint_the_refresh_is_aimed_at_a_guess(tmp_pat
 
     first = asyncio.run(drive())
     assert str(first.url) == "https://agent.robinhood.test/token"
+
+
+def test_the_acknowledgement_gate_counts_what_the_profile_scan_found(profiles):
+    """PF13 must read the same fact the console reads, or the two describe opposite systems.
+
+    It counted defaults_used, which fills in as values are read and is therefore empty when
+    preflight runs. Over a profile carrying 68 unresolved fields the gate announced "all risk
+    parameters are explicit values" and passed, while the console announced that real money was
+    blocked. Neither sentence was true.
+    """
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO})
+    broker = make_broker(profiles, fake, enabled=True)
+    profiles.unresolved = ["risk_profile.buckets.micro_live.position_limits.max_open_positions"]
+    profiles.defaults_used = []          # nothing read yet: exactly the state preflight sees
+
+    profiles.accept_defaults = False
+    gate = next(c for c in run_preflight(profiles, broker).checks if c.check_id == "PF13")
+    assert gate.passed is False and "accept_all_recommended_defaults" in gate.detail
+
+    profiles.accept_defaults = True
+    accepted = next(c for c in run_preflight(profiles, broker).checks if c.check_id == "PF13")
+    assert accepted.passed is True and "accepted via" in accepted.detail
+
+    profiles.unresolved = []
+    explicit = next(c for c in run_preflight(profiles, broker).checks if c.check_id == "PF13")
+    assert explicit.passed is True and explicit.detail == "all risk parameters are explicit values"
