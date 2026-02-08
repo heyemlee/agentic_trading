@@ -61,13 +61,47 @@ Requires **Python 3.12** and **[uv](https://docs.astral.sh/uv/)**. AI research a
 git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
 uv sync
+
+mkdir -p state runs          # ledgers and run artefacts; both are gitignored, so a clone has neither
 cp -n .env.example .env
 cp -n config/examples/portfolio.example.yaml state/portfolio.yaml
 cp -n config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
-uv run ct-auth              # create your local console login
-uv run ct-api
+
+uv run ct-auth               # set the console username and password, stored hashed in state/
+uv run ct-api                # serves the API and the console on 127.0.0.1:8787, foreground
 ```
 
-Open [localhost:8787/ui/](http://127.0.0.1:8787/ui/). Broker setup and operating details are in the [operations guide](docs/OPERATIONS.md).
+Open [localhost:8787](http://127.0.0.1:8787/) — the bare origin redirects to the console at
+`/ui/` — and sign in with what `ct-auth` just set. Stop the server with Ctrl-C.
+
+A fresh clone cannot place a real order, because it has no broker credentials: the default venue
+is `broker.adapter: simulated`, and the Robinhood path additionally needs an OAuth token that
+lives in `state/` and is never committed. Note that `config/` is this deployment's own live
+configuration, tracked deliberately so it can be reviewed and diffed — so a clone inherits the
+owner's settings, including `micro_live_execution.enabled: true`. That switch is one of several
+gates, not the only one, and the preflight refuses without an account behind it. Read
+`config/risk_profile.yaml` before pointing this at any account of your own. Connecting a broker,
+arming real money and the release/launchd deployment are all in the
+[operations guide](docs/OPERATIONS.md).
+
+**What to try first.** Research is the only thing that runs on its own, and it costs Claude
+subscription quota rather than API credit:
+
+```bash
+uv run ct-trigger manual --ticker VTI        # one research run, about 8 minutes, in the background
+uv run ct-trigger scheduled --dry-run        # what the weekly schedule would do, starting nothing
+uv run ct-state status                       # database integrity, record counts, unsettled orders
+uv run ct-ops status                         # background heartbeats and free disk; non-zero if late
+```
+
+The run writes a decision record and its analyst reports under `runs/<run-id>/`, and the console's
+Research page shows the same thing. `NO_TRADE` is a normal and common outcome: the deterministic
+layer turns a Hold rating with no position into no action, and missing evidence lowers confidence
+rather than being argued past.
+
+**Optional keys**, all in `.env`, none required to start: `FRED_API_KEY` adds verified inflation,
+rate and labour data (without it those are recorded as missing evidence, which is correct
+conservative behaviour, not a fault); `CT_PUSH_SUBJECT` is needed before the console can send web
+push to a phone; `CT_HEARTBEAT_URL` points at an external watcher.
 
 <sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · Vanilla JS</sub>

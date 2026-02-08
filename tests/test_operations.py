@@ -415,3 +415,32 @@ def test_no_current_doc_offers_a_command_this_stage_refuses():
     assert not offered, (
         "these lines offer a command that stage " + str(stage) + " refuses:\n  "
         + "\n  ".join(offered))
+
+
+def test_the_readme_setup_creates_the_directories_it_then_writes_into():
+    """A clone has no state/ or runs/: both are gitignored, so cp into them fails.
+
+    The published setup copied two ledger templates into state/ without creating it first, so
+    following the README from a fresh clone stopped at `cp: state/portfolio.yaml: No such file
+    or directory` -- on the fifth line, before anything had started.
+    """
+    for readme in (ROOT / "README.md", ROOT / "README.zh-CN.md"):
+        text = readme.read_text(encoding="utf-8")
+        for target in ("state/portfolio.yaml", "state/micro_live_portfolio.yaml"):
+            if "cp -n config/examples/" in text and target in text:
+                assert "mkdir -p state runs" in text, (
+                    f"{readme.name} copies into {target} without creating the directory first")
+        assert not re.search(r"(?m)^\s*git ls-files\s+state", text)
+
+
+def test_every_env_var_the_code_requires_is_offered_by_the_template():
+    """A variable nobody knew to set is a feature that silently does not work.
+
+    CT_PUSH_SUBJECT gates web push entirely -- unset, Apple refuses every send with one opaque
+    status -- and .env.example said the webpush channel needed nothing from it.
+    """
+    template = (ROOT / ".env.example").read_text(encoding="utf-8")
+    from agentic_trading import webpush
+
+    for name in (webpush.SUBJECT_ENV, "CT_HEARTBEAT_URL", "FRED_API_KEY"):
+        assert re.search(rf"(?m)^{name}=", template), f"{name} is not offered in .env.example"

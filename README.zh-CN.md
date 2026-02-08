@@ -61,13 +61,41 @@
 git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
 uv sync
+
+mkdir -p state runs          # 账本与运行产物；两者都被 gitignore，克隆下来不存在
 cp -n .env.example .env
 cp -n config/examples/portfolio.example.yaml state/portfolio.yaml
 cp -n config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
-uv run ct-auth              # 创建本地控制台登录凭据
-uv run ct-api
+
+uv run ct-auth               # 设置控制台用户名与密码，散列后存在 state/
+uv run ct-api                # 在 127.0.0.1:8787 提供 API 与控制台，前台运行
 ```
 
-打开 [localhost:8787/ui/](http://127.0.0.1:8787/ui/)。券商连接和运行细节见[操作文档](docs/OPERATIONS.md)。
+打开 [localhost:8787](http://127.0.0.1:8787/)（裸地址会跳转到 `/ui/`），用刚才 `ct-auth`
+设置的账号登录。Ctrl-C 停止。
+
+全新克隆**下不了真单**，因为它没有券商凭据：默认场所是 `broker.adapter: simulated`，
+而 Robinhood 那条路另外需要一份 OAuth 令牌，它存在 `state/` 里且从不提交。注意
+`config/` 是这个部署自己的实时配置，**刻意**纳入 git 以便审阅和比对——所以克隆会继承
+所有者的设置，其中包括 `micro_live_execution.enabled: true`。那个开关只是若干道闸门之一，
+背后没有账户时 preflight 会直接拒绝。把它指向你自己的账户之前，请先读一遍
+`config/risk_profile.yaml`。券商连接、真钱开启和 release/launchd 部署见[操作文档](docs/OPERATIONS.md)。
+
+**先试什么。** 研究是唯一会自己跑起来的东西，它花的是 Claude 订阅额度而不是 API 按量计费：
+
+```bash
+uv run ct-trigger manual --ticker VTI        # 跑一次研究，约 8 分钟，后台进行
+uv run ct-trigger scheduled --dry-run        # 定时研究此刻会做什么，不启动任何东西
+uv run ct-state status                       # 数据库完整性、记录数、未结订单
+uv run ct-ops status                         # 后台心跳与磁盘；有活动迟到则返回非零
+```
+
+运行结果写在 `runs/<run-id>/` 下的决策记录和分析师报告里，控制台的研究页看到的是同一份。
+`NO_TRADE` 是正常且常见的结论：确定性层把"评级持有且当前无仓"映射成不动，而缺失的证据
+会压低置信度，不会被话术绕过去。
+
+**可选的密钥**都放 `.env`，启动一个都不需要：`FRED_API_KEY` 补上经过验证的通胀、利率与
+就业数据（没有它这些会被记为缺失证据，那是正确的保守行为，不是故障）；`CT_PUSH_SUBJECT`
+是控制台向手机发推送的前提；`CT_HEARTBEAT_URL` 指向一个外部看门狗。
 
 <sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · 原生 JavaScript</sub>
