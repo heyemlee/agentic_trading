@@ -162,6 +162,40 @@ def test_the_allowlisted_fetch_tool_is_added_for_an_analyst_and_only_when_enable
         BOTH_ON).tool_names
 
 
+def test_the_briefing_names_every_allowlisted_domain(profiles):
+    # The upstream prompt renders "you have access to" from the list it binds itself, so
+    # fetch_url -- appended afterwards -- is absent from it, and the tool's description names
+    # no domain. Fifteen runs called it zero times. The briefing is the only place the model
+    # learns where it may point the tool, and it is built from config, so a domain dropped
+    # there disappears from the prompt rather than becoming a stale promise.
+    from agentic_trading.llm.web_fetch import load_policy
+
+    policy = load_policy(profiles)
+    text = _bind(NEWS_TOOLS, policy.as_dict())._web_briefing()
+    assert policy.allowed_domains
+    for domain in policy.allowed_domains:
+        assert domain in text
+    assert "mcp__ta__fetch_url" in text
+    assert str(policy.max_calls) in text
+
+
+def test_the_briefing_is_silent_wherever_the_tool_is():
+    # Same gate as the tool itself: no analyst role, or fetch disabled, grants no briefing.
+    assert _bind(NEWS_TOOLS, {"fetch_enabled": False})._web_briefing() == ""
+    assert _bind(["get_verified_market_snapshot", "get_news", "get_fundamentals",
+                  "get_indicators"], BOTH_ON)._web_briefing() == ""
+
+
+def test_the_briefing_reaches_the_cli_system_prompt(fake_claude, tmp_path, profiles):
+    from agentic_trading.llm.web_fetch import load_policy
+
+    bound = _bind(NEWS_TOOLS, load_policy(profiles).as_dict(), work_dir=str(tmp_path))
+    briefing = bound._web_briefing()
+    msg = bound.invoke([SystemMessage(content="be brief"), HumanMessage(content="hi")])
+    # "be brief" is 8 characters; the briefing is appended after a blank line.
+    assert f"SYSTEM_LEN={8 + 2 + len(briefing)}" in msg.content
+
+
 def test_builtin_tools_are_allowlisted_even_with_no_mcp_tools_bound():
     # _mcp_args used to be the only source of --allowedTools, so a built-in tool on a call with
     # no MCP tools would have been offered and then denied, with no way to prompt in -p.
