@@ -8,7 +8,7 @@
     !D.health.paused && (D.health.market || {}).is_open === true &&
     (!D.proposalDetail.is_real_money || D.health.micro_live_enabled === true && D.microLive.preflight_ready === true);
 
-  document.getElementById('banner-icon').innerHTML = C.ICON.lock;
+  C.setHTML(document.getElementById('banner-icon'), C.ICON.lock);
 
   const set = (id, v) => { document.getElementById(id).textContent = v; };
   const plainRows = (arr) => (arr || []).map((x) => C.listRow({ title: x })).join('');
@@ -21,13 +21,13 @@
     const wrap = document.getElementById('queue-wrap');
     wrap.hidden = waiting.length < 2;
     if (wrap.hidden) return;
-    document.getElementById('queue-list').innerHTML = waiting.map((x) =>
+    C.setHTML(document.getElementById('queue-list'), waiting.map((x) =>
       '<button class="option-row" type="button" role="radio" data-proposal="' +
         C.escapeHtml(x.proposal_id) + '" aria-checked="' +
         (current && x.proposal_id === current.proposal_id ? 'true' : 'false') + '">' +
         '<span class="option-name">' + C.escapeHtml(x.ticker) + ' · ' + C.usd(x.notional_usd) +
           (x.is_real_money ? ' <span class="chip chip-accent">' + C.t('bucket.realShort') + '</span>' : '') +
-        '</span><span class="option-mark" aria-hidden="true">' + C.ICON.check + '</span></button>').join('');
+        '</span><span class="option-mark" aria-hidden="true">' + C.ICON.check + '</span></button>').join(''));
   }
 
   /* Switching mid-approval would swap the terms under a request already in
@@ -108,19 +108,19 @@
     set('t-policy', (r.policy_reasons || []).join('; '));
 
     /* blind spots */
-    document.getElementById('t-missing').innerHTML = plainRows(r.missing_information);
-    document.getElementById('t-risks').innerHTML = plainRows(r.primary_risks);
+    C.setHTML(document.getElementById('t-missing'), plainRows(r.missing_information));
+    C.setHTML(document.getElementById('t-risks'), plainRows(r.primary_risks));
     set('t-wrong', r.what_could_make_this_wrong);
     set('t-nothing', r.why_doing_nothing_may_be_better);
 
     /* hard risk */
     const rules = (p.hard_risk || {}).rules || [];
     set('rule-count', C.t('ap.rulesPass', { n: rules.filter((x) => x.passed).length, m: rules.length }));
-    document.getElementById('rule-list').innerHTML = rules.map((x) => C.gateRow(x)).join('');
+    C.setHTML(document.getElementById('rule-list'), rules.map((x) => C.gateRow(x)).join(''));
 
     /* history */
-    document.getElementById('history-list').innerHTML = (p.history || []).map((h) =>
-      C.listRow({ title: C.titleise(h.event), sub: h.detail, note: C.dateTime(h.at) })).join('');
+    C.setHTML(document.getElementById('history-list'), (p.history || []).map((h) =>
+      C.listRow({ title: C.titleise(h.event), sub: h.detail, note: C.dateTime(h.at) })).join(''));
 
     tick();
   }

@@ -146,7 +146,7 @@
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'research',  tab: true },
-    { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
+    { href: 'lab.html',       key: 'lab',       icon: 'lab' },
     { href: 'research.html',  key: 'research',  icon: 'research' },
     { href: 'risk.html',      key: 'risk',     icon: 'risk' },
     { href: 'activity.html',  key: 'activity', icon: 'activity' },
@@ -163,8 +163,9 @@
      tab are deliberately absent: a back button beside their own tab would
      be noise. */
   const PARENT = {
-    approvals:  { href: 'more.html', key: 'more' },
-    research:   { href: 'more.html', key: 'more' },
+    approvals:  { href: 'index.html', key: 'dashboard' },
+    research:   { href: 'advisor.html', key: 'advisor' },
+    lab:        { href: 'research.html', key: 'research' },
     risk:       { href: 'more.html', key: 'more' },
     activity:   { href: 'more.html', key: 'more' },
     evaluation: { href: 'more.html', key: 'more' },
@@ -177,19 +178,19 @@
   function renderChrome(activeKey) {
     const open = openCount();
     const overflow = NAV.filter((n) => !n.tab);
-    const inOverflow = overflow.some((n) => n.key === activeKey);
+    const section = activeKey === 'approvals' ? 'dashboard' : ['research', 'lab'].includes(activeKey) ? 'advisor' : activeKey;
+    const inOverflow = overflow.some((n) => n.key === section);
 
     const tabs = NAV.filter((n) => n.tab).map((n) => {
-      const dot = n.key === 'approvals' && open ? '<span class="tabdot"></span>' : '';
+      const dot = n.key === 'dashboard' ? '<span id="home-badge" class="tabdot"' + (open ? '' : ' hidden') + '></span>' : '';
       return '<a class="tabitem" href="' + n.href + '"' +
-        (n.key === activeKey ? ' aria-current="page"' : '') +
+        (n.key === activeKey ? ' aria-current="page"' : n.key === section ? ' data-section-active="true"' : '') +
         ' data-od-id="tab-' + n.key + '">' + ICON[n.icon] + dot +
         '<span data-nav-label="' + n.key + '">' + t('nav.' + n.key) + '</span></a>';
     }).join('') +
       '<a class="tabitem" href="more.html" id="tab-more"' +
       (activeKey === 'more' ? ' aria-current="page"' : (inOverflow ? ' data-section-active="true"' : '')) +
       ' data-od-id="tab-more">' + ICON.more +
-      '<span id="more-badge" class="tabdot"' + (open ? '' : ' hidden') + '></span>' +
       '<span data-nav-label="more">' + t('nav.more') + '</span></a>';
 
     const parent = PARENT[activeKey];
@@ -213,7 +214,7 @@
 
 
   function paintNavStatus() {
-    const badge = document.getElementById('more-badge');
+    const badge = document.getElementById('home-badge');
     if (badge) badge.hidden = !openCount();
     const el = document.getElementById('nav-status');
     if (!el) return;
@@ -225,7 +226,7 @@
     if (signedOut) return;
     const s = systemStatus();
     const tone = s === 'READY' ? 'dot-ok' : (s === 'PAUSED' ? 'dot-warn' : 'dot-bad');
-    el.innerHTML = '<span class="dot ' + tone + '"></span><span>' + escapeHtml(code(s)) + '</span>';
+    setHTML(el, '<span class="dot ' + tone + '"></span><span>' + escapeHtml(code(s)) + '</span>');
     el.title = sysCopy(s);
   }
 
@@ -263,6 +264,7 @@
      words are never rewritten — translating them would be inventing them. */
   function explainError(raw) {
     if (!raw) return { text: t('ux.unavailable'), raw: null };
+    if (raw === 'network offline') return { text: t('ux.offline'), raw: null };
     if (raw === 'loading') return { text: t('ux.connecting'), raw: null };
     if (raw === 'login required') return { text: t('ux.notSignedIn'), raw: null };
     let text = String(raw);
@@ -334,7 +336,7 @@
     document.getElementById('sync-label').textContent = t(loading ? 'ux.connecting' : missing.length ? 'ux.syncGap' : 'ux.synced');
     document.getElementById('sync-dot').className = 'dot ' + (missing.length || !CT_API.authenticated || !CT_API.state.online ? 'dot-warn' : 'dot-ok');
     document.getElementById('sources-title').textContent = t('ux.sources');
-    document.getElementById('source-rows').innerHTML = rows.map(([key, item]) => {
+    setHTML(document.getElementById('source-rows'), rows.map(([key, item]) => {
       const live = CT_API.isLive(key);
       const why = live ? null : explainError(item.error);
       const canTouch = !live && key === 'portfolio' && CT_API.authenticated &&
@@ -353,7 +355,7 @@
           : '') +
         '</div><time>' +
         escapeHtml(item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—') + '</time></div>';
-    }).join('');
+    }).join(''));
   }
 
   /* Language lives in one place — the row on the Me page, which opens a
@@ -429,53 +431,9 @@
       try { paintNavStatus(); paintFoot(); paintConnection(); } catch (e) {}
       document.dispatchEvent(new CustomEvent('ct:data', { detail: {} }));
     });
-    wireChromeAutohide();
+    document.addEventListener('ct:connection', () => { paintConnection(); paintNavStatus(); });
     try { paintNavStatus(); paintFoot(); } catch (e) { /* chrome only */ }
     document.addEventListener('ct:pause-changed', paintNavStatus);
-  }
-
-  /* ─── chrome autohide ─────────────────────────────────────────────
-     Scrolling down hands the space to the content; stopping brings the bars
-     back. Scrolling up brings them back too — that is the gesture for "I
-     want out", and on a section page the back control lives in the header. */
-  function wireChromeAutohide() {
-    let last = Math.max(0, window.scrollY);
-    let away = false;
-    let idle = null;
-
-    const set = (next) => {
-      if (next === away) return;
-      away = next;
-      document.body.classList.toggle('chrome-away', next);
-    };
-
-    const onScroll = () => {
-      /* Chat view is a fixed-height flex column that never scrolls the window;
-         hiding its header would open a gap rather than free any space. The
-         class is applied after mount, so this is checked per scroll. */
-      if (document.body.classList.contains('chat-view')) { set(false); return; }
-
-      const y = Math.max(0, window.scrollY);
-      const delta = y - last;
-      /* Below this the movement is rubber-band or sub-pixel jitter, which would
-         otherwise flip the bars on every frame of an inertial scroll. `last` is
-         left alone so a slow scroll still accumulates to a turn. */
-      if (Math.abs(delta) < 4) return;
-      last = y;
-
-      clearTimeout(idle);
-      idle = setTimeout(() => set(false), 180);
-
-      if (y <= 24) set(false);        /* at the top there is nothing to gain */
-      else set(delta > 0);
-    };
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    /* A page that shrinks — a filter applied, a section collapsed — can leave
-       the bars hidden with no scroll left to bring them back. */
-    window.addEventListener('resize', () => {
-      if (document.documentElement.scrollHeight <= window.innerHeight + 24) set(false);
-    }, { passive: true });
   }
 
   /* ─── live(): bind a screen to the polling layer ──────────────────
@@ -529,7 +487,7 @@
     draw();
     if (!window.CT_API) return;
     document.addEventListener('ct:data', draw);
-    CT_API.start([...new Set([...keys, ...optionalKeys])]);
+    CT_API.start([...new Set([...keys, ...optionalKeys, 'proposals'])]);
     paintConnection();
   }
 
@@ -685,6 +643,12 @@
       '</span><div><p class="notice-label">' + t('home.notices') + ' · ' + String(index + 1).padStart(2, '0') +
       '</p><p>' + escapeHtml(message) + '</p></div></article>';
   }
+  const markup = new WeakMap();
+  function setHTML(element, html) {
+    if (!element || markup.get(element) === html) return;
+    markup.set(element, html);
+    element.innerHTML = html;
+  }
   const sheetOrigins = new Map();
   function openSheet(id) {
     const sheet = document.getElementById(id);
@@ -709,6 +673,6 @@
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,
-    mount, wireTabs, live, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
+    setHTML, mount, wireTabs, live, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
   };
 })();

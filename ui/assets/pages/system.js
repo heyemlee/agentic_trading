@@ -31,10 +31,10 @@
     renderOperations();
 
     document.getElementById('warn-count').textContent = C.t('common.open', { n: warnings.length });
-    document.getElementById('warning-list').innerHTML = warnings.length
+    C.setHTML(document.getElementById('warning-list'), warnings.length
       ? warnings.map(C.noticeCard).join('')
       : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
-        '</span><p>' + C.t('home.noNotices') + '</p></div>';
+        '</span><p>' + C.t('home.noNotices') + '</p></div>');
     paint();
   }
 
@@ -77,7 +77,7 @@
     const ops = D.operations;
     if (!ops) {
       $('op-state').textContent = C.t('sy.unknown');
-      $('op-list').innerHTML = '';
+      C.setHTML($('op-list'), '');
       $('op-disk').textContent = '';
       return;
     }
@@ -86,7 +86,7 @@
     const chip = $('op-state');
     chip.textContent = stale.length ? C.t('sy.opsLate', { n: stale.length }) : C.t('sy.opsOk');
     chip.className = 'chip' + (stale.length ? ' chip-warn' : ' chip-accent');
-    $('op-list').innerHTML = rows.map((row) => C.listRow({
+    C.setHTML($('op-list'), rows.map((row) => C.listRow({
       id: 'op-' + row.id,
       title: C.t('sy.op.' + row.id),
       sub: row.detail || '',
@@ -95,7 +95,7 @@
       note: !row.overdue ? C.t('sy.onTime')
             : row.age_minutes == null ? C.t('sy.neverRan')
             : C.t('sy.overdue', { d: C.duration(row.age_minutes) }),
-    })).join('');
+    })).join(''));
     const disk = ops.disk || {};
     $('op-disk').textContent = disk.free_gb == null ? ''
       : C.t('sy.disk', { f: disk.free_gb.toFixed(1), p: disk.free_pct.toFixed(0),

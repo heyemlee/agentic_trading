@@ -7,17 +7,17 @@
   function renderOrders() {
 
     const o = D.orders;
-    document.getElementById('tracked-body').innerHTML = (o.tracked_orders || []).map(x => C.listRow({
+    C.setHTML(document.getElementById('tracked-body'), (o.tracked_orders || []).map(x => C.listRow({
       title: x.symbol + ' · ' + C.code(x.status),
       sub: x.proposal_id + ' · ' + (x.reconciliation_error || (x.reconciled_at ? C.dateTime(x.reconciled_at) : 'Awaiting synchronization / 等待同步')),
       value: (x.filled_quantity || 0) + ' shares filled',
       note: C.bucket(x.bucket) + ' · ' + (x.venue_status || '—'),
-    })).join('') || '<p class="body-sm">No tracked orders / 暂无订单记录</p>';
+    })).join('') || '<p class="body-sm">No tracked orders / 暂无订单记录</p>');
     document.getElementById('fill-count').textContent = C.t('ac.recorded', { n: o.fills.length });
     document.getElementById('open-count').textContent = o.error
       ? C.t('ac.venueUnreachable') : C.t('ac.live', { n: o.open_orders.length });
 
-    document.getElementById('fills-body').innerHTML = o.fills.length
+    C.setHTML(document.getElementById('fills-body'), o.fills.length
       ? '<div class="list">' + o.fills.map((f) => C.listRow({
           title: f.symbol + ' · ' + f.side,
           sub: C.dateTime(f.at) + ' · ' + C.bucket(f.bucket),
@@ -25,9 +25,9 @@
           note: f.quantity + ' @ ' + C.usd(f.price),
         })).join('') + '</div>'
       : '<div class="empty" data-od-id="empty-fills">' +
-          '<p class="empty-title">' + C.t('ac.noFills') + '</p></div>';
+          '<p class="empty-title">' + C.t('ac.noFills') + '</p></div>');
 
-    document.getElementById('open-body').innerHTML = o.open_orders.length
+    C.setHTML(document.getElementById('open-body'), o.open_orders.length
       ? '<div class="list">' + o.open_orders.map((x) => C.listRow({
           title: x.symbol + ' · ' + x.side,
           sub: x.status,
@@ -38,7 +38,7 @@
         ? '<div class="empty" data-od-id="error-open">' +
             '<p class="empty-title">' + C.t('ac.venueError') + '</p><p>' + C.escapeHtml(o.error) + '</p></div>'
         : '<div class="empty" data-od-id="empty-open">' +
-            '<p class="empty-title">' + C.t('ac.noOpen') + '</p></div>';
+            '<p class="empty-title">' + C.t('ac.noOpen') + '</p></div>');
   }
 
   /* ── the audit journal ───────────────────────────────────────────
@@ -112,10 +112,10 @@
   }
 
   function renderFilters() {
-    document.getElementById('audit-filters').innerHTML = Object.keys(GROUPS).map((key) =>
+    C.setHTML(document.getElementById('audit-filters'), Object.keys(GROUPS).map((key) =>
       '<button class="chip' + (key === group ? ' chip-accent' : '') + '" type="button" ' +
         'data-group="' + key + '" data-od-id="audit-filter-' + key + '">' +
-        C.t('ac.filter.' + key) + '</button>').join('');
+        C.t('ac.filter.' + key) + '</button>').join(''));
     document.getElementById('audit-filters').querySelectorAll('[data-group]').forEach((chip) => {
       chip.addEventListener('click', () => {
         group = chip.getAttribute('data-group');

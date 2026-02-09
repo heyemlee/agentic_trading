@@ -16,16 +16,18 @@
 
 <main id="content" hidden data-i18n-title="home.title">
 
-  <!-- ── what the agent is doing ───────────────────────────────────── -->
-  <section class="section" style="padding-block:0;" data-od-id="agent">
+  <!-- ── waiting on you ────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="needs-you">
+    <div class="container" id="needs-you-slot"></div>
+  </section>
+
+  <!-- ── notices ───────────────────────────────────────────────────── -->
+  <section class="section" style="padding-block:0;" data-od-id="warnings" id="home-warnings" hidden>
     <div class="container">
-      <div class="agent-strip">
-        <span class="agent-dot" id="agent-dot"></span>
-        <div>
-          <p class="agent-state" id="agent-state">—</p>
-          <p class="agent-note" id="agent-note"></p>
-        </div>
-      </div>
+      <details class="home-notices">
+        <summary><span data-i18n="home.notices">Notices</span> <span class="chip chip-warn" id="warn-count">—</span></summary>
+        <div class="stack stack-3" id="warning-list"></div>
+      </details>
     </div>
   </section>
 
@@ -36,7 +38,8 @@
       <p class="figure figure-lg" style="margin-top:8px;" id="equity-value">—</p>
       <p class="body-sm body-muted" style="margin-top:4px;" id="equity-source">—</p>
 
-      <div class="row row-wrap" style="margin-top:12px;">
+      <p class="body-sm" id="home-drawdown"></p>
+      <div class="row row-wrap" style="margin-top:8px;">
         <span class="chip" id="chip-system">—</span>
         <span class="chip" id="chip-market">—</span>
         <span class="chip" id="chip-money">—</span>
@@ -44,7 +47,7 @@
 
       <div class="app-quick-actions">
         <a class="btn btn-green" href="advisor.html" data-i18n="app.ask">问问助手</a>
-        <a class="btn btn-secondary" href="advisor.html?view=holdings" data-i18n="app.positions">Robinhood 持仓</a>
+        <a class="btn btn-secondary" href="portfolio.html" data-i18n="nav.portfolio">资产</a>
       </div>
       <details class="app-disclosure">
       <summary data-i18n="app.details">账户明细</summary>
@@ -63,19 +66,17 @@
     </div>
   </section>
 
-  <!-- ── waiting on you ────────────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="needs-you">
-    <div class="container" id="needs-you-slot"></div>
-  </section>
-
-  <!-- ── buckets ───────────────────────────────────────────────────── -->
-  <section class="section" data-od-id="buckets">
+  <!-- ── what the agent is doing ───────────────────────────────────── -->
+  <section class="section" style="padding-block:0;" data-od-id="agent">
     <div class="container">
-      <div class="section-head">
-        <h2 data-i18n="home.buckets">Buckets</h2>
-        <a class="body-sm linkish" href="portfolio.html" data-i18n="common.details">Details</a>
-      </div>
-      <div class="list" id="bucket-list"></div>
+      <a class="agent-strip" id="agent-link" href="lab.html">
+        <span class="agent-dot" id="agent-dot"></span>
+        <div>
+          <p class="agent-state" id="agent-state">—</p>
+          <p class="agent-note" id="agent-note"></p>
+        </div>
+        <span class="body-sm" data-i18n="home.viewProcess">查看过程</span>
+      </a>
     </div>
   </section>
 
@@ -87,16 +88,6 @@
     </div>
   </section>
 
-  <!-- ── notices ───────────────────────────────────────────────────── -->
-  <section class="section" data-od-id="warnings">
-    <div class="container">
-      <div class="section-head">
-        <h2 data-i18n="home.notices">Notices</h2>
-        <span class="chip" id="warn-count">—</span>
-      </div>
-      <div class="stack stack-3" id="warning-list"></div>
-    </div>
-  </section>
 
 </main>
 

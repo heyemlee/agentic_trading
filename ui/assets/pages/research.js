@@ -21,7 +21,7 @@
     const runs = (D.research || []).filter((r) => C.showsBucket(r.bucket));
 
     /* ── confidence bars — filled encoding, real values only ─────────── */
-    document.getElementById('conf-chart').innerHTML = '<div class="stack stack-4">' +
+    C.setHTML(document.getElementById('conf-chart'), '<div class="stack stack-4">' +
       runs.map((r) =>
         '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '">' +
           '<div class="row-between" style="margin-bottom:6px;">' +
@@ -36,7 +36,7 @@
             '<span style="position:absolute;top:-3px;bottom:-3px;left:' + FLOOR +
               '%;width:2px;background:var(--fg);" aria-hidden="true"></span>' +
           '</div>' +
-        '</div>').join('') + '</div>';
+        '</div>').join('') + '</div>');
 
     /* ── run list ────────────────────────────────────────────────────── */
     function runList(rows) {
@@ -56,7 +56,7 @@
         note: C.dateOnly(r.trade_date),
       })).join('') + '</div>';
     }
-    document.getElementById('panel-runs-all').innerHTML = runList(runs);
+    C.setHTML(document.getElementById('panel-runs-all'), runList(runs));
     document.getElementById('panel-runs-notrade').innerHTML =
       runList(runs.filter((r) => r.final_action === 'NO_TRADE'));
     document.getElementById('panel-runs-proposal').innerHTML =
@@ -64,7 +64,7 @@
 
     /* Most recent decision — read from the record, not baked into markup. */
     const last = runs[0];
-    document.getElementById('recent-card').innerHTML = !last ? '' :
+    C.setHTML(document.getElementById('recent-card'), !last ? '' :
       '<div class="section-head">' +
         '<span class="chip chip-ink">' +
           (last.final_action ? C.escapeHtml(C.code(last.final_action)) : C.t('ac.incomplete')) + '</span>' +
@@ -84,7 +84,7 @@
           C.escapeHtml(last.llm_calls) + ' · ' + C.clock(last.elapsed_seconds) + '</dd></div>' +
         '<div class="kv-row"><dt>' + C.t('rs.proposal') + '</dt><dd>' +
           C.escapeHtml((last.proposal_id || C.t('common.none'))) + '</dd></div>' +
-      '</dl>';
+      '</dl>');
 
   }
 

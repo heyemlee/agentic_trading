@@ -47,7 +47,7 @@
     const lv = (C.SHOW_CONCEPTUAL ? D.risk.total : D.risk.micro_live) || {};
     document.getElementById('ladder-summary').textContent =
       C.t('rk.ladderSummary', { l: C.code(lv.level), d: C.pct(lv.drawdown_pct || 0) });
-    document.getElementById('ladder-cards').innerHTML = LADDERS.map(([key, label, kind]) => {
+    C.setHTML(document.getElementById('ladder-cards'), LADDERS.map(([key, label, kind]) => {
       const l = D.risk[key];
       const real = key === 'micro_live';
       return '<div class="card' + (real ? ' card-real' : '') + '" data-od-id="ladder-' + key + '">' +
@@ -63,7 +63,7 @@
             ? C.t('rk.latched')
           : C.t('rk.noReset', { d: C.dateOnly(l.updated) })) + '</p>' +
       '</div>';
-    }).join('');
+    }).join(''));
 
     /* ── gates ───────────────────────────────────────────────────────── */
     const gateList = (rows) => rows.length
@@ -73,7 +73,7 @@
 
     const checks = D.microLive.checks.slice().sort((a, b) =>
       (a.passed === b.passed) ? a.id.localeCompare(b.id) : (a.passed ? 1 : -1));
-    document.getElementById('panel-gates-all').innerHTML = gateList(checks);
+    C.setHTML(document.getElementById('panel-gates-all'), gateList(checks));
     document.getElementById('panel-gates-blocking').innerHTML =
       gateList(checks.filter((g) => D.microLive.blocking.includes(g.id)));
     document.getElementById('panel-gates-green').innerHTML =

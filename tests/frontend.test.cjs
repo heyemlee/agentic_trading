@@ -180,11 +180,11 @@ test('assistant safely renders sources and preserves new edits during a note sav
 test('assistant panels switch instantly without losing a draft', () => {
   const c = advisorPage(async () => ({}));
   assert.equal(c.element('panel-chat').hidden, false);
-  assert.equal(c.element('panel-holdings').hidden, true);
+  assert.equal(c.element('panel-discover').hidden, true);
   c.element('chat-input').value = 'Keep my question';
-  c.element('view-holdings').events.click();
+  c.element('view-discover').events.click();
   assert.equal(c.element('panel-chat').hidden, true);
-  assert.equal(c.element('panel-holdings').hidden, false);
+  assert.equal(c.element('panel-discover').hidden, false);
   assert.equal(c.element('panel-personal').hidden, true);
   c.element('view-chat').events.click();
   assert.equal(c.element('chat-input').value, 'Keep my question');
@@ -357,7 +357,7 @@ test('a current snapshot, and one already being refreshed elsewhere, are left al
                              { stale: true, snapshot: savedSnapshot,
                                jobs: [{ run_key: 'from_assistant', state: 'QUEUED', task: { kind: 'refresh' } }] });
   await flush();
-  assert.match(busy.element('broker-stamp').textContent, /ai.stale/);
+  assert.match(busy.element('broker-stamp').textContent, /ux.refreshing/);
 });
 
 /* The ledger fails closed once nothing has confirmed it for max_age_days, and the API then
@@ -584,8 +584,7 @@ test('the conceptual book comes back in full when the switch is on', () => {
   assert.ok(c.element('hwm-foot').textContent.includes('$3,000.00'));
   // the real-money account keeps its own row rather than being folded into the total
   assert.ok(c.element('account-list').innerHTML.includes('$100.00'));
-  const buckets = c.element('bucket-list').innerHTML;
-  assert.ok(buckets.includes('$2,500.00') && buckets.includes('$500.00'));
+  assert.equal(c.element('bucket-list').innerHTML, '', 'bucket detail belongs to Assets');
 });
 
 test('money paid in is shown as funding, not as a result', () => {
@@ -939,4 +938,85 @@ test('reports that name a different run are refused, not drawn on this office', 
   assert.equal(deskStates(c).market, 'waiting', 'no desk may show another run’s report');
   assert.doesNotMatch(c.element('#roster').innerHTML, /wrong run/);
   assert.equal(c.element('.lab-demo-note').hidden, false);
+});
+
+test('unchanged polls and clock ticks preserve the page; errors and new data notify it', async () => {
+  const c = context(); let value = [], fails = false, paints = 0;
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'csrf' })
+    : fails ? response({ detail: 'offline' }, 500) : response(value);
+  c.run('api.js'); c.document.addEventListener('ct:data', () => { paints++; });
+  c.CT_API.start(['proposals']); await flush();
+  paints = 0;
+  await c.CT_API.readOnce('proposals'); c.intervals.at(-1)();
+  assert.equal(paints, 0);
+  value = [{ proposal_id: 'new', status: 'WAITING_FOR_APPROVAL' }];
+  await c.CT_API.readOnce('proposals'); assert.equal(paints, 1);
+  fails = true; await c.CT_API.readOnce('proposals'); assert.equal(paints, 2);
+  assert.equal(c.CT_API.canAct(['proposals']), false);
+});
+
+test('network reconnect refreshes reads, never replays a write', async () => {
+  const c = context(); let reads = 0, posts = 0;
+  c.addEventListener = c.document.addEventListener.bind(c.document);
+  c.fetch = async (url, options) => {
+    if (options.method === 'POST') posts++;
+    if (url === '/auth/session') return response({ authenticated: true, csrf_token: 'csrf' });
+    reads++; return response([]);
+  };
+  c.run('api.js'); c.CT_API.start(['proposals']); await flush();
+  assert.equal(c.CT_API.canAct(['proposals']), true);
+  c.document.dispatchEvent({ type: 'offline' });
+  assert.equal(c.CT_API.canAct(['proposals']), false);
+  const before = reads;
+  c.document.dispatchEvent({ type: 'online' }); await flush();
+  assert.ok(reads > before); assert.equal(posts, 0);
+  assert.equal(c.CT_API.canAct(['proposals']), true);
+  c.document.hidden = true; const hiddenReads = reads;
+  c.intervals.forEach(fn => fn()); await flush(); assert.equal(reads, hiddenReads);
+  c.document.hidden = false; c.document.dispatchEvent({ type: 'visibilitychange' }); await flush();
+  assert.ok(reads > hiddenReads);
+});
+
+test('the selected second proposal remains valid when the queue refreshes', async () => {
+  const c = context(); const proposals = [{ proposal_id: 'A', version: 'a' }, { proposal_id: 'B', version: 'b' }];
+  c.CT.proposals = proposals;
+  c.fetch = async url => url === '/proposals' ? response(proposals) : response(proposals[1]);
+  c.run('api.js'); c.CT_API.selectProposal('B'); await flush();
+  assert.equal(c.CT.proposalDetail.proposal_id, 'B');
+  assert.equal(c.CT_API.isLive('proposalDetail'), true);
+  await c.CT_API.readOnce('proposals');
+  assert.equal(c.CT.proposalDetail.proposal_id, 'B');
+});
+
+test('unchanged account markup is not replaced when another resource updates', () => {
+  const c = portfolioPage(async () => ({}), { stale: false, snapshot: savedSnapshot, jobs: [] });
+  const account = c.element('broker-accounts'); let replacements = 0;
+  Object.defineProperty(account, 'innerHTML', { set() { replacements++; } });
+  c.render(); c.CT.health.checked_at = 'new time'; c.render();
+  assert.equal(replacements, 0);
+});
+
+test('home follows active research and clears stale account details when the ledger is withheld', () => {
+  const c = homePage(); c.CT_DEMO = false;
+  c.CT_API.watchRun = key => { c.CT_API.activeRun = key; };
+  c.CT.researchJobs = [{ run_key: '2026-09-15_VTI_test', state: 'RUNNING' }]; c.render();
+  assert.equal(c.CT_API.activeRun, '2026-09-15_VTI_test');
+  assert.match(c.element('agent-state').textContent, /agent.studying/);
+  c.CT.researchJobs = []; c.CT.portfolio = { accounts: {}, buckets: {}, errors: { micro_live: 'unconfirmed' } };
+  c.CT.proposals = []; c.render();
+  assert.equal(c.CT_API.activeRun, null);
+  assert.equal(c.element('hwm-delta').textContent, '—');
+  assert.match(c.element('needs-you-slot').innerHTML, /portfolio.html#ledger-notice/);
+});
+
+test('holdings research starts once with visible pending feedback', async () => {
+  let finish, posts = 0;
+  const c = portfolioPage(() => { posts++; return new Promise(resolve => { finish = resolve; }); },
+    { stale: false, jobs: [], snapshot: { ...savedSnapshot, accounts: [{ complete: true, positions: [{ symbol: 'VTI', quantity: 1 }] }] } });
+  const button = c.element('review-holdings');
+  const pending = button.events.click(); await button.events.click();
+  assert.equal(posts, 1); assert.equal(button.disabled, true);
+  assert.match(c.element('review-status').textContent, /ai.running/);
+  finish({ started: ['VTI'], deferred: [] }); await pending;
+  assert.equal(button.disabled, false); assert.match(c.element('review-status').textContent, /ai.batch/);
 });

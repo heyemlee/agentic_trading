@@ -3,7 +3,6 @@
   C.mount('dashboard');
 
   const $ = (id) => document.getElementById(id);
-  const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
 
   /* Runs on a hidden bucket stay out of the headline and the Latest list. */
   const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket));
@@ -31,10 +30,17 @@
       $('equity-label').textContent = C.t('home.noAccount');
       C.tickValue($('equity-value'), '—');
       $('equity-source').textContent = Object.values(D.portfolio.errors || {}).join('; ');
-      $('funding-kv').innerHTML = '';
-      $('account-list').innerHTML = '';
+      C.setHTML($('funding-kv'), '');
+      C.setHTML($('account-list'), '');
+      $('home-drawdown').textContent = '';
+      $('hwm-delta').textContent = '—';
+      $('hwm-foot').textContent = '';
+      $('hwm-fill').style.width = '0%';
+      $('hwm-mark').style.left = '0%';
+      $('hwm-track').setAttribute('aria-label', C.t('home.noAccount'));
       return;
     }
+    $('home-drawdown').textContent = C.t('home.drawdown', { p: C.pct(lead.drawdown_pct || 0) });
     const equity = lead.equity_usd;
     const hwm = lead.high_water_mark_usd;
 
@@ -68,10 +74,10 @@
 
     /* Money paid in is not money made. Both are shown so neither can be read
        as the other, and the return is stated against funding, not equity. */
-    $('funding-kv').innerHTML = fundingRows(lead);
+    C.setHTML($('funding-kv'), fundingRows(lead));
 
     /* Any further account keeps its own equity, funding and high-water mark. */
-    $('account-list').innerHTML = names.slice(1).map((key) => {
+    C.setHTML($('account-list'), names.slice(1).map((key) => {
       const a = A[key];
       return C.listRow({
         id: 'account-' + key,
@@ -83,7 +89,7 @@
           p: (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd),
           d: C.pct(a.drawdown_pct || 0) }),
       });
-    }).join('');
+    }).join(''));
   }
 
   function fundingRows(a) {
@@ -99,13 +105,16 @@
      last decision record say what it just did. The run_key format is
      {date}_{TICKER}_{hex} (service.py), so the ticker is readable from it. */
   function renderAgent() {
-    const run = D.researchRun;
+    const job = (D.researchJobs || []).find(j => ['QUEUED', 'RUNNING'].includes(j.state));
+    if (!window.CT_DEMO && CT_API.activeRun !== (job?.run_key || null)) CT_API.watchRun(job?.run_key || null);
+    const run = D.researchRun || job;
+    $('agent-link').href = 'lab.html' + (run?.run_key ? '?run=' + encodeURIComponent(run.run_key) : '');
     const waiting = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
     const last = visibleRuns()[0];
     const dot = $('agent-dot');
     let live = false, state, note;
 
-    if (run && run.state === 'RUNNING') {
+    if (run && ['QUEUED', 'RUNNING'].includes(run.state)) {
       live = true;
       state = C.t('agent.studying', { t: String(run.run_key).split('_')[1] || '—' });
       note = C.t('agent.studyingNote');
@@ -134,15 +143,18 @@
   /* ── status chips ────────────────────────────────────────────────── */
   function renderChips() {
     const s = C.systemStatus();
+    const normal = s === 'READY' && !(D.health.warnings || []).length && D.microLive?.preflight_ready !== false;
     const sys = $('chip-system');
-    sys.textContent = C.code(s);
+    sys.textContent = normal ? C.t('home.allNormal') : C.code(s);
     sys.className = 'chip' + (s === 'READY' ? '' : ' chip-warn');
     sys.title = C.sysCopy(s);
 
     const open = D.health.market.is_open;
     $('chip-market').textContent = C.t(open ? 'home.marketOpen' : 'home.marketClosed');
 
+    $('chip-market').hidden = normal;
     const money = $('chip-money');
+    money.hidden = normal;
     const on = D.health.micro_live_enabled;
     money.textContent = C.t(on ? 'home.moneyOn' : 'home.moneyOff');
     money.className = 'chip' + (on ? ' chip-accent' : '');
@@ -152,65 +164,19 @@
   function renderProposal() {
     const p = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
     if (!p) {
-      $('needs-you-slot').innerHTML =
-        '<div class="empty" data-od-id="empty-queue">' +
-          '<p class="empty-title">' + C.t('home.emptyQueue') + '</p>' +
-          '<p>' + C.t('home.emptyQueueBody') + '</p>' +
-        '</div>';
+      const failures = Object.values(D.portfolio.errors || {});
+      C.setHTML($('needs-you-slot'), failures.length
+        ? '<a class="btn btn-secondary" href="portfolio.html#ledger-notice">' + C.t('home.reviewLedger') + '</a>'
+        : (D.health.warnings || []).length ? ''
+        : '<p class="body-sm body-muted" data-od-id="empty-queue">' + C.t('home.emptyQueue') + '</p>');
       return;
     }
-    const rules = D.proposalDetail && D.proposalDetail.proposal_id === p.proposal_id
-      ? (D.proposalDetail.hard_risk || {}).rules : null;
-    const hardRisk = rules
-      ? rules.filter((r) => r.passed).length + '/' + rules.length
-      : '—';
-
     $('needs-you-slot').innerHTML =
-      '<div class="card' + (p.is_real_money ? ' card-real' : '') + '" data-od-id="proposal-card">' +
-        '<div class="row-between row-wrap" style="margin-bottom:16px;">' +
-          '<span class="chip' + (p.is_real_money ? ' chip-accent' : '') + '">' +
-            (p.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.bucket(p.bucket) + '</span>' +
-          '<span class="body-sm body-muted" id="fresh-chip">—</span>' +
-        '</div>' +
-        '<p class="eyebrow">' + C.t('home.waitingOnYou') + '</p>' +
-        '<h2 style="margin-top:6px;font-size:24px;">' + C.escapeHtml(C.code(p.action)) + ' ' +
-          C.usd(p.notional_usd) + ' of ' + C.escapeHtml(p.ticker) + '</h2>' +
-        '<div class="stat-row" style="margin-top:20px;">' +
-          '<div><p class="eyebrow">' + C.t('home.strength') + '</p><p class="figure figure-xs" style="margin-top:2px;">' +
-            C.escapeHtml(p.confidence) + '<span class="figure-unit">/100</span></p></div>' +
-          '<div><p class="eyebrow">' + C.t('home.reference') + '</p><p class="figure figure-xs" style="margin-top:2px;">' +
-            C.usd(p.reference_price) + '</p></div>' +
-          '<div><p class="eyebrow">' + C.t('home.hardRisk') + '</p><p class="figure figure-xs" style="margin-top:2px;">' +
-            hardRisk + '</p></div>' +
-        '</div>' +
-        '<div style="margin-top:20px;">' +
-          '<div class="row-between body-sm body-muted" style="margin-bottom:6px;">' +
-            '<span>' + C.t('home.freshness') + '</span><span class="num" id="fresh-left">—</span></div>' +
-          '<div class="meter-track"><div class="meter-fill is-accent" id="fresh-meter" style="width:0%"></div></div>' +
-        '</div>' +
-        '<a class="btn btn-green" href="approvals.html" style="margin-top:20px;" ' +
-          'data-od-id="cta-review-proposal">' + C.t('home.reviewCta') + '</a>' +
-      '</div>';
-    tickFreshness();
-  }
-
-  /* ── buckets, holdings-list style ────────────────────────────────── */
-  function renderBuckets() {
-    const B = D.portfolio.buckets;
-    $('bucket-list').innerHTML = order.filter((k) => B[k]).map((key) => {
-      const b = B[key];
-      const sleeves = Object.entries(b.sleeves_pct)
-        .map(([k, v]) => C.titleise(k) + ' ' + C.pct(v, 0)).join(' · ');
-      return C.listRow({
-        id: 'bucket-' + key,
-        href: 'portfolio.html',
-        title: C.bucket(key),
-        sub: b.is_real_money ? C.t('bucket.real', { venue: C.titleise(b.venue || '—') })
-                             : C.t('bucket.conceptual'),
-        value: C.usd(b.equity_usd),
-        note: C.t('home.positionsCash', { n: b.position_count, s: sleeves }),
-      });
-    }).join('');
+      '<a class="card' + (p.is_real_money ? ' card-real' : '') + ' home-approval" href="approvals.html" data-od-id="proposal-card">' +
+        '<span class="eyebrow">' + C.t('home.waitingOnYou') + ' · ' + C.openCount() + '</span>' +
+        '<strong>' + C.escapeHtml(C.code(p.action)) + ' ' + C.usd(p.notional_usd) + ' · ' + C.escapeHtml(p.ticker) + '</strong>' +
+        '<span class="body-sm">' + (p.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.bucket(p.bucket) + '</span>' +
+        '<span class="body-sm linkish">' + C.t('home.reviewCta') + '</span></a>';
   }
 
   /* ── latest ──────────────────────────────────────────────────────── */
@@ -250,43 +216,30 @@
       value: String(o.fills.length),
       note: C.t('home.fills'),
     }));
-    $('latest-list').innerHTML = rows.join('');
+    C.setHTML($('latest-list'), rows.join(''));
   }
 
   /* ── notices ─────────────────────────────────────────────────────── */
   function renderNotices() {
     const w = D.health.warnings || [];
+    $('home-warnings').hidden = !w.length;
     $('warn-count').textContent = C.t('common.open', { n: w.length });
-    $('warning-list').innerHTML = w.length
+    C.setHTML($('warning-list'), w.length
       ? w.map(C.noticeCard).join('')
       : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
-        '</span><p>' + C.t('home.noNotices') + '</p></div>';
+        '</span><p>' + C.t('home.noNotices') + '</p></div>');
   }
 
-  /* ── freshness ticks locally between polls, once a second ────────── */
-  function tickFreshness() {
-    const p = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
-    const left = $('fresh-left'), chip = $('fresh-chip'), meter = $('fresh-meter');
-    if (!p || !left || !meter) return;
-    const f = C.freshnessNow(p);
-    left.textContent = C.t('common.left', { d: C.duration(f.remaining) });
-    if (chip) chip.textContent = C.code(f.state);
-    meter.style.width = f.pctUsed.toFixed(2) + '%';
-    meter.className = 'meter-fill ' +
-      (f.state === 'EXPIRED' ? 'is-bad' : f.state === 'STALE' ? 'is-warn' : 'is-accent');
-  }
-  setInterval(tickFreshness, 1000);
   document.addEventListener('ct:pause-changed', () => { renderChips(); renderAgent(); });
 
   /* Poll only what this screen reads; render on first paint and every tick. */
-  C.live(['health', 'portfolio', 'risk', 'proposals', 'proposalDetail', 'microLive', 'research', 'orders', 'researchRun'],
+  C.live(['portfolio', 'proposals'],
     function render() {
       renderAgent();
       renderEquity();
       renderChips();
       renderProposal();
-      renderBuckets();
       renderLatest();
       renderNotices();
-    });
+    }, ['microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
 })();

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Portfolio · Agentic Trading</title>
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
@@ -18,10 +18,21 @@
 
   <section class="section pagehead" data-od-id="pagehead">
     <div class="container">
-      <h1 data-i18n="pf.title">Portfolio</h1>
+      <h1 data-i18n="pf.title">Assets</h1>
       <p class="body-muted" data-i18n="ux.brokerScope">Robinhood accounts · saved read-only snapshot</p>
-      <p id="broker-stamp" class="body-sm body-muted"></p>
+      <p id="broker-stamp" class="body-sm body-muted" role="status"></p>
+      <div class="advisor-actions row row-wrap" style="margin-block:12px;gap:8px;">
+        <a class="btn btn-secondary btn-sm" href="advisor.html?prompt=holdings-risk" data-i18n="pf.analyzeHoldings">分析我的持仓</a>
+        <button id="refresh-holdings" class="btn btn-secondary btn-sm" data-i18n="ai.refresh">刷新账户与候选</button>
+      </div>
       <div id="broker-accounts" class="stack stack-4"></div>
+      <details class="app-disclosure">
+        <summary data-i18n="ai.reviewAll">逐一研究我的持仓</summary>
+        <p class="body-sm body-muted" data-i18n="ai.coverage">覆盖所有 Robinhood 账户的股票与 ETF。其他资产暂不分析。每次完整研究计入每日额度。</p>
+        <button id="review-holdings" class="btn btn-secondary btn-sm" data-i18n="ai.reviewAll">逐一研究我的持仓</button>
+        <p id="review-status" class="body-sm" role="status"></p>
+        <a class="body-sm linkish" href="advisor.html?sheet=jobs" data-i18n="pf.reviewJobs">研究进度 / 取消</a>
+      </details>
     </div>
   </section>
   <section class="section"><div class="container">

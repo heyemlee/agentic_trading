@@ -215,18 +215,6 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
   .backlink > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
-/* ─── chrome autohide ────────────────────────────────────────────────
-   The bars give the page its space back while you move through it and come
-   back the moment you stop. Transform, not display: nothing reflows, and a
-   half-finished slide can reverse mid-flight. */
-.topnav, .tabbar { transition: transform var(--motion-base) var(--ease); }
-body.chrome-away { --chrome-offset: 0px; }
-body.chrome-away .topnav { transform: translateY(-100%); }
-/* The tab bar floats clear of the edge and casts a shadow, so it has further
-   to travel than its own height. */
-body.chrome-away .tabbar { transform: translateY(calc(100% + 28px)); }
-@media (prefers-reduced-motion: reduce) { .topnav, .tabbar { transition: none; } }
-
 /* ─── bottom tab bar — at every width, this is an app ───────────────── */
 body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
 .tabbar {
@@ -815,20 +803,20 @@ dialog.modal[open]::backdrop { animation: fade-in var(--motion-base) var(--ease)
    CSS approximation of the material, with opaque/low-motion fallbacks. */
 :root { --column: 600px; --text-hero: 46px; --tabbar-h: 64px; --glass: rgba(255,255,255,.84); }
 html { background: #f6f8f6; scroll-padding-bottom: 120px; }
-body { min-height: 100dvh; background: linear-gradient(160deg, #f3f8f0 0, #fff 420px); padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
+body { min-height: 100dvh; background: linear-gradient(160deg, #f3f8f0 0, #fff 420px); padding-bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom, 0px)); }
 button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 [hidden] { display: none !important; }
 .topnav { background: rgba(250,252,249,.86); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); border: 0; padding-top: env(safe-area-inset-top, 0px); }
 .topnav-inner { min-height: 62px; }
 .brand { font-size: 20px; }
 .brand-mark { width: 30px; height: 30px; box-shadow: inset 0 1px 1px #ffffff99; }
-.tabbar { left: 16px; right: 16px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); max-width: 560px; margin-inline: auto; padding: 6px; border-radius: 32px; border: 1px solid #fff; background: var(--glass); -webkit-backdrop-filter: blur(28px) saturate(175%); backdrop-filter: blur(28px) saturate(175%); box-shadow: 0 12px 40px #142a191a, 0 2px 6px #142a190a, inset 0 1px 2px #fff; }
+.tabbar { left: 0; right: 0; bottom: 0; padding: 4px max(12px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); border-radius: 0; border: 0; border-top: 1px solid var(--divider); background: var(--glass); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
 .tabbar-inner { gap: 4px; }
 .tabitem { min-height: 56px; border-radius: 26px; font-size: 11px; color: #555b56; transition: background 180ms, transform 180ms; }
 .tabitem[aria-current="page"], .tabitem[aria-expanded="true"], .tabitem[data-section-active="true"] { background: #e4efdf; color: #173e1b; box-shadow: inset 0 1px 2px #fff9; }
 .tabitem:active { transform: scale(.95); background: #dce8d780; }
 .tabitem svg { width: 23px; height: 23px; }
-.tabdot { background: var(--green-ink); }
+.tabdot { background: var(--danger); }
 .pagefoot { display: none; }
 #resource-status { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .figure-lg { font-size: clamp(36px, 9vw, 50px); letter-spacing: -.045em; }
@@ -951,3 +939,17 @@ html:has(dialog[open]) { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after, dialog::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.home-page [data-od-id="needs-you"] { padding-top: 12px; }
+.home-page .agent-strip { display: flex; align-items: center; gap: 12px; color: inherit; }
+.home-page .agent-strip > div { flex: 1; }
+.home-page .pagehead { padding-block: 12px; }
+.home-page .app-quick-actions { margin: 12px 0; }
+.assistant-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.assistant-shortcuts [aria-selected="true"] { background: var(--green-tint); color: var(--green-ink); }
+
+.home-approval { display: flex; flex-direction: column; gap: 6px; color: inherit; }
+.home-approval strong { font-size: 20px; }
+
+.home-notices > summary { min-height: 44px; align-content: center; cursor: pointer; color: var(--warn-ink); }
+.home-notices[open] > summary { margin-bottom: 12px; }

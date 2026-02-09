@@ -17,16 +17,16 @@ window.CT_API = (function () {
     pushDevices: { path: () => '/notifications/devices', ms: 120000 },
     authSessions: { path: () => '/auth/sessions', ms: 60000 },
     evaluation: { path: () => '/evaluation', ms: 300000 },
-    portfolio: { path: () => '/portfolio', ms: 60000 },
-    risk: { path: () => '/risk', ms: 60000 },
-    microLive: { path: () => '/micro-live', ms: 60000 },
-    proposals: { path: () => '/proposals', ms: 15000 },
+    portfolio: { path: () => '/portfolio', ms: 15000 },
+    risk: { path: () => '/risk', ms: 15000 },
+    microLive: { path: () => '/micro-live', ms: 15000 },
+    proposals: { path: () => '/proposals', ms: 5000 },
     orders: { path: () => '/orders', ms: 10000 },
-    research: { path: () => '/research?limit=20', ms: 60000 },
+    research: { path: () => '/research?limit=20', ms: 10000 },
     // The team and the analyst selection come from config/ and change about never,
     // so this is read once a session rather than polled like live state.
     labRoster: { path: () => '/research/roster', ms: 900000 },
-    researchJobs: { path: () => '/research/jobs?limit=20', ms: 10000 },
+    researchJobs: { path: () => '/research/jobs?limit=20', ms: 5000 },
     researchRun: { path: () => activeRun ? '/research/' + encodeURIComponent(activeRun) : null, ms: 5000 },
     proposalDetail: {
       ms: 15000,
@@ -51,11 +51,17 @@ window.CT_API = (function () {
     const item = state.resources[key];
     return !!(item && !item.error && item.lastOkAt && Date.now() - item.lastOkAt <= SOURCES[key].ms * 2);
   }
-  function announce() {
+  let connectionSignature = '';
+  function announce(changed = false) {
     state.online = !demo && wanted.length > 0 && isLive();
     Object.keys(SOURCES).forEach(key => { state.live[key] = isLive(key); });
     document.dispatchEvent(new CustomEvent('ct:connection', { detail: state }));
-    document.dispatchEvent(new CustomEvent('ct:data', { detail: state }));
+    const signature = JSON.stringify([state.authPending, auth.authenticated, state.live,
+      Object.entries(state.resources).map(([key, item]) => [key, item.error])]);
+    if (changed || signature !== connectionSignature) {
+      connectionSignature = signature;
+      document.dispatchEvent(new CustomEvent('ct:data', { detail: state }));
+    }
   }
   function unauthorized(clearDrafts = true) {
     if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
@@ -96,12 +102,13 @@ window.CT_API = (function () {
       return;
     }
     const pending = (async () => {
+      const previous = JSON.stringify(window.CT[key]);
       try {
         const data = await fetchJSON(path);
         // Never attach a late detail response to a newly selected proposal/run.
         if (src.path() !== path) return;
         if (key === 'proposalDetail') {
-          const current = (window.CT.proposals || [])[0];
+          const current = (window.CT.proposals || []).find(p => p.proposal_id === data.proposal_id);
           if (!current || data.proposal_id !== current.proposal_id || data.version !== current.version) {
             throw new Error('Proposal changed while its detail was loading. Refreshing the queue.');
           }
@@ -130,7 +137,7 @@ window.CT_API = (function () {
         state.resources[key] = { lastOkAt: Date.now(), error: null, path };
         state.lastOkAt = Date.now();
         if (key === 'proposals') {
-          const current = data[0];
+          const current = data.find(p => p.proposal_id === pickedProposal) || data[0];
           const detail = window.CT.proposalDetail;
           if (!current || detail && (detail.proposal_id !== current.proposal_id || detail.version !== current.version)) {
             window.CT.proposalDetail = null;
@@ -141,7 +148,7 @@ window.CT_API = (function () {
       } catch (error) {
         state.resources[key] = { ...(state.resources[key] || {}), error: error.message };
         state.lastError = error.message;
-      } finally { announce(); }
+      } finally { announce(previous !== JSON.stringify(window.CT[key])); }
     })();
     inFlight.set(key, pending);
     try { return await pending; }
@@ -171,10 +178,21 @@ window.CT_API = (function () {
       wanted.forEach(key => { if (key !== 'proposalDetail') readOnce(key); });
     });
     wanted.forEach(key => timers.push(setInterval(() => { if (!document.hidden) readOnce(key); }, SOURCES[key].ms)));
-    timers.push(setInterval(announce, 1000));
+    timers.push(setInterval(() => { if (!document.hidden) announce(); }, 1000));
+  }
+  async function reconnect() {
+    if (document.hidden || demo) return;
+    await loadSession();
+    wanted.forEach(readOnce);
   }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !demo) { loadSession(); wanted.forEach(readOnce); }
+    if (!document.hidden) reconnect();
+  });
+  window.addEventListener?.('online', reconnect);
+  window.addEventListener?.('pageshow', event => { if (event.persisted) reconnect(); });
+  window.addEventListener?.('offline', () => {
+    wanted.forEach(key => { state.resources[key] = { ...state.resources[key], error: 'network offline' }; });
+    announce();
   });
   async function post(path, body) {
     if (demo) return { blocked: true, reason: 'Demo mode cannot change state.' };

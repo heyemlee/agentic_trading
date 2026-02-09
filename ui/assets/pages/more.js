@@ -40,7 +40,7 @@
         '</button>').join('');
   }
 
-  document.getElementById('language-close').innerHTML = C.ICON.cross;
+  C.setHTML(document.getElementById('language-close'), C.ICON.cross);
 
   document.getElementById('more-language').addEventListener('click', () => {
     pending = window.I18N.lang;          /* always open on the current choice */

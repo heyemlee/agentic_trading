@@ -37,17 +37,17 @@
     $('ev-lead').textContent = percent(report.strategy_minus_benchmark_pct_points, true);
     $('ev-interpretation').textContent = C.t(report.conclusive ? 'evl.conclusive' : report.readable ? 'evl.readable' : 'evl.tooEarly');
 
-    $('ev-decisions').innerHTML = [
+    C.setHTML($('ev-decisions'), [
       C.listRow({ title: C.t('evl.researchRuns'), value: String(decisions.research_runs ?? 0), sub: C.t('evl.outcomes', { v: Object.entries(decisions.run_outcomes || {}).map(([k, v]) => k + ' ' + v).join(' · ') || '—' }) }),
       C.listRow({ title: C.t('evl.dataQuality'), value: percent(decisions.incomplete_data_rate_pct, false), sub: C.t('evl.llmCalls', { n: decisions.llm_calls ?? 0 }) }),
       C.listRow({ title: C.t('evl.execution'), value: C.t('evl.fills', { n: execution.fills ?? 0 }), sub: C.t('evl.traded', { v: C.usd(execution.traded_usd || 0) }) }),
-    ].join('');
+    ].join(''));
 
     const triggered = report.stop_rules_triggered || [];
-    $('ev-integrity').innerHTML = [
+    C.setHTML($('ev-integrity'), [
       C.listRow({ title: C.t('evl.config'), value: C.t(report.config_drifted ? 'evl.changed' : 'evl.unchanged') }),
       C.listRow({ title: C.t('evl.stopRules'), value: triggered.length ? C.t('evl.triggered', { n: triggered.length }) : C.t('evl.noneTriggered'), sub: triggered.join(' · ') }),
-    ].join('');
+    ].join(''));
     $('ev-caveat').textContent = report.caveat || '';
   }
 
@@ -55,5 +55,5 @@
   document.addEventListener('ct:data', refresh);
   document.addEventListener('ct:lang', render);
   render();
-  CT_API.start(['health', 'evaluation']);
+  CT_API.start(['health', 'evaluation', 'proposals']);
 })();

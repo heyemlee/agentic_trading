@@ -2,11 +2,12 @@
   const C = window.Console, D = C.D, API = window.CT_API;
   C.mount('portfolio');
 
-  /* The Robinhood block is a saved snapshot, written by an assistant refresh
-     job and never by this page's own reads. The only control that starts one
-     is on the assistant screen, so arriving here on a day-old snapshot used to
-     mean reading "refresh for current data" with nothing on the page to press.
-     Ask for one refresh per visit when what is saved has already gone stale.
+  let refreshing = false, refreshRequest = null;
+  let reviewing = false, reviewRequest = null, reviewStatus = '';
+
+  /* The Robinhood block is a saved snapshot, written by a refresh job, never
+     by this page's polling reads. Offer an explicit refresh beside its time,
+     and ask once per visit automatically when the saved snapshot is stale.
 
      A refresh is not free: it is a worker process out of the same concurrency
      pool as research runs, and it leaves a job and a log behind. So it is
@@ -17,18 +18,36 @@
   let armed = true, askedAt = 0, askedFor = null, askError = '';
   document.addEventListener('visibilitychange', () => { if (document.hidden) armed = true; });
 
-  async function askRefresh(saved) {
-    if (!armed || document.hidden || !API.writesEnabled || !API.isLive('advisor')) return;
-    if (!saved.stale || refreshJobs(saved).some(ACTIVE) || Date.now() - askedAt < 60000) return;
-    armed = false; askedAt = Date.now(); askError = '';
+  async function askRefresh(saved, manual = false) {
+    if (refreshing || (!armed && !manual) || document.hidden || !API.writesEnabled || !API.isLive('advisor')) return;
+    if (refreshJobs(saved).some(ACTIVE) || (!manual && (!saved.stale || Date.now() - askedAt < 60000))) return;
+    armed = false; askedAt = Date.now(); askError = ''; refreshing = true;
+    refreshRequest ||= crypto.randomUUID();
+    render();
     try {
       const job = await API.post('/advisor/jobs', {
-        kind: 'refresh', language: window.I18N.lang, request_id: crypto.randomUUID() });
+        kind: 'refresh', language: window.I18N.lang, request_id: refreshRequest });
       if (job.blocked) return;
-      askedFor = job.run_key;
+      askedFor = job.run_key; refreshRequest = null;
       await API.readOnce('advisor');
     } catch (error) { askError = error.message; }
+    finally { refreshing = false; render(); }
   }
+
+  document.getElementById('refresh-holdings').addEventListener('click', () => askRefresh(D.advisor || {}, true));
+  document.getElementById('review-holdings').addEventListener('click', async () => {
+    if (reviewing || document.getElementById('review-holdings').disabled) return;
+    reviewing = true; reviewRequest ||= crypto.randomUUID(); reviewStatus = C.t('ai.running'); render();
+    try {
+      const result = await API.post('/advisor/review', { request_id: reviewRequest, language: window.I18N.lang });
+      if (result.blocked) { reviewStatus = C.t('ai.demo'); return; }
+      reviewRequest = null;
+      reviewStatus = C.t('ai.batch', { started: result.started.length, deferred: result.deferred.length }) + ' ' +
+        result.deferred.map(d => d.symbol + ': ' + d.reason).join(' · ');
+      await API.readOnce('advisor');
+    } catch (error) { reviewStatus = C.t('ai.error', { error: error.message }); }
+    finally { reviewing = false; render(); }
+  });
 
   /* The strategy figures come from the ledgers, and a ledger fails closed once nothing
      has confirmed it for max_age_days. The API then answers with its buckets emptied and
@@ -56,18 +75,22 @@
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
     const live = API.isLive('advisor');
-    /* Only the refresh this page asked for speaks here. An older failure
-       belongs to whoever started it, on the screen they started it from. */
-    const mine = refreshJobs(saved).find((job) => job.run_key === askedFor);
+    /* Any active refresh affects this snapshot. Historical failures are shown
+       only for the refresh requested from this page. */
+    const mine = refreshJobs(saved).find(ACTIVE) || refreshJobs(saved).find((job) => job.run_key === askedFor);
+    document.getElementById('refresh-holdings').disabled = refreshing || !!(mine && ACTIVE(mine)) || !API.writesEnabled || !live;
+    document.getElementById('review-holdings').disabled = reviewing || !API.writesEnabled || !live || saved.stale ||
+      !(snapshot.accounts || []).some(a => a.complete && a.positions?.length);
+    document.getElementById('review-status').textContent = reviewStatus;
     document.getElementById('broker-stamp').textContent =
       askError ? C.t('ux.refreshFailed', { error: askError })
-      : mine && ACTIVE(mine) ? C.t('ux.refreshing')
+      : refreshing || mine && ACTIVE(mine) ? C.t('ux.refreshing')
       : mine && mine.state !== 'COMPLETE' ? C.t('ux.refreshFailed', { error: mine.error || C.code(mine.state) })
       : snapshot.fetched_at ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) })
       : C.t('ai.empty');
     askRefresh(saved);
     const money = value => value == null ? '—' : C.usd(value);
-    document.getElementById('broker-accounts').innerHTML = (snapshot.accounts || []).map(a =>
+    C.setHTML(document.getElementById('broker-accounts'), (snapshot.accounts || []).map(a =>
       '<article class="account-glass"><div class="section-head"><h2>' + C.escapeHtml(a.label) + '</h2><span class="chip">' + C.t('ai.readOnly') + '</span></div>' +
       '<p class="figure">' + money(a.equity_usd) + '</p><p class="body-sm body-muted">' + C.t('ai.cash') + ' ' + money(a.cash_usd) + '</p>' +
       (!a.complete ? '<p class="body-sm">' + C.t('ux.incompleteAccount') + '</p>' : '') +
@@ -76,7 +99,7 @@
         value: money(p.market_value_usd), note: p.unrealized_pct == null ? '—' : C.pct(p.unrealized_pct),
         href: 'research.html?ticker=' + encodeURIComponent(p.symbol) })).join('') +
       (!(a.positions || []).length && a.complete ? '<p class="body-sm">' + C.t('ai.noPositions') + '</p>' : '') + '</article>'
-    ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + C.escapeHtml(snapshot.errors.join(' · ')) + '</p>' : '');
+    ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + C.escapeHtml(snapshot.errors.join(' · ')) + '</p>' : ''));
 
     const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
     const B = D.portfolio.buckets;
@@ -115,7 +138,7 @@
           { d: C.dateOnly(D.portfolio.as_of) });
 
     /* ── per account: equity, funding, result, drawdown ──────────────── */
-    document.getElementById('account-cards').innerHTML = Object.keys(A)
+    C.setHTML(document.getElementById('account-cards'), Object.keys(A)
       .filter(C.showsAccount)
       .sort((a, b) => (a === 'conceptual' ? -1 : b === 'conceptual' ? 1 : a.localeCompare(b)))
       .map((key) => {
@@ -143,22 +166,22 @@
             kv(C.t('acct.hwm'), a.high_water_mark_usd == null ? '—' : C.usd(a.high_water_mark_usd)) +
             kv(C.t('acct.drawdown'), C.pct(a.drawdown_pct || 0) + ' · ' + C.code(a.ladder_level)) +
           '</dl></div>';
-      }).join('');
+      }).join(''));
 
     /* ── allocation ──────────────────────────────────────────────────── */
-    document.getElementById('alloc-bar').innerHTML = order.filter((k) => B[k]).map((k) =>
+    C.setHTML(document.getElementById('alloc-bar'), order.filter((k) => B[k]).map((k) =>
       '<span style="width:' + (total ? (B[k].equity_usd / total) * 100 : 0).toFixed(2) +
-      '%;background:' + SHADE[k] + ';"></span>').join('');
-    document.getElementById('alloc-legend').innerHTML = order.filter((k) => B[k]).map((k) =>
+      '%;background:' + SHADE[k] + ';"></span>').join(''));
+    C.setHTML(document.getElementById('alloc-legend'), order.filter((k) => B[k]).map((k) =>
       C.listRow({
         title: C.bucket(k),
         sub: C.t('acct.' + B[k].account),
         value: C.usd(B[k].equity_usd),
         note: C.t('pf.ofTotal', { p: C.pct(total ? (B[k].equity_usd / total) * 100 : 0) }),
-      })).join('');
+      })).join(''));
 
     /* ── bucket cards ────────────────────────────────────────────────── */
-    document.getElementById('bucket-cards').innerHTML = order.filter((k) => B[k]).map((key) => {
+    C.setHTML(document.getElementById('bucket-cards'), order.filter((k) => B[k]).map((key) => {
       const b = B[key];
       const real = b.is_real_money;
       const positions = b.positions.length
@@ -191,7 +214,7 @@
             '<div class="kv-row"><dt>' + C.escapeHtml(C.t('pf.sleeve', { k: C.titleise(k) })) + '</dt><dd>' + C.pct(v) + '</dd></div>').join('') +
         '</dl>' + positions +
       '</div>';
-    }).join('');
+    }).join(''));
   }
 
   C.live(['portfolio'], render, ['advisor']);

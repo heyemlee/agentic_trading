@@ -48,11 +48,10 @@
   document.querySelectorAll('[data-icon]').forEach((el) => {
     el.innerHTML = C.ICON[el.dataset.icon] || '';
   });
-  const views = ['chat', 'holdings', 'discover'];
+  const views = ['chat', 'discover'];
   function showView(view, focus = false) {
     if (!views.includes(view)) view = 'chat';
     document.body?.classList.toggle('chat-view', view === 'chat');
-    el('view-chat').parentElement?.style.setProperty('--segment-index', views.indexOf(view));
     for (const name of views) {
       el('panel-' + name).hidden = name !== view;
       el('view-' + name).setAttribute('aria-selected', String(name === view));
@@ -65,19 +64,21 @@
   for (const [index, name] of views.entries()) {
     el('view-' + name).addEventListener('click', () => showView(name));
     el('view-' + name).addEventListener('keydown', e => {
-      const next = e.key === 'ArrowRight' ? (index + 1) % 3 : e.key === 'ArrowLeft' ? (index + 2) % 3
-        : e.key === 'Home' ? 0 : e.key === 'End' ? 2 : null;
+      const next = e.key === 'ArrowRight' ? (index + 1) % views.length : e.key === 'ArrowLeft' ? (index + views.length - 1) % views.length
+        : e.key === 'Home' ? 0 : e.key === 'End' ? views.length - 1 : null;
       if (next !== null) { e.preventDefault(); showView(views[next], true); }
     });
   }
-  showView(new URLSearchParams(location.search).get('view'));
+  const params = new URLSearchParams(location.search);
+  let entryPromptPending = params.get('prompt') === 'holdings-risk';
+  if (params.get('view') === 'holdings') location.replace('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''));
+  showView(params.get('view'));
   if (window.visualViewport) {
     const fitKeyboard = () => document.body.style.setProperty('--app-height', window.visualViewport.height + 'px');
     window.visualViewport.addEventListener('resize', fitKeyboard);
     fitKeyboard();
   }
   const status = text => { el('advisor-status').textContent = text; };
-  const money = n => n == null ? '—' : C.usd(n);
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
   function researchButton(symbol, account) {
     return '<button class="btn btn-secondary btn-sm" data-research="' + h(symbol) + '"' +
@@ -86,14 +87,14 @@
   function paintMessages() {
     const log = el('chat-messages');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-    el('chat-messages').innerHTML = shownMessages.length ? shownMessages.map(m =>
+    paint('chat-messages', shownMessages.length ? shownMessages.map(m =>
       '<div class="chat-message ' + (m.role === 'user' ? 'user' : 'assistant') + '">' +
       '<p class="eyebrow">' + t(m.role === 'user' ? 'ai.you' : 'ai.assistant') + '</p>' +
       '<div class="md">' + C.md(m.content) + '</div>' +
       (m.research_candidates || []).map(c => '<div class="advisor-row"><div><strong>' + h(c.symbol) +
         '</strong><p class="body-sm">' + h(c.reason) + '</p></div>' + researchButton(c.symbol) + '</div>').join('') +
       (m.role === 'user' && m.state !== 'COMPLETE' ? '<p class="body-sm">' + h(C.code(m.state)) + '</p>' : '') + '</div>'
-    ).join('') : '<p class="body-muted">' + t('ai.noMessages') + '</p>';
+    ).join('') : '<p class="body-muted">' + t('ai.noMessages') + '</p>');
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
   async function loadConversation(signature) {
@@ -117,23 +118,12 @@
   }
   function render() {
     restoreSession();
+    if (entryPromptPending) {
+      if (!el('chat-input').value) el('chat-input').value = t('ai.askRisk');
+      remember(); entryPromptPending = false;
+    }
     const state = D.advisor || {}, snapshot = state.snapshot || {}, jobs = state.jobs || [];
-    el('snapshot-status').textContent = snapshot.fetched_at
-      ? t(state.stale ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) }) : t('ai.empty');
     const decisions = state.decisions || [];
-    el('observed-accounts').innerHTML = (snapshot.accounts || []).map(account =>
-      '<div style="margin-block:20px"><h3>' + h(account.label) + ' · ' + t('ai.readOnly') + '</h3>' +
-      '<p class="body-sm">' + t('ai.value') + ' ' + money(account.equity_usd) + ' · ' + t('ai.cash') + ' ' + money(account.cash_usd) + '</p>' +
-      (account.positions.length ? account.positions.map(p => {
-        const decision = decisions.find(d => d.ticker === p.symbol && d.account_id === account.id);
-        return '<div class="advisor-row"><div><strong>' + h(p.symbol) + '</strong> · ' + money(p.market_value_usd) +
-          '<p class="body-sm body-muted">' + h(p.quantity) + ' · ' + t('ai.cost') + ' ' + money(p.average_cost) +
-          (p.unrealized_pct == null ? '' : ' · ' + h(C.pct(p.unrealized_pct))) + '</p>' +
-          '<p class="body-sm">' + h(decision ? C.code(decision.action) : t('ai.notReviewed')) + '</p></div>' +
-          researchButton(p.symbol, account.id) + '</div>';
-      }).join('') : '<p class="body-sm">' + t(account.complete ? 'ai.noPositions' : 'ai.empty') + '</p>') + '</div>'
-    ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + h(t('ai.partial', { errors: snapshot.errors.join(' ') })) + '</p>' : '');
-    el('review-holdings').disabled = !A.writesEnabled || state.stale || !(snapshot.accounts || []).some(a => a.complete && a.positions.length);
     paint('candidate-list', (snapshot.candidates || []).map(c =>
       '<div class="advisor-row"><div><strong>' + h(c.symbol) + '</strong><p class="body-sm body-muted">' +
       h(c.sources.join(' · ')) + '</p></div>' + researchButton(c.symbol) + '</div>').join(''));
@@ -194,13 +184,14 @@
     const chatting = jobs.some(j => active(j) && j.task?.conversation_id === conversation);
     el('chat-send').disabled = busy || chatting || !A.writesEnabled;
     el('shortlist').disabled = busy || chatting || !A.writesEnabled;
+    document.querySelectorAll('[data-research], #symbol-form button').forEach(button => { button.disabled = busy || !A.writesEnabled; });
     const signature = conversation + JSON.stringify(jobs.filter(j => j.task?.conversation_id === conversation).map(j => [j.run_key, j.state]));
     if (signature !== conversationSignature) loadConversation(signature);
     if (window.CT_DEMO) { status(t('ai.demo')); paintMessages(); }
   }
   async function send(kind, extra = {}) {
     if (busy) return;
-    busy = true; el('chat-send').disabled = true;
+    busy = true; status(t('ai.running')); render();
     const payload = { kind, language: window.I18N.lang, conversation_id: conversation, ...extra };
     const fingerprint = JSON.stringify(payload);
     if (!pendingRequest || pendingRequest.fingerprint !== fingerprint) {
@@ -234,7 +225,6 @@
   el('chat-input').addEventListener('input', remember);
   el('ask-risk').addEventListener('click', () => { el('chat-input').value = t('ai.askRisk'); remember(); });
   el('ask-scenario').addEventListener('click', () => { el('chat-input').value = t('ai.askScenario'); remember(); });
-  el('refresh-holdings').addEventListener('click', () => send('refresh'));
   el('shortlist').addEventListener('click', () => { showView('chat'); send('shortlist', { message: t('ai.shortlistPrompt') }); });
   el('symbol-form').addEventListener('submit', e => {
     e.preventDefault(); send('analysis', { ticker: el('symbol-input').value.trim().toUpperCase() });
@@ -261,20 +251,6 @@
       await A.readOnce('advisor');
     } catch (err) { el('notes-save-status').textContent = t('ai.error', { error: err.message }); }
     finally { el('save-notes').disabled = false; }
-  });
-  let reviewRequest = null;
-  el('review-holdings').addEventListener('click', async () => {
-    if (busy) return;
-    busy = true; reviewRequest ||= crypto.randomUUID();
-    try {
-      const result = await A.post('/advisor/review', { request_id: reviewRequest, language: window.I18N.lang });
-      if (result.blocked) { status(t('ai.demo')); return; }
-      reviewRequest = null;
-      status(t('ai.batch', { started: result.started.length, deferred: result.deferred.length }) + ' ' +
-        result.deferred.map(d => d.symbol + ': ' + d.reason).join(' · '));
-      await A.readOnce('advisor');
-    } catch (err) { status(t('ai.error', { error: err.message })); }
-    finally { busy = false; render(); }
   });
   document.addEventListener('click', async e => {
     const choice = e.target.closest?.('[data-conversation]');
@@ -318,5 +294,6 @@
   /* The personal context has its own page now. Borrowing this one as a
      container left people on the Assistant after they closed the sheet, so
      the deep link is gone; the sheet stays for editing mid-conversation. */
+  if (params.get('sheet') === 'jobs') C.openSheet('jobs-sheet');
   C.live(['advisor'], render);
 })();
