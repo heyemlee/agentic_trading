@@ -13,8 +13,13 @@ execution-time revalidation, the Micro-Live capital boundary or the venue's own 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
+import json
 import logging
+import os
+import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -22,9 +27,10 @@ from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from starlette.datastructures import Headers
 
 from ..env import load_env
 from ..service import Service, ServiceConflict, ServiceError
@@ -110,6 +116,33 @@ app = FastAPI(
 )
 _service = Service("config")
 _auth = ConsoleAuth()
+#: Reads slower than this are logged by name; a page cannot show before its reads answer.
+_SLOW_MS = 400
+
+
+def _cache_policy(request: Request) -> str:
+    """How long a browser may keep a response, decided by what the response is.
+
+    Everything the API says about money, orders or the session is ``no-store``: a page must
+    never show an old price, an old drawdown level or an old proposal as if it were current.
+    The console's own files say nothing of the kind, and every response used to be no-store
+    all the same, so each tap on the tab bar downloaded a quarter of a megabyte of unchanged
+    script again. That is what made moving between screens slow.
+
+    A page is ``no-cache``: kept, but revalidated with the server on every visit, so a new
+    release is seen at once, a signed-out session still lands on the login screen, and with no
+    connection there is no page at all rather than a stale one. The scripts and stylesheets a
+    page names are stamped by :class:`ConsoleFiles` with the release they belong to, so a
+    stamped URL can be kept for a year without going stale: the next release's pages ask for
+    different URLs. An unstamped asset, one a script loads by itself, revalidates like a page.
+    The service worker and the manifest keep the policy they always had.
+    """
+    path = request.url.path
+    if path.startswith(("/ui/assets/", "/ui/icons/")):
+        return "max-age=31536000, immutable" if request.query_params.get("v") else "no-cache"
+    if path.startswith("/ui/") and path.endswith(("/", ".html")):
+        return "no-cache"
+    return "no-store"
 
 
 @app.middleware("http")
@@ -159,8 +192,15 @@ async def security_boundary(request: Request, call_next):
         response = JSONResponse({"detail": "invalid session or CSRF token"}, status_code=403)
     if response is None:
         request.state.identity = session.username if session else None
+        started = time.perf_counter()
         response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store"
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        # A screen that waits on one of these is what "the console is slow" turns out to mean,
+        # and nothing else records which read it was. One line, only past the threshold, so the
+        # log names the endpoint instead of leaving it to be guessed from the page.
+        if elapsed_ms >= _SLOW_MS:
+            logger.info("slow request: %s %s answered in %d ms", request.method, path, elapsed_ms)
+    response.headers["Cache-Control"] = _cache_policy(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -579,7 +619,69 @@ def main() -> None:
 # Same origin as the API, so no CORS middleware is needed and none is added:
 # this stays one local listener on 127.0.0.1 with nothing cross-site allowed.
 # Absent `ui/`, the API runs exactly as before.
+_ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
+
+
+class ConsoleFiles(StaticFiles):
+    """The console's files, with every page's asset references stamped by release.
+
+    Still no build step: the pages on disk name ``assets/console.js`` and nothing more, and
+    are rewritten on the way out so that the name carries the release it belongs to,
+    ``assets/console.js?v=8f0c…``, which is what lets :func:`_cache_policy` hand that URL to
+    the browser as immutable. In a release the stamp comes from ``RELEASE.json``; in a checkout
+    run by hand it is a digest of the asset files' sizes and modification times, so an edit
+    shows on the next load without anyone remembering to bump anything. A page carries an ETag
+    over its rewritten body, so a page that has not changed costs one round trip and no bytes.
+    """
+
+    def __init__(self, directory: Path):
+        super().__init__(directory=str(directory), html=True)
+        self.root = directory
+        self.release = directory.parent / "RELEASE.json"
+        self._release_stamp: str | None = None
+        self._pages: dict[str, tuple[tuple, bytes, str]] = {}
+
+    def stamp(self) -> str:
+        if self._release_stamp is None:
+            self._release_stamp = ""
+            if self.release.is_file():
+                try:
+                    name = str(json.loads(self.release.read_text())["name"])
+                    self._release_stamp = hashlib.sha256(name.encode()).hexdigest()[:12]
+                except (OSError, ValueError, KeyError, TypeError):
+                    logger.warning("unreadable %s; stamping console assets by file instead", self.release)
+        if self._release_stamp:
+            return self._release_stamp
+        digest = hashlib.sha256()
+        for folder in ("assets", "icons"):
+            for base, dirs, files in os.walk(self.root / folder):
+                dirs.sort()
+                for name in sorted(files):
+                    info = os.stat(os.path.join(base, name))
+                    digest.update(f"{base}/{name}:{info.st_mtime_ns}:{info.st_size}\n".encode())
+        return digest.hexdigest()[:12]
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        if status_code != 200 or not str(full_path).endswith(".html"):
+            return super().file_response(full_path, stat_result, scope, status_code)
+        key = (stat_result.st_mtime_ns, stat_result.st_size, self.stamp())
+        cached = self._pages.get(str(full_path))
+        if cached is None or cached[0] != key:
+            page = Path(full_path).read_text(encoding="utf-8")
+            body = _ASSET_REF.sub(lambda m: f"{m.group(1)}{m.group(2)}?v={key[2]}{m.group(3)}", page).encode()
+            cached = (key, body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+            self._pages[str(full_path)] = cached
+        _, body, etag = cached
+        headers = {"etag": etag}
+        offered = Headers(scope=scope).get("if-none-match", "")
+        if etag in [tag.strip().removeprefix("W/") for tag in offered.split(",")]:
+            return Response(status_code=304, headers=headers)
+        if scope["method"] == "HEAD":
+            return Response(b"", headers={**headers, "content-length": str(len(body))}, media_type="text/html")
+        return Response(body, headers=headers, media_type="text/html")
+
+
 _UI_DIR = Path(__file__).resolve().parents[2] / "ui"
 if _UI_DIR.is_dir():
-    app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
+    app.mount("/ui", ConsoleFiles(_UI_DIR), name="ui")
     logger.info("console mounted at /ui from %s", _UI_DIR)

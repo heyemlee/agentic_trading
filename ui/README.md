@@ -39,6 +39,16 @@ requests until credentials are configured. All API calls use the page's origin.
 See [the setup and recovery guide](../docs/CONSOLE_SETUP_AND_RECOVERY.md) for the
 session model, HTTPS settings and order recovery.
 
+Moving between screens costs one request. Each page is served `no-cache`, so the
+browser asks the server every time and gets a bodiless 304 when nothing changed;
+the scripts and stylesheets a page names are rewritten on the way out to carry the
+release they belong to (`assets/console.js?v=8f0c…`) and are served immutable, so
+they are fetched once per release and never again. The pages on disk stay plain —
+write `assets/console.js`, never a hand-made `?v=` — and a checkout run by hand
+stamps by file modification time, so an edit shows on the next load. Nothing the
+API answers is ever cached, and no screen opens offline: see `_cache_policy` and
+`ConsoleFiles` in `agentic_trading/api/app.py`.
+
 Use `/ui/index.html?demo=1` for a public, read-only demo. Demo navigation preserves
 this flag, shows a permanent banner, and makes **no API requests**. Live pages
 start empty and never fall back to fixtures.

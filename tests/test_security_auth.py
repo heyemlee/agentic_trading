@@ -1,4 +1,5 @@
 """Exercise the HTTP security boundary without a broker or model connection."""
+import re
 import time
 from importlib import import_module
 from types import SimpleNamespace
@@ -57,8 +58,101 @@ def test_login_cookie_logout_and_headers(console_auth):
     assert client.get('/portfolio').status_code == 401
     ui = client.get('/ui/login.html')
     assert "script-src 'self';" in ui.headers['content-security-policy']
-    assert ui.headers['cache-control'] == 'no-store'
+    # Revalidated on every visit, never shown from a cache unasked: see _cache_policy.
+    assert ui.headers['cache-control'] == 'no-cache'
     assert ui.headers['x-frame-options'] == 'DENY'
+
+
+def test_console_pages_revalidate_and_their_assets_are_stamped(console_auth):
+    """A tap on the tab bar must not download the console again.
+
+    Every response used to be no-store, so each screen change re-fetched a quarter of a
+    megabyte of unchanged script. The pages still go back to the server every time, because a
+    new release or a signed-out session has to be seen at once, but a page that has not changed
+    is answered with 304 and no body, and the assets it names carry the release stamp, so the
+    browser keeps them without asking until a release names different ones. What the API says
+    about money and sessions stays no-store.
+    """
+    client = TestClient(app, base_url='https://testserver')
+    page = client.get('/ui/login.html')
+    assert page.status_code == 200
+    assert page.headers['cache-control'] == 'no-cache'
+    stamps = set(re.findall(r'(?:src|href)="(?:assets|icons)/[^"?]+\?v=([0-9a-f]+)"', page.text))
+    assert len(stamps) == 1, 'every asset a page names carries the one release stamp'
+    stamp = stamps.pop()
+    assert 'src="assets/i18n.js?v=' + stamp + '"' in page.text
+    assert 'href="assets/console.css?v=' + stamp + '"' in page.text
+    assert not re.search(r'(?:src|href)="(?:assets|icons)/[^"?]+"', page.text), 'an asset was left unstamped'
+
+    unchanged = client.get('/ui/login.html', headers={'If-None-Match': page.headers['etag']})
+    assert unchanged.status_code == 304
+    assert not unchanged.content
+    head = client.head('/ui/login.html')
+    assert head.status_code == 200 and not head.content
+    assert head.headers['etag'] == page.headers['etag']
+
+    stamped = client.get('/ui/assets/console.js?v=' + stamp)
+    assert stamped.status_code == 200
+    assert stamped.headers['cache-control'] == 'max-age=31536000, immutable'
+    assert client.get('/ui/assets/console.js').headers['cache-control'] == 'no-cache'
+    assert client.get('/ui/icons/icon-192.png?v=' + stamp).headers['cache-control'] == 'max-age=31536000, immutable'
+    assert client.get('/ui/sw.js').headers['cache-control'] == 'no-store'
+    assert client.get('/ui/manifest.webmanifest').headers['cache-control'] == 'no-store'
+    assert client.get('/auth/session').headers['cache-control'] == 'no-store'
+    # The directory index is a page like any other, and demo pages are public.
+    index = client.get('/ui/?demo=1')
+    assert index.status_code == 200 and index.headers['cache-control'] == 'no-cache'
+    assert 'src="assets/console.js?v=' + stamp + '"' in index.text
+
+
+def test_a_slow_read_is_named_in_the_log(auth_client, monkeypatch, caplog):
+    """The console cannot show a screen before its reads answer, so a slow one must be findable."""
+    import logging
+
+    module = import_module('agentic_trading.api.app')
+    monkeypatch.setattr(module, '_SLOW_MS', 20)
+    monkeypatch.setattr(module, '_service', SimpleNamespace(
+        operations=lambda: time.sleep(0.05) or {}, notification_status=dict))
+    with caplog.at_level(logging.INFO, logger='agentic_trading.api.app'):
+        assert auth_client.get('/system/operations').status_code == 200
+        assert auth_client.get('/system/notifications').status_code == 200
+    slow = [record.getMessage() for record in caplog.records if 'slow request' in record.getMessage()]
+    assert len(slow) == 1 and 'GET /system/operations answered in' in slow[0]
+
+
+def test_console_asset_stamp_follows_the_release_and_otherwise_the_files(tmp_path):
+    """In a release the stamp is the release; in a checkout it moves when a file does."""
+    from fastapi import FastAPI
+
+    from agentic_trading.api.app import ConsoleFiles
+
+    ui = tmp_path / 'ui'
+    (ui / 'assets').mkdir(parents=True)
+    (ui / 'icons').mkdir()
+    (ui / 'assets' / 'console.js').write_text('1')
+    (ui / 'page.html').write_text('<link rel="stylesheet" href="assets/console.css?v=old" />'
+                                  '<script src="assets/console.js"></script><a href="index.html">x</a>')
+    checkout = ConsoleFiles(ui)
+    first = checkout.stamp()
+    assert checkout.stamp() == first
+    (ui / 'assets' / 'console.js').write_text('22')
+    assert checkout.stamp() != first, 'an edited asset must reach the browser on the next load'
+
+    (tmp_path / 'RELEASE.json').write_text('{"name": "20260916T070731Z-0c1edee"}')
+    release = ConsoleFiles(ui)
+    assert release.stamp() == release.stamp()
+    assert release.stamp() not in (first, checkout.stamp())
+    (ui / 'assets' / 'console.js').write_text('333')
+    assert release.stamp() == release.stamp(), 'a release is immutable, so its stamp is too'
+
+    probe = FastAPI()
+    probe.mount('/ui', release)
+    with TestClient(probe) as client:
+        body = client.get('/ui/page.html').text
+        assert 'href="assets/console.css?v=' + release.stamp() + '"' in body
+        assert 'src="assets/console.js?v=' + release.stamp() + '"' in body
+        assert 'v=old' not in body
+        assert 'href="index.html"' in body, 'navigation is not an asset and is left alone'
 
 
 @pytest.mark.parametrize('password', [
