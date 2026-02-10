@@ -292,10 +292,13 @@
     const rows = Object.entries(CT_API.state.resources).filter(([key]) => CT_API.SOURCES[key].path());
     const missing = rows.filter(([key]) => !CT_API.isLive(key));
     const loading = CT_API.state.authPending || (CT_API.authenticated && missing.length && missing.every(([, item]) => item.error === 'loading'));
-    if (loading) {
+    if (CT_API.state.authError && !CT_API.state.authPending) {
+      bar.textContent = t('ux.sessionUnavailable');
+    } else if (loading) {
       bar.className = 'conn-bar is-loading';
-      bar.textContent = t('ux.connecting');
-    } else if (!CT_API.authenticated) {
+      bar.textContent = t('common.loading');
+      bar.hidden = document.getElementById('content')?.hidden === true;
+    } else if (CT_API.state.authChecked && !CT_API.authenticated) {
       /* Being signed out is an ordinary state, not a fault — so this reads
          neutral, and carries the way in with this page as the return address. */
       bar.className = 'conn-bar';
@@ -365,6 +368,13 @@
 
   function mount(activeKey) {
     document.addEventListener('click', async event => {
+      const retry = event.target.closest?.('[data-action="retry-load"]');
+      if (retry) {
+        if (retry.disabled) return;
+        retry.disabled = true;
+        try { await CT_API.refresh(); } finally { retry.disabled = false; }
+        return;
+      }
       const touch = event.target.closest?.('[data-action="touch-portfolio"]');
       if (touch) {
         if (touch.disabled) return;
@@ -440,54 +450,65 @@
      Pass the CT keys this screen reads and a render function. render()
      waits for initial live data (or explicit demo fixtures) and runs again
      after each resource update. */
-  /* With no data the page body stays hidden, which used to leave a blank
-     screen below the bar. Say why instead. The action stays in the bar — one
-     way in, not two. */
-  /* Why this page has nothing to show — or null while it may still arrive.
-     Being told something is wrong and then handed a blank screen is the same
-     dead end whether the cause is a sign-in or a stale read. */
-  function blankReason() {
+  /* Unknown authentication is a loading state, never evidence of a logout.
+     Keep a named page skeleton on screen until its own data is available. */
+  function blankReason(keys) {
     if (window.CT_DEMO || !window.CT_API) return null;
-    if (!CT_API.authenticated) return { icon: ICON.lock, text: t('ux.signedOutBody') };
+    if (CT_API.state.authChecked && !CT_API.authenticated && !CT_API.state.authPending) {
+      return { icon: ICON.lock, text: t('ux.signedOutBody') };
+    }
+    if (CT_API.state.authError && !CT_API.state.authPending) {
+      return { icon: ICON.info, text: t('ux.sessionUnavailable'), retry: true };
+    }
     const broken = Object.entries(CT_API.state.resources)
-      .filter(([key, item]) => CT_API.SOURCES[key].path() && !CT_API.isLive(key) &&
+      .filter(([key, item]) => keys.includes(key) && CT_API.SOURCES[key].path() && !CT_API.isLive(key) &&
                                item.error && item.error !== 'loading');
-    /* Still in flight: the bar already says "connecting", so say nothing. */
-    if (!broken.length) return null;
+    if (!broken.length || CT_API.state.authPending) return { loading: true, text: t('ux.loadingPage') };
     return { icon: ICON.info,
-             text: t('ux.blockedBody', { names: broken.map(([key]) => sourceName(key)).join(' · ') }) };
+             text: t('ux.blockedBody', { names: broken.map(([key]) => sourceName(key)).join(' · ') }), retry: true };
   }
 
-  function paintBlankState(show) {
-    const reason = show ? blankReason() : null;
+  function paintBlankState(show, keys) {
+    const reason = show ? blankReason(keys) : null;
     let block = document.getElementById('blank-state');
     if (!reason) { if (block) block.remove(); return; }
     if (!block) {
       block = document.createElement('div');
       block.id = 'blank-state';
-      block.className = 'blank-state';
-      block.innerHTML = '<span class="blank-mark" id="blank-mark" aria-hidden="true"></span>' +
-        '<p id="blank-copy"></p>';
-      (document.getElementById('resource-status') ||
-       document.getElementById('conn-bar') || document.body).after(block);
+      document.getElementById('content').before(block);
     }
-    document.getElementById('blank-mark').innerHTML = reason.icon;
-    document.getElementById('blank-copy').textContent = reason.text;
+    const title = t(document.getElementById('content').dataset.i18nTitle || 'common.loading');
+    block.className = reason.loading ? 'page-loading container' : 'blank-state';
+    block.setAttribute('aria-busy', String(!!reason.loading));
+    setHTML(block, reason.loading
+      ? '<h1>' + escapeHtml(title) + '</h1><p role="status">' + escapeHtml(reason.text) + '</p>' +
+        '<div class="page-skeleton" aria-hidden="true"><span></span><span></span><div></div><div></div></div>'
+      : '<span class="blank-mark" aria-hidden="true">' + reason.icon + '</span>' +
+        '<p role="status">' + escapeHtml(reason.text) + '</p>' +
+        (reason.retry ? '<button class="btn btn-secondary btn-sm" data-action="retry-load">' + escapeHtml(t('ux.retryLoad')) + '</button>' : ''));
   }
 
   function live(keys, render, optionalKeys = []) {
-    keys = [...new Set(['health', ...keys])];
+    keys = [...new Set(keys)];
+    let displayed = false;
     const draw = () => {
-      const loaded = CT_API.loaded(keys);
+      const signedOut = CT_API.state.authChecked && !CT_API.authenticated && !CT_API.state.authPending;
+      if (signedOut) displayed = false;
+      // First render needs the verified owner (e.g. to restore the right chat draft).
+      // A later connectivity problem should retain content already on screen.
+      const loaded = CT_API.loaded(keys) && !signedOut &&
+        (window.CT_DEMO || CT_API.authenticated || displayed || !keys.length);
+      if (loaded) displayed = true;
       document.getElementById('content').hidden = !loaded;
-      paintBlankState(!loaded);
+      document.getElementById('content').setAttribute('aria-busy', String(!loaded));
+      paintBlankState(!loaded, keys);
       if (loaded) { try { render(); } catch (e) { console.error('[console] render failed', e); } }
       paintNavStatus(); paintFoot(); paintConnection();
     };
     draw();
     if (!window.CT_API) return;
     document.addEventListener('ct:data', draw);
-    CT_API.start([...new Set([...keys, ...optionalKeys, 'proposals'])]);
+    CT_API.start([...new Set(['health', ...keys, ...optionalKeys, 'proposals'])]);
     paintConnection();
   }
 

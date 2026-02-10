@@ -17,6 +17,7 @@
 
     const signedIn = CT_API.authenticated;
     const session = document.getElementById('more-session');
+    session.hidden = !window.CT_DEMO && !signedIn && (!CT_API.state.authChecked || CT_API.state.authPending);
     session.href = signedIn ? 'notifications.html' : 'login.html?next=more.html';
     document.getElementById('more-session-label').textContent = C.t(signedIn ? 'more.account' : 'more.signIn');
     document.getElementById('more-session-hint').textContent = C.t(signedIn ? 'more.accountHint' : 'more.sessionHint');

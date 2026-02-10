@@ -274,6 +274,13 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   border-radius: 50%; background: var(--surface); color: var(--muted); }
 .blank-state .blank-mark svg { width: 20px; height: 20px; }
 .blank-state p { margin: 0; font-size: var(--text-sm); }
+.page-loading { padding-block: 24px; }
+.page-loading > p { color: var(--muted); margin-top: 8px; font-size: var(--text-sm); }
+.page-skeleton { display: grid; gap: 16px; margin-top: 28px; }
+.page-skeleton > * { display: block; border-radius: 12px; background: var(--surface-2); }
+.page-skeleton > span { width: 45%; height: 20px; }
+.page-skeleton > span + span { width: 65%; height: 36px; margin-bottom: 12px; }
+.page-skeleton > div { height: 96px; }
 
 /* ─── the debate table on the sign-in screen ─────────────────────────
    pixel-office.js draws the whole 320x296 room; only the debate table is

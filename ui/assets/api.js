@@ -41,9 +41,11 @@ window.CT_API = (function () {
       },
     },
   };
-  const state = { online: null, demo, authPending: !demo, resources: {}, live: {}, lastOkAt: null, lastError: null };
+  const state = { online: null, demo, authPending: !demo, authChecked: false, authError: null,
+    resources: {}, live: {}, lastOkAt: null, lastError: null };
   const timers = [];
   const inFlight = new Map();
+  let sessionRequest = null, authEpoch = 0;
 
   function isLive(key) {
     if (demo) return false;
@@ -56,7 +58,7 @@ window.CT_API = (function () {
     state.online = !demo && wanted.length > 0 && isLive();
     Object.keys(SOURCES).forEach(key => { state.live[key] = isLive(key); });
     document.dispatchEvent(new CustomEvent('ct:connection', { detail: state }));
-    const signature = JSON.stringify([state.authPending, auth.authenticated, state.live,
+    const signature = JSON.stringify([state.authPending, state.authChecked, state.authError, auth.authenticated, state.live,
       Object.entries(state.resources).map(([key, item]) => [key, item.error])]);
     if (changed || signature !== connectionSignature) {
       connectionSignature = signature;
@@ -64,6 +66,8 @@ window.CT_API = (function () {
     }
   }
   function unauthorized(clearDrafts = true) {
+    authEpoch++;
+    state.authChecked = true; state.authPending = false; state.authError = null;
     if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
     auth = { authenticated: false, csrf_token: null };
     Object.keys(state.resources).forEach(key => { state.resources[key].error = 'login required'; });
@@ -79,7 +83,7 @@ window.CT_API = (function () {
         signal: ctrl.signal, headers: { Accept: 'application/json', ...(options.headers || {}) } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (res.status === 401 || res.status === 503 && path === '/auth/session') unauthorized();
+        if (res.status === 401) unauthorized();
         throw new Error(typeof body.detail === 'string' ? body.detail : res.status + ' ' + res.statusText);
       }
       return body;
@@ -160,13 +164,31 @@ window.CT_API = (function () {
   function stop() { while (timers.length) clearInterval(timers.pop()); }
   async function loadSession() {
     if (demo) return;
+    if (sessionRequest) return sessionRequest;
+    const epoch = authEpoch;
     state.authPending = true;
-    try {
-      auth = await fetchJSON('/auth/session');
-      if (!auth.authenticated) unauthorized();
-    } catch (e) { unauthorized(false); }
-    state.authPending = false;
-    document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
+    state.authError = null;
+    announce();
+    sessionRequest = (async () => {
+      try {
+        const session = await fetchJSON('/auth/session');
+        // A concurrent 401 or logout takes precedence over this older request.
+        if (epoch !== authEpoch) return;
+        auth = session;
+        state.authChecked = true;
+        if (!auth.authenticated) unauthorized();
+      } catch (error) {
+        if (epoch !== authEpoch) return;
+        auth = { authenticated: false, csrf_token: null };
+        state.authChecked = false;
+        state.authError = error.message;
+      } finally {
+        state.authPending = false;
+        document.dispatchEvent(new CustomEvent('ct:auth', { detail: auth }));
+        announce();
+      }
+    })();
+    try { await sessionRequest; } finally { sessionRequest = null; }
   }
   function start(keys) {
     stop();
@@ -174,16 +196,21 @@ window.CT_API = (function () {
     wanted.forEach(key => { state.resources[key] ||= { lastOkAt: null, error: 'loading' }; });
     if (wanted.includes('proposalDetail') && !wanted.includes('proposals')) wanted.push('proposals');
     if (demo) { announce(); return; }
-    loadSession().then(() => {
-      wanted.forEach(key => { if (key !== 'proposalDetail') readOnce(key); });
-    });
-    wanted.forEach(key => timers.push(setInterval(() => { if (!document.hidden) readOnce(key); }, SOURCES[key].ms)));
+    loadSession();
+    // All reads already carry the HttpOnly cookie and are authorized by the server.
+    // Waiting for the CSRF/session response only adds latency to a page navigation.
+    wanted.forEach(key => { if (key !== 'proposalDetail') readOnce(key); });
+    wanted.forEach(key => timers.push(setInterval(() => {
+      if (!document.hidden) {
+        if (state.authError) loadSession();
+        readOnce(key);
+      }
+    }, SOURCES[key].ms)));
     timers.push(setInterval(() => { if (!document.hidden) announce(); }, 1000));
   }
   async function reconnect() {
     if (document.hidden || demo) return;
-    await loadSession();
-    wanted.forEach(readOnce);
+    await Promise.all([loadSession(), ...wanted.map(readOnce)]);
   }
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) reconnect();
@@ -196,11 +223,11 @@ window.CT_API = (function () {
   });
   async function post(path, body) {
     if (demo) return { blocked: true, reason: 'Demo mode cannot change state.' };
-    if (!auth.authenticated || !auth.csrf_token) throw new Error('Sign in before performing this action.');
+    if (state.authPending || !auth.authenticated || !auth.csrf_token) throw new Error('Sign in before performing this action.');
     const result = await request(path, { method: 'POST', headers: {
       'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': auth.csrf_token,
     }, body: JSON.stringify(body || {}) }, 60000);
-    if (path === '/auth/logout') unauthorized();
+    if (path === '/auth/logout') { unauthorized(); announce(); }
     return result;
   }
   /* Which of several waiting proposals is on screen. Mirrors watchRun: the
@@ -224,13 +251,13 @@ window.CT_API = (function () {
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, isLive,
+  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, isLive, refresh: reconnect,
     get activeRun() { return activeRun; },
     get pickedProposal() { return pickedProposal; },
-    get writesEnabled() { return !demo && auth.authenticated === true; },
+    get writesEnabled() { return !demo && !state.authPending && auth.authenticated === true; },
     get authenticated() { return auth.authenticated === true; },
     get username() { return auth.authenticated ? auth.username : null; },
     loaded: keys => demo || keys.every(key => !SOURCES[key].path() || !!(state.resources[key]?.lastOkAt || state.resources[key]?.receivedAt)),
-    canAct: keys => !demo && auth.authenticated === true && keys.every(isLive),
+    canAct: keys => !demo && !state.authPending && auth.authenticated === true && keys.every(isLive),
   };
 })();

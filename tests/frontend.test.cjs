@@ -1020,3 +1020,88 @@ test('holdings research starts once with visible pending feedback', async () => 
   finish({ started: ['VTI'], deferred: [] }); await pending;
   assert.equal(button.disabled, false); assert.match(c.element('review-status').textContent, /ai.batch/);
 });
+
+function loadingPage(fetch) {
+  const c = context();
+  c.location.pathname = '/ui/portfolio.html';
+  c.element('content').dataset.i18nTitle = 'pf.title';
+  c.element('blank-state').remove = function () { this.removed = true; };
+  c.fetch = fetch;
+  c.run('api.js'); c.run('console.js');
+  c.Console.live(['portfolio'], () => { c.draws = (c.draws || 0) + 1; });
+  return c;
+}
+
+test('slow navigation shows a titled skeleton, reads in parallel and never claims a logout', async () => {
+  let session, portfolio, health; const calls = [];
+  const c = loadingPage(async url => {
+    calls.push(url);
+    if (url === '/auth/session') return new Promise(resolve => { session = resolve; });
+    if (url === '/health') return new Promise(resolve => { health = resolve; });
+    if (url === '/portfolio') return new Promise(resolve => { portfolio = resolve; });
+    return response([]);
+  });
+  assert.ok(calls.includes('/portfolio'), 'page reads must not wait for session confirmation');
+  assert.equal(c.element('content').hidden, true);
+  assert.match(c.element('blank-state').innerHTML, /pf.title.*ux.loadingPage/);
+  assert.ok(!c.element('blank-state').innerHTML.includes('ux.signedOutBody'));
+  assert.equal(c.CT_API.writesEnabled, false);
+  portfolio(response({ buckets: {}, accounts: {} })); await flush();
+  assert.equal(c.element('content').hidden, true, 'verify the owner before restoring page-local drafts');
+  assert.equal(c.CT_API.writesEnabled, false, 'an authorized read cannot authorize a write');
+  session(response({ authenticated: true, csrf_token: 'csrf' })); await flush();
+  assert.equal(c.element('content').hidden, false, 'unrelated slow health must not hold the page');
+  assert.ok(c.draws > 0);
+  health(response({ status: 'READY' })); await flush();
+  assert.equal(c.CT_API.writesEnabled, true);
+  assert.equal(c.element('blank-state').removed, true);
+});
+
+test('session connection failure offers retry, preserves drafts, and recovers without signing in again', async () => {
+  let broken = true;
+  const c = loadingPage(async url => {
+    if (broken) throw Error('connection lost');
+    return response(url === '/auth/session' ? { authenticated: true, csrf_token: 'csrf' }
+      : url === '/portfolio' ? { buckets: {}, accounts: {} } : url === '/health' ? { status: 'READY' } : []);
+  });
+  c.sessionStorage = tabStorage(); c.sessionStorage.setItem('ct.advisor.session.v1', 'draft');
+  await flush();
+  assert.equal(c.CT_API.state.authChecked, false);
+  assert.match(c.element('blank-state').innerHTML, /ux.sessionUnavailable/);
+  assert.match(c.element('blank-state').innerHTML, /retry-load/);
+  assert.ok(!c.element('conn-bar').innerHTML.includes('login.html'));
+  assert.equal(c.sessionStorage.getItem('ct.advisor.session.v1'), 'draft');
+  assert.equal(c.CT_API.canAct(['portfolio']), false);
+  broken = false; await c.CT_API.refresh(); await flush();
+  assert.equal(c.element('content').hidden, false);
+  assert.equal(c.CT_API.authenticated, true);
+  assert.equal(c.CT_API.writesEnabled, true);
+});
+
+test('a confirmed 401 shows sign-in and a late session response cannot undo it', async () => {
+  let session;
+  const c = loadingPage(async url => url === '/auth/session'
+    ? new Promise(resolve => { session = resolve; }) : response({}, 401));
+  await flush();
+  assert.match(c.element('blank-state').innerHTML, /ux.signedOutBody/);
+  assert.equal(c.element('content').hidden, true);
+  session(response({ authenticated: true, csrf_token: 'old' })); await flush();
+  assert.equal(c.CT_API.authenticated, false);
+  assert.equal(c.CT_API.writesEnabled, false);
+});
+
+test('failed session recheck keeps loaded content visible while disabling writes', async () => {
+  let broken = false;
+  const c = loadingPage(async url => {
+    if (url === '/auth/session') {
+      if (broken) throw Error('timeout');
+      return response({ authenticated: true, csrf_token: 'csrf' });
+    }
+    return response(url === '/portfolio' ? { buckets: {}, accounts: {} } : url === '/health' ? { status: 'READY' } : []);
+  });
+  await flush(); assert.equal(c.element('content').hidden, false);
+  broken = true; await c.CT_API.refresh();
+  assert.equal(c.element('content').hidden, false);
+  assert.match(c.element('conn-bar').textContent, /ux.sessionUnavailable/);
+  assert.equal(c.CT_API.writesEnabled, false);
+});
