@@ -8,7 +8,8 @@ runs against Alpaca paper when credentials are configured; only the adapter chan
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -54,7 +55,6 @@ def _profiles(tmp: Path) -> Profiles:
     p.risk["micro_live_execution"] = {**(p.risk.get("micro_live_execution") or {}),
                                       "ledger_file": str(tmp / "micro_live_portfolio.yaml"),
                                       "risk_state_file": str(tmp / "micro_live_risk_state.json")}
-    p.risk["market_regime"] = {**(p.risk.get("market_regime") or {}), "_offline": True}
     return p
 
 
@@ -217,8 +217,33 @@ class CaseOutcome:
     ok: bool
 
 
+@contextmanager
+def simulated_market() -> Iterator[None]:
+    """Hold today's market out of the scenarios.
+
+    They are about the proposal lifecycle, and revalidation reads the market regime and each
+    held instrument's identity through the upstream data layer. The profile used to carry an
+    ``_offline`` flag meant to stop that, which no code read: every case assessed the real SPY
+    and VIX, passed on a machine with a fresh data cache or a network, and turned INVALIDATED
+    ("the market regime worsened from NORMAL to UNKNOWN") on one with neither -- or on any day
+    the real VIX stood above 20.
+    """
+    from unittest import mock
+
+    from . import execution
+    from .portfolio import snapshot_from_broker
+    from .risk_scenarios import identity_lookup, regime
+
+    def offline_snapshot(*args, **kwargs):
+        return snapshot_from_broker(*args, **{**kwargs, "identity_lookup": identity_lookup})
+
+    with mock.patch.object(execution, "assess_regime", lambda *_args, **_kwargs: regime("NORMAL")), \
+            mock.patch.object(execution, "snapshot_from_broker", offline_snapshot):
+        yield
+
+
 def run_case(case: Case) -> CaseOutcome:
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td, simulated_market():
         tmp = Path(td)
         profiles, proposal, broker, ledger = case.build(tmp)
         store = ProposalStore(tmp / "proposals.json")
@@ -236,7 +261,7 @@ def run_case(case: Case) -> CaseOutcome:
 def run_idempotency_case() -> CaseOutcome:
     """Executing the same approved proposal twice must never produce two orders."""
     case = Case("T15", "Duplicate submission is prevented", "ALREADY_EXECUTED", False, lambda tmp: _std(tmp))
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td, simulated_market():
         tmp = Path(td)
         profiles, proposal, broker, ledger = _std(tmp, broker_kwargs={"cash": 3000.0})
         store = ProposalStore(tmp / "proposals.json")

@@ -188,6 +188,43 @@ def no_network_guard(monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
+    # yfinance talks through curl_cffi, a native libcurl binding that never touches the socket
+    # module above, so every price and regime read went out regardless. The data layer also
+    # swallows the refusal and answers "unavailable", which turns a leak into a quietly
+    # different verdict, so an attempt is recorded and fails the test when it ends.
+    attempts: list[str] = []
+    try:
+        from curl_cffi import curl as native_curl
+    except ImportError:  # pragma: no cover - nothing to guard without the client
+        native_curl = None
+    if native_curl is not None:
+        def perform(self, *args, **kwargs):
+            attempts.append("perform a native curl request (yfinance's HTTP client)")
+            raise refuse("perform", "a native curl request")
+
+        monkeypatch.setattr(native_curl.Curl, "perform", perform)
+    yield
+    assert not attempts, (
+        f"an offline test tried to {attempts[0]} {len(attempts)} time(s); the suite must not "
+        "touch the network. Stub the market data (see execution_scenarios.simulated_market).")
+
+
+@pytest.fixture(autouse=True)
+def upstream_config_guard():
+    """Upstream keeps its data configuration in a module global that ``set_config`` replaces.
+
+    A test that runs the research graph points ``data_cache_dir`` at its own tmp_path, and the
+    global kept that value for every test after it: a data read that had found a cached file
+    went to the network instead, and the result depended on which tests ran first.
+    """
+    import copy
+
+    from tradingagents.dataflows import config as upstream
+
+    saved = copy.deepcopy(upstream._config)
+    yield
+    upstream._config = saved
+
 
 @pytest.fixture(autouse=True)
 def real_state_guard(monkeypatch):

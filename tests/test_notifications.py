@@ -19,7 +19,16 @@ from tests.conftest import ROOT, copy_example_ledger
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
+    # The notifications read the market regime and the last session through the data layer;
+    # which of them fire must not depend on today's market or on reaching it.
+    from agentic_trading import risk
+    from agentic_trading import service as service_module
+    from agentic_trading.risk_scenarios import regime
+    from tests.conftest import recent_session
+
+    monkeypatch.setattr(risk, "assess_regime", lambda *_args, **_kwargs: regime("NORMAL"))
+    monkeypatch.setattr(service_module, "_last_session", lambda *_args, **_kwargs: recent_session())
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"
