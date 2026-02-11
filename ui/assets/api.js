@@ -8,6 +8,15 @@ window.CT_API = (function () {
   let pickedProposal = null;
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
+  /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
+     preference. Two of these reads open a fresh Robinhood OAuth/MCP session at the API and
+     hold it for four to eight seconds — /micro-live on every call, /orders whenever
+     micro-live execution is enabled — and while that handshake runs it delays every other
+     read, including ones that never touch a venue. On 2026-09-15 this table was quickened to
+     5-15s across the board; the console then spent nearly all of its time handshaking, and a
+     tab change sat on a skeleton for seconds waiting for a SQLite read that takes 26 ms on
+     its own. Quickening a read here is therefore a decision about the whole console, not
+     about one screen. */
   const SOURCES = {
     advisor: { path: () => '/advisor', ms: 5000 },
     health: { path: () => '/health', ms: 30000 },
@@ -17,16 +26,16 @@ window.CT_API = (function () {
     pushDevices: { path: () => '/notifications/devices', ms: 120000 },
     authSessions: { path: () => '/auth/sessions', ms: 60000 },
     evaluation: { path: () => '/evaluation', ms: 300000 },
-    portfolio: { path: () => '/portfolio', ms: 15000 },
-    risk: { path: () => '/risk', ms: 15000 },
-    microLive: { path: () => '/micro-live', ms: 15000 },
-    proposals: { path: () => '/proposals', ms: 5000 },
+    portfolio: { path: () => '/portfolio', ms: 60000 },
+    risk: { path: () => '/risk', ms: 60000 },
+    microLive: { path: () => '/micro-live', ms: 60000 },
+    proposals: { path: () => '/proposals', ms: 15000 },
     orders: { path: () => '/orders', ms: 10000 },
-    research: { path: () => '/research?limit=20', ms: 10000 },
+    research: { path: () => '/research?limit=20', ms: 60000 },
     // The team and the analyst selection come from config/ and change about never,
     // so this is read once a session rather than polled like live state.
     labRoster: { path: () => '/research/roster', ms: 900000 },
-    researchJobs: { path: () => '/research/jobs?limit=20', ms: 5000 },
+    researchJobs: { path: () => '/research/jobs?limit=20', ms: 10000 },
     researchRun: { path: () => activeRun ? '/research/' + encodeURIComponent(activeRun) : null, ms: 5000 },
     proposalDetail: {
       ms: 15000,

@@ -712,6 +712,35 @@ const dictionary = () => {
   return { en: block('en'), zh: block('zh') };
 };
 
+test('the polling cadence stays within its budget, because two of these reads call a venue', () => {
+  /* On 2026-09-15 this table was quickened across the board — micro-live, portfolio, risk and
+     research from 60s to 10-15s, proposals from 15s to 5s — to make the console feel live. The
+     effect was the opposite. /micro-live opens a fresh Robinhood OAuth/MCP session on every
+     call, and /orders does the same whenever micro-live execution is enabled; each handshake
+     runs for four to eight seconds and delays every other read while it does. At 15s the API
+     was handshaking almost continuously, and a tab change waited seconds for a SQLite read
+     that costs 26 ms on its own. Nothing failed, because nothing here was watching.
+
+     So these are pinned to FRONTEND_HANDOFF.md §15 and to what ui/README.md tells the reader.
+     Quickening one is a decision about the whole console: change the budget, this test and the
+     README together, having looked at what the endpoint costs the API. */
+  const src = uiFile('assets/api.js');
+  const found = Object.fromEntries([...src.matchAll(/^\s{4}(\w+): \{[^}]*?ms: (\d+)/gm)]
+    .map(m => [m[1], Number(m[2])]));
+  const budget = {
+    advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
+    notifications: 120000, pushDevices: 120000, authSessions: 60000, evaluation: 300000,
+    portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
+    research: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
+    proposalDetail: 15000,
+  };
+  assert.deepEqual(found, budget);
+
+  // The two that reach a venue are the reason the budget exists; neither may be quickened.
+  assert.ok(found.microLive >= 60000, '/micro-live opens a broker session on every call');
+  assert.ok(found.orders >= 10000, '/orders opens a broker session while real money is enabled');
+});
+
 test('every key a page asks for is defined, in both languages', () => {
   const { en, zh } = dictionary();
   const used = new Set();
