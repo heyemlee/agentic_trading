@@ -8,6 +8,7 @@ prompts, the policy step and the Hard Risk Layer all consume.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -439,10 +440,22 @@ def snapshot_from_broker(
     for bp in broker_positions:
         symbol = bp.symbol.upper()
         prior = ledger.position(symbol)
+        # A venue row can arrive without an average price; the adapter reads that as 0.0. The
+        # ledger recorded a cost basis when the position was opened, and it is the better answer
+        # than a validation error thrown out of revalidation, which escaped every handler and
+        # stranded the approval that triggered it.
+        cost = bp.average_entry_price
+        if not (math.isfinite(cost) and cost > 0):
+            cost = prior.cost_basis_per_share if prior else 0.0
+        price = bp.market_value / bp.quantity if bp.quantity else cost
+        if not (math.isfinite(price) and price > 0 and cost > 0):
+            raise PortfolioError(
+                f"broker reports {symbol} without a usable price or average cost; its value cannot "
+                "be established, so the book cannot be reconciled (fail closed)")
         positions.append(Position(symbol=symbol, bucket=bucket_of[symbol], quantity=bp.quantity,
-                                  cost_basis_per_share=bp.average_entry_price,
+                                  cost_basis_per_share=cost,
                                   opened_by=prior.opened_by if prior else None))
-        prices[symbol] = bp.market_value / bp.quantity if bp.quantity else bp.average_entry_price
+        prices[symbol] = price
     state = PortfolioState(as_of=trade_date, currency=ledger.currency, buckets=ledger.buckets,
                            positions=positions, recent_opens=ledger.recent_opens,
                            cash_flows=ledger.cash_flows, applied_orders=ledger.applied_orders,

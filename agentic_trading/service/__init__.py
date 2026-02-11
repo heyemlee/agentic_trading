@@ -24,8 +24,8 @@ from .. import agent_roster, autonomy
 from ..broker import make_broker
 from ..broker.base import BrokerError
 from ..env import load_env
+from ..execution import ExecutionResult, needs_reconciliation, reconcile_proposal, revalidate
 from ..execution import execute as execute_proposal
-from ..execution import needs_reconciliation, reconcile_proposal, revalidate
 from ..micro_live import BUCKET as MICRO_BUCKET
 from ..micro_live import run_preflight
 from ..portfolio import PortfolioError, load_portfolio
@@ -525,45 +525,43 @@ class Service:
         if initial is None or initial.proposal_id != proposal_id:
             raise ServiceError(f"no proposal {proposal_id!r}")
         account_key = "micro_live" if initial.bucket == MICRO_BUCKET else "conceptual"
+        checks = {"initial": initial, "identity": identity, "version": version,
+                  "request_id": request_id, "terms": terms}
         # Every approval/execution for an account shares this lock. The proposal lock is only
         # held for short state transitions, and never across a broker network request.
         with file_lock(store.db.path.with_name(f"{account_key}.execution")):
             with store.locked():
-                p = store.get(proposal_id)
-                if p is None or p.proposal_id != proposal_id:
-                    raise ServiceError(f"no proposal {proposal_id!r}")
-                if p.bucket != initial.bucket:
-                    raise ServiceConflict("proposal account changed; review it again")
-                if not identity or not version or not request_id or terms is None:
-                    raise ServiceError("verified identity, explicit terms, version and request id are required")
-                expected = {"ticker": p.ticker, "bucket": p.bucket, "action": p.action,
-                            "notional_usd": p.notional_usd, "sell_quantity": p.sell_quantity}
-                if terms != expected:
-                    raise ServiceConflict("approval terms changed; review the current proposal")
-                if any(other.approval_request_id == request_id and other.proposal_id != p.proposal_id
-                       for other in store.all()):
-                    raise ServiceConflict("request id already belongs to another proposal")
-                replay = p.approval_request_id == request_id
-                if replay:
-                    if p.approved_by != identity or p.approved_version != version:
-                        raise ServiceConflict("request id does not match the original approval")
-                    if p.approval_response is not None:
-                        return p.approval_response
-                elif p.status != PROPOSED or p.version() != version:
-                    raise ServiceConflict("proposal version or status changed; review it again")
-                if not replay:
-                    p.status = APPROVED
-                    p.approved_at = utcnow().isoformat()
-                    p.approved_by = identity
-                    p.approval_note = note
-                    p.approval_request_id = request_id
-                    p.approved_version = version
-                    p.note("approved", note or "explicit approval through the console",
-                           identity=identity, version=version, request_id=request_id, terms=terms)
-                    store.save(p)
+                p = self._approvable(store, proposal_id, **checks)
+                if p.approval_request_id == request_id and p.approval_response is not None:
+                    return p.approval_response
+            # The venue is reached before the approval is recorded. Opening it can fail -- an
+            # expired token, the venue down, real money switched off -- and an approval saved
+            # ahead of that was left APPROVED with no order and no response: a retry under a
+            # fresh request id then met "status changed" for good, and the autonomous loop,
+            # which only considers PROPOSED, never looked at it again.
             broker = self._broker(profiles, p.bucket)
             try:
-                result = execute_proposal(profiles, p, broker, store)
+                with store.locked():
+                    # Checked again: the proposal lock was not held while the venue was opened,
+                    # so a rejection or a competing approval may have landed in between.
+                    p = self._approvable(store, proposal_id, **checks)
+                    replay = p.approval_request_id == request_id
+                    if replay and p.approval_response is not None:
+                        return p.approval_response
+                    if not replay:
+                        p.status = APPROVED
+                        p.approved_at = utcnow().isoformat()
+                        p.approved_by = identity
+                        p.approval_note = note
+                        p.approval_request_id = request_id
+                        p.approved_version = version
+                        p.note("approved", note or "explicit approval through the console",
+                               identity=identity, version=version, request_id=request_id, terms=terms)
+                        store.save(p)
+                try:
+                    result = execute_proposal(profiles, p, broker, store)
+                except Exception as exc:  # noqa: BLE001 - an approval must always end in a recorded answer
+                    result = self._execution_failed(store, proposal_id, exc)
             finally:
                 _close(broker)
             with store.locked():
@@ -581,6 +579,62 @@ class Service:
                 p.approval_response = response
                 store.save(p)
                 return response
+
+    @staticmethod
+    def _approvable(store: ProposalStore, proposal_id: str, *, initial: Proposal,
+                    identity: str | None, version: str | None, request_id: str | None,
+                    terms: dict[str, Any] | None) -> Proposal:
+        """The proposal, if this request may approve it or is a replay of the approval that did.
+
+        Call with the proposal lock held. Raises rather than returning a reason, so no caller
+        can proceed past a refusal by forgetting to read it.
+        """
+        p = store.get(proposal_id)
+        if p is None or p.proposal_id != proposal_id:
+            raise ServiceError(f"no proposal {proposal_id!r}")
+        if p.bucket != initial.bucket:
+            raise ServiceConflict("proposal account changed; review it again")
+        if not identity or not version or not request_id or terms is None:
+            raise ServiceError("verified identity, explicit terms, version and request id are required")
+        expected = {"ticker": p.ticker, "bucket": p.bucket, "action": p.action,
+                    "notional_usd": p.notional_usd, "sell_quantity": p.sell_quantity}
+        if terms != expected:
+            raise ServiceConflict("approval terms changed; review the current proposal")
+        if any(other.approval_request_id == request_id and other.proposal_id != p.proposal_id
+               for other in store.all()):
+            raise ServiceConflict("request id already belongs to another proposal")
+        if p.approval_request_id == request_id:
+            if p.approved_by != identity or p.approved_version != version:
+                raise ServiceConflict("request id does not match the original approval")
+        elif p.status != PROPOSED or p.version() != version:
+            raise ServiceConflict("proposal version or status changed; review it again")
+        return p
+
+    @staticmethod
+    def _execution_failed(store: ProposalStore, proposal_id: str, exc: Exception) -> ExecutionResult:
+        """Turn an exception out of execution into an outcome the approval can record.
+
+        Execution handles every failure after the order intent is persisted itself, so an
+        exception reaching here normally means the venue was never asked for an order. That is
+        read back from the stored proposal rather than assumed: an order id on record means the
+        venue may hold an order, and the proposal is left for reconciliation instead.
+        """
+        logger.exception("execution of %s raised", proposal_id)
+        detail = f"{type(exc).__name__}: {exc}"[:300]
+        with store.locked():
+            current = store.get(proposal_id)
+            if current is not None and current.client_order_id:
+                current.reconciliation_error = (current.reconciliation_error
+                                                or f"execution was interrupted: {detail}; lookup required")
+                current.note("execution_failed", detail)
+                store.save(current)
+                return ExecutionResult(False, "RECONCILIATION_REQUIRED", proposal_id, {},
+                                       error=current.reconciliation_error)
+            error = f"execution failed before any order was sent: {detail}"
+            if current is not None:
+                current.note("execution_failed", error)
+                store.save(current)
+        return ExecutionResult(False, "EXECUTION_FAILED", proposal_id, {}, error=error)
 
     def autonomous_reductions(self) -> dict[str, Any]:
         """Approve and execute the reductions the deterministic gate permits.

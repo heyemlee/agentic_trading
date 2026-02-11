@@ -16,11 +16,13 @@ from agentic_trading.proposals import (
     PARTIALLY_FILLED,
     PROPOSED,
     SUBMITTED,
+    SUBMITTING,
     UNKNOWN,
     ProposalStore,
+    needs_reconciliation,
 )
 from agentic_trading.risk_scenarios import identity_lookup, regime
-from agentic_trading.service import Service, ServiceConflict
+from agentic_trading.service import Service, ServiceConflict, ServiceError
 from agentic_trading.service.status import ProposalStatus, proposal_status
 from agentic_trading.state_db import StateDB
 
@@ -217,6 +219,91 @@ def test_approval_version_terms_identity_and_retries(tmp_path, monkeypatch):
         service.approve(p.proposal_id, **{**args, 'identity': 'another-user'})
     with pytest.raises(ServiceConflict):
         service.approve(p.proposal_id, **{**args, 'request_id': str(uuid4())})
+
+
+def waiting(tmp_path, monkeypatch, **changes):
+    profiles, p, broker, _, store = setup(tmp_path)
+    p.status = PROPOSED; p.approved_at = None
+    for name, value in changes.items():
+        setattr(p, name, value)
+    store.save(p)
+    return profiles, store.get(p.proposal_id), broker, store, service_for(profiles, store, broker, monkeypatch)
+
+
+def test_a_venue_that_cannot_be_opened_records_no_approval(tmp_path, monkeypatch):
+    """The approval was saved before the venue was opened. When opening failed, the proposal
+    stayed APPROVED with no order and no answer, and a retry under the fresh request id the
+    console mints for every attempt met "status changed" for good."""
+    _, p, broker, store, service = waiting(tmp_path, monkeypatch)
+
+    def expired(*_):
+        raise BrokerUnavailable('the venue session token has expired')
+
+    monkeypatch.setattr(service, '_broker', expired)
+    with pytest.raises(BrokerUnavailable):
+        service.approve(p.proposal_id, **approve_arguments(p))
+    stored = store.get(p.proposal_id)
+    assert stored.status == PROPOSED and stored.approval_request_id is None
+    assert store.db.status()['counts']['approvals'] == 0
+
+    monkeypatch.setattr(service, '_broker', lambda *_: broker)
+    retried = service.approve(p.proposal_id, **approve_arguments(stored))
+    assert retried['status'] == 'EXECUTED', retried
+    assert len(broker._orders) == 1
+
+
+def test_approving_while_real_money_is_switched_off_leaves_the_proposal_waiting(tmp_path, monkeypatch):
+    profiles, p, _, store, _ = waiting(tmp_path, monkeypatch, bucket='micro_live')
+    profiles.risk['micro_live_execution']['enabled'] = False
+    service = Service()                                  # the real venue selection, not a stub
+    monkeypatch.setattr(service, 'profiles', lambda: profiles)
+    monkeypatch.setattr(service, '_store', lambda _: store)
+    with pytest.raises(ServiceError, match='real-money execution is disabled'):
+        service.approve(p.proposal_id, **approve_arguments(p))
+    assert store.get(p.proposal_id).status == PROPOSED
+
+
+def test_an_exception_out_of_execution_ends_in_a_recorded_answer(tmp_path, monkeypatch):
+    """A validation error raised inside revalidation escaped every handler: no response was
+    stored, the API answered 500, and the proposal sat APPROVED with nothing to explain it."""
+    _, p, broker, store, service = waiting(tmp_path, monkeypatch)
+
+    def invalid_position(*_args, **_kwargs):
+        raise ValueError('1 validation error for Position: cost_basis_per_share must be > 0')
+
+    monkeypatch.setattr(execution, 'revalidate', invalid_position)
+    args = approve_arguments(p)
+    response = service.approve(p.proposal_id, **args)
+    assert response['outcome'] == 'EXECUTION_FAILED', response
+    assert response['submitted'] is False
+    assert 'before any order was sent' in response['error'] and 'cost_basis_per_share' in response['error']
+    assert response['message'] == response['error']
+    assert len(broker._orders) == 0
+
+    stored = store.get(p.proposal_id)
+    assert stored.approval_response == response
+    assert stored.history[-1]['event'] == 'execution_failed'
+    assert not needs_reconciliation(stored)
+    assert service.approve(p.proposal_id, **args) == response      # a replay reads the answer
+
+
+def test_an_exception_after_the_order_intent_is_left_for_reconciliation(tmp_path, monkeypatch):
+    import agentic_trading.service as service_module
+
+    _, p, _, store, service = waiting(tmp_path, monkeypatch)
+
+    def interrupted(_profiles, proposal, _broker, store):
+        current = store.get(proposal.proposal_id)
+        current.client_order_id, current.status = 'ct-intent-1', SUBMITTING
+        store.save(current)
+        raise RuntimeError('interrupted between the intent and the venue answer')
+
+    monkeypatch.setattr(service_module, 'execute_proposal', interrupted)
+    response = service.approve(p.proposal_id, **approve_arguments(p))
+    assert response['outcome'] == 'RECONCILIATION_REQUIRED', response
+    stored = store.get(p.proposal_id)
+    assert needs_reconciliation(stored)
+    assert 'lookup required' in stored.reconciliation_error
 
 
 def test_service_recovery_does_not_submit(tmp_path, monkeypatch):

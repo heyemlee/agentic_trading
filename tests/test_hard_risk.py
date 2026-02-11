@@ -484,6 +484,32 @@ def test_the_broker_snapshot_keeps_the_order_history(tmp_path):
     assert snap.state.applied_orders == ledger.applied_orders
 
 
+def test_a_broker_position_without_an_average_price_keeps_the_ledger_cost_basis(tmp_path):
+    # The Robinhood adapter reads a missing average price as 0.0, and Position requires a cost
+    # basis above zero, so revalidation raised a validation error no handler caught.
+    from agentic_trading.broker.base import Account, BrokerPosition
+    from agentic_trading.execution_scenarios import _ledger, _profiles
+    from agentic_trading.portfolio import PortfolioError, load_portfolio, snapshot_from_broker
+    from agentic_trading.risk_scenarios import PRICES
+
+    profiles = _profiles(tmp_path)
+    ledger = load_portfolio(_ledger(tmp_path, positions=[
+        {"symbol": "VTI", "bucket": "core", "quantity": 2.0, "cost_basis_per_share": 250.0}]))
+    account = Account(account_id="AG1", cash=3000.0, buying_power=3000.0, equity=3000.0)
+
+    no_average = BrokerPosition("VTI", 2.0, 0.0, 2.0 * PRICES["VTI"])
+    snap = snapshot_from_broker(account, [no_average], ledger, profiles, TRADE_DATE,
+                                identity_lookup=identity_lookup)
+    assert snap.state.positions[0].cost_basis_per_share == 250.0
+
+    # With no market value either, there is nothing to value the position at: refuse, in the
+    # error type revalidation already turns into "cannot be reconciled".
+    no_value = BrokerPosition("VTI", 2.0, 0.0, 0.0)
+    with pytest.raises(PortfolioError, match="without a usable price"):
+        snapshot_from_broker(account, [no_value], ledger, profiles, TRADE_DATE,
+                             identity_lookup=identity_lookup)
+
+
 # -- sizing basis: what the percentages are percentages OF ---------------------------
 #
 # Every cap in the engine divides by BucketView.allocation_usd. Pointing that at live equity
