@@ -14,12 +14,8 @@ from .env import load_env
 from .operations import record as record_activity
 from .portfolio import cash_flow_summary, migrate_portfolio, record_cash_flow
 from .profile import load_profiles
-from .proposals import ProposalStore
+from .proposals import Proposal, ProposalStore, needs_reconciliation
 from .state_db import StateDB
-
-#: Proposal states that still own money at the venue. A restored database must be compared
-#: against the broker before anything new is executed, and these are the rows to compare.
-UNSETTLED = ("APPROVED", "EXECUTING", "SUBMITTED", "PARTIALLY_FILLED", "UNKNOWN")
 
 
 def _sources(profiles):
@@ -45,6 +41,12 @@ def unsettled_orders(db: StateDB) -> list[dict[str, str]]:
 
     Publishing a release or restoring a backup while one of these is open risks a second
     submission or a lost fill, so both paths ask this question before they act.
+
+    The question is execution's own `needs_reconciliation`, asked of the stored lifecycle
+    status. This guard once kept a status list of its own and matched it against the venue's
+    lowercase order status first, so an order still queued or partially filled at the broker
+    passed as settled; a guard that answers differently from the code placing orders protects
+    nothing.
     """
     conn = db.current() or db._read()
     if conn is None:
@@ -60,11 +62,13 @@ def unsettled_orders(db: StateDB) -> list[dict[str, str]]:
     out = []
     for row in rows:
         item = json.loads(row[0])
-        status = str(item.get("order_status") or item.get("status") or "")
-        if item.get("client_order_id") and status in UNSETTLED:
-            out.append({"proposal_id": item.get("proposal_id"), "ticker": item.get("ticker"),
-                        "bucket": item.get("bucket"), "order_status": status,
-                        "client_order_id": item.get("client_order_id")})
+        proposal = Proposal(**{k: v for k, v in item.items() if k in Proposal.__dataclass_fields__})
+        if needs_reconciliation(proposal):
+            out.append({"proposal_id": proposal.proposal_id, "ticker": proposal.ticker,
+                        "bucket": proposal.bucket, "status": proposal.status,
+                        "order_status": proposal.order_status,
+                        "reconciliation_error": proposal.reconciliation_error,
+                        "client_order_id": proposal.client_order_id})
     return out
 
 

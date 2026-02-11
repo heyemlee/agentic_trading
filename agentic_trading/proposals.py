@@ -335,6 +335,19 @@ class ProposalStore:
         return out
 
 
+def needs_reconciliation(proposal: Proposal) -> bool:
+    """Whether this proposal's real fate is known only to the venue.
+
+    Every question of the form "does the broker still own an order?" asks this, and only this:
+    execution before it places another order, the release gate, a restore and a ledger
+    confirmation. It is phrased in the lifecycle status this system writes, never in the
+    venue's own order status, whose vocabulary belongs to the broker and changes with it.
+    """
+    return bool(proposal.client_order_id and (
+        proposal.status in PENDING_EXECUTION or proposal.reconciliation_error
+        or (not proposal.reconciled_at and proposal.status in (APPROVED, EXECUTED))))
+
+
 def positions_fingerprint(symbols_and_qty: dict[str, float]) -> str:
     """Stable fingerprint of the position book, to detect that it changed under a proposal."""
     parts = [f"{s.upper()}:{round(float(q), 6)}" for s, q in sorted(symbols_and_qty.items())]

@@ -46,7 +46,6 @@ from .proposals import (
     INVALIDATED,
     NEEDS_REANALYSIS,
     PARTIALLY_FILLED,
-    PENDING_EXECUTION,
     REJECTED,
     SUBMITTED,
     SUBMITTING,
@@ -54,6 +53,7 @@ from .proposals import (
     Proposal,
     ProposalStore,
     client_order_id,
+    needs_reconciliation,
     positions_fingerprint,
     utcnow,
 )
@@ -394,12 +394,6 @@ class ExecutionResult:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def needs_reconciliation(proposal: Proposal) -> bool:
-    return bool(proposal.client_order_id and (
-        proposal.status in PENDING_EXECUTION or proposal.reconciliation_error
-        or (not proposal.reconciled_at and proposal.status in (APPROVED, EXECUTED))))
 
 
 def execute(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, store: ProposalStore, *,

@@ -17,7 +17,18 @@ import pytest
 from agentic_trading import state_cli
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.portfolio import load_portfolio, migrate_portfolio
-from agentic_trading.proposals import PROPOSED, ProposalStore
+from agentic_trading.proposals import (
+    APPROVED,
+    CANCELED,
+    EXECUTED,
+    PARTIALLY_FILLED,
+    PROPOSED,
+    REJECTED,
+    SUBMITTED,
+    SUBMITTING,
+    UNKNOWN,
+    ProposalStore,
+)
 from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT, copy_example_ledger
 
@@ -135,9 +146,11 @@ def test_restoring_revokes_sessions_and_names_the_orders_to_check(project, tmp_p
         # named columns, so adding one later cannot silently break this
         conn.execute("INSERT INTO console_sessions(token_hash,username,csrf,generation,"
                      "created_at,last_seen_at,expires_at) VALUES('hash','owner','csrf','gen',1,1,9e9)")
-    open_order = _proposal(status=PROPOSED)
+    # the shape execution leaves behind: lifecycle SUBMITTED, venue status normalised, polled once
+    open_order = _proposal(status=SUBMITTED)
     open_order.client_order_id = "ct-open-1"
-    open_order.order_status = "SUBMITTED"
+    open_order.order_status = "accepted"
+    open_order.reconciled_at = "2026-09-15T14:31:00+00:00"
     ProposalStore(project / "state" / "proposals.json").save(open_order)
 
     backup = tmp_path / "snapshot.sqlite3"
@@ -159,6 +172,62 @@ def test_restoring_revokes_sessions_and_names_the_orders_to_check(project, tmp_p
     # the ledger is still attached to its proposal after the move
     assert load_portfolio(target / "portfolio.yaml").buckets["core"].cash_usd > 0
     assert len(ProposalStore(target / "proposals.json").all()) == 2
+
+
+# Each row is a state execution.py really writes: (lifecycle status, venue order status as
+# broker/robinhood.py normalises it, polled at least once, reconciliation error).
+OWNED_BY_THE_BROKER = [
+    pytest.param(SUBMITTING, "submitting", False, None, id="intent persisted, venue not answered"),
+    pytest.param(SUBMITTED, "new", True, None, id="queued at the venue"),
+    pytest.param(SUBMITTED, "accepted", True, None, id="confirmed at the venue"),
+    pytest.param(PARTIALLY_FILLED, "partially_filled", True, None, id="partly filled"),
+    pytest.param(UNKNOWN, None, False, "submission result unknown: TimeoutError; lookup required",
+                 id="submission outcome unknown"),
+    pytest.param(UNKNOWN, "accepted", True, "order synchronization failed: timeout",
+                 id="poll failed after acceptance"),
+    pytest.param(APPROVED, None, False, None, id="pre-upgrade approved order never polled"),
+]
+SETTLED = [
+    pytest.param(EXECUTED, "filled", True, None, id="filled"),
+    pytest.param(CANCELED, "canceled", True, None, id="canceled"),
+    pytest.param(REJECTED, "rejected", True, None, id="rejected by the venue"),
+]
+
+
+def _stored_order(project, status, order_status, polled, error):
+    order = _proposal(status=status)
+    order.client_order_id = "ct-order-1"
+    order.order_status = order_status
+    order.reconciled_at = "2026-09-15T14:31:00+00:00" if polled else None
+    order.reconciliation_error = error
+    ProposalStore(project / "state" / "proposals.json").save(order)
+    return StateDB(project / "state" / "proposals.json")
+
+
+@pytest.mark.parametrize(("status", "order_status", "polled", "error"), OWNED_BY_THE_BROKER)
+def test_the_release_gate_sees_every_order_the_broker_still_owns(project, status, order_status,
+                                                                 polled, error, capsys):
+    """The gate in front of a release, a restore and a ledger confirmation.
+
+    It once compared the venue's lowercase order status against an uppercase list and let five
+    of these six states through as settled, because the one test it had used a status string
+    production never writes.
+    """
+    db = _stored_order(project, status, order_status, polled, error)
+    assert [row["client_order_id"] for row in state_cli.unsettled_orders(db)] == ["ct-order-1"]
+
+    capsys.readouterr()
+    assert run(["status", "--config-dir", str(project / "config"), "--fail-on-unsettled"]) == 3
+
+
+@pytest.mark.parametrize(("status", "order_status", "polled", "error"), SETTLED)
+def test_the_release_gate_lets_a_settled_order_through(project, status, order_status, polled,
+                                                       error, capsys):
+    db = _stored_order(project, status, order_status, polled, error)
+    assert state_cli.unsettled_orders(db) == []
+
+    capsys.readouterr()
+    assert run(["status", "--config-dir", str(project / "config"), "--fail-on-unsettled"]) == 0
 
 
 def test_restoring_never_silently_replaces_a_live_database(project, tmp_path):

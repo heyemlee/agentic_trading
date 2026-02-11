@@ -24,7 +24,7 @@ from agentic_trading.portfolio import (
     last_session_date,
     load_portfolio,
 )
-from agentic_trading.proposals import EXECUTED, PROPOSED, ProposalStore
+from agentic_trading.proposals import PARTIALLY_FILLED, PROPOSED, ProposalStore
 from agentic_trading.risk_scenarios import PRICES, TRADE_DATE, identity_lookup
 from agentic_trading.state_db import StateDB
 from tests.conftest import ROOT, copy_example_ledger
@@ -160,9 +160,10 @@ def test_ct_state_confirm_renews_the_paper_book_and_reports_what_it_checked(proj
 
 def test_ct_state_confirm_refuses_while_the_broker_still_owns_an_order(project):
     store = ProposalStore(project / "state" / "proposals.json")
-    pending = _proposal(status=EXECUTED)
+    pending = _proposal(status=PARTIALLY_FILLED)
     pending.client_order_id = "ct-open-1"
-    pending.order_status = "SUBMITTED"          # one of state_cli.UNSETTLED
+    pending.order_status = "partially_filled"   # as execution records a partly filled order
+    pending.reconciled_at = "2026-09-15T14:31:00+00:00"
     store.save(pending)
 
     code, report = confirm(project, "--ledger", "conceptual")
