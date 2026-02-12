@@ -1134,3 +1134,62 @@ test('failed session recheck keeps loaded content visible while disabling writes
   assert.match(c.element('conn-bar').textContent, /ux.sessionUnavailable/);
   assert.equal(c.CT_API.writesEnabled, false);
 });
+
+test('primary page shows its real layout while auth and data are pending', async () => {
+  const c = context(); let session, portfolio;
+  const button = c.element('write-button');
+  c.element('content').querySelectorAll = () => [button];
+  c.element('blank-state').remove = function () { this.removed = true; };
+  c.CT_NAV = { bind() {} };
+  c.fetch = async url => url === '/auth/session' ? new Promise(resolve => { session = resolve; })
+    : url === '/portfolio' ? new Promise(resolve => { portfolio = resolve; }) : response([]);
+  c.run('api.js'); c.run('console.js');
+  let draws = 0;
+  c.Console.live(['portfolio'], () => { draws++; });
+  assert.equal(c.element('content').hidden, false);
+  assert.equal(c.element('blank-state').removed, true);
+  assert.equal(button.disabled, true);
+  assert.equal(draws, 0, 'do not render empty data as zero balances');
+  portfolio(response({ accounts: {}, buckets: {} })); await flush();
+  assert.equal(draws, 0, 'drafts still wait for verified identity');
+  session(response({ authenticated: true, csrf_token: 'csrf' })); await flush();
+  assert.ok(draws > 0);
+  assert.equal(button.disabled, false);
+});
+
+test('switching primary tabs reuses authenticated reads and keeps one set of polling timers', async () => {
+  const c = context(), calls = [], activeTimers = new Set();
+  let timerId = 0;
+  c.setInterval = () => { const id = ++timerId; activeTimers.add(id); return id; };
+  c.clearInterval = id => activeTimers.delete(id);
+  c.fetch = async url => {
+    calls.push(url);
+    return response(url === '/auth/session' ? { authenticated: true, csrf_token: 'csrf' } : {});
+  };
+  c.run('api.js'); c.CT_API.start(['health', 'portfolio']); await flush();
+  for (let i = 0; i < 20; i++) {
+    c.CT_API.start(i % 2 ? ['health', 'portfolio'] : ['health', 'advisor']);
+    await flush();
+    assert.equal(c.CT_API.state.authPending, false);
+    assert.equal(activeTimers.size, 3);
+  }
+  for (const path of ['/auth/session', '/health', '/portfolio', '/advisor']) {
+    assert.equal(calls.filter(x => x === path).length, 1, path);
+  }
+});
+
+test('a late account read and another tab cannot restore an invalidated session', async () => {
+  const c = context(); let portfolio;
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'csrf' })
+    : url === '/portfolio' ? new Promise(resolve => { portfolio = resolve; })
+    : response({}, 401);
+  c.run('api.js');
+  c.CT_API.start(['portfolio']); await flush();
+  await c.CT_API.readOnce('health');
+  portfolio(response({ accounts: { private: { equity_usd: 123 } }, buckets: {} })); await flush();
+  assert.equal(c.CT.portfolio.accounts.private, undefined);
+  c.CT_API.start(['advisor']);
+  assert.equal(c.CT_API.state.authPending, false);
+  assert.equal(c.CT_API.authenticated, false);
+  assert.equal(c.CT_API.writesEnabled, false);
+});

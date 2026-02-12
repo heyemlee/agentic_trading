@@ -222,8 +222,9 @@
        nothing to report. A red "Unknown" here claims a fault that is not
        happening — and repeats what the bar below already says. */
     const signedOut = !window.CT_DEMO && window.CT_API && !CT_API.authenticated;
-    el.hidden = signedOut;
-    if (signedOut) return;
+    const pendingHealth = !window.CT_DEMO && CT_API.state.resources.health?.error === 'loading';
+    el.hidden = signedOut || pendingHealth;
+    if (el.hidden) return;
     const s = systemStatus();
     const tone = s === 'READY' ? 'dot-ok' : (s === 'PAUSED' ? 'dot-warn' : 'dot-bad');
     setHTML(el, '<span class="dot ' + tone + '"></span><span>' + escapeHtml(code(s)) + '</span>');
@@ -297,7 +298,7 @@
     } else if (loading) {
       bar.className = 'conn-bar is-loading';
       bar.textContent = t('common.loading');
-      bar.hidden = document.getElementById('content')?.hidden === true;
+      bar.hidden = !!window.CT_NAV || document.getElementById('content')?.hidden === true;
     } else if (CT_API.state.authChecked && !CT_API.authenticated) {
       /* Being signed out is an ordinary state, not a fault — so this reads
          neutral, and carries the way in with this page as the return address. */
@@ -366,7 +367,19 @@
      the same setting reachable two ways, and the chrome one changed the
      language on a single stray tap. */
 
+  let chromeMounted = false;
   function mount(activeKey) {
+    if (chromeMounted) {
+      const template = document.createElement('div');
+      template.innerHTML = renderChrome(activeKey);
+      for (const selector of ['.topnav', '.tabbar']) {
+        document.querySelector(selector).replaceWith(template.querySelector(selector));
+      }
+      window.I18N.applyStatic();
+      paintNavStatus(); paintFoot(); paintConnection();
+      return;
+    }
+    chromeMounted = true;
     document.addEventListener('click', async event => {
       const retry = event.target.closest?.('[data-action="retry-load"]');
       if (retry) {
@@ -454,7 +467,7 @@
      Keep a named page skeleton on screen until its own data is available. */
   function blankReason(keys) {
     if (window.CT_DEMO || !window.CT_API) return null;
-    if (CT_API.state.authChecked && !CT_API.authenticated && !CT_API.state.authPending) {
+    if (CT_API.state.authChecked && !CT_API.authenticated) {
       return { icon: ICON.lock, text: t('ux.signedOutBody') };
     }
     if (CT_API.state.authError && !CT_API.state.authPending) {
@@ -490,25 +503,43 @@
 
   function live(keys, render, optionalKeys = []) {
     keys = [...new Set(keys)];
+    const content = document.getElementById('content');
+    const instant = !!window.CT_NAV;
+    const wanted = [...new Set(['health', ...keys, ...optionalKeys, 'proposals'])];
+    window.CT_NAV?.bind(wanted);
     let displayed = false;
+    let heldControls = null;
     const draw = () => {
-      const signedOut = CT_API.state.authChecked && !CT_API.authenticated && !CT_API.state.authPending;
+      if (instant && document.getElementById('content') !== content) return;
+      const signedOut = CT_API.state.authChecked && !CT_API.authenticated;
       if (signedOut) displayed = false;
       // First render needs the verified owner (e.g. to restore the right chat draft).
       // A later connectivity problem should retain content already on screen.
       const loaded = CT_API.loaded(keys) && !signedOut &&
         (window.CT_DEMO || CT_API.authenticated || displayed || !keys.length);
       if (loaded) displayed = true;
-      document.getElementById('content').hidden = !loaded;
-      document.getElementById('content').setAttribute('aria-busy', String(!loaded));
-      paintBlankState(!loaded, keys);
+      const reason = !loaded ? blankReason(keys) : null;
+      const shell = instant && reason?.loading;
+      content.hidden = !loaded && !shell;
+      content.setAttribute('aria-busy', String(!loaded));
+      // The actual page layout is visible before account data. No empty fixture is
+      // rendered as a balance, and actions stay disabled until the first valid draw.
+      if (shell && !heldControls) {
+        heldControls = [...content.querySelectorAll('button, input, textarea, select')]
+          .map(el => [el, el.disabled]);
+        heldControls.forEach(([el]) => { el.disabled = true; });
+      } else if (loaded && heldControls) {
+        heldControls.forEach(([el, disabled]) => { el.disabled = disabled; });
+        heldControls = null;
+      }
+      paintBlankState(!loaded && !shell, keys);
       if (loaded) { try { render(); } catch (e) { console.error('[console] render failed', e); } }
       paintNavStatus(); paintFoot(); paintConnection();
     };
     draw();
     if (!window.CT_API) return;
     document.addEventListener('ct:data', draw);
-    CT_API.start([...new Set(['health', ...keys, ...optionalKeys, 'proposals'])]);
+    CT_API.start(wanted);
     paintConnection();
   }
 
@@ -688,6 +719,7 @@
     }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
   }
   window.Console = {
+    page: (name, init) => window.CT_NAV ? CT_NAV.register(name, init) : init(document),
     D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
     SHOW_CONCEPTUAL, showsBucket, showsAccount,
     t, code, sysCopy, mlCopy, psCopy, bucket,

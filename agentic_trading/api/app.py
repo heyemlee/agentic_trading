@@ -21,6 +21,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
@@ -621,6 +622,8 @@ def main() -> None:
 # Absent `ui/`, the API runs exactly as before.
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
+_PRIMARY_PAGES = ("index", "portfolio", "advisor", "more")
+
 
 class ConsoleFiles(StaticFiles):
     """The console's files, with every page's asset references stamped by release.
@@ -661,13 +664,42 @@ class ConsoleFiles(StaticFiles):
                     digest.update(f"{base}/{name}:{info.st_mtime_ns}:{info.st_size}\n".encode())
         return digest.hexdigest()[:12]
 
+    def primary_templates(self, page: str, name: str) -> str:
+        """Ship all four static layouts in the initial response, before navigation runs.
+
+        Inert templates contain no account data. Even a first tap on a slow network can
+        switch the layout while that page's script or API reads are still in flight.
+        """
+        if name not in _PRIMARY_PAGES:
+            return page
+        templates = []
+        for other in _PRIMARY_PAGES:
+            if other == name:
+                continue
+            source = (self.root / f"{other}.html").read_text(encoding="utf-8")
+            body = re.search(r'<body([^>]*)>(.*?)</body>', source, re.DOTALL)
+            title = re.search(r'<title>(.*?)</title>', source, re.DOTALL)
+            classes = re.search(r'class="([^"]*)"', body[1])
+            markup = re.sub(r'<script\b[^>]*>.*?</script>', '', body[2], flags=re.DOTALL)
+            templates.append(f'<template data-ct-page="{other}" '
+                             f'data-title="{escape(title[1], quote=True)}" '
+                             f'data-class="{escape(classes[1] if classes else "", quote=True)}">'
+                             f'{markup}</template>')
+        page = page.replace('<script src="assets/i18n.js"', ''.join(templates) + '\n<script src="assets/i18n.js"', 1)
+        if 'href="assets/advisor.css"' not in page:
+            page = page.replace('</head>', '<link rel="stylesheet" href="assets/advisor.css" />\n</head>')
+        return page
+
     def file_response(self, full_path, stat_result, scope, status_code=200):
         if status_code != 200 or not str(full_path).endswith(".html"):
             return super().file_response(full_path, stat_result, scope, status_code)
-        key = (stat_result.st_mtime_ns, stat_result.st_size, self.stamp())
+        name = Path(full_path).stem
+        layouts = tuple((p.stat().st_mtime_ns, p.stat().st_size)
+                        for item in _PRIMARY_PAGES if (p := self.root / f"{item}.html").is_file())
+        key = (stat_result.st_mtime_ns, stat_result.st_size, self.stamp(), layouts)
         cached = self._pages.get(str(full_path))
         if cached is None or cached[0] != key:
-            page = Path(full_path).read_text(encoding="utf-8")
+            page = self.primary_templates(Path(full_path).read_text(encoding="utf-8"), name)
             body = _ASSET_REF.sub(lambda m: f"{m.group(1)}{m.group(2)}?v={key[2]}{m.group(3)}", page).encode()
             cached = (key, body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
             self._pages[str(full_path)] = cached

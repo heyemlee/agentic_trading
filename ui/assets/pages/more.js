@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('more', function (document) {
   'use strict';
   const C = window.Console;
   C.mount('more');
@@ -72,4 +72,4 @@
   });
   document.addEventListener('ct:auth', render);
   C.live([], render);
-})();
+});

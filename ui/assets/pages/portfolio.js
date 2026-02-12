@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('portfolio', function (document) {
   const C = window.Console, D = C.D, API = window.CT_API;
   C.mount('portfolio');
 
@@ -218,4 +218,4 @@
   }
 
   C.live(['portfolio'], render, ['advisor']);
-})();
+});

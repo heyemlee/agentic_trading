@@ -53,6 +53,27 @@ Use `/ui/index.html?demo=1` for a public, read-only demo. Demo navigation preser
 this flag, shows a permanent banner, and makes **no API requests**. Live pages
 start empty and never fall back to fixtures.
 
+## Primary navigation
+
+Home, Assets, Assistant and Me share one document through `assets/navigation.js`.
+The initial response includes all four static layouts as inert templates, with shared styles.
+Page factories are prefetched; even before they arrive a first tap can show the layout.
+Opening an initialized tab synchronously switches its retained DOM. Scroll position, chat input, expanded sections and
+in-flight actions survive switching. Browser Back/Forward and direct links still work.
+Secondary tools and login use ordinary document navigation.
+
+The API client and its polling timers are shared. Switching tabs selects the active resources
+without repeating a successful session check or rereading fresh data. First entry shows the
+real page layout with unavailable values and disabled actions until authenticated data arrives,
+rather than an entire replacement skeleton. Failed reads and expired sessions remain visible.
+Retained data exists only in memory; there is no offline storage, write queue or replay.
+A template from a different deployed release falls back to a complete document navigation.
+
+`node tools/check_navigation.cjs` runs a mobile browser regression with deliberately delayed,
+synthetic APIs. It needs Playwright and Chrome (or `CT_BROWSER_CHANNEL`); it starts its own
+static server and never calls the deployed API. The dependency-free regression cases remain
+in `tests/frontend.test.cjs` and run through `deploy/checks.sh`.
+
 ## Live data
 
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals

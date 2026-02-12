@@ -115,11 +115,12 @@ window.CT_API = (function () {
       return;
     }
     const pending = (async () => {
+      const epoch = authEpoch;
       const previous = JSON.stringify(window.CT[key]);
       try {
         const data = await fetchJSON(path);
         // Never attach a late detail response to a newly selected proposal/run.
-        if (src.path() !== path) return;
+        if (epoch !== authEpoch || src.path() !== path) return;
         if (key === 'proposalDetail') {
           const current = (window.CT.proposals || []).find(p => p.proposal_id === data.proposal_id);
           if (!current || data.proposal_id !== current.proposal_id || data.version !== current.version) {
@@ -159,6 +160,7 @@ window.CT_API = (function () {
           if (wanted.includes('proposalDetail')) Promise.resolve().then(() => readOnce('proposalDetail'));
         }
       } catch (error) {
+        if (epoch !== authEpoch) return;
         state.resources[key] = { ...(state.resources[key] || {}), error: error.message };
         state.lastError = error.message;
       } finally { announce(previous !== JSON.stringify(window.CT[key])); }
@@ -205,10 +207,12 @@ window.CT_API = (function () {
     wanted.forEach(key => { state.resources[key] ||= { lastOkAt: null, error: 'loading' }; });
     if (wanted.includes('proposalDetail') && !wanted.includes('proposals')) wanted.push('proposals');
     if (demo) { announce(); return; }
-    loadSession();
+    if (state.authChecked && !auth.authenticated) { announce(true); return; }
+    if (!state.authChecked) loadSession();
     // All reads already carry the HttpOnly cookie and are authorized by the server.
     // Waiting for the CSRF/session response only adds latency to a page navigation.
-    wanted.forEach(key => { if (key !== 'proposalDetail') readOnce(key); });
+    wanted.forEach(key => { if (key !== 'proposalDetail' && !isLive(key)) readOnce(key); });
+    announce(true);
     wanted.forEach(key => timers.push(setInterval(() => {
       if (!document.hidden) {
         if (state.authError) loadSession();

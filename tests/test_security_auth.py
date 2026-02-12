@@ -459,3 +459,43 @@ def test_every_write_to_a_migrated_table_names_its_columns():
             if re.search(rf'INSERT\s+INTO\s+{table}\s+VALUES', path.read_text()):
                 offenders.append(f'{path.name}: positional INSERT into {table}')
     assert not offenders, offenders
+
+
+def test_primary_layouts_arrive_before_navigation_without_executable_scripts(console_auth):
+    """The first tap must not wait for another HTML request, even on a cold connection."""
+    client = TestClient(app, base_url='https://testserver')
+    names = {'index', 'portfolio', 'advisor', 'more'}
+    for name in names:
+        page = client.get(f'/ui/{name}.html?demo=1')
+        templates = re.findall(r'<template data-ct-page="([^"]+)"[^>]*>(.*?)</template>', page.text, re.DOTALL)
+        assert {key for key, _ in templates} == names - {name}
+        for _, markup in templates:
+            assert 'id="content"' in markup
+            assert '<script' not in markup, 'prefetch must not mount pages or trigger automatic writes'
+        assert page.text.index('<template ') < page.text.index('<script src="assets/navigation.js')
+        assert 'href="assets/advisor.css?v=' in page.text
+    assert 'data-ct-page=' not in client.get('/ui/login.html').text
+    assert 'data-ct-page=' not in client.get('/ui/approvals.html?demo=1').text
+
+
+def test_editing_an_embedded_layout_invalidates_the_host_page_etag(tmp_path):
+    from fastapi import FastAPI
+
+    from agentic_trading.api.app import ConsoleFiles
+
+    ui = tmp_path / 'ui'
+    ui.mkdir()
+    for name in ('index', 'portfolio', 'advisor', 'more'):
+        (ui / f'{name}.html').write_text('<html><head><title>Page</title></head><body>'
+                                       '<main id="content">Original</main>'
+                                       '<script src="assets/i18n.js"></script></body></html>')
+    probe = FastAPI()
+    probe.mount('/ui', ConsoleFiles(ui))
+    with TestClient(probe) as client:
+        original = client.get('/ui/index.html')
+        target = ui / 'portfolio.html'
+        target.write_text(target.read_text().replace('Original', 'Updated holdings layout'))
+        changed = client.get('/ui/index.html', headers={'If-None-Match': original.headers['etag']})
+        assert changed.status_code == 200
+        assert changed.headers['etag'] != original.headers['etag']
+        assert 'Updated holdings layout' in changed.text

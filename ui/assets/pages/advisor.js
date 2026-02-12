@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('advisor', function (document) {
   'use strict';
   const C = window.Console, A = window.CT_API, D = C.D;
   const el = id => document.getElementById(id), h = C.escapeHtml, t = C.t;
@@ -295,5 +295,14 @@
      container left people on the Assistant after they closed the sheet, so
      the deep link is gone; the sheet stays for editing mid-conversation. */
   if (params.get('sheet') === 'jobs') C.openSheet('jobs-sheet');
+  document.addEventListener('ct:route', () => {
+    const next = new URLSearchParams(location.search);
+    if (next.has('view')) showView(next.get('view'));
+    if (next.get('sheet') === 'jobs') C.openSheet('jobs-sheet');
+    if (next.get('prompt') === 'holdings-risk') {
+      showView('chat');
+      entryPromptPending = true;
+    }
+  });
   C.live(['advisor'], render);
-})();
+});

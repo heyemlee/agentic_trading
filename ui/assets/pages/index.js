@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('index', function (document) {
   const C = window.Console, D = C.D;
   C.mount('dashboard');
 
@@ -242,4 +242,4 @@
       renderLatest();
       renderNotices();
     }, ['microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
-})();
+});
