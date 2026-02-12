@@ -322,9 +322,9 @@ failures:
 | FRED macro data missing | `/health.warnings` | informational; the system records the gap, lowers confidence and prefers NO_TRADE. **Not a blocker.** |
 | Risk defaults not accepted | `/health.warnings` | informational; blocks real money only |
 | Claude limit reached | `/health.status`, `/system/claude` | show when the limit resets; runs resume afterwards |
-| Market closed | `/system/market.is_open` | approval will return `STALE` rather than submitting |
+| Market closed | `/system/market.is_open` | approval returns outcome `STALE` with status `WAITING_FOR_APPROVAL`: nothing is submitted and the proposal stays in the queue to approve again |
 | Broker unavailable | `/micro-live.connect_error` | show as not connected; never imply an order went through |
-| Stale quote | inside an approval result's `reasons` | the order was refused, not sent |
+| Stale quote | inside an approval result's `reasons` | the order was refused, not sent; like a pause or a venue that did not answer, the proposal returns to `WAITING_FOR_APPROVAL` |
 | Stale proposal | `freshness.state` | offer reanalyze |
 | Hard Risk rejection | proposal `hard_risk.failed_rule_ids` | show the rule details |
 | System halted | `/health.status = HALTED` | needs a manual reset by the investor |

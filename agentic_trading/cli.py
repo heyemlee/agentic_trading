@@ -107,7 +107,7 @@ def portfolio_context(profiles: Profiles, trade_date: str,
                          micro_live_equity=micro_equity)
         save_ladder_states(ladder_path, ladders)
     regime = assess_regime(profiles, trade_date)
-    governing = ladders.for_bucket(bucket) if bucket != "core" else ladders.total
+    governing = ladders.governing(bucket)
     text = render_snapshot(snap, {"total": {"level": governing.level, "drawdown_pct": governing.drawdown_pct}},
                            regime.as_dict())
     return snap, ladders, regime, text
@@ -235,7 +235,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
             target_weight_pct=result.target_weight_pct_of_allocation, trade_date=trade_date,
             requires_human_approval=result.requires_human_approval,
             reference_price=proposal_obj.evidence.get("price") or _reference_price(snap, ticker, trade_date),
-            reference_price_date=proposal_obj.evidence.get("price_date", trade_date), ladder_level_at_proposal=ladders.total.level,
+            reference_price_date=proposal_obj.evidence.get("price_date", trade_date), ladder_level_at_proposal=ladders.governing(bucket).level,
             regime_at_proposal=regime.level, portfolio_equity_at_proposal=snap.total_equity,
             bucket_cash_at_proposal=snap.buckets[bucket].cash_usd,
             positions_fingerprint=positions_fingerprint({p.symbol: p.quantity for p in snap.state.positions}),

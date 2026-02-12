@@ -13,6 +13,8 @@ from agentic_trading.portfolio import load_portfolio, snapshot_from_broker
 from agentic_trading.proposals import (
     CANCELED,
     EXECUTED,
+    EXPIRED,
+    INVALIDATED,
     PARTIALLY_FILLED,
     PROPOSED,
     SUBMITTED,
@@ -72,6 +74,83 @@ def test_exit_reaches_broker_and_updates_ledger(tmp_path, action, held, selling)
     assert (position.quantity if position else 0) == pytest.approx(held - selling)
     expected_cash = 2500 - held * 100 + selling * result.order['filled_avg_price']
     assert saved.buckets['core'].cash_usd == pytest.approx(round(expected_cash, 2))
+
+
+def _core_holding(tmp_path, action):
+    """Two VTI shares held in core, and a proposal to act on them priced where the venue is."""
+    profiles, p, broker, ledger = _std(tmp_path,
+        broker_kwargs={'cash': 2800, 'positions': {'VTI': (2, 100)}},
+        ledger_kwargs={'core_cash': 2300, 'positions': [
+            {'symbol': 'VTI', 'bucket': 'core', 'quantity': 2, 'cost_basis_per_share': 100}]},
+        proposal_kwargs={'action': action, 'notional': 100, 'price': 100, 'fingerprint': 'VTI:2.0'})
+    broker.set_price('VTI', 100)
+    if action in ('SELL', 'REDUCE'):
+        p.sell_quantity = 1
+    store = ProposalStore(tmp_path / 'proposals.json'); store.save(p)
+    return profiles, p, broker, ledger, store
+
+
+def _worse_ladder(monkeypatch):
+    from agentic_trading.risk.ladder import LadderState, LadderStates
+
+    states = LadderStates(LadderState(3000.0, 'RISK_REDUCTION'), LadderState(2500.0, 'RISK_REDUCTION'),
+                          LadderState(500.0), LadderState(100.0))
+    monkeypatch.setattr(execution, 'load_ladder_states', lambda *args, **kwargs: states)
+    monkeypatch.setattr(execution, 'evaluate_ladders', lambda *args, **kwargs: states)
+    monkeypatch.setattr(execution, 'save_ladder_states', lambda *args, **kwargs: None)
+
+
+def _worse_regime(monkeypatch):
+    monkeypatch.setattr(execution, 'assess_regime', lambda *args: regime('HIGH_RISK'))
+
+
+WORSE_SINCE_THE_ANALYSIS = [
+    pytest.param(_worse_ladder, 'ladder_level_escalated_since_proposal', id='ladder escalated'),
+    pytest.param(_worse_regime, 'regime_worsened_since_proposal', id='regime worsened'),
+]
+
+
+@pytest.mark.parametrize(('worsen', 'change'), WORSE_SINCE_THE_ANALYSIS)
+def test_a_worse_ladder_or_regime_never_invalidates_a_reduction(tmp_path, monkeypatch, worsen, change):
+    """Hard Risk lets a reduction through at every ladder level. Revalidation invalidated one
+    anyway when conditions had deteriorated since the analysis -- refusing the sale exactly
+    when it mattered most."""
+    profiles, p, broker, ledger, store = _core_holding(tmp_path, 'REDUCE')
+    worsen(monkeypatch)
+    result = execution.execute(profiles, p, broker, store, ledger_path=str(ledger))
+    assert change not in result.revalidation['changes']
+    assert result.submitted, result.as_dict()
+    assert result.order['side'] == 'sell' and result.order['quantity'] == 1
+
+
+@pytest.mark.parametrize(('worsen', 'change'), WORSE_SINCE_THE_ANALYSIS)
+def test_a_worse_ladder_or_regime_still_invalidates_an_opening(tmp_path, monkeypatch, worsen, change):
+    profiles, p, broker, ledger, store = _core_holding(tmp_path, 'ADD')
+    worsen(monkeypatch)
+    result = execution.execute(profiles, p, broker, store, ledger_path=str(ledger))
+    assert result.outcome == 'INVALIDATED' and change in result.revalidation['changes']
+    assert not result.submitted and store.get(p.proposal_id).status == INVALIDATED
+
+
+def test_every_bucket_is_recorded_and_compared_against_the_same_ladder():
+    """Research recorded the total ladder for every bucket; revalidation compared the bucket's
+    own. A Micro-Live proposal therefore carried the never-stepped conceptual total (NORMAL)
+    into a comparison with the real account's ladder."""
+    from agentic_trading.risk.ladder import LadderState, LadderStates, escalated
+
+    states = LadderStates(LadderState(3000.0), LadderState(2500.0, 'WARNING'), LadderState(500.0, 'HALT'),
+                          LadderState(100.0, 'WARNING'))
+    assert states.governing('core') is states.total
+    assert states.governing('sandbox') is states.sandbox
+    assert states.governing('micro_live') is states.micro_live
+
+    assert not escalated('micro_live', 'WARNING', 'WARNING')
+    # The shorter ladders rank their own levels: ranked on the total ladder's, HALT was unknown
+    # and a climb to it went unnoticed.
+    assert escalated('sandbox', 'WARNING', 'HALT')
+    assert escalated('micro_live', 'NORMAL', 'WARNING')
+    assert escalated('core', 'WARNING', 'RISK_REDUCTION')
+    assert not escalated('core', 'RISK_REDUCTION', 'WARNING')
 
 
 def test_zero_sized_legacy_sell_requires_new_analysis(tmp_path):
@@ -304,6 +383,80 @@ def test_an_exception_after_the_order_intent_is_left_for_reconciliation(tmp_path
     stored = store.get(p.proposal_id)
     assert needs_reconciliation(stored)
     assert 'lookup required' in stored.reconciliation_error
+
+
+def _market_closed(profiles, broker, monkeypatch):
+    broker.set_market_open(False)
+
+
+def _paused(profiles, broker, monkeypatch):
+    # The config flag, never state/HALT: these profiles resolve state/ inside the real checkout.
+    profiles.risk['execution_policy']['kill_switch']['trading_halted'] = True
+
+
+def _venue_silent(profiles, broker, monkeypatch):
+    broker.set_unavailable(True)
+
+
+def _regime_unassessable(profiles, broker, monkeypatch):
+    monkeypatch.setattr(execution, 'assess_regime', lambda *args: regime('UNKNOWN'))
+
+
+MOMENTARY = [
+    pytest.param(_market_closed, 'market is closed', id='market closed'),
+    pytest.param(_paused, 'execution is paused', id='execution paused'),
+    pytest.param(_venue_silent, 'broker state unavailable', id='venue did not answer'),
+    pytest.param(_regime_unassessable, 'cannot be assessed right now', id='regime data unavailable'),
+]
+
+
+def _restore(profiles, broker, monkeypatch):
+    profiles.risk['execution_policy']['kill_switch']['trading_halted'] = False
+    broker.set_market_open(True)
+    broker.set_unavailable(False)
+    monkeypatch.setattr(execution, 'assess_regime', lambda *args: regime('NORMAL'))
+
+
+@pytest.mark.parametrize(('arrange', 'said'), MOMENTARY)
+def test_a_refusal_about_the_moment_hands_the_approval_back(tmp_path, monkeypatch, arrange, said):
+    """These were stored as verdicts on the idea: a closed market made it EXPIRED, a pause
+    REJECTED, a silent venue or a regime nobody could read INVALIDATED. Getting the same idea
+    back then took a fresh research run."""
+    profiles, p, broker, store, service = waiting(tmp_path, monkeypatch)
+    arrange(profiles, broker, monkeypatch)
+    args = approve_arguments(p)
+
+    response = service.approve(p.proposal_id, **args)
+    assert response['status'] == 'WAITING_FOR_APPROVAL', response
+    assert said in response['message'] and 'nothing was sent' in response['message']
+    assert len(broker._orders) == 0
+    stored = store.get(p.proposal_id)
+    assert stored.status == PROPOSED
+    assert stored.history[-1]['event'] == 'approval_deferred'
+    assert service.approve(p.proposal_id, **args) == response      # the same request replays its answer
+
+    _restore(profiles, broker, monkeypatch)
+    executed = service.approve(p.proposal_id, **approve_arguments(stored))
+    assert executed['status'] == 'EXECUTED', executed
+    assert len(broker._orders) == 1
+    assert store.db.status()['counts']['approvals'] == 2           # both approvals stay on record
+
+
+def test_a_verdict_on_the_idea_still_ends_it(tmp_path, monkeypatch):
+    _, p, _, store, service = waiting(tmp_path, monkeypatch)
+    monkeypatch.setattr(execution, 'assess_regime', lambda *args: regime('HIGH_RISK'))
+    response = service.approve(p.proposal_id, **approve_arguments(p))
+    assert 'worsened from NORMAL to HIGH_RISK' in str(response['reasons'])
+    assert store.get(p.proposal_id).status == INVALIDATED
+
+
+def test_an_autonomous_approval_is_not_handed_back_to_the_loop(tmp_path, monkeypatch):
+    """The autonomous loop approves every PROPOSED candidate on each pass; handing a refused one
+    back would approve it again every fifteen seconds for as long as the market stayed shut."""
+    _, p, broker, store, service = waiting(tmp_path, monkeypatch)
+    broker.set_market_open(False)
+    service.approve(p.proposal_id, **{**approve_arguments(p), 'identity': 'autonomy:reduce'})
+    assert store.get(p.proposal_id).status == EXPIRED
 
 
 def test_service_recovery_does_not_submit(tmp_path, monkeypatch):

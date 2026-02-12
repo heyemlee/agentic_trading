@@ -555,6 +555,9 @@ class Service:
                         p.approval_note = note
                         p.approval_request_id = request_id
                         p.approved_version = version
+                        # A proposal handed back by an earlier approval still carries that
+                        # approval's answer, and the answer is what gets returned below.
+                        p.approval_response = None
                         p.note("approved", note or "explicit approval through the console",
                                identity=identity, version=version, request_id=request_id, terms=terms)
                         store.save(p)

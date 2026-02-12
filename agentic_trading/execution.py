@@ -46,6 +46,7 @@ from .proposals import (
     INVALIDATED,
     NEEDS_REANALYSIS,
     PARTIALLY_FILLED,
+    PROPOSED,
     REJECTED,
     SUBMITTED,
     SUBMITTING,
@@ -65,7 +66,7 @@ from .risk import (
     save_ladder_states,
 )
 from .risk import Proposal as RiskProposal
-from .risk.ladder import ORDER as LADDER_ORDER
+from .risk.ladder import escalated
 from .state_db import StateConflict, StateDB
 from .storage import file_lock
 
@@ -92,6 +93,9 @@ class Revalidation:
     limit_price: float | None = None
     current_price: float | None = None
     price_drift_pct: float | None = None
+    #: The refusal is about this moment -- a closed market, a pause, a venue that did not answer
+    #: -- and says nothing about the idea. See `_defer`.
+    retryable: bool = False
 
     @property
     def may_execute(self) -> bool:
@@ -151,6 +155,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         "execution_policy", "kill_switch", "halt_file", default="state/HALT"))
     if halt.exists() or profiles.risk_cfg("execution_policy", "kill_switch", "trading_halted", default=False):
         rv.outcome = OUT_REJECTED
+        rv.retryable = True
         rv.reasons.append("execution is paused; no order may be submitted")
         return rv
 
@@ -191,6 +196,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     rv.reasons.append(f"approval: {approval_why}")
     if expired:
         rv.outcome = OUT_STALE
+        rv.retryable = True
         rv.reasons.append("the approval itself went stale; re-approve against current conditions")
         return rv
 
@@ -202,6 +208,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         clock = broker.get_clock()
     except BrokerError as exc:
         rv.outcome = OUT_INVALIDATED
+        rv.retryable = True
         rv.reasons.append(f"broker state unavailable or inconsistent: {exc}")
         return rv
     rv.refreshed = {
@@ -210,13 +217,16 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         "market_open": clock.is_open, "read_at": utcnow().isoformat(),
     }
     if account.trading_blocked:
+        rv.retryable = True
         rv.reasons.append("the broker reports the account as blocked from trading")
         return rv
     if bool(rules.get("require_market_open", True)) and not clock.is_open:
         rv.outcome = OUT_STALE
+        rv.retryable = True
         rv.reasons.append("the market is closed; a day order would be rejected, so nothing is submitted")
         return rv
     if any(o.symbol == proposal.ticker and o.is_open for o in open_orders):
+        rv.retryable = True
         rv.reasons.append(f"an open order for {proposal.ticker} already exists at the broker")
         return rv
 
@@ -224,6 +234,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     price, price_detail = _venue_price(broker, proposal.ticker, profiles)
     rv.reasons.append(price_detail)
     if price is None:
+        rv.retryable = True
         return rv
     rv.current_price = price
     rv.refreshed["price"] = price
@@ -250,6 +261,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     try:
         snap: Snapshot = snapshot_from_broker(account, positions, ledger, profiles, proposal.trade_date)
     except PortfolioError as exc:
+        rv.retryable = True
         rv.reasons.append(f"portfolio could not be reconciled with the broker: {exc}")
         return rv
 
@@ -288,23 +300,30 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     else:
         ladders = refresh_ladders()
     regime = assess_regime(profiles, proposal.trade_date)
-    rv.refreshed["ladder_level"] = ladders.for_bucket(proposal.bucket).level if proposal.bucket != "core" else ladders.total.level
+    current_ladder = ladders.governing(proposal.bucket).level
+    rv.refreshed["ladder_level"] = current_ladder
     rv.refreshed["regime"] = regime.level
 
-    prior_ladder = proposal.ladder_level_at_proposal
-    current_ladder = ladders.for_bucket(proposal.bucket).level if proposal.bucket != "core" else ladders.total.level
-    if (prior_ladder in LADDER_ORDER and current_ladder in LADDER_ORDER
-            and LADDER_ORDER.index(current_ladder) > LADDER_ORDER.index(prior_ladder)):
+    # A worse ladder or regime since the analysis is a reason not to add risk, never a reason to
+    # keep it. Hard Risk lets a reduction through at every ladder level; invalidating one here
+    # because conditions deteriorated would refuse the sale exactly when it matters most.
+    reducing = proposal.action in ("SELL", "REDUCE")
+    if not reducing and escalated(proposal.bucket, proposal.ladder_level_at_proposal, current_ladder):
             rv.changes.append("ladder_level_escalated_since_proposal")
             rv.outcome = OUT_INVALIDATED
             rv.reasons.append(f"the {proposal.bucket} drawdown ladder escalated from "
                               f"{proposal.ladder_level_at_proposal} to {current_ladder} since the analysis")
             return rv
-    if (proposal.regime_at_proposal in REGIME_ORDER and regime.level in REGIME_ORDER
+    if (not reducing and proposal.regime_at_proposal in REGIME_ORDER and regime.level in REGIME_ORDER
             and REGIME_ORDER.index(regime.level) > REGIME_ORDER.index(proposal.regime_at_proposal)):
             rv.changes.append("regime_worsened_since_proposal")
             rv.outcome = OUT_INVALIDATED
-            rv.reasons.append(f"the market regime worsened from {proposal.regime_at_proposal} to {regime.level}")
+            # UNKNOWN sorts last, so a data outage read as the worst regime there is. It is a
+            # regime nobody could assess, not one that got worse.
+            rv.retryable = not regime.available
+            rv.reasons.append(f"the market regime worsened from {proposal.regime_at_proposal} to {regime.level}"
+                              if regime.available else
+                              f"the market regime cannot be assessed right now: {regime.detail}")
             return rv
 
     # ---- 5. Hard Risk again, against the fresh state
@@ -441,6 +460,9 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
         )
     rv = revalidate(profiles, proposal, broker, ledger_path=ledger_path)
     if not rv.may_execute:
+        if rv.retryable and _defers(proposal):
+            return _defer(store, proposal, rv.outcome, rv.reasons[-1] if rv.reasons else rv.outcome,
+                          rv.as_dict())
         proposal.status = {OUT_STALE: EXPIRED, OUT_REANALYZE: NEEDS_REANALYSIS,
                            OUT_INVALIDATED: INVALIDATED, OUT_REJECTED: REJECTED}.get(rv.outcome, INVALIDATED)
         proposal.note("revalidation_failed", f"{rv.outcome}: {rv.reasons[-1] if rv.reasons else ''}",
@@ -453,6 +475,8 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
         pf = run_preflight(profiles, broker)
         if not pf.ready:
             failed = "; ".join(f"{c.check_id} {c.name}: {c.detail}" for c in pf.failures)
+            if _defers(proposal):
+                return _defer(store, proposal, "PREFLIGHT_FAILED", failed, rv.as_dict())
             proposal.note("preflight_failed", failed)
             store.save(proposal)
             return ExecutionResult(False, "PREFLIGHT_FAILED", proposal.proposal_id, rv.as_dict(), error=failed)
@@ -467,6 +491,9 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
     try:
         existing = broker.get_order_by_client_id(coid)
     except BrokerError as exc:
+        if _defers(proposal):
+            return _defer(store, proposal, "BROKER_UNAVAILABLE", f"the venue could not be asked for {coid}: {exc}",
+                          rv.as_dict())
         return ExecutionResult(False, "BROKER_UNAVAILABLE", proposal.proposal_id, rv.as_dict(), error=str(exc))
     if existing is not None:
         proposal.client_order_id = coid
@@ -481,6 +508,9 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
         try:
             review = broker.review_order(request)
         except BrokerError as exc:
+            if _defers(proposal):
+                return _defer(store, proposal, "REVIEW_FAILED", f"the venue's pre-trade review did not answer: {exc}",
+                              rv.as_dict())
             return ExecutionResult(False, "REVIEW_FAILED", proposal.proposal_id, rv.as_dict(), error=str(exc))
         blocking = [str(a) for a in review.get("alerts", []) if a]
         if blocking:
@@ -520,6 +550,9 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
         # The transaction rolled the intent back, so the venue has not been called. Reloading
         # also discards the in-memory revision assigned inside the aborted transaction.
         proposal = store.get(proposal.proposal_id) or proposal
+        if _defers(proposal):
+            return _defer(store, proposal, "RESERVATION_FAILED", f"capital reservation failed: {exc}",
+                          rv.as_dict())
         return ExecutionResult(False, "RESERVATION_FAILED", proposal.proposal_id, rv.as_dict(),
                                error=f"capital reservation failed: {exc}", duplicate_prevented=True)
     try:
@@ -555,6 +588,46 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
         pass  # the initial response is recorded; the worker will read the newer state
     return _record_order(profiles, proposal, order, store, submitted=True,
                          outcome="SUBMITTED", revalidation=rv.as_dict())
+
+
+def _defers(proposal: Proposal) -> bool:
+    """Whether a refusal about the moment hands this proposal back to a person.
+
+    Only a person's approval is handed back. An autonomous one keeps the terminal outcome it
+    always had: the autonomous loop considers every PROPOSED reduction every fifteen seconds, and
+    a proposal returned to it while execution is paused would be approved again on every pass.
+    """
+    return not str(proposal.approved_by or "").startswith("autonomy:")
+
+
+def _defer(store: ProposalStore, proposal: Proposal, outcome: str, reason: str,
+           revalidation: dict[str, Any]) -> ExecutionResult:
+    """Nothing was sent, for a reason that says nothing about the idea: hand it back.
+
+    These refusals used to be stored as verdicts. A closed market made the proposal EXPIRED, a
+    pause REJECTED -- the word the journal uses for a person declining it -- and a venue that
+    did not answer, an order already open for the symbol or a stale quote INVALIDATED; the
+    checks before submission (preflight, the venue's review, the capital reservation) left it
+    APPROVED with no order, where no console request could reach it again. The console withholds
+    the approve button while the market is closed or execution is paused, but `ct-approve` and a
+    page opened a minute before the close do not, and either way a research run had to be spent
+    to get the same idea back.
+
+    The proposal returns to PROPOSED, so it waits in the queue and expires on its own clock like
+    any other. The approval record stays in the approvals table and the history says why it did
+    not execute. A replay of the same request still reads the stored response; approving again
+    takes a fresh approval against the proposal's new version.
+    """
+    message = f"nothing was sent; the proposal is waiting for approval again: {reason}"
+    with store.locked():
+        current = store.get(proposal.proposal_id)
+        # Only an approval that never reached the venue is handed back. Anything else moved on
+        # while execution was running, and is left exactly as it is.
+        if current is not None and current.status == APPROVED and not current.client_order_id:
+            current.status = PROPOSED
+            current.note("approval_deferred", message, outcome=outcome)
+            store.save(current)
+    return ExecutionResult(False, outcome, proposal.proposal_id, revalidation, error=message)
 
 
 def reconcile_proposal(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter,

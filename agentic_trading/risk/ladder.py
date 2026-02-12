@@ -52,6 +52,26 @@ class LadderStates:
             return self.micro_live
         return {"core": self.core, "sandbox": self.sandbox}.get(bucket, self.sandbox)
 
+    def governing(self, bucket: str) -> LadderState:
+        """The ladder a proposal is recorded against when it is made and compared with when it
+        is approved. Core is held to the total portfolio's; every other bucket to its own.
+
+        One definition for both ends. Proposals used to record the total ladder whatever their
+        bucket while revalidation compared the bucket's own, so a Micro-Live proposal carried
+        the conceptual book's level into a comparison with the real account's.
+        """
+        return self.total if bucket == "core" else self.for_bucket(bucket)
+
+
+def escalated(bucket: str, before: str | None, after: str) -> bool:
+    """Whether the governing ladder is at a worse level now than it was.
+
+    Sandbox and Micro-Live step through their own shorter ladder, so their levels are ranked on
+    it. Ranked on the total ladder's, HALT was an unknown word and a climb to it went unnoticed.
+    """
+    order = ORDER if bucket == "core" else SANDBOX_ORDER
+    return before in order and after in order and order.index(after) > order.index(before)
+
 
 def load_ladder_states(path: str | Path, profiles: Profiles) -> LadderStates:
     path = Path(path)
