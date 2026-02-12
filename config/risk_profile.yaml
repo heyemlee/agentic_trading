@@ -33,8 +33,12 @@ execution_policy:
     channel: cli
     proposal_ttl_minutes: 240
     revalidate_all_rules_at_submit: true
+    # NOT ENFORCED: no code reads this. The drift allowed between the analysis price and the
+    # venue's price at approval is proposal_freshness.classes.<class>.max_price_drift_pct.
     max_price_drift_pct_since_proposal: 2.0
   # Autonomy is three independent capabilities, all off. None bypasses the Hard Risk Layer.
+  # NOT ENFORCED: no code reads this block. The autonomy that exists is configured and switched
+  # under buckets.micro_live.autonomy (autonomy.py); changing a value here changes nothing.
   autonomy:
     defensive:                             # risk-reducing actions only
       enabled: false                       # defensive automation; still disabled
@@ -141,6 +145,8 @@ buckets:
       turnover_exempt: [initial_deployment_tranche, ladder_risk_reduction]
       no_same_day_round_trips: true        # never buy and sell one symbol in one session; also avoids pattern-day-trader status
       reasoning: turnover is buys plus sells over core equity; de-risking must never be blocked by a turnover cap
+    # NOT ENFORCED: no rule reads these. Nothing raises a review or an exit proposal from a
+    # position's loss against its cost; the drawdown ladders are the only loss-driven control.
     per_position_loss_rules_pct_from_cost:
       individual_stock:           {review_at: {value: TODO, recommended_default: -10}, mandatory_exit_proposal_at: {value: TODO, recommended_default: -15}}
       sector_factor_thematic_etf: {review_at: {value: TODO, recommended_default: -10}, mandatory_exit_proposal_at: {value: TODO, recommended_default: -15}}
@@ -185,6 +191,8 @@ buckets:
       max_orders_per_week:        {value: TODO, recommended_default: 6}
       no_same_day_round_trips: true
     loss_limits:
+      # NOT ENFORCED: the two per_position_* limits and monthly_realized_loss_budget_usd are
+      # read by no code. daily_loss_gate_pct_of_allocation is enforced, as HR22.
       per_position_review_pct_from_cost:          {value: TODO, recommended_default: -15}
       per_position_mandatory_close_pct_from_cost: {value: TODO, recommended_default: -25}
       daily_loss_gate_pct_of_allocation:          {value: TODO, recommended_default: -5}    # 25 dollars: no new sandbox opens that day
@@ -298,6 +306,8 @@ buckets:
       max_orders_per_week:        {value: TODO, recommended_default: 4}
       no_same_day_round_trips: true
     loss_limits:
+      # NOT ENFORCED: the two per_position_* limits are read by no code; no position is reviewed
+      # or closed for its loss. daily_loss_gate_pct_of_allocation is enforced, as HR22.
       per_position_review_pct_from_cost:          {value: TODO, recommended_default: -12}
       per_position_mandatory_close_pct_from_cost: {value: TODO, recommended_default: -20}
       daily_loss_gate_pct_of_allocation:          {value: TODO, recommended_default: -5}
@@ -557,7 +567,7 @@ broker:
     etf: 0.3
     stock: 0.5
     crypto: 0.5
-  submit_timeout_seconds: 30
+  submit_timeout_seconds: 30                # NOT ENFORCED: no code reads this; Robinhood calls time out at robinhood.call_timeout_seconds
   reconcile_after_submit_seconds: 5        # give the paper broker a moment before reading state back
   state_file: state/proposals.json
   fills_file: state/fills.jsonl
@@ -809,7 +819,7 @@ data_freshness:
 revalidation:
   # A fast deterministic re-check handles the common case. A full multi-agent reanalysis is
   # reserved for a materially changed thesis, both to stay safe and to conserve Claude usage.
-  allow_size_reduction: true
+  allow_size_reduction: true               # NOT ENFORCED: no code reads this; a buy is always shrunk to fit, but never below min_reduction_ratio
   min_reduction_ratio: 0.5                 # never execute less than half the approved idea silently
   reanalysis_triggers:
     - price_drift_beyond_class_band
@@ -917,6 +927,9 @@ micro_live_execution:
     # the venue's own pre-trade review runs first and returns a live quote, our revalidation
     # rejects the order if that quote has drifted from the analysis price, only highly liquid
     # instruments are permitted, and order size is small.
+    # Of those mitigations, the quote check that exists compares the venue's own quote with the
+    # analysis price against the proposal class's max_price_drift_pct. The review's quote is
+    # not compared with anything: see max_review_quote_drift_pct below.
     order_type: market
     # A buy takes a limit price whenever the approved size buys at least one whole share and
     # rounding down to whole shares does not cut it below revalidation.min_reduction_ratio --
@@ -928,6 +941,17 @@ micro_live_execution:
     prefer_limit_in_whole_shares: true
     time_in_force: gfd
     market_hours: regular_hours
+    # NOT ENFORCED, every key from here to the end of order_rules. They were written for the
+    # $100 account and no code reads them. What bounds a Micro-Live order today:
+    #   size       buckets.micro_live.tiers.<tier>.max_order_usd, position_limits and
+    #              concentration caps (Hard Risk)
+    #   minimum    sizing.min_order_usd
+    #   spread     data_freshness.fast.max_spread_pct
+    #   positions  buckets.micro_live.position_limits.max_open_positions
+    #   rate       buckets.micro_live.activity_limits (HR12)
+    #   review     nothing compares the venue review's quote with our price
+    # Enforcing max_single_order_usd as written would cap every order at $40, below the tier
+    # limits above, so implementing these is a decision about limits, not a repair.
     max_review_quote_drift_pct: 1.0      # the review's quote vs our revalidation price
     max_spread_pct: 0.5                  # refuse to trade a wide book
     min_order_usd: 10
