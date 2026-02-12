@@ -129,6 +129,40 @@ def test_a_failed_delivery_is_retried_with_backoff_and_then_throttled(service, m
     assert notify.dispatch(db, settings, [event], now=now + timedelta(hours=5))["failed"]
 
 
+def test_the_market_regime_is_not_announced_as_a_drawdown_ladder(service, monkeypatch):
+    from agentic_trading import risk
+    from agentic_trading.risk_scenarios import regime
+
+    monkeypatch.setattr(risk, "assess_regime", lambda *_args, **_kwargs: regime("ELEVATED_RISK"))
+    assert service.risk_state()["regime"]["level"] == "ELEVATED_RISK"
+    assert not [e for e in service.collect_notifications() if "regime" in e.key]
+
+
+def test_a_push_the_service_refused_is_recorded_and_the_pass_goes_on(service, monkeypatch):
+    """With a device subscribed, a refusal from the push service raised PushError, which dispatch
+    did not catch: the pass stopped at that event with nothing recorded and nothing after it
+    tried, and the 15-second loop logged a traceback each time."""
+    from agentic_trading import webpush
+
+    settings = service.notification_settings()
+    monkeypatch.setattr(webpush, "devices", lambda _db: [{"device_id": "phone"}])
+    refused = []
+
+    def deliver(_db, _state_dir, payload, **_kwargs):
+        refused.append(payload["title"])
+        raise webpush.PushError("no device accepted the notification: 403: BadJwtToken")
+
+    monkeypatch.setattr(webpush, "deliver", deliver)
+    events = [notify.Event(key="a", kind="proposal_waiting", title="first"),
+              notify.Event(key="b", kind="proposal_waiting", title="second")]
+
+    result = notify.dispatch(settings._db, settings, events)
+    assert [f["key"] for f in result["failed"]] == ["a", "b"] and len(refused) == 2
+    assert "BadJwtToken" in result["failed"][0]["error"]
+    entry = notify.pending(settings._db)["events"]["a"]
+    assert entry["state"] == "PENDING" and entry["attempts"] == 1
+
+
 def test_a_condition_outlives_the_outage_that_stopped_it_being_delivered(service, monkeypatch):
     """Exhausting the retry budget against a broken channel must not retire the condition.
 

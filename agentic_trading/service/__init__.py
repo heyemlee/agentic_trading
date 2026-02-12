@@ -84,6 +84,9 @@ from .status import (
 
 logger = logging.getLogger(__name__)
 
+#: The drawdown ladders `risk_state` reports, as opposed to the other entries beside them.
+LADDER_NAMES = ("total", "core", "sandbox", "micro_live")
+
 BUCKETS = ("core", "sandbox", MICRO_BUCKET)
 
 
@@ -1166,7 +1169,10 @@ class Service:
                     detail=micro.connect_error[:200], link="/ui/system.html", urgent=True))
 
         for name, ladder in self.risk_state().items():
-            if not isinstance(ladder, dict) or "level" not in ladder:
+            # risk_state also carries the market regime, which has a "level" too. Read as a
+            # ladder it produced "the regime drawdown ladder is at ELEVATED_RISK, drawdown 0.00%"
+            # and repeated it every quiet period for as long as the market stayed there.
+            if name not in LADDER_NAMES or not isinstance(ladder, dict) or "level" not in ladder:
                 continue
             if ladder["level"] != "NORMAL":
                 events.append(Event(

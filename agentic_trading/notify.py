@@ -254,8 +254,14 @@ def send(settings: Settings, event: Event) -> None:
     if settings.channel == "webpush":
         from . import webpush
 
-        webpush.deliver(settings._db, settings.state_dir, event.payload(),
-                        subject_env=settings.push_subject_env)
+        # PushError is not a DeliveryError, and dispatch only records the latter. A subscribed
+        # device the push service refused, or a contact that failed validation, escaped the pass:
+        # no attempt recorded, no backoff, and every event after it in the list never tried.
+        try:
+            webpush.deliver(settings._db, settings.state_dir, event.payload(),
+                            subject_env=settings.push_subject_env)
+        except webpush.PushError as exc:
+            raise DeliveryError(str(exc)) from exc
         return
     if settings.channel == "wechat":
         reply = _post(os.environ[settings.wechat_url_env].strip(),
