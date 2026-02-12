@@ -12,11 +12,11 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from datetime import date as calendar_date
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -1715,21 +1715,41 @@ def _fred_configured(profiles: Profiles) -> bool:
     return bool(load_env(profiles.project_dir) and os.environ.get("FRED_API_KEY", "").strip())
 
 
-@lru_cache(maxsize=4)
+#: How long a "no usable bar yet" answer stands before the vendor is asked again. A published
+#: bar does not go away, so a "yes" stands for the life of the process.
+SESSION_PROBE_RETRY_SECONDS = 600.0
+_SESSION_PROBES_KEPT = 16
+_session_probes: dict[str, tuple[bool, float]] = {}
+
+
 def _session_has_data(session: str) -> bool:
     """Whether the data vendor has published a usable bar for this session.
 
     A vendor can lag hours behind the close, publishing a bar with volume but no closing price.
     Research and pricing must anchor to a session that is actually complete, so this probes a
     single liquid symbol rather than assuming the calendar and the vendor agree.
+
+    This was an ``lru_cache``, which kept a "no" for the life of the API process. Probed once in
+    the vendor's lag window, a session stayed "no data" until a restart: every research run and
+    every price the next day anchored to the session before it, and each later day added another
+    stale key, up to four sessions behind. A "no" is therefore only remembered for a few minutes,
+    which still keeps a console polling every few seconds from asking the vendor each time.
     """
+    now = time.monotonic()
+    known = _session_probes.get(session)
+    if known is not None and (known[0] or now - known[1] < SESSION_PROBE_RETRY_SECONDS):
+        return known[0]
     try:
         from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
         df = load_ohlcv("SPY", session)
-        return df is not None and not df.empty
+        usable = df is not None and not df.empty
     except Exception:  # noqa: BLE001 - any failure means "not usable"
-        return False
+        usable = False
+    _session_probes[session] = (usable, now)
+    while len(_session_probes) > _SESSION_PROBES_KEPT:
+        _session_probes.pop(next(iter(_session_probes)))
+    return usable
 
 
 def _last_session(max_lookback: int = 5) -> str:
