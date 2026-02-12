@@ -136,10 +136,11 @@ def quotes_now():
 class FakeMCP:
     """Stands in for the Robinhood MCP session: same call surface, scripted answers."""
 
-    def __init__(self, tools, responses=None, error_tools=()):
+    def __init__(self, tools, responses=None, error_tools=(), error_text="venue said no"):
         self._tools = list(tools)
         self._responses = dict(responses or {})
         self._error_tools = set(error_tools)
+        self._error_text = error_text
         self.calls: list[tuple[str, dict]] = []
 
     def list_tools(self):
@@ -148,7 +149,7 @@ class FakeMCP:
     def call_tool(self, name, arguments):
         self.calls.append((name, dict(arguments)))
         if name in self._error_tools:
-            return SimpleNamespace(isError=True, content=[SimpleNamespace(text="venue said no")],
+            return SimpleNamespace(isError=True, content=[SimpleNamespace(text=self._error_text)],
                                    structuredContent=None)
         payload = self._responses.get(name, {})
         if callable(payload):
@@ -289,8 +290,8 @@ def test_over_funded_account_halts_trading(profiles):
                                                            "get_portfolio": rich_portfolio,
                                                            "get_equity_orders": EMPTY_ORDERS}), enabled=True)
     with pytest.raises(BrokerError, match="above the"):
-        broker.submit_order(OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-1",
-                                         notional=35.0, order_type="market"))
+        broker.pre_submit_check(OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-1",
+                                             notional=35.0, order_type="market"))
 
 
 def test_order_submission_maps_and_prevents_duplicates(profiles):
@@ -315,13 +316,14 @@ def test_order_submission_maps_and_prevents_duplicates(profiles):
     ref_id = sent["ref_id"]
     assert len(ref_id) == 36, "ref_id must be a UUID, the venue's idempotency key"
 
-    # the same logical order now exists at the venue, so a retry is refused
-    fake._responses["get_equity_orders"] = {"data": {"orders": [
-        {"id": "rh-1", "ref_id": ref_id, "symbol": "VTI", "side": "buy", "state": "filled",
-         "quantity": "0.0918", "cumulative_quantity": "0.0918", "average_price": "381.00"}]}}
+    # A retry carries the same ref_id, and the venue refusing it on that ground is a duplicate,
+    # not a rejection of the idea. (Execution looks the id up before it ever gets this far.)
+    fake._error_tools, fake._error_text = {"place_equity_order"}, "an order with this ref_id already exists"
     with pytest.raises(DuplicateOrder):
         broker.submit_order(OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-1",
                                          notional=35.0, order_type="market"))
+    retried = [a for n, a in fake.calls if n == "place_equity_order"]
+    assert len(retried) == 2 and retried[1]["ref_id"] == ref_id
 
 
 def test_venue_error_becomes_a_rejection_not_a_silent_pass(profiles):
@@ -334,6 +336,106 @@ def test_venue_error_becomes_a_rejection_not_a_silent_pass(profiles):
     with pytest.raises(Exception, match="venue said no"):
         broker.submit_order(OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-2",
                                          notional=35.0, order_type="market"))
+
+
+TRADABLE = {"data": {"tradability": [{"symbol": "VTI", "tradable": True, "fractional": True}]}}
+
+
+@pytest.mark.parametrize("tool", ["get_accounts", "get_equity_orders", "get_equity_tradability"])
+def test_a_read_that_errors_is_unavailable_never_a_rejection(profiles, tool):
+    """Execution closes a proposal for good on a BrokerRejection. A read answering with an error
+    refused nothing, and used to be reported exactly like a refused order."""
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO,
+                                   "get_equity_orders": EMPTY_ORDERS, "get_equity_tradability": TRADABLE},
+                   error_tools={tool})
+    broker = make_broker(profiles, fake, enabled=True)
+    request = OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-3", notional=35.0, order_type="market")
+    with pytest.raises(BrokerUnavailable, match="venue said no"):
+        if tool == "get_equity_orders":
+            broker.get_order_by_client_id(request.client_order_id)
+        else:
+            broker.pre_submit_check(request)
+
+
+def test_placing_an_order_reads_nothing_from_the_venue_first(profiles):
+    """Every read before placement now happens before the intent is recorded; one that failed
+    after it could not be told apart from an order that may have been placed."""
+    placed = {"data": {"orders": [{"id": "rh-2", "symbol": "VTI", "side": "buy", "state": "queued",
+                                   "quantity": "0.0918", "cumulative_quantity": "0", "type": "market"}]}}
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO,
+                                   "get_equity_tradability": TRADABLE, "place_equity_order": placed})
+    broker = make_broker(profiles, fake, enabled=True)
+    request = OrderRequest(symbol="VTI", side="buy", client_order_id="ct-x-4", notional=35.0,
+                           order_type="market")
+    broker.pre_submit_check(request)          # the order execution calls them in
+    fake.calls.clear()
+    broker.submit_order(request)
+    assert [name for name, _ in fake.calls] == ["place_equity_order"]
+
+
+def test_polling_follows_the_order_it_was_asked_about(profiles):
+    rows = {"data": {"orders": [
+        {"id": "rh-other", "symbol": "VTI", "side": "buy", "state": "filled", "quantity": "1",
+         "cumulative_quantity": "1", "average_price": "370"},
+        {"id": "rh-mine", "symbol": "VTI", "side": "buy", "state": "confirmed", "quantity": "0.09",
+         "cumulative_quantity": "0"}]}}
+    broker = make_broker(profiles, FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS,
+                                                           "get_equity_orders": rows}), enabled=True)
+    order = broker.poll_order("rh-mine", timeout_seconds=0)
+    assert order.order_id == "rh-mine" and order.status == "accepted"
+    with pytest.raises(BrokerUnavailable, match="no order"):
+        broker.poll_order("rh-missing", timeout_seconds=0)
+
+
+def _unreachable(_arguments):
+    raise ConnectionError("connection reset by peer")
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param({"error_tools": {"get_equity_tradability"}}, id="tool answered with an error"),
+    pytest.param({"responses": {"get_equity_tradability": _unreachable}}, id="call never answered"),
+])
+def test_a_venue_check_that_fails_before_placement_leaves_no_order_intent(profiles, tmp_path, monkeypatch,
+                                                                          failure):
+    """The tool-error case used to close the approved proposal as REJECTED; the transport case left
+    it UNKNOWN with an intent recovery could never find at the venue, which in turn refused every
+    later order for the account."""
+    import yaml
+
+    from agentic_trading.broker.base import Clock
+    from agentic_trading.execution import execute, needs_reconciliation
+    from agentic_trading.execution_scenarios import _proposal
+    from agentic_trading.proposals import PROPOSED, ProposalStore
+    from agentic_trading.risk_scenarios import regime as fake_regime
+
+    ledger = tmp_path / "micro_live_portfolio.yaml"
+    ledger.write_text(yaml.safe_dump({"as_of": "2026-09-02", "currency": "USD",
+                                      "buckets": {"micro_live": {"cash_usd": 100.0}},
+                                      "positions": [], "recent_opens": []}))
+    _isolate_state(profiles, tmp_path, ledger)
+    responses = {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO, "get_equity_positions": EMPTY_POSITIONS,
+                 "get_equity_quotes": quotes_now(), "get_equity_orders": EMPTY_ORDERS,
+                 "review_equity_order": {"data": {"alerts": []}}, "get_equity_tradability": TRADABLE,
+                 "place_equity_order": {"data": {"orders": []}}}
+    responses.update(failure.get("responses", {}))
+    fake = FakeMCP(CURRENT_TOOLS, responses, error_tools=failure.get("error_tools", ()))
+    broker = make_broker(profiles, fake, enabled=True)
+    monkeypatch.setattr("agentic_trading.execution.assess_regime", lambda p, d: fake_regime("NORMAL"))
+    monkeypatch.setattr(broker, "get_clock", lambda: Clock(is_open=True, timestamp=datetime.now(UTC)))
+
+    proposal = _proposal(bucket="micro_live", notional=35.0, price=376.88, confidence=80)
+    proposal.limit_class = "broad_diversified_etf"
+    store = ProposalStore(tmp_path / "proposals.json")
+    store.save(proposal)
+    result = execute(profiles, proposal, broker, store, ledger_path=str(ledger))
+
+    assert result.outcome == "PRE_SUBMIT_REFUSED" and not result.submitted
+    assert not any(name == "place_equity_order" for name, _ in fake.calls)
+    stored = store.get(proposal.proposal_id)
+    assert stored.status == PROPOSED and stored.client_order_id is None
+    assert not needs_reconciliation(stored)
+    counts = store.db.status()["counts"]
+    assert counts["orders"] == counts["reservations"] == 0
 
 
 def test_only_the_micro_live_bucket_reaches_the_real_money_venue(profiles):

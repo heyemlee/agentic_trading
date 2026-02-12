@@ -504,6 +504,17 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
                              outcome="DUPLICATE_PREVENTED", revalidation=rv.as_dict())
 
     request = _build_order_request(profiles, proposal, rv, coid)
+    if hasattr(broker, "pre_submit_check"):
+        # Before the intent is recorded, so a refusal or a failed read here means nothing was sent.
+        try:
+            broker.pre_submit_check(request)
+        except BrokerError as exc:
+            reason = f"the venue's checks for this order did not pass: {exc}"
+            if _defers(proposal):
+                return _defer(store, proposal, "PRE_SUBMIT_REFUSED", reason, rv.as_dict())
+            proposal.note("pre_submit_refused", reason)
+            store.save(proposal)
+            return ExecutionResult(False, "PRE_SUBMIT_REFUSED", proposal.proposal_id, rv.as_dict(), error=reason)
     if bool((profiles.risk.get("robinhood") or {}).get("use_broker_pretrade_review", True)) and hasattr(broker, "review_order"):
         try:
             review = broker.review_order(request)

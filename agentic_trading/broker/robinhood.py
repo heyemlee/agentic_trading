@@ -368,6 +368,10 @@ class RobinhoodBroker:
             self._portal = None
 
     # ------------------------------------------------------------------ calls
+    #: Capabilities whose tool-level error is the venue refusing an order. Any other tool that
+    #: answers with an error failed to tell us something, which is not a refusal of anything.
+    ORDER_CAPABILITIES = frozenset({"place_order", "cancel_order"})
+
     def _call(self, capability: str, arguments: dict[str, Any] | None = None) -> Any:
         tool = self.tools.get(capability)
         if tool is None:
@@ -384,7 +388,11 @@ class RobinhoodBroker:
         except Exception as exc:
             raise BrokerUnavailable(f"the Robinhood call {tool} failed: {type(exc).__name__}: {exc}") from exc
         if getattr(result, "isError", False):
-            raise BrokerRejection(f"Robinhood tool {tool} returned an error: {_content_text(result)}")
+            # Execution reads a BrokerRejection as "the venue refused this order" and closes the
+            # proposal for good. A read that failed -- the account, the order list, tradability --
+            # refused nothing, so it must not be able to say that.
+            error = BrokerRejection if capability in self.ORDER_CAPABILITIES else BrokerUnavailable
+            raise error(f"Robinhood tool {tool} returned an error: {_content_text(result)}")
         payload = getattr(result, "structuredContent", None)
         if payload is None:
             text = _content_text(result)
@@ -605,13 +613,26 @@ class RobinhoodBroker:
             return True, detail
         return True, f"the venue returned no tradability row for {symbol}"
 
-    def submit_order(self, request: OrderRequest) -> BrokerOrder:
+    def _require_master_switch(self) -> dict[str, Any]:
         micro = dict(self.profiles.risk.get("micro_live_execution") or {})
         if not bool(micro.get("enabled", False)):
-            raise BrokerError(
+            raise BrokerRejection(
                 "micro_live_execution.enabled is false: real-money orders are disabled. This is the "
                 "master switch and it is not flipped by any other setting."
             )
+        return micro
+
+    def pre_submit_check(self, request: OrderRequest) -> None:
+        """The venue-side checks for one order, run before execution records the order intent.
+
+        They used to run inside ``submit_order``, after the intent and the capital reservation
+        were committed. A read that failed there was indistinguishable from an order that may
+        have been placed: the proposal went UNKNOWN, recovery could never find an order that was
+        never sent, and every later order for the account waited behind it. A tool error on one
+        of those reads was worse, surfacing as a venue rejection that closed the proposal.
+        Raising here, before anything is recorded, means nothing was sent.
+        """
+        micro = self._require_master_switch()
         acct = self.agentic_account(refresh=True)
         if acct.get("agentic_allowed") is not True:
             raise BrokerError("the resolved account is not agentic_allowed; the venue would reject the order")
@@ -630,13 +651,18 @@ class RobinhoodBroker:
         if not tradable:
             raise BrokerRejection(tradable_detail)
 
+    def submit_order(self, request: OrderRequest) -> BrokerOrder:
+        """Place one order. Call ``pre_submit_check`` first; execution does, before the intent.
+
+        Nothing here reads the venue before placing. The only check left is the master switch,
+        which costs no call. Duplicates are refused twice without a read at this point: execution
+        looks the client order id up before it records the intent, under the account's
+        execution lock, and the venue itself refuses a second order carrying the same ref_id.
+        """
+        self._require_master_switch()
         # Idempotency: ref_id is the venue's key, a UUID derived deterministically from our
         # client order id, so a retry carries the same value and the venue rejects the duplicate.
         ref_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentic-trading:{request.client_order_id}"))
-        existing = self._find_by_ref(ref_id, request.client_order_id)
-        if existing is not None:
-            raise DuplicateOrder(f"an order for {request.client_order_id} already exists at Robinhood", existing)
-
         args = self._order_args(request)
         args["ref_id"] = ref_id
         try:
@@ -677,8 +703,12 @@ class RobinhoodBroker:
             rows = _rows(self._call("orders", {
                 "account_number": self._account_number(self.agentic_account()), "order_id": order_id,
             }), "orders")
-            if rows:
-                latest = self._order(rows[0])
+            # The order the venue was asked about, not whichever row came first: a tool that
+            # ignores the filter answers with the account's whole order list.
+            match = next((self._order(r) for r in rows if isinstance(r, dict)
+                          and str(_first(r, "id", "order_id", default="")) == str(order_id)), None)
+            if match is not None:
+                latest = match
                 if latest.is_terminal:
                     return latest
             if _time.monotonic() >= deadline:
