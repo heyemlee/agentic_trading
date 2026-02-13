@@ -56,14 +56,21 @@ from pydantic import BaseModel, Field
 from ..agent_roster import role_for_node
 from .analyst_roles import analyst_role
 
-# Variables that would move billing to the API or to a cloud provider. Stripped
-# from the CLI environment on every call, regardless of the caller's shell.
+# Variables that would move billing to the API or to a cloud provider, or send the
+# subscription's credential and every prompt somewhere other than Anthropic. Stripped from the
+# CLI environment on every call, regardless of the caller's shell. The launchd jobs have a
+# closed environment; `ct-research` run from a shell that points ANTHROPIC_BASE_URL at a proxy
+# did not.
 BILLING_ENV_VARS = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_VERTEX_BASE_URL",
 )
 # Set inside a running Claude Code session; must be unset for a nested CLI call.
 NESTED_SESSION_VARS = ("CLAUDECODE",)
@@ -543,7 +550,9 @@ class ClaudeCodeChatModel(BaseChatModel):
         append_progress(self.progress_path, {
             "kind": "call_finished", **progress,
             "wall_seconds": entry["wall_seconds"],
-            "tools": sorted({str(call.get("name")) for call in tool_calls if call.get("name")}),
+            # `_extract_tool_calls` records the tool under "tool". Reading "name" here listed no
+            # tool for any call, so the lab showed every desk as thinking.
+            "tools": sorted({str(call.get("tool")) for call in tool_calls if call.get("tool")}),
         })
 
         message = AIMessage(

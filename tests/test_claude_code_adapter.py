@@ -38,6 +38,13 @@ def test_environment_is_scrubbed_of_billing_and_nesting_vars():
     assert env == {"PATH": "/bin"}
 
 
+@pytest.mark.parametrize("name", ["ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS",
+                                  "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL"])
+def test_a_redirected_endpoint_never_reaches_the_cli(name):
+    """The subscription's OAuth token and every prompt go wherever these point."""
+    assert scrubbed_environment({name: "https://proxy.example", "PATH": "/bin"}) == {"PATH": "/bin"}
+
+
 def test_invoke_uses_subscription_cli_with_builtin_tools_disabled(fake_claude, tmp_path):
     reset_usage_log()
     llm = ClaudeCodeChatModel(model="claude-sonnet-5", effort="low", work_dir=str(tmp_path))
@@ -75,12 +82,16 @@ def test_bound_tools_are_served_over_mcp_and_audited(fake_claude, tmp_path):
     from tradingagents.agents.utils.agent_utils import get_indicators, get_stock_data
 
     reset_usage_log()
-    llm = ClaudeCodeChatModel(model="claude-sonnet-5", work_dir=str(tmp_path), config_dir="config")
+    llm = ClaudeCodeChatModel(model="claude-sonnet-5", work_dir=str(tmp_path), config_dir="config",
+                              progress_path=str(tmp_path / "progress.jsonl"))
     bound = llm.bind_tools([get_stock_data, get_indicators])
     msg = bound.invoke("analyze")
     assert "ALLOWED=mcp__ta__get_stock_data,mcp__ta__get_indicators" in msg.content
     calls = msg.response_metadata["tool_calls_executed"]
     assert calls and calls[0]["tool"] == "mcp__ta__get_stock_data"
+    finished = [json.loads(line) for line in (tmp_path / "progress.jsonl").read_text().splitlines()
+                if json.loads(line)["kind"] == "call_finished"]
+    assert finished and finished[-1]["tools"] == ["mcp__ta__get_stock_data"]
     assert "more chars" in calls[0]["result_excerpt"]
     assert msg.tool_calls == []  # the loop ran inside the CLI; LangGraph sees a finished report
     assert USAGE_LOG[-1]["num_turns"] == 2
