@@ -99,6 +99,29 @@ def test_health_reports_a_product_status(sandbox_service):
     assert health.claude.billing == "claude_subscription_no_api_charges"
 
 
+def test_a_legacy_run_log_does_not_report_the_subscription_as_limited(sandbox_service):
+    """Nothing writes runs/*.log any more; workers log to runs/api and launchd to runs/service. A
+    limit line left in an old file reported CLAUDE_LIMIT_REACHED for good, and scheduled research
+    was skipped because of it. The job store is what records a limit now."""
+    runs = sandbox_service.profiles().project_dir / "runs"
+    (runs / "2026-08-30_VTI.log").write_text(
+        "STOPPED: You've hit your session limit · resets 1:30pm\n", encoding="utf-8")
+    assert sandbox_service.claude_status().state == "OK"
+    assert sandbox_service.health().status != SystemStatus.CLAUDE_LIMIT_REACHED
+
+
+def test_a_halt_that_needs_a_person_is_not_hidden_behind_a_quota_wait(sandbox_service, monkeypatch):
+    from agentic_trading.service.shapes import ClaudeStatus
+
+    monkeypatch.setattr(sandbox_service, "risk_state", lambda: {
+        "total": {"level": "HARD_HALT", "manual_reset_required": True}})
+    monkeypatch.setattr(sandbox_service, "claude_status", lambda: ClaudeStatus(
+        state="LIMIT_REACHED", detail="resets 1:30pm", billing="claude_subscription_no_api_charges"))
+    health = sandbox_service.health()
+    assert health.status == SystemStatus.HALTED
+    assert health.claude.state == "LIMIT_REACHED"
+
+
 def test_health_never_exposes_credentials(sandbox_service):
     blob = sandbox_service.health().model_dump_json().lower()
     for secret in ("access_token", "refresh_token", "client_secret", "api_key", "bearer"):

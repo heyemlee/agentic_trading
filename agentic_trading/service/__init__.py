@@ -160,10 +160,13 @@ class Service:
         halted = risk.get("total", {}).get("manual_reset_required", False)
 
         claude = self.claude_status()
-        if claude.state == "LIMIT_REACHED":
-            status = SystemStatus.CLAUDE_LIMIT_REACHED
-        elif halted:
+        # A halt waits for a person; a subscription limit clears on its own at a stated time.
+        # Ranked the other way, a drawdown halt was reported as "limit reached" for as long as
+        # both held. Either one blocks scheduled research, and `claude` still carries the limit.
+        if halted:
             status = SystemStatus.HALTED
+        elif claude.state == "LIMIT_REACHED":
+            status = SystemStatus.CLAUDE_LIMIT_REACHED
         elif paused:
             status = SystemStatus.PAUSED
         else:
@@ -216,9 +219,6 @@ class Service:
         if jobs and jobs[0].get("state") == "CLAUDE_LIMIT_REACHED":
             state = "LIMIT_REACHED"
             detail = jobs[0].get("error") or "Claude subscription limit reached"
-        latest = _latest_run_error(profiles)
-        if state == "OK" and latest and "limit" in latest.lower():
-            state, detail = "LIMIT_REACHED", latest
         return ClaudeStatus(state=state, detail=detail,
                             billing="claude_subscription_no_api_charges",
                             calls_today=calls_today, last_call_at=last_call)
@@ -1827,14 +1827,3 @@ def _approval_message(status: ProposalStatus, result: Any) -> str:
     }.get(status, result.error or "no order was submitted")
 
 
-def _latest_run_error(profiles: Profiles) -> str | None:
-    logs = sorted((profiles.project_dir / "runs").glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in logs[:3]:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            if "STOPPED" in line and "limit" in line.lower():
-                return line.strip()[:300]
-    return None
