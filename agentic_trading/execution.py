@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any
@@ -713,7 +714,7 @@ def _record_order_transaction(profiles, proposal, order, store, *, submitted, ou
         state = apply_fill_to_ledger(
             ledger, symbol=order.symbol, bucket=proposal.bucket, side=order.side,
             quantity=order.filled_quantity, price=order.filled_avg_price,
-            trade_date=utcnow().astimezone(ZoneInfo("America/New_York")).date().isoformat(),
+            trade_date=_fill_session(proposal),
             client_order_id=proposal.client_order_id,
             # Provenance for the autonomous allowance: a position opened without a person is
             # measured against it for as long as it is held.
@@ -745,6 +746,29 @@ def _record_order_transaction(profiles, proposal, order, store, *, submitted, ou
     store.save(proposal)
     return ExecutionResult(submitted, outcome, proposal.proposal_id, revalidation or {},
                            order=_order_dict(order), duplicate_prevented=not submitted)
+
+
+def _fill_session(proposal: Proposal) -> str:
+    """The New York session a fill belongs to.
+
+    It was the date the fill was *read*. Reconciliation runs until an order settles, so a day
+    order that filled at 15:59 and was read after midnight -- the machine asleep, the venue slow
+    to answer -- was booked to the next day: its opening counted against tomorrow's new-position
+    limit and not today's, and a sale's realized loss escaped the daily loss gate of the day it
+    was taken. A day order can only fill in the session it was submitted, so that session is the
+    answer; an order that can outlive its session keeps the date it was observed.
+    """
+    new_york = ZoneInfo("America/New_York")
+    in_force = str((proposal.order_request or {}).get("time_in_force") or "").lower()
+    if in_force in ("day", "gfd"):
+        submitted = next((entry.get("at") for entry in reversed(proposal.history)
+                          if entry.get("event") == "submitting"), None)
+        try:
+            if submitted:
+                return datetime.fromisoformat(str(submitted)).astimezone(new_york).date().isoformat()
+        except ValueError:
+            pass
+    return utcnow().astimezone(new_york).date().isoformat()
 
 
 def _append_fill(profiles, proposal, order, event):

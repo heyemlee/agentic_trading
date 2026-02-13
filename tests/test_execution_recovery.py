@@ -189,6 +189,29 @@ def test_pending_then_filled_recovery_is_incremental_and_idempotent(tmp_path, mo
     assert len(broker._orders) == 1
 
 
+def test_a_fill_read_after_midnight_is_booked_to_the_session_it_happened_in(tmp_path, monkeypatch):
+    """A day order can only fill in the session it was placed. Booking it to the date the fill
+    was read moved a 15:59 fill read after midnight into the next day's opening limit and out of
+    its own day's loss gate."""
+    from zoneinfo import ZoneInfo
+
+    profiles, p, broker, ledger, store = setup(tmp_path, 'none')
+    assert execution.execute(profiles, p, broker, store, ledger_path=str(ledger)).submitted
+    new_york = ZoneInfo('America/New_York')
+    placed_in = datetime.now(UTC).astimezone(new_york).date().isoformat()
+
+    order = next(iter(broker._orders.values()))
+    finish(broker, order)
+    next_morning = datetime.now(UTC) + timedelta(days=1)
+    monkeypatch.setattr(execution, 'utcnow', lambda: next_morning)
+    assert execution.reconcile_proposal(profiles, store.get(p.proposal_id), broker,
+                                        store).outcome == 'RECONCILED'
+
+    book = load_portfolio(ledger)
+    assert book.position('VTI').opened_on == placed_in
+    assert [o.date for o in book.recent_opens if o.symbol == 'VTI'] == [placed_in]
+
+
 def test_partial_then_canceled_preserves_fill_and_terminal_state(tmp_path):
     profiles, p, broker, ledger, store = setup(tmp_path, 'partial')
     execution.execute(profiles, p, broker, store, ledger_path=str(ledger))
