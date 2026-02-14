@@ -60,16 +60,23 @@ for label in "${labels[@]}"; do
   fi
   plutil -lint "$target"
   launchctl bootout "gui/$UID/$label" 2>/dev/null || true
-  loaded=false
-  for attempt in {1..10}; do
-    if launchctl bootstrap "gui/$UID" "$target" 2>/dev/null; then
-      loaded=true
-      break
-    fi
+  # bootout returns before the job is gone, and the API is given ExitTimeOut 30 to close its
+  # broker sessions; launchd answers a bootstrap inside that window with an I/O error. Ten
+  # half-second attempts with their errors discarded were the same five seconds release.sh
+  # used until 2026-09-12, when the API outlasted them and stayed unregistered: KeepAlive gone,
+  # the service down until someone bootstrapped it by hand. Same wait as release.sh now, and the
+  # last bootstrap error is the message.
+  for attempt in {1..60}; do
+    launchctl print "gui/$UID/$label" >/dev/null 2>&1 || break
     sleep 0.5
   done
-  if [[ "$loaded" != true ]]; then
-    echo "failed to load $label after waiting for the previous job to exit" >&2
+  bootstrap_error=""
+  for attempt in {1..60}; do
+    bootstrap_error="$(launchctl bootstrap "gui/$UID" "$target" 2>&1)" && break
+    sleep 0.5
+  done
+  if ! launchctl print "gui/$UID/$label" >/dev/null 2>&1; then
+    echo "$label did not register: ${bootstrap_error:-no error reported}. The service is not running." >&2
     exit 1
   fi
   launchctl enable "gui/$UID/$label"
