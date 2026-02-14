@@ -1193,3 +1193,52 @@ test('a late account read and another tab cannot restore an invalidated session'
   assert.equal(c.CT_API.authenticated, false);
   assert.equal(c.CT_API.writesEnabled, false);
 });
+
+/* Acting on a proposal usually closes it, and renderDetail hides the proposal and live-condition
+   sections as soon as the queue is empty. The outcome lived inside the proposal section, so an
+   approval's fill or refusal rendered and vanished within a second. */
+test('the outcome of an action is not inside a section that hides when the queue empties', () => {
+  const html = fs.readFileSync(path.join(root, 'ui/approvals.html'), 'utf8');
+  const sections = html.split('<section').slice(1);
+  const holder = sections.find(s => s.includes('id="result-slot"'));
+  assert.ok(holder, 'the result slot is on the page');
+  assert.ok(!holder.includes('data-od-id="proposal-detail"'));
+  assert.ok(!holder.includes('id="live-conditions"'));
+  assert.ok(!holder.split('>')[0].includes('hidden'));
+});
+
+function serviceWorker(fetchImpl) {
+  const listeners = {}, calls = [];
+  const self = { addEventListener: (type, fn) => { listeners[type] = fn; },
+    registration: { scope: 'https://console.test/ui/',
+      pushManager: { subscribe: async options => ({ options, toJSON: () => ({ endpoint: 'https://push.test/new', keys: {} }) }) } } };
+  const ctx = vm.createContext({ self, atob, Uint8Array, JSON, Error, console: { warn: (...a) => calls.push(['warn', a]) },
+    fetch: async (url, init = {}) => { calls.push([url, init]); return fetchImpl(url, init); } });
+  vm.runInContext(fs.readFileSync(path.join(root, 'ui/sw.js'), 'utf8'), ctx, { filename: 'sw.js' });
+  return { listeners, calls };
+}
+
+test('a rotated push subscription is recorded with the session CSRF token', async () => {
+  const { listeners, calls } = serviceWorker(async url => url === '../auth/session'
+    ? response({ authenticated: true, csrf_token: 'session-token' }) : response({ ok: true }));
+  let done;
+  listeners.pushsubscriptionchange({ oldSubscription: { options: { userVisibleOnly: true, applicationServerKey: new Uint8Array([4]) } },
+    waitUntil: promise => { done = promise; } });
+  await done;
+  const post = calls.find(([url]) => url === '../notifications/subscribe');
+  assert.ok(post, 'the renewal reached the API');
+  assert.equal(post[1].method, 'POST');
+  assert.equal(post[1].headers['X-CSRF-Token'], 'session-token');
+  assert.equal(JSON.parse(post[1].body).renewed, true);
+  assert.ok(!calls.some(([kind]) => kind === 'warn'));
+});
+
+test('a renewal the API refuses is reported, not swallowed', async () => {
+  const { listeners, calls } = serviceWorker(async url => url === '../auth/session'
+    ? response({ authenticated: true, csrf_token: 'session-token' }) : response({ detail: 'no' }, 403));
+  let done;
+  listeners.pushsubscriptionchange({ oldSubscription: { options: { userVisibleOnly: true, applicationServerKey: new Uint8Array([4]) } },
+    waitUntil: promise => { done = promise; } });
+  await done;
+  assert.ok(calls.some(([kind, args]) => kind === 'warn' && String(args[1]).includes('403')));
+});

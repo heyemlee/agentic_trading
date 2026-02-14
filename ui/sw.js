@@ -54,13 +54,49 @@ self.addEventListener('notificationclick', (event) => {
 /* A subscription can be rotated by the push service. Without this the device goes quiet and
    nothing says why, so the new endpoint is handed straight back to the console's API. */
 self.addEventListener('pushsubscriptionchange', (event) => {
-  event.waitUntil((async () => {
-    const subscription = await self.registration.pushManager.subscribe(
-      event.oldSubscription ? event.oldSubscription.options : { userVisibleOnly: true });
-    await fetch('../notifications/subscribe', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-CT-Request': '1' },
-      body: JSON.stringify({ subscription: subscription.toJSON(), renewed: true }),
-    }).catch(() => {});
-  })());
+  event.waitUntil(renewSubscription(event).catch((error) => {
+    /* Nothing can be shown from a service worker. The device keeps its old entry in the
+       console's device list, whose failure count is where this becomes visible. */
+    console.warn('push subscription renewal was not recorded:', error && error.message);
+  }));
 });
+
+async function readJSON(url) {
+  const response = await fetch(url, { credentials: 'same-origin', headers: { 'X-CT-Request': '1' } });
+  if (!response.ok) throw new Error(url + ' answered ' + response.status);
+  return response.json();
+}
+
+function decodeKey(base64) {
+  const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+
+async function renewSubscription(event) {
+  let subscription = event.newSubscription;
+  if (!subscription) {
+    const options = event.oldSubscription && event.oldSubscription.options;
+    /* A push service accepts no subscription without this deployment's public key, and a
+       rotation does not always hand the old options over. */
+    subscription = await self.registration.pushManager.subscribe(
+      options && options.applicationServerKey ? options : {
+        userVisibleOnly: true,
+        applicationServerKey: decodeKey((await readJSON('../notifications/key')).public_key),
+      });
+  }
+  /* Every write to the API needs the session's CSRF token, and a service worker cannot see the
+     page's copy. The renewal went out without one, so the API refused every renewal with 403 and
+     the empty catch hid it: the phone kept being pushed at a dead endpoint and fell silent. The
+     token is asked for the same way the page asks on load; the session cookie travels with a
+     same-origin request, and nothing is relaxed on the server for it. */
+  const session = await readJSON('../auth/session');
+  if (!session.authenticated || !session.csrf_token) {
+    throw new Error('no signed-in session to record the new subscription under');
+  }
+  const response = await fetch('../notifications/subscribe', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': session.csrf_token },
+    body: JSON.stringify({ subscription: subscription.toJSON(), renewed: true }),
+  });
+  if (!response.ok) throw new Error('the subscription endpoint answered ' + response.status);
+}

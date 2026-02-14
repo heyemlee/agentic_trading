@@ -34,6 +34,12 @@
     </div>
   </section>
 
+  <!-- The outcome of the last action. Not inside the proposal: acting usually closes it, and the
+       proposal section hides as the queue empties, which took the answer with it. -->
+  <section class="section" style="padding-top:0;" data-od-id="result">
+    <div class="container"><div id="result-slot"></div></div>
+  </section>
+
   <section class="section" style="padding-top:0;" id="queue-wrap" data-od-id="queue" hidden>
     <div class="container">
       <p class="eyebrow" data-i18n="ap.queue">Waiting on you — pick one</p>
@@ -92,7 +98,6 @@
           <span class="body-sm body-muted" aria-hidden="true">·</span>
           <button class="btn btn-danger" id="btn-reject" data-od-id="cta-reject" data-i18n="ap.decline">—</button>
         </div>
-        <div id="result-slot"></div>
       </div>
 
       <!-- ── tabs ────────────────────────────────────────────────── -->
