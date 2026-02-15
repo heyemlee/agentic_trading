@@ -81,26 +81,6 @@ class ProposalStatus(str, Enum):
     NO_TRADE = "NO_TRADE"
 
 
-# Execution outcomes -> the product state a frontend should show.
-OUTCOME_TO_PROPOSAL_STATUS = {
-    "SUBMITTED": ProposalStatus.SUBMITTED,
-    "DUPLICATE_PREVENTED": ProposalStatus.UNKNOWN,  # a duplicate alone proves no fill
-    "ALREADY_EXECUTED": ProposalStatus.EXECUTED,
-    "STALE": ProposalStatus.STALE,
-    "REANALYZE": ProposalStatus.REANALYSIS_REQUIRED,
-    "INVALIDATED": ProposalStatus.INVALIDATED,
-    "REJECTED": ProposalStatus.HARD_RISK_REJECTED,
-    "BROKER_REJECTED": ProposalStatus.BROKER_REVIEW_REJECTED,
-    "BROKER_REVIEW_ALERT": ProposalStatus.BROKER_REVIEW_REJECTED,
-    "PREFLIGHT_FAILED": ProposalStatus.HARD_RISK_REJECTED,
-    "REVIEW_FAILED": ProposalStatus.BROKER_REVIEW_REJECTED,
-    "BROKER_UNAVAILABLE": ProposalStatus.INVALIDATED,
-    "SUBMIT_UNCERTAIN": ProposalStatus.UNKNOWN,
-    "RECONCILIATION_REQUIRED": ProposalStatus.UNKNOWN,
-    "ATTEMPTS_EXHAUSTED": ProposalStatus.INVALIDATED,
-}
-
-
 def proposal_status(proposal: Proposal, profiles: Any) -> ProposalStatus:
     """Map a stored proposal onto the vocabulary above, freshness included."""
     if proposal.reconciliation_error or proposal.status in (SUBMITTING, UNKNOWN):

@@ -246,15 +246,12 @@ def test_hr05e_refuses_a_web_claim_that_arrived_without_provenance(profiles):
 
 
 def test_the_medium_window_narrows_for_an_event_driven_thesis(profiles):
-    engine = HardRiskEngine(profiles)
-    slow = Proposal(ticker="VTI", bucket="core", action="BUY", size_hint="normal", confidence=80,
-                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
-                    strategy="long_only_diversified")
-    fast = Proposal(ticker="VTI", bucket="core", action="BUY", size_hint="normal", confidence=80,
-                    trade_date=TRADE_DATE, cls=classify_instrument("VTI", profiles, identity_lookup),
-                    strategy="event_driven")
-    assert engine._web_evidence_window(slow) == 1440
-    assert engine._web_evidence_window(fast) == 60
+    """Hard Risk and revalidation read the window from one definition, so they cannot disagree."""
+    from agentic_trading.proposals import web_evidence_window
+
+    assert web_evidence_window(profiles, "long_only_diversified") == 1440
+    assert web_evidence_window(profiles, "event_driven") == 60
+    assert web_evidence_window(profiles, None) == 1440
 
 
 # -- the real-money bucket's diversification rules ----------------------------------

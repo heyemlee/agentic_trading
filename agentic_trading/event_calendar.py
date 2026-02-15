@@ -177,7 +177,7 @@ def earnings_blackout(profiles: Profiles, ticker: str, trade_date: str, *, actio
     if today is None:
         return True, f"trade date {trade_date!r} is unreadable"
     if trading_days_between is None:
-        from .portfolio import _trading_days_between as trading_days_between
+        from .portfolio import trading_days_between
     if next_earnings >= today:
         days = trading_days_between(today.isoformat(), next_earnings.isoformat())
         limit = int(before)

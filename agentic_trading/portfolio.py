@@ -318,7 +318,8 @@ class Snapshot:
         return self.state.position(symbol, bucket) is not None
 
 
-def _trading_days_between(earlier: str, later: str) -> int:
+def trading_days_between(earlier: str, later: str) -> int:
+    """Weekdays from one date to a later one; the one definition every age check counts by."""
     a, b = pd.to_datetime(earlier), pd.to_datetime(later)
     if a >= b:
         return 0
@@ -350,7 +351,7 @@ def build_snapshot(
     max_price_age_seen = 0
     for p in state.positions:
         price, price_date = price_lookup(p.symbol, trade_date)
-        age = _trading_days_between(price_date, trade_date)
+        age = trading_days_between(price_date, trade_date)
         max_price_age_seen = max(max_price_age_seen, age)
         if age > max_price_age:
             raise PortfolioError(f"price for {p.symbol} is {age} trading days old (limit {max_price_age})")

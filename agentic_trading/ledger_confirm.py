@@ -19,7 +19,6 @@ from .state_db import StateDB
 
 logger = logging.getLogger(__name__)
 
-LEDGERS = ("conceptual", "micro_live")
 
 
 def ledger_paths(profiles: Profiles) -> dict[str, Path]:

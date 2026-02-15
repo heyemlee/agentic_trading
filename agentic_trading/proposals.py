@@ -15,7 +15,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,29 @@ STRATEGY_FRESHNESS_CLASS = {
     "short": "short",
     "event_driven": "event_driven",
 }
+
+
+def freshness_class_of(profiles: Profiles, strategy: str | None) -> str:
+    """The freshness class a strategy is held to; anything unmapped takes the profile's default."""
+    cfg = profiles.risk.get("proposal_freshness") or {}
+    default = str(cfg.get("default_class", "core_conservative"))
+    name = STRATEGY_FRESHNESS_CLASS.get((strategy or "").lower(), default)
+    return name if name in (cfg.get("classes") or {}) else default
+
+
+def web_evidence_window(profiles: Profiles, strategy: str | None) -> float:
+    """How old a web retrieval may be, in minutes, from ``data_freshness.medium``.
+
+    One definition for HR05e at proposal time and for revalidation at approval time. They were two
+    copies that decided "event-driven" differently, and the two checks exist to reach the same
+    verdict on the same evidence. An event-driven thesis is about the current tape, so it takes
+    the shorter window the config declares for it.
+    """
+    medium = (profiles.risk.get("data_freshness") or {}).get("medium") or {}
+    default = float(medium.get("max_age_minutes", 1440))
+    if freshness_class_of(profiles, strategy) == "event_driven":
+        return float(medium.get("event_driven_max_age_minutes", default))
+    return default
 
 
 def utcnow() -> datetime:
@@ -129,10 +152,7 @@ class Proposal:
 
     # -- freshness -----------------------------------------------------------
     def freshness_class(self, profiles: Profiles) -> str:
-        cfg = profiles.risk.get("proposal_freshness") or {}
-        default = str(cfg.get("default_class", "core_conservative"))
-        name = STRATEGY_FRESHNESS_CLASS.get((self.strategy or "").lower(), default)
-        return name if name in (cfg.get("classes") or {}) else default
+        return freshness_class_of(profiles, self.strategy)
 
     def freshness_rules(self, profiles: Profiles) -> dict[str, Any]:
         cfg = profiles.risk.get("proposal_freshness") or {}
@@ -358,6 +378,3 @@ def client_order_id(profiles: Profiles, proposal: Proposal, attempt: int) -> str
     prefix = str((profiles.risk.get("idempotency") or {}).get("client_order_id_prefix", "ct"))
     return f"{prefix}-{proposal.proposal_id}-{attempt}"[:128]
 
-
-def next_business_datetime(dt: datetime, minutes: int) -> datetime:
-    return dt + timedelta(minutes=minutes)

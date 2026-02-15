@@ -3,7 +3,7 @@ import math
 import re
 from datetime import UTC, datetime
 
-from .portfolio import _trading_days_between, upstream_price_lookup
+from .portfolio import trading_days_between, upstream_price_lookup
 
 #: How the buckets can appear in prose. Written as patterns because the model does not spell
 #: them consistently: MICRO_LIVE, micro-live and "micro live" are the same account.
@@ -178,7 +178,7 @@ def check_evidence(evidence, symbol, trade_date, max_age_days=3):
         observed = datetime.fromisoformat(evidence["observed_at"])
         if observed.tzinfo is None or (observed - datetime.now(UTC)).total_seconds() > 5:
             return False, "research evidence has no valid collection timestamp"
-        if date > target or _trading_days_between(str(date), trade_date) > max_age_days:
+        if date > target or trading_days_between(str(date), trade_date) > max_age_days:
             return False, "research price is future-dated or too old for the analysis date"
         if evidence.get("missing_required_reports"):
             return False, "required reports missing: " + ", ".join(evidence["missing_required_reports"])

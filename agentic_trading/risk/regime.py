@@ -14,6 +14,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..portfolio import trading_days_between
 from ..profile import Profiles
 
 LEVELS = ("LOW_RISK", "NORMAL", "ELEVATED_RISK", "HIGH_RISK", "UNKNOWN")
@@ -44,11 +45,6 @@ def upstream_ohlcv(symbol: str, as_of: str) -> pd.DataFrame:
     return load_ohlcv(symbol, as_of)
 
 
-def _trading_days_between(earlier: str, later: str) -> int:
-    a, b = pd.to_datetime(earlier), pd.to_datetime(later)
-    return 0 if a >= b else max(0, len(pd.bdate_range(a, b)) - 1)
-
-
 def assess_regime(profiles: Profiles, trade_date: str, ohlcv_lookup: OhlcvLookup = upstream_ohlcv) -> RegimeResult:
     cfg = profiles.risk.get("market_regime") or {}
     index_symbol = str(cfg.get("index_symbol", "SPY"))
@@ -71,7 +67,7 @@ def assess_regime(profiles: Profiles, trade_date: str, ohlcv_lookup: OhlcvLookup
     except Exception as exc:  # noqa: BLE001 - any data failure is UNKNOWN, never a guess
         return RegimeResult("UNKNOWN", False, f"regime data unavailable: {type(exc).__name__}: {exc}")
 
-    age = max(_trading_days_between(index_date, trade_date), _trading_days_between(vix_date, trade_date))
+    age = max(trading_days_between(index_date, trade_date), trading_days_between(vix_date, trade_date))
     if age > max_age:
         return RegimeResult("UNKNOWN", False, f"regime data is {age} trading days old (limit {max_age})",
                             index_symbol, index_close, index_sma, index_date, vix, vix_date)

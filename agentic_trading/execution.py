@@ -58,6 +58,7 @@ from .proposals import (
     needs_reconciliation,
     positions_fingerprint,
     utcnow,
+    web_evidence_window,
 )
 from .risk import (
     HardRiskEngine,
@@ -68,10 +69,9 @@ from .risk import (
 )
 from .risk import Proposal as RiskProposal
 from .risk.ladder import escalated
+from .risk.regime import LEVELS as REGIME_ORDER
 from .state_db import StateConflict, StateDB
 from .storage import file_lock
-
-REGIME_ORDER = ["LOW_RISK", "NORMAL", "ELEVATED_RISK", "HIGH_RISK", "UNKNOWN"]
 
 # Revalidation outcomes
 OUT_VALID = "VALID"
@@ -104,15 +104,6 @@ class Revalidation:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def _web_window(profiles: Profiles, proposal: Proposal) -> float:
-    """The same ``data_freshness.medium`` window HR05e uses, keyed on the proposal's class."""
-    medium = (profiles.risk.get("data_freshness") or {}).get("medium") or {}
-    default = float(medium.get("max_age_minutes", 1440))
-    if proposal.freshness_class(profiles) == "event_driven":
-        return float(medium.get("event_driven_max_age_minutes", default))
-    return default
 
 
 def _venue_price(broker: BrokerAdapter, symbol: str, profiles: Profiles) -> tuple[float | None, str]:
@@ -183,7 +174,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     # Web-sourced facts age faster than the proposal does. A proposal may wait out
     # human_approval.proposal_ttl_minutes, which is long enough for a headline read before the
     # open to be four hours stale by the time someone approves it.
-    web_ok, web_why = check_web_sources(proposal.evidence, _web_window(profiles, proposal))
+    web_ok, web_why = check_web_sources(proposal.evidence, web_evidence_window(profiles, proposal.strategy))
     rv.reasons.append(f"web evidence: {web_why}")
     if not web_ok:
         rv.changes.append("news_recheck_required_and_material_change")

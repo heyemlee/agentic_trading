@@ -32,7 +32,6 @@ from ..portfolio import PortfolioError, load_portfolio
 from ..profile import ProfileError, Profiles, load_profiles
 from ..proposals import (
     APPROVED,
-    INVALIDATED,
     NEEDS_REANALYSIS,
     PROPOSED,
     REJECTED,
@@ -782,20 +781,6 @@ class Service:
             store.save(p)
         run = self.start_research(p.ticker, bucket=p.bucket, trigger="reanalysis")
         return {"proposal_id": p.proposal_id, "status": ProposalStatus.REANALYSIS_REQUIRED, "run": run}
-
-    def invalidate(self, proposal_id: str, reason: str) -> dict[str, Any]:
-        profiles = self.profiles()
-        store = self._store(profiles)
-        with store.locked():
-            p = store.get(proposal_id)
-            if p is None:
-                raise ServiceError(f"no proposal {proposal_id!r}")
-            if p.client_order_id or p.status not in (PROPOSED, APPROVED):
-                raise ServiceConflict("an executing or closed proposal cannot be changed")
-            p.status = INVALIDATED
-            p.note("invalidated", reason)
-            store.save(p)
-        return {"proposal_id": p.proposal_id, "status": ProposalStatus.INVALIDATED}
 
     # ---------------------------------------------------------------- research
     def advisor_decisions(self, limit: int = 40) -> list[AdvisorDecision]:
