@@ -64,6 +64,7 @@
       const content = document.getElementById('content');
       content.hidden = false;
       content.inert = true;
+      Console.loading(true);
       CT_API.start(['health', 'proposals']);
       return;
     }

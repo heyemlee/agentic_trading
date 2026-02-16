@@ -63,6 +63,10 @@ Opening an initialized tab synchronously switches its retained DOM. Scroll posit
 in-flight actions survive switching. Browser Back/Forward and direct links still work.
 
 Cold opens of console pages get a shared startup curtain before application scripts run.
+The branded introduction is shown once per tab session. A sessionStorage boolean (no account
+data) selects the compact, blades-only curtain for later document transitions and reloads.
+Inside the app, pending page data or scripts show only the same blades over the retained
+layout; returning to a ready page hides them immediately. Background refreshes keep content.
 It uses the owner's lightsaber animation (Uiverse.io, NlghtM4re), adapted to the console's
 light palette. The first successful render with authenticated data dismisses it immediately
 with a short fade; no minimum delay or artificial progress is added. Optional slow reads do

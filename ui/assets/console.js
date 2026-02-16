@@ -232,10 +232,19 @@
   }
 
   function renderFoot() {
-    return '<footer class="pagefoot" data-od-id="pagefoot"><div class="container">' +
+    return '<div id="page-loader" class="page-loader" hidden role="status" data-i18n-aria="common.loading" aria-label="' + escapeHtml(t('common.loading')) + '">' +
+      '<div class="startup-loader" aria-hidden="true"><span class="lightsaber ls-left ls-green"></span>' +
+      '<span class="lightsaber ls-right ls-red"></span>' +
+      [1, 2, 3, 4, 5].map(n => '<span class="ls-particles ls-part-' + n + '"></span>').join('') + '</div></div>' +
+      '<footer class="pagefoot" data-od-id="pagefoot"><div class="container">' +
       '<p class="body-sm" data-i18n="foot.local">' + t('foot.local') + '</p>' +
       '<p class="body-sm" style="margin-top:4px;" id="foot-stamp"></p>' +
       '</div></footer>';
+  }
+
+  function loading(show) {
+    const loader = document.getElementById('page-loader');
+    if (loader) loader.hidden = !show;
   }
 
   function paintFoot() {
@@ -316,8 +325,8 @@
       const portfolioStale = missing.some(([key, item]) =>
         key === 'portfolio' && item.error && item.error.includes('older than'));
       const touchBtn = (portfolioStale && CT_API.authenticated)
-        ? ' <button type="button" class="btn btn-sm btn-accent" data-action="touch-portfolio" style="margin-left:8px;padding:3px 10px;font-size:12px;vertical-align:middle;">' +
-          escapeHtml(t('ux.touchLedger')) + '</button>'
+        ? ' <button type="button" class="btn btn-sm btn-accent" data-action="confirm-ledger" style="margin-left:8px;padding:3px 10px;font-size:12px;vertical-align:middle;">' +
+          escapeHtml(t('pf.confirmLedger')) + '</button>'
         : '';
       bar.innerHTML = '<span class="conn-msg">' +
         escapeHtml(names ? t('ux.stale', { names }) : t('ux.offline')) + '</span>' + touchBtn;
@@ -354,8 +363,8 @@
             '</summary><pre>' + escapeHtml(why.raw) + '</pre></details>'
           : '') +
         (canTouch
-          ? '<div style="margin-top:8px;"><button type="button" class="btn btn-sm btn-accent" data-action="touch-portfolio">' +
-            escapeHtml(t('ux.touchLedger')) + '</button></div>'
+          ? '<div style="margin-top:8px;"><button type="button" class="btn btn-sm btn-accent" data-action="confirm-ledger">' +
+            escapeHtml(t('pf.confirmLedger')) + '</button></div>'
           : '') +
         '</div><time>' +
         escapeHtml(item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—') + '</time></div>';
@@ -366,6 +375,30 @@
      picker and only commits on confirm. A second switch in the chrome made
      the same setting reachable two ways, and the chrome one changed the
      language on a single stray tap. */
+
+  /* Offered where a stale ledger is reported. It used to post to /portfolio/touch, a route the
+     API never had, so the one control shown in that state failed with "Not Found" every time.
+     A stale ledger is renewed by a check that can refuse, never by writing a new date over it:
+     this runs the same confirmation as the Portfolio page and ct-state confirm, and says what
+     it refused. */
+  async function confirmLedger(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const report = await CT_API.post('/portfolio/confirm', { ledger: 'all' });
+      if (report && report.blocked) return;
+      if (report && !report.confirmed) {
+        const refusals = [...(report.ledgers || []).filter(l => l.error).map(l => l.error),
+                          ...(report.unsettled_orders || []).map(o => o.client_order_id)];
+        alert(t('pf.confirmRefused', { error: refusals.join(' · ') || report.detail || '' }));
+      }
+      await CT_API.readOnce('portfolio');
+    } catch (err) {
+      alert(t('pf.confirmRefused', { error: err.message || err }));
+    } finally {
+      button.disabled = false;
+    }
+  }
 
   let chromeMounted = false;
   function mount(activeKey) {
@@ -388,21 +421,8 @@
         try { await CT_API.refresh(); } finally { retry.disabled = false; }
         return;
       }
-      const touch = event.target.closest?.('[data-action="touch-portfolio"]');
-      if (touch) {
-        if (touch.disabled) return;
-        touch.disabled = true;
-        try {
-          const res = await CT_API.post('/portfolio/touch', {});
-          if (res && res.blocked) return;
-          await CT_API.readOnce('portfolio');
-        } catch (err) {
-          alert(t('ux.touchFailed', { err: err.message || err }));
-        } finally {
-          touch.disabled = false;
-        }
-        return;
-      }
+      const confirmButton = event.target.closest?.('[data-action="confirm-ledger"]');
+      if (confirmButton) { await confirmLedger(confirmButton); return; }
       const open = event.target.closest?.('[data-open-sheet]');
       const close = event.target.closest?.('[data-close-sheet]');
       if (open) openSheet(open.dataset.openSheet);
@@ -520,6 +540,7 @@
       if (loaded) displayed = true;
       const reason = !loaded ? blankReason(keys) : null;
       const shell = instant && reason?.loading;
+      loading(!!shell);
       content.hidden = !loaded && !shell;
       content.setAttribute('aria-busy', String(!loaded));
       // The actual page layout is visible before account data. No empty fixture is
@@ -733,6 +754,7 @@
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,
-    setHTML, mount, wireTabs, live, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
+    setHTML, mount, wireTabs, live, loading, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
+    confirmLedger,
   };
 })();

@@ -1208,8 +1208,9 @@ test('a late account read and another tab cannot restore an invalidated session'
   assert.equal(c.CT_API.writesEnabled, false);
 });
 
-function startupPage() {
+function startupPage(storage = tabStorage()) {
   const c = context(), timers = new Map(); let nextTimer = 0;
+  c.sessionStorage = storage;
   c.setTimeout = (fn, ms) => { timers.set(++nextTimer, { fn, ms }); return nextTimer; };
   c.clearTimeout = id => timers.delete(id);
   c.fireTimer = ms => {
@@ -1217,11 +1218,13 @@ function startupPage() {
   };
   c.hasTimer = ms => [...timers.values()].some(t => t.ms === ms);
   c.document.documentElement = { removeAttribute: () => { c.revealed = true; } };
-  c.document.querySelector = () => null;
+  c.document.querySelector = selector => selector === '#content:not([hidden])' ? c.element('content') : null;
   c.matchMedia = () => ({ matches: false });
   c.element('startup').focus = () => {};
-  c.element('startup').contains = () => false;
+  c.element('startup').blur = () => { c.blurred = true; };
+  c.element('startup').contains = () => true;
   c.element('startup').remove = () => { c.removed = true; };
+  c.element('content').focus = () => { c.contentFocused = true; };
   c.element('startup-actions').hidden = true;
   const copies = ['preparing', 'slow', 'failed'].map(key => ({ dataset: { i18n: 'startup.' + key } }));
   c.element('startup-message').querySelectorAll = () => copies;
@@ -1232,6 +1235,17 @@ function startupPage() {
   return c;
 }
 
+test('brand introduction appears once per tab session, including failed loads and reloads', () => {
+  const storage = tabStorage();
+  const first = startupPage(storage);
+  assert.equal(first.element('startup').classList.contains('is-first'), true);
+  const next = startupPage(storage);
+  assert.equal(next.element('startup').classList.contains('is-first'), false);
+  next.emitStatus('error');
+  assert.equal(next.element('startup-actions').hidden, false, 'compact loads retain recovery controls');
+  assert.equal(startupPage().element('startup').classList.contains('is-first'), true, 'a new session gets the introduction');
+});
+
 test('startup waits for authenticated rendering, then stays dismissed through later loads', () => {
   const c = startupPage();
   c.emitStatus('ready');
@@ -1239,6 +1253,7 @@ test('startup waits for authenticated rendering, then stays dismissed through la
   c.CT_API.authenticated = true;
   c.emitStatus('ready');
   assert.equal(c.revealed, true);
+  assert.equal(c.contentFocused, true, 'startup focus moves into content, not the selected navigation tab');
   assert.equal(c.hasTimer(10000), false, 'readiness cancels the watchdog, without a minimum delay');
   c.fireTimer(180);
   assert.equal(c.removed, true);
@@ -1328,4 +1343,19 @@ test('a renewal the API refuses is reported, not swallowed', async () => {
     waitUntil: promise => { done = promise; } });
   await done;
   assert.ok(calls.some(([kind, args]) => kind === 'warn' && String(args[1]).includes('403')));
+});
+
+test('the stale-ledger control runs the ledger confirmation and reports a refusal', async () => {
+  const c = context(); c.run('console.js');
+  const sent = [], alerts = [], read = [];
+  c.alert = message => alerts.push(message);
+  c.CT_API = { post: async (url, body) => { sent.push([url, body]);
+    return { confirmed: false, ledgers: [{ ledger: 'micro_live', error: 'PortfolioError: cash mismatch' }] }; },
+  readOnce: async key => { read.push(key); } };
+  const button = { disabled: false };
+  await c.Console.confirmLedger(button);
+  assert.equal(JSON.stringify(sent), JSON.stringify([['/portfolio/confirm', { ledger: 'all' }]]));
+  assert.match(alerts[0], /pf.confirmRefused.*cash mismatch/);
+  assert.deepEqual(read, ['portfolio']);
+  assert.equal(button.disabled, false);
 });

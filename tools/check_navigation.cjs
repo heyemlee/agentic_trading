@@ -70,6 +70,9 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.waitForFunction(()=>window.CT_NAV && !document.getElementById('content').hidden);
  assert.equal(await page.locator('.page-skeleton').count(),0);
  assert.equal(await page.locator('#startup').isVisible(),true);
+ assert.equal(await page.locator('#startup').evaluate(el => el.classList.contains('is-first')), true);
+ assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor), 'rgb(255, 255, 255)');
+ assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(255, 255, 255)');
  await page.locator('.startup-mark').evaluate(el => el.decode());
  assert.equal(await page.locator('.tabbar').isVisible(),false, 'cold start must cover intermediate UI');
  const startupTitle = await page.locator('#startup-title').evaluate(el => ({text:el.textContent.trim(), height:el.getBoundingClientRect().height}));
@@ -103,6 +106,8 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.waitForTimeout(2400);
  await page.waitForSelector('#startup', {state:'detached'});
  assert.equal(await page.locator('.tabbar').isVisible(),true);
+ assert.equal(await page.locator('.tabitem:focus').count(), 0, 'startup must not leave a focus ring on the selected tab');
+ assert.equal(await page.locator('#content').evaluate(el => el === document.activeElement), true);
  assert.match((await page.locator('.brand').innerText()).replace(/\s+/g, ' '), /Agentic Trading/);
  await page.locator('#chat-input').fill('Draft stays across tabs');
  await page.locator('[data-od-id="tab-portfolio"]').click();
@@ -139,10 +144,17 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.equal(result.hidden, false); assert.equal(result.skeleton, false); assert.ok(result.ms < 100);
    times.push(result);
    await page.waitForFunction(() => !document.getElementById('content').inert);
+   if (name === 'risk') {
+     assert.equal(await page.locator('#page-loader').isVisible(), true);
+     assert.equal(await page.locator('#page-loader .lightsaber').count(), 2);
+     assert.equal((await page.locator('#page-loader').innerText()).trim(), '');
+     assert.equal(await page.locator('.startup-brand').count(), 0);
+   }
    await page.locator('#back-link').click();
    await page.waitForURL('**/more.html');
    assert.equal(await page.evaluate(() => window.navigationTestToken), documentToken);
    assert.equal(await page.locator('#content').isVisible(), true);
+   assert.equal(await page.locator('#page-loader').isVisible(), false);
    assert.equal(await page.locator('#startup, .page-skeleton').count(), 0);
  }
  await page.locator('#content a[href="profile.html"]').click();
@@ -217,10 +229,12 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
 
  // A direct secondary-page entry uses the same startup and has an instant parent fallback.
  const direct = await context.newPage();
+ let directDelay = 0;
  direct.on('pageerror', e => errors.push(e.message));
- await direct.route('**/*', route => {
+ await direct.route('**/*', async route => {
    const url = new URL(route.request().url());
    if (url.pathname.startsWith('/ui/')) return route.continue();
+   if (directDelay) await new Promise(resolve => setTimeout(resolve, directDelay));
    return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(payload[url.pathname] || {})});
  });
  await direct.goto(origin + '/ui/risk.html');
@@ -230,6 +244,20 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await direct.evaluate(() => window.coldEntryToken), 'same-document');
  assert.equal(await direct.locator('#content').isVisible(), true);
  assert.equal(await direct.locator('#startup, .page-skeleton').count(), 0);
+ directDelay = 1200;
+ await direct.goto(origin + '/ui/evaluation.html', {waitUntil:'domcontentloaded'});
+ assert.equal(await direct.locator('#startup').isVisible(), true);
+ assert.equal(await direct.locator('#startup .startup-brand').isVisible(), false);
+ assert.equal(await direct.locator('#startup .startup-caption').isVisible(), false);
+ assert.equal(await direct.locator('#startup .lightsaber').count(), 2);
+ assert.equal(await direct.locator('#startup-message').evaluate(el => getComputedStyle(el).clipPath), 'inset(50%)');
+ if (process.env.CT_UI_CAPTURE_DIR) {
+   await direct.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'internal-loading-phone.png')});
+ }
+ await direct.waitForSelector('#startup', {state:'detached'});
+ await direct.reload({waitUntil:'domcontentloaded'});
+ assert.equal(await direct.locator('#startup .startup-brand').isVisible(), false);
+ await direct.waitForSelector('#startup', {state:'detached'});
  await direct.close();
 
  // Reduced motion is a static pair of blades, and a frozen request has a bounded wait.

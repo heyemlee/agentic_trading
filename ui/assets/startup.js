@@ -1,8 +1,18 @@
-/* One curtain per document startup; never recreated by route changes or polling. */
+/* Brand introduction once per tab session; later document loads show only the blades. */
 (function () {
   'use strict';
   const panel = document.getElementById('startup');
   if (!panel) return;
+  let seen = false;
+  try {
+    seen = sessionStorage.getItem('ct.startup.seen.v1') === '1';
+    sessionStorage.setItem('ct.startup.seen.v1', '1');
+  } catch (_) {
+    // Storage can be disabled; an internal document transition still is not a first visit.
+    try { seen = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (_) {}
+  }
+  if (!seen) panel.classList.add('is-first');
+  else panel.setAttribute('aria-labelledby', 'startup-message');
   const message = document.getElementById('startup-message');
   const actions = document.getElementById('startup-actions');
   const retry = document.getElementById('startup-retry');
@@ -36,11 +46,13 @@
     panel.classList.add('is-leaving');
     panel.inert = true;
     if (focused) {
-      const target = document.querySelector('#content:not([hidden]), .conn-signin, .tabitem');
+      // Move focus into the page only. Falling back to the selected tab left
+      // iOS drawing a large black focus ring until the first route change.
+      const target = document.querySelector('#content:not([hidden])');
       if (target) {
-        if (target.id === 'content') target.setAttribute('tabindex', '-1');
+        target.setAttribute('tabindex', '-1');
         target.focus({ preventScroll: true });
-      }
+      } else panel.blur();
     }
     panel.setAttribute('aria-hidden', 'true');
     setTimeout(() => panel.remove(), window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180);

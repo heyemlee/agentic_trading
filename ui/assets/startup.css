@@ -1,4 +1,6 @@
 /* Cold-start curtain. Its markup arrives with HTML, ahead of application scripts. */
+html[data-ct-starting],
+html[data-ct-starting] body { background: #fff !important; }
 html[data-ct-starting] body { overflow: hidden !important; }
 html[data-ct-starting] body > :not(#startup):not(script):not(template) { visibility: hidden; }
 .startup {
@@ -15,6 +17,7 @@ html[data-ct-starting] body > :not(#startup):not(script):not(template) { visibil
 }
 .startup.is-leaving { opacity: 0; pointer-events: none; }
 .startup:focus { outline: none; }
+#content[tabindex="-1"]:focus { outline: none; }
 .startup-center { width: min(100%, 360px); text-align: center; transform: translateY(-5vh); }
 .startup-brand { display: flex; justify-content: center; align-items: center; gap: 12px; }
 .startup-brand h1 {
@@ -30,29 +33,38 @@ html[data-ct-starting] body > :not(#startup):not(script):not(template) { visibil
 .startup-continue { border: 0; background: transparent; color: #566255; font: inherit; font-size: 13px; padding: 8px 16px; cursor: pointer; }
 .startup-continue:focus-visible { outline: 2px solid #226e2a; outline-offset: 2px; border-radius: 8px; }
 .startup.is-waiting .startup-loader { opacity: .5; }
+.startup:not(.is-first) .startup-brand,
+.startup:not(.is-first) .startup-caption { display: none; }
+.startup:not(.is-first) .startup-center { transform: none; }
+.startup:not(.is-first) .startup-stage { margin-top: 0; }
+.startup:not(.is-first):not(.is-waiting) .startup-message {
+  position: absolute; width: 1px; height: 1px; min-height: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.page-loader { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
 
 /* From Uiverse.io by NlghtM4re. Original choreography, scoped to the startup
    screen; shared particle motion replaces duplicate prefixed keyframes. */
 .startup-loader { width: 80px; height: 40px; position: absolute; top: 50%; left: 50%; margin: -20px -40px; transform: scale(1.15); }
-.startup .lightsaber { position: absolute; width: 4px; height: 12px; background: #58615a; border-radius: 1px; bottom: 0; }
-.startup .lightsaber::before {
+.startup-loader .lightsaber { position: absolute; width: 4px; height: 12px; background: #58615a; border-radius: 1px; bottom: 0; }
+.startup-loader .lightsaber::before {
   position: absolute; content: ''; display: block; width: 2px; height: 25px; max-height: 1px;
   left: 1px; top: 1px; background: #fff; border-radius: 1px; transform: rotateZ(180deg); transform-origin: center top;
 }
-.startup .lightsaber::after { position: absolute; content: ''; width: 2px; height: 2px; left: 1px; top: 4px; background: #fff; border-radius: 50%; }
-.startup .ls-left { left: 0; animation: ct-fight-left 2s ease-in-out infinite -.4s; }
-.startup .ls-right { right: 0; animation: ct-fight-right 2s ease-in-out infinite -.4s; }
-.startup .ls-green::before { --blade: #00c805; animation: ct-light-green 2s ease-in-out infinite -.4s; }
-.startup .ls-red::before { --blade: #f06363; animation: ct-light-red 2s ease-in-out infinite -.4s; }
-.startup .ls-particles {
+.startup-loader .lightsaber::after { position: absolute; content: ''; width: 2px; height: 2px; left: 1px; top: 4px; background: #fff; border-radius: 50%; }
+.startup-loader .ls-left { left: 0; animation: ct-fight-left 2s ease-in-out infinite -.4s; }
+.startup-loader .ls-right { right: 0; animation: ct-fight-right 2s ease-in-out infinite -.4s; }
+.startup-loader .ls-green::before { --blade: #00c805; animation: ct-light-green 2s ease-in-out infinite -.4s; }
+.startup-loader .ls-red::before { --blade: #f06363; animation: ct-light-red 2s ease-in-out infinite -.4s; }
+.startup-loader .ls-particles {
   position: absolute; left: 42px; top: 10px; width: 1px; height: 5px;
   background: #566255; opacity: 0; animation: ct-sparks 2s ease-out infinite -.4s;
 }
-.startup .ls-part-1 { --angle: 35deg; --distance: -30px; }
-.startup .ls-part-2 { --angle: -65deg; --distance: -40px; }
-.startup .ls-part-3 { --angle: -75deg; --distance: -35px; }
-.startup .ls-part-4 { --angle: -25deg; --distance: -30px; }
-.startup .ls-part-5 { --angle: 65deg; --distance: -35px; }
+.startup-loader .ls-part-1 { --angle: 35deg; --distance: -30px; }
+.startup-loader .ls-part-2 { --angle: -65deg; --distance: -40px; }
+.startup-loader .ls-part-3 { --angle: -75deg; --distance: -35px; }
+.startup-loader .ls-part-4 { --angle: -25deg; --distance: -30px; }
+.startup-loader .ls-part-5 { --angle: 65deg; --distance: -35px; }
 @keyframes ct-light-green {
   0%, 100% { max-height: 0; box-shadow: 0 0 0 0 var(--blade); }
   5%, 85% { box-shadow: 0 0 4px 2px var(--blade); }
@@ -88,8 +100,8 @@ html[data-ct-starting] body > :not(#startup):not(script):not(template) { visibil
 }
 @media (prefers-reduced-motion: reduce) {
   .startup { transition: none; }
-  .startup .lightsaber, .startup .lightsaber::before, .startup .ls-particles { animation: none; }
-  .startup .ls-left { left: 25px; transform: rotateZ(35deg); }
-  .startup .ls-right { right: 25px; transform: rotateZ(-35deg); }
-  .startup .lightsaber::before { max-height: 22px; box-shadow: 0 0 4px 2px var(--blade); }
+  .startup-loader .lightsaber, .startup-loader .lightsaber::before, .startup-loader .ls-particles { animation: none; }
+  .startup-loader .ls-left { left: 25px; transform: rotateZ(35deg); }
+  .startup-loader .ls-right { right: 25px; transform: rotateZ(-35deg); }
+  .startup-loader .lightsaber::before { max-height: 22px; box-shadow: 0 0 4px 2px var(--blade); }
 }
