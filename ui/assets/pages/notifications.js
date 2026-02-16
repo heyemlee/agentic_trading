@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('notifications', function (document) {
   /* Devices and notifications used to live inside a <details> on the System
      page, which meant "System status" and "Notifications" resolved to the same
      URL — and the deep link could not land before data arrived. They are a
@@ -209,4 +209,4 @@
   wirePush();
 
   C.live(['authSessions', 'pushDevices'], () => { renderDevices(); renderPush(); });
-})();
+});

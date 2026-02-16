@@ -464,7 +464,8 @@ def test_every_write_to_a_migrated_table_names_its_columns():
 def test_primary_layouts_arrive_before_navigation_without_executable_scripts(console_auth):
     """The first tap must not wait for another HTML request, even on a cold connection."""
     client = TestClient(app, base_url='https://testserver')
-    names = {'index', 'portfolio', 'advisor', 'more'}
+    names = {'index', 'portfolio', 'advisor', 'more', 'risk', 'activity', 'evaluation',
+             'profile', 'notifications', 'system', 'approvals', 'research', 'lab'}
     for name in names:
         page = client.get(f'/ui/{name}.html?demo=1')
         templates = re.findall(r'<template data-ct-page="([^"]+)"[^>]*>(.*?)</template>', page.text, re.DOTALL)
@@ -480,7 +481,6 @@ def test_primary_layouts_arrive_before_navigation_without_executable_scripts(con
         assert page.text.index('assets/startup.js') < page.text.index('assets/i18n.js')
         assert 'href="assets/startup.css?v=' in page.text
     assert 'data-ct-page=' not in client.get('/ui/login.html').text
-    assert 'data-ct-page=' not in client.get('/ui/approvals.html?demo=1').text
 
 
 def test_editing_an_embedded_layout_invalidates_the_host_page_etag(tmp_path):

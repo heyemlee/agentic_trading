@@ -14,7 +14,8 @@ from agentic_trading.api.app import ConsoleFiles
 ui = Path('ui')
 files = ConsoleFiles(ui)
 print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_text(), name)
-                  for name in ('index', 'portfolio', 'advisor', 'more')}))
+                  for name in ('index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
+                               'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab')}))
 `], {cwd: root, encoding:'utf8'}));
 (async () => {
  const server = http.createServer(async (req, res) => {
@@ -46,6 +47,13 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  '/advisor/conversations/default':{messages:[]},
  '/research/jobs':[], '/research':[],
  };
+ const fixtureContext = { URLSearchParams, window: { location: { search: '?demo=1' } } };
+ require('node:vm').runInNewContext(await fs.readFile(path.join(root, 'ui/assets/data.js'), 'utf8'), fixtureContext);
+ for (const [key, endpoint] of Object.entries({risk:'/risk', microLive:'/micro-live',
+   schedule:'/system/schedule', operations:'/system/operations', notifications:'/system/notifications',
+   authSessions:'/auth/sessions', pushDevices:'/notifications/devices', evaluation:'/evaluation', activity:'/activity'})) {
+   payload[endpoint] = fixtureContext.window.CT[key];
+ }
  let delay=1800, denied=false;
  await page.route('**/*', async route=>{
   const url = new URL(route.request().url());
@@ -117,6 +125,33 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  await page.locator('[data-od-id="tab-dashboard"]').click();
 
+ // More tools must switch synchronously even while their first reads are pending.
+ await page.locator('[data-od-id="tab-more"]').click();
+ const documentToken = await page.evaluate(() => window.navigationTestToken = crypto.randomUUID());
+ for (const name of ['risk', 'activity', 'evaluation', 'profile', 'notifications', 'system']) {
+   const result = await page.evaluate(name => {
+     const before = performance.now();
+     document.querySelector('#content a[href="' + name + '.html"]').click();
+     return {ms:performance.now()-before, path:location.pathname,
+       hidden:document.getElementById('content').hidden, skeleton:!!document.querySelector('.page-skeleton')};
+   }, name);
+   assert.ok(result.path.endsWith(name + '.html'));
+   assert.equal(result.hidden, false); assert.equal(result.skeleton, false); assert.ok(result.ms < 100);
+   times.push(result);
+   await page.waitForFunction(() => !document.getElementById('content').inert);
+   await page.locator('#back-link').click();
+   await page.waitForURL('**/more.html');
+   assert.equal(await page.evaluate(() => window.navigationTestToken), documentToken);
+   assert.equal(await page.locator('#content').isVisible(), true);
+   assert.equal(await page.locator('#startup, .page-skeleton').count(), 0);
+ }
+ await page.locator('#content a[href="profile.html"]').click();
+ await page.locator('#profile-notes').fill('Personal draft survives returning to More');
+ await page.locator('#back-link').click(); await page.waitForURL('**/more.html');
+ await page.goForward(); await page.waitForURL('**/profile.html');
+ assert.equal(await page.locator('#profile-notes').inputValue(), 'Personal draft survives returning to More');
+ await page.locator('[data-od-id="tab-dashboard"]').click();
+
  assert.equal(calls.filter(c=>c.path==='/auth/session').length,1);
  assert.equal(calls.filter(c=>c.method==='POST').length,0);
  assert.equal(await page.evaluate(()=>performance.getEntriesByType('navigation').length),1);
@@ -126,12 +161,36 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.locator('[data-od-id="tab-advisor"]').click();
  assert.equal(await page.locator('#content').isVisible(),false);
  assert.equal(await page.locator('#chat-input').inputValue(),'');
+ await page.locator('[data-od-id="tab-more"]').click();
+ await page.evaluate(() => document.querySelector('#content a[href="profile.html"]').click());
+ assert.equal(await page.locator('#profile-notes').inputValue(), '');
+ assert.equal(await page.locator('#content').isVisible(), false);
  calls.length = 0;
  await page.goto(origin + '/ui/index.html?demo=1');
  for (const tab of ['advisor', 'portfolio', 'more', 'dashboard']) {
    await page.locator('[data-od-id="tab-' + tab + '"]').click();
    assert.ok(page.url().includes('demo=1'));
    assert.equal(await page.locator('#content').isVisible(), true);
+ }
+ for (const name of ['risk', 'activity', 'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab']) {
+   await page.evaluate(name => {
+     const link = document.createElement('a'); link.href = name + '.html?demo=1';
+     document.body.append(link); link.click(); link.remove();
+   }, name);
+   await page.waitForFunction(() => !document.getElementById('content').inert);
+   assert.ok(page.url().includes(name + '.html?demo=1'));
+   assert.equal(await page.locator('#content').isVisible(), true);
+   assert.equal(await page.locator('#startup, .page-skeleton').count(), 0);
+   assert.equal(await page.locator('.topnav').count(), 1);
+ }
+ await page.locator('[data-od-id="tab-more"]').click();
+ for (const ticker of ['VTI', 'VOO']) {
+   await page.evaluate(ticker => {
+     const link = document.createElement('a'); link.href = 'research.html?demo=1&ticker=' + ticker;
+     document.body.append(link); link.click(); link.remove();
+   }, ticker);
+   assert.equal(await page.locator('#f-ticker').inputValue(), ticker);
+   await page.locator('#back-link').click(); await page.waitForURL('**/more.html?demo=1');
  }
  assert.equal(calls.length, 0, 'demo must never read or write the API');
 
@@ -155,6 +214,23 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await failing.waitForSelector('#startup', {state:'detached'});
  assert.equal(await failing.locator('#content').isVisible(), true);
  await failing.close();
+
+ // A direct secondary-page entry uses the same startup and has an instant parent fallback.
+ const direct = await context.newPage();
+ direct.on('pageerror', e => errors.push(e.message));
+ await direct.route('**/*', route => {
+   const url = new URL(route.request().url());
+   if (url.pathname.startsWith('/ui/')) return route.continue();
+   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(payload[url.pathname] || {})});
+ });
+ await direct.goto(origin + '/ui/risk.html');
+ await direct.waitForSelector('#startup', {state:'detached'});
+ await direct.evaluate(() => window.coldEntryToken = 'same-document');
+ await direct.locator('#back-link').click(); await direct.waitForURL('**/more.html');
+ assert.equal(await direct.evaluate(() => window.coldEntryToken), 'same-document');
+ assert.equal(await direct.locator('#content').isVisible(), true);
+ assert.equal(await direct.locator('#startup, .page-skeleton').count(), 0);
+ await direct.close();
 
  // Reduced motion is a static pair of blades, and a frozen request has a bounded wait.
  const reduced = await browser.newContext({viewport:{width:390,height:844}, reducedMotion:'reduce'});

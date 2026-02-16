@@ -1,9 +1,8 @@
-(function () {
+window.Console.page('evaluation', function (document) {
   'use strict';
   const C = window.Console, D = C.D;
   const $ = (id) => document.getElementById(id);
   C.mount('evaluation');
-  $('content').hidden = false;
 
   const percent = (value, signed) => value == null ? '—' :
     (signed && Number(value) > 0 ? '+' : '') + C.pct(Number(value), 2);
@@ -11,7 +10,6 @@
   function render() {
     const report = D.evaluation;
     const source = CT_API.state.resources.evaluation;
-    $('evaluation-loading').hidden = Boolean(report) || Boolean(source && source.error);
     $('evaluation-empty').hidden = Boolean(report) || !(source && source.error);
     $('evaluation-report').hidden = !report;
     if (!report) {
@@ -51,9 +49,5 @@
     $('ev-caveat').textContent = report.caveat || '';
   }
 
-  const refresh = () => { render(); C.paintNavStatus(); C.paintConnection(); };
-  document.addEventListener('ct:data', refresh);
-  document.addEventListener('ct:lang', render);
-  render();
-  CT_API.start(['health', 'evaluation', 'proposals']);
-})();
+  C.live(['evaluation'], render);
+});

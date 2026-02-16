@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('research', function (document) {
   const C = window.Console, D = C.D;
   C.mount('research');
   C.wireTabs();
@@ -283,7 +283,14 @@
     CT_API.watchRun(res.run_key);
   });
 
-  const query = new URLSearchParams(window.location.search);
-  if (query.get('ticker')) document.getElementById('f-ticker').value = query.get('ticker').toUpperCase();
-  if (query.get('run') && !window.CT_DEMO) openTrace(query.get('run'));
-})();
+  let entryURL;
+  function routeEntry() {
+    if (entryURL === window.location.href) return;
+    entryURL = window.location.href;
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('ticker')) document.getElementById('f-ticker').value = query.get('ticker').toUpperCase();
+    if (query.get('run') && !window.CT_DEMO) openTrace(query.get('run'));
+  }
+  document.addEventListener('ct:route', routeEntry);
+  routeEntry();
+});

@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('profile', function (document) {
   /* The personal context used to be a sheet borrowed from the Assistant page,
      so closing it left you on the Assistant — a page you never asked for. It
      is its own page now, and it goes back where you came from.
@@ -15,6 +15,12 @@
   let revision = 0, loaded = false, dirty = false;
 
   function render() {
+    if (!window.CT_DEMO && !CT_API.authenticated) {
+      notes.value = ''; status.textContent = '';
+      revision = 0; loaded = false; dirty = false;
+      save.disabled = true;
+      return;
+    }
     const saved = (D.advisor || {}).notes;
     /* Never clobber something the reader is in the middle of typing. */
     if (saved && !dirty && (!loaded || saved.revision !== revision)) {
@@ -48,4 +54,4 @@
 
   document.addEventListener('ct:auth', render);
   C.live(['advisor'], render);
-})();
+});

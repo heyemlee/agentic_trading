@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('activity', function (document) {
   const C = window.Console, D = C.D;
   C.mount('activity');
   C.wireTabs();
@@ -137,4 +137,4 @@
     load(true);
   }
   document.addEventListener('ct:lang', () => { renderFilters(); paint(); });
-})();
+});

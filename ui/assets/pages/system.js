@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('system', function (document) {
   const C = window.Console, D = C.D;
   C.mount('system');
   C.wireTabs();
@@ -127,6 +127,7 @@
   }
   revealLinkedSetting();
   window.addEventListener?.('hashchange', revealLinkedSetting);
+  document.addEventListener('ct:route', revealLinkedSetting);
 
   /* ── kill switch: POST /system/pause | /system/resume ────────────── */
   const pill = document.getElementById('switch-pill');
@@ -194,4 +195,4 @@
 
   C.live(['health', 'microLive', 'schedule', 'operations', 'notifications'],
          renderHealth);
-})();
+});

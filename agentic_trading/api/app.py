@@ -622,7 +622,8 @@ def main() -> None:
 # Absent `ui/`, the API runs exactly as before.
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
-_PRIMARY_PAGES = ("index", "portfolio", "advisor", "more")
+_PRIMARY_PAGES = ("index", "portfolio", "advisor", "more", "risk", "activity", "evaluation",
+                  "profile", "notifications", "system", "approvals", "research", "lab")
 
 
 class ConsoleFiles(StaticFiles):
@@ -665,7 +666,7 @@ class ConsoleFiles(StaticFiles):
         return digest.hexdigest()[:12]
 
     def primary_templates(self, page: str, name: str) -> str:
-        """Ship all four static layouts in the initial response, before navigation runs.
+        """Ship console layouts in the initial response, before navigation runs.
 
         Inert templates contain no account data. Even a first tap on a slow network can
         switch the layout while that page's script or API reads are still in flight.
@@ -674,7 +675,7 @@ class ConsoleFiles(StaticFiles):
             return page
         templates = []
         for other in _PRIMARY_PAGES:
-            if other == name:
+            if other == name or not (self.root / f"{other}.html").is_file():
                 continue
             source = (self.root / f"{other}.html").read_text(encoding="utf-8")
             body = re.search(r'<body([^>]*)>(.*?)</body>', source, re.DOTALL)
@@ -688,6 +689,8 @@ class ConsoleFiles(StaticFiles):
         page = page.replace('<script src="assets/i18n.js"', ''.join(templates) + '\n<script src="assets/i18n.js"', 1)
         if 'href="assets/advisor.css"' not in page:
             page = page.replace('</head>', '<link rel="stylesheet" href="assets/advisor.css" />\n</head>')
+        if 'href="assets/lab.css"' not in page:
+            page = page.replace('</head>', '<link rel="stylesheet" href="assets/lab.css" />\n</head>')
         startup = self.root / 'assets' / 'startup.html'
         if startup.is_file():
             page = re.sub(r'<html\b', '<html data-ct-starting', page, count=1)

@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('risk', function (document) {
   const C = window.Console, D = C.D;
   C.mount('risk');
   C.wireTabs();
@@ -87,4 +87,4 @@
   }
 
   C.live(['risk', 'microLive'], render);
-})();
+});

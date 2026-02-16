@@ -15,9 +15,10 @@
  * room — the portfolio manager rates, while policy.py and the hard-risk rules outside
  * the wall decide what may happen, which is why the gate panel is not a desk.
  * ───────────────────────────────────────────────────────────────────── */
-(() => {
+window.Console.page('lab', function (document) {
   const C = window.Console, D = C.D;
   C.mount('lab');
+  window.createLabPixelScene?.(document);
   const q = (s) => document.querySelector(s);
 
   /* Seat order belongs to the drawn room, not to the team: pixel-office.js addresses
@@ -211,6 +212,7 @@
 
   /* ── painting ─────────────────────────────────────────────────────── */
   function render() {
+    if (document.hidden) return;
     const v = view();
     if (!v.desks.length) return;
     if (!chosenRole || !v.desks.some((d) => d.key === chosenRole)) {
@@ -445,7 +447,11 @@
     const waiting = v.run && v.run.proposalId;
     button.textContent = waiting ? C.t('lab.reviewProposal') : settled ? C.t('lab.noApproval') : C.t('lab.awaitRules');
     button.disabled = !waiting;
-    button.onclick = waiting ? () => { window.location.href = 'approvals.html'; } : null;
+    button.onclick = waiting ? () => {
+      const link = document.createElement('a');
+      link.href = 'approvals.html';
+      button.after(link); link.click(); link.remove();
+    } : null;
   }
 
   function paintFeed(v) {
@@ -590,7 +596,8 @@
   q('#ambient').addEventListener('click', () => { ambientEnabled = !ambientEnabled; stopMotion(); render(); });
   reduced.addEventListener('change', () => { stopMotion(); render(); });
   document.addEventListener('visibilitychange', () => { stopMotion(); render(); });
+  document.addEventListener('ct:leave', stopMotion);
   document.addEventListener('ct:lang', render);
 
   C.live(['research', 'researchJobs', 'schedule', 'labRoster'], render, ['researchRun']);
-})();
+});

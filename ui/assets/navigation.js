@@ -1,8 +1,11 @@
-/* Four primary tabs share one document and one API client. Only static templates
+/* Console pages share one document and one API client. Only static templates
    are prefetched; account data and retained DOM live in this tab's memory only. */
 (function () {
   'use strict';
-  const routes = new Set(['index', 'portfolio', 'advisor', 'more']);
+  const routes = new Set(['index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
+    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab']);
+  const dependencies = { advisor: ['advisor-session.js'], notifications: ['push.js'],
+    approvals: ['approval-intent.js'], lab: ['lab/pixel-office.js'] };
   const views = new Map(), factories = new Map(), pending = new Map();
   const assets = new Map([...document.querySelectorAll('script[src], link[rel="stylesheet"]')]
     .map(el => [el.src || el.href, Promise.resolve()]));
@@ -11,11 +14,12 @@
   const routeName = url => url.pathname.slice(base.pathname.length).replace(/\.html$/, '') || 'index';
   let active, revision = 0;
   history.scrollRestoration = 'manual';
+  history.replaceState({ ...history.state, ctDepth: 0 }, '');
 
   function eligible(url) {
     return url.origin === base.origin && url.pathname.startsWith(base.pathname) &&
       routes.has(routeName(url)) && (url.searchParams.get('demo') === '1') === !!window.CT_DEMO &&
-      [...url.searchParams.keys()].every(key => ['demo', 'view', 'sheet', 'prompt'].includes(key));
+      [...url.searchParams.keys()].every(key => ['demo', 'view', 'sheet', 'prompt', 'ticker', 'run'].includes(key));
   }
   function makeView(name, body, title) {
     const storage = document.createElement('div');
@@ -44,7 +48,8 @@
         if (key === 'querySelector' || key === 'querySelectorAll') return selector =>
           (active === view ? target : view.storage)[key](selector);
         if (key === 'addEventListener') return (type, fn, options) => target.addEventListener(type, event => {
-          if (active === view || type === 'ct:auth') fn(event);
+          if (active === view || type === 'ct:auth' ||
+              (type === 'ct:leave' && event.detail?.name === view.name)) fn(event);
         }, options);
         const value = Reflect.get(target, key, target);
         return typeof value === 'function' ? value.bind(target) : value;
@@ -91,7 +96,9 @@
   function prepare(name) {
     if (views.has(name)) {
       return (async () => {
-        if (name === 'advisor') await asset(new URL('assets/advisor-session.js' + version, base).href, false);
+        for (const dependency of dependencies[name] || []) {
+          await asset(new URL('assets/' + dependency + version, base).href, false);
+        }
         await asset(new URL('assets/pages/' + name + '.js' + version, base).href, false);
         return views.get(name);
       })();
@@ -114,7 +121,7 @@
       // execute once; prefetch never mounts a page or starts its automatic refresh job.
       for (const el of html.querySelectorAll('script[src]')) {
         const src = el.getAttribute('src');
-        if (/assets\/(?:pages\/|advisor-session\.js)/.test(src)) {
+        if (/assets\/(?:pages\/|advisor-session\.js|push\.js|approval-intent\.js|lab\/pixel-office\.js)/.test(src)) {
           await asset(new URL(src, url).href, false);
         }
       }
@@ -128,8 +135,9 @@
     return task;
   }
   function show(view, url, historyMode) {
-    if (historyMode === 'push') history.pushState(null, '', url);
+    if (historyMode === 'push') history.pushState({ ctDepth: (history.state?.ctDepth || 0) + 1 }, '', url);
     if (active !== view) {
+      document.dispatchEvent(new CustomEvent('ct:leave', { detail: { name: active.name } }));
       document.querySelectorAll('dialog[open]').forEach(el => el.close());
       active.className = document.body.className;
       active.scroll = window.scrollY;
@@ -180,6 +188,11 @@
     if (window.CT_DEMO && url.origin === base.origin && routes.has(routeName(url))) url.searchParams.set('demo', '1');
     if (!eligible(url)) return;
     event.preventDefault();
+    if (link.id === 'back-link' && history.state?.ctDepth > 0) {
+      revision++;
+      history.back();
+      return;
+    }
     if (url.href === location.href) { revision++; return; }
     performance.mark('ct:navigation-click');
     navigate(url);
@@ -189,7 +202,7 @@
     if (eligible(url)) navigate(url, 'pop');
     else location.reload();
   });
-  // Download the small primary layouts immediately, before the first tap.
+  // Download page factories without mounting hidden pages or issuing business requests.
   for (const name of routes) if (name !== active.name) prepare(name).catch(() => {});
   let warmed = false;
   document.addEventListener('ct:auth', () => {

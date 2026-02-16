@@ -53,15 +53,16 @@ Use `/ui/index.html?demo=1` for a public, read-only demo. Demo navigation preser
 this flag, shows a permanent banner, and makes **no API requests**. Live pages
 start empty and never fall back to fixtures.
 
-## Primary navigation
+## Console navigation
 
-Home, Assets, Assistant and Me share one document through `assets/navigation.js`.
-The initial response includes all four static layouts as inert templates, with shared styles.
+All thirteen console pages share one document through `assets/navigation.js`, including
+the tools reached from More and their return links. Login remains a separate document.
+The initial response includes the static layouts as inert templates, with shared styles.
 Page factories are prefetched; even before they arrive a first tap can show the layout.
 Opening an initialized tab synchronously switches its retained DOM. Scroll position, chat input, expanded sections and
 in-flight actions survive switching. Browser Back/Forward and direct links still work.
 
-Cold opens of these four pages get a shared startup curtain before application scripts run.
+Cold opens of console pages get a shared startup curtain before application scripts run.
 It uses the owner's lightsaber animation (Uiverse.io, NlghtM4re), adapted to the console's
 light palette. The first successful render with authenticated data dismisses it immediately
 with a short fade; no minimum delay or artificial progress is added. Optional slow reads do
@@ -69,7 +70,9 @@ not hold it open. A failed initial load, or ten seconds without readiness, offer
 an option to enter the page and see its connection details. Signing out dismisses it to the
 existing sign-in state. It never returns for tab switches, polling or background resumes,
 and reduced-motion preferences disable its animation. No extra business request is made.
-Secondary tools and login use ordinary document navigation.
+Back/Forward and the header return button restore the previous page and scroll position.
+Page scripts are registered without running until entry; preloading never starts a write,
+push registration, or the research-room animation.
 
 The API client and its polling timers are shared. Switching tabs selects the active resources
 without repeating a successful session check or rereading fresh data. First entry shows the

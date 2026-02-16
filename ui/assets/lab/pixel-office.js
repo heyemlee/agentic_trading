@@ -1,7 +1,7 @@
 /* Pixel Agents sprite conventions and frame loop adapted under MIT.
  * Copyright (c) 2026 Pablo De Lucca. See vendor/pixel-agents/LICENSE. */
 'use strict';
-(() => {
+window.createLabPixelScene = function (document) {
   const canvas = document.querySelector('#pixel-office'), ctx = canvas.getContext('2d');
   const W = 320, H = 296, base = 'assets/lab/pixel-agents/';
   const seats = [
@@ -134,4 +134,4 @@
   // Adapted from upstream gameLoop.ts: capped delta, one rAF, no React rerenders.
   function frame(time){const dt=last?Math.min((time-last)/1000,.1):0;last=time;if(!document.hidden&&active){tick(dt);render();}requestAnimationFrame(frame);}
   Promise.all(jobs).then(()=>{ready=true;render();requestAnimationFrame(frame);}).catch(()=>{document.querySelector('#scene-caption').textContent='办公室素材加载失败，请刷新重试。';});
-})();
+};

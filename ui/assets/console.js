@@ -431,7 +431,7 @@
        you here is a truer "back", so use that instead. */
     const backLink = document.getElementById('back-link');
     if (backLink) backLink.addEventListener('click', (event) => {
-      if (event.defaultPrevented || event.button || event.metaKey ||
+      if (window.CT_NAV || event.defaultPrevented || event.button || event.metaKey ||
           event.ctrlKey || event.shiftKey || event.altKey) return;
       let internal = false;
       try {

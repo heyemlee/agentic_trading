@@ -1,4 +1,4 @@
-(function () {
+window.Console.page('approvals', function (document) {
   const C = window.Console, D = C.D;
   C.mount('approvals');
   C.wireTabs();
@@ -128,6 +128,7 @@
   /* The freshness clock ticks locally between polls so the countdown stays
      smooth; handoff §15 asks for exactly this. */
   function tick() {
+    if (document.hidden) return;
     const p = D.proposalDetail;
     const meter = document.getElementById('fresh-meter');
     if (!p || !meter) return;
@@ -289,4 +290,4 @@
 
   /* Live writes require a verified session; demo never calls the API. */
   C.live(['proposals', 'proposalDetail', 'health', 'microLive'], renderDetail);
-})();
+});
