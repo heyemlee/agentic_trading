@@ -22,7 +22,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
    try {
      const body = layouts[path.basename(file, '.html')] || await fs.readFile(file);
-     const mime = {'.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.png':'image/png'};
+     const mime = {'.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.png':'image/png', '.svg':'image/svg+xml'};
      res.writeHead(200, {'Content-Type': mime[path.extname(file)] || 'application/octet-stream'}).end(body);
    } catch { res.writeHead(404).end(); }
  });
@@ -61,7 +61,26 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.goto(origin + '/ui/index.html', {waitUntil:'domcontentloaded'});
  await page.waitForFunction(()=>window.CT_NAV && !document.getElementById('content').hidden);
  assert.equal(await page.locator('.page-skeleton').count(),0);
-
+ assert.equal(await page.locator('#startup').isVisible(),true);
+ await page.locator('.startup-mark').evaluate(el => el.decode());
+ assert.equal(await page.locator('.tabbar').isVisible(),false, 'cold start must cover intermediate UI');
+ const startupTitle = await page.locator('#startup-title').evaluate(el => ({text:el.textContent.trim(), height:el.getBoundingClientRect().height}));
+ assert.equal(startupTitle.text, 'Agentic Trading');
+ assert.ok(startupTitle.height < 50, 'startup product name must stay on one line');
+ if (process.env.CT_UI_CAPTURE_DIR) {
+   await page.evaluate(() => I18N.set('zh'));
+   await page.waitForTimeout(350);
+   const folder = path.resolve(process.env.CT_UI_CAPTURE_DIR);
+   await fs.mkdir(folder, {recursive:true});
+   await page.screenshot({path:path.join(folder, 'startup-phone.png')});
+   const mark = await fs.readFile(path.join(root, 'ui/icons/mark.svg'), 'utf8');
+   const markup = (await page.locator('#startup').evaluate(el => el.outerHTML))
+     .replace('src="icons/mark.svg"', 'src="data:image/svg+xml;base64,' + Buffer.from(mark).toString('base64') + '"');
+   const styles = await Promise.all(['console.css', 'startup.css'].map(name => fs.readFile(path.join(root, 'ui/assets', name), 'utf8')));
+   await fs.writeFile(path.join(folder, 'startup-preview.html'), '<!doctype html><html lang="zh-Hans"><head>' +
+     '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">' +
+     '<title>Agentic Trading · 启动页预览</title><style>' + styles.join('\n') + '</style></head><body>' + markup + '</body></html>');
+ }
 
  const times=[];
  for(const tab of ['portfolio','advisor','more','dashboard','portfolio','advisor']) {
@@ -74,6 +93,9 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.ok(t.path.endsWith((tab==='dashboard'?'index':tab)+'.html'));
  }
  await page.waitForTimeout(2400);
+ await page.waitForSelector('#startup', {state:'detached'});
+ assert.equal(await page.locator('.tabbar').isVisible(),true);
+ assert.match((await page.locator('.brand').innerText()).replace(/\s+/g, ' '), /Agentic Trading/);
  await page.locator('#chat-input').fill('Draft stays across tabs');
  await page.locator('[data-od-id="tab-portfolio"]').click();
  await page.locator('[data-od-id="tab-advisor"]').click();
@@ -87,6 +109,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('.topnav').count(),1);
  assert.equal(await page.locator('.tabbar').count(),1);
  assert.equal(await page.locator('#content').count(),1);
+ assert.equal(await page.locator('#startup').count(),0, 'route changes must not replay the startup');
  await page.locator('[data-od-id="tab-portfolio"]').click();
  await page.locator('a[href="advisor.html?prompt=holdings-risk"]').click();
  assert.ok(page.url().includes('prompt=holdings-risk'));
@@ -111,6 +134,45 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.equal(await page.locator('#content').isVisible(), true);
  }
  assert.equal(calls.length, 0, 'demo must never read or write the API');
+
+ // A cold open with failed reads must expose recovery controls, not an endless animation.
+ const failing = await context.newPage();
+ failing.on('pageerror', e => errors.push(e.message));
+ let recover = false;
+ await failing.route('**/*', async route => {
+   const url = new URL(route.request().url());
+   if (url.pathname.startsWith('/ui/')) return route.continue();
+   if (url.pathname === '/favicon.ico') return route.fulfill({status:204});
+   if (!recover) return route.abort('failed');
+   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(payload[url.pathname] || {})});
+ });
+ await failing.goto(origin + '/ui/index.html');
+ await failing.waitForSelector('#startup-actions:not([hidden])');
+ assert.equal(await failing.locator('#startup').isVisible(), true);
+ assert.equal(await failing.locator('#content').isVisible(), false);
+ recover = true;
+ await failing.locator('#startup-retry').click();
+ await failing.waitForSelector('#startup', {state:'detached'});
+ assert.equal(await failing.locator('#content').isVisible(), true);
+ await failing.close();
+
+ // Reduced motion is a static pair of blades, and a frozen request has a bounded wait.
+ const reduced = await browser.newContext({viewport:{width:390,height:844}, reducedMotion:'reduce'});
+ const stalled = await reduced.newPage();
+ stalled.on('pageerror', e => errors.push(e.message));
+ await stalled.clock.install();
+ await stalled.route('**/*', route => {
+   const url = new URL(route.request().url());
+   if (url.pathname.startsWith('/ui/')) return route.continue();
+   // Deliberately leave API routes unanswered. Advancing the clock drives the watchdog.
+ });
+ await stalled.goto(origin + '/ui/index.html');
+ assert.equal(await stalled.locator('.lightsaber').first().evaluate(el => getComputedStyle(el).animationName), 'none');
+ await stalled.clock.fastForward(10001);
+ assert.equal(await stalled.locator('#startup-actions').isVisible(), true);
+ await stalled.locator('#startup-continue').click();
+ assert.equal(await stalled.locator('.tabbar').isVisible(), true);
+ await reduced.close();
  assert.deepEqual(errors,[]);
  console.log(JSON.stringify({times,calls,errors},null,2));
  } finally {

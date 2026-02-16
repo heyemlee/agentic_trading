@@ -26,6 +26,11 @@ window.I18N = (function () {
 
   const DICT = {
     en: {
+      'startup.caption': 'Your investment workspace',
+      'startup.preparing': 'Preparing your workspace…',
+      'startup.slow': 'Taking a little longer. You can retry or open the app to check the connection.',
+      'startup.failed': 'We couldn’t finish loading. Try again or open the app to see details.',
+      'startup.continue': 'Open the app',
       'ux.draftRestored': 'Draft restored in this tab · not sent or saved to your profile.',
       'ux.connecting': 'Connecting…', 'ux.advanced': 'Advanced settings',
       'ux.brokerScope': 'Robinhood accounts · saved read-only snapshot', 'ux.strategyFunds': 'Strategy-managed funds',
@@ -552,6 +557,11 @@ window.I18N = (function () {
     },
 
     zh: {
+      'startup.caption': '你的投资工作台',
+      'startup.preparing': '正在准备你的工作台…',
+      'startup.slow': '这次准备得稍久一些。可以重试，或进入页面查看连接状态。',
+      'startup.failed': '暂时未能完成加载。请重试，或进入页面查看详情。',
+      'startup.continue': '进入页面',
       'ux.draftRestored': '已恢复此标签页中的草稿 · 尚未发送或保存到个人资料。',
       'ux.connecting': '正在连接…', 'ux.advanced': '高级设置',
       'ux.brokerScope': 'Robinhood 各账户 · 已保存的只读快照', 'ux.strategyFunds': '策略管理资金',

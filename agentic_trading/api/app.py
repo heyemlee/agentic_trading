@@ -688,6 +688,11 @@ class ConsoleFiles(StaticFiles):
         page = page.replace('<script src="assets/i18n.js"', ''.join(templates) + '\n<script src="assets/i18n.js"', 1)
         if 'href="assets/advisor.css"' not in page:
             page = page.replace('</head>', '<link rel="stylesheet" href="assets/advisor.css" />\n</head>')
+        startup = self.root / 'assets' / 'startup.html'
+        if startup.is_file():
+            page = re.sub(r'<html\b', '<html data-ct-starting', page, count=1)
+            page = page.replace('</head>', '<link rel="stylesheet" href="assets/startup.css" />\n</head>')
+            page = re.sub(r'(<body[^>]*>)', lambda m: m[1] + '\n' + startup.read_text(encoding='utf-8'), page, count=1)
         return page
 
     def file_response(self, full_path, stat_result, scope, status_code=200):

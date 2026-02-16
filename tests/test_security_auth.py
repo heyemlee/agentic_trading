@@ -472,8 +472,13 @@ def test_primary_layouts_arrive_before_navigation_without_executable_scripts(con
         for _, markup in templates:
             assert 'id="content"' in markup
             assert '<script' not in markup, 'prefetch must not mount pages or trigger automatic writes'
+            assert 'id="startup"' not in markup, 'route changes must not bring the startup curtain back'
         assert page.text.index('<template ') < page.text.index('<script src="assets/navigation.js')
         assert 'href="assets/advisor.css?v=' in page.text
+        assert page.text.count('id="startup"') == 1
+        assert 'data-ct-starting' in page.text
+        assert page.text.index('assets/startup.js') < page.text.index('assets/i18n.js')
+        assert 'href="assets/startup.css?v=' in page.text
     assert 'data-ct-page=' not in client.get('/ui/login.html').text
     assert 'data-ct-page=' not in client.get('/ui/approvals.html?demo=1').text
 

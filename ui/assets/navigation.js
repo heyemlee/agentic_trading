@@ -19,7 +19,7 @@
   }
   function makeView(name, body, title) {
     const storage = document.createElement('div');
-    const nodes = [...body.children].filter(el => !['SCRIPT', 'TEMPLATE'].includes(el.tagName));
+    const nodes = [...body.children].filter(el => !['SCRIPT', 'TEMPLATE'].includes(el.tagName) && el.id !== 'startup');
     return { name, storage, nodes, title, className: body.className, scroll: 0, initialized: false, keys: [] };
   }
   active = makeView(routeName(new URL(location.href)), document.body, document.title);

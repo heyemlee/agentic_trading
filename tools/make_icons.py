@@ -1,27 +1,22 @@
-"""Generate the console's home-screen icons, with no image library.
+"""Generate the letter-free interlocking signal mark as SVG and antialiased PNG.
 
-An icon is the only part of this system a person sees before it has said anything, so it is
-worth being deliberate about: a dark ground, and the drawdown ladder that governs every
-decision this thing makes, drawn as four rising bars with the top one held back. It is drawn
-here rather than committed as opaque binary so it can be read, reviewed and changed like the
-rest of the code.
-
-    uv run python tools/make_icons.py
-
-PNG is written by hand because the alternative is a dependency for four flat images. The format
-is simple enough: a signature, a header chunk, zlib-compressed scanlines, and an end chunk.
+Two offset chevrons form an open link: independent agents working together.
+The shared geometry keeps the navigation mark and installed app icons consistent.
+Run: uv run python tools/make_icons.py
 """
 
 from __future__ import annotations
 
 import struct
 import zlib
+from itertools import pairwise
 from pathlib import Path
 
-#: Matches the console's own palette (ui/assets/console.css).
-INK = (17, 19, 24)          # background
-PAPER = (247, 247, 245)     # the bars
-ACCENT = (46, 139, 87)      # the bar that is still climbing
+INK = (16, 37, 29)
+PAPER = (239, 247, 237)
+ACCENT = (136, 224, 164)
+STROKES = (((29, 55), (49, 35), (61, 47)), ((39, 53), (51, 65), (71, 45)))
+RADIUS = 4.5
 
 SIZES = {"icon-180.png": 180, "icon-192.png": 192, "icon-512.png": 512,
          "icon-maskable-512.png": 512}
@@ -42,34 +37,48 @@ def write_png(path: Path, pixels: list[list[tuple[int, int, int]]]) -> None:
         + _chunk(b"IEND", b""))
 
 
+def distance_squared(x: float, y: float, a: tuple, b: tuple) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    t = max(0, min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy)))
+    return (x - a[0] - t * dx) ** 2 + (y - a[1] - t * dy) ** 2
+
+
 def draw(size: int, *, maskable: bool) -> list[list[tuple[int, int, int]]]:
-    """Four bars on a dark ground: the ladder, with its top step not yet taken.
-
-    A maskable icon is cropped to whatever shape the platform likes, so its content is kept
-    inside the middle 80% and the ground is drawn edge to edge.
-    """
+    """Keep the entire mark inside the maskable safe circle; smooth stroke edges."""
     pixels = [[INK] * size for _ in range(size)]
-    inset = size * 0.16 if maskable else size * 0.22
-    field = size - 2 * inset
-    gap = field * 0.09
-    bar = (field - 3 * gap) / 4
-    heights = (0.34, 0.55, 0.78, 0.52)          # the fourth is the step held back
-
-    for index, fraction in enumerate(heights):
-        left = int(inset + index * (bar + gap))
-        right = int(left + bar)
-        top = int(inset + field * (1 - fraction))
-        bottom = int(inset + field)
-        colour = ACCENT if index == 3 else PAPER
-        for y in range(max(top, 0), min(bottom, size)):
-            for x in range(max(left, 0), min(right, size)):
-                pixels[y][x] = colour
+    # Identical safe geometry for ordinary and maskable platform crops.
+    scale = 100 / size
+    for y in range(int(size * .29), int(size * .71) + 1):
+        for x in range(int(size * .23), int(size * .77) + 1):
+            colour = list(INK)
+            for points, ink in zip(STROKES, (PAPER, ACCENT), strict=True):
+                distance = min(distance_squared((x + .5) * scale, (y + .5) * scale, a, b)
+                               for a, b in pairwise(points)) ** .5
+                coverage = max(0, min(1, (RADIUS - distance) / scale + .5))
+                colour = [round(c * (1 - coverage) + v * coverage)
+                          for c, v in zip(colour, ink, strict=True)]
+            pixels[y][x] = tuple(colour)
     return pixels
+
+
+def svg() -> str:
+    def hex_colour(colour: tuple) -> str:
+        return "#" + "".join(f"{v:02x}" for v in colour)
+
+    paths = "".join(
+        f'<polyline points="{" ".join(f"{x},{y}" for x, y in points)}" '
+        f'stroke="{hex_colour(colour)}"/>'
+        for points, colour in zip(STROKES, (PAPER, ACCENT), strict=True))
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            f'<rect width="100" height="100" rx="24" fill="{hex_colour(INK)}"/>'
+            f'<g fill="none" stroke-width="{RADIUS * 2}" stroke-linecap="round" '
+            f'stroke-linejoin="round">{paths}</g></svg>\n')
 
 
 def main() -> None:
     out = Path(__file__).resolve().parents[1] / "ui" / "icons"
     out.mkdir(parents=True, exist_ok=True)
+    (out / "mark.svg").write_text(svg())
     for name, size in SIZES.items():
         write_png(out / name, draw(size, maskable="maskable" in name))
         print(f"wrote {out / name} ({size}x{size})")

@@ -1,6 +1,6 @@
 {
   "name": "Agentic Trading",
-  "short_name": "Trading",
+  "short_name": "Agentic Trading",
   "description": "Research, approvals and risk for a conservative, human-approved portfolio.",
   "start_url": "index.html",
   "scope": "./",

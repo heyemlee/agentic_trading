@@ -39,7 +39,7 @@ requests until credentials are configured. All API calls use the page's origin.
 See [the setup and recovery guide](../docs/CONSOLE_SETUP_AND_RECOVERY.md) for the
 session model, HTTPS settings and order recovery.
 
-Moving between screens costs one request. Each page is served `no-cache`, so the
+Opening a document costs one request. Each page is served `no-cache`, so the
 browser asks the server every time and gets a bodiless 304 when nothing changed;
 the scripts and stylesheets a page names are rewritten on the way out to carry the
 release they belong to (`assets/console.js?v=8f0c…`) and are served immutable, so
@@ -60,6 +60,15 @@ The initial response includes all four static layouts as inert templates, with s
 Page factories are prefetched; even before they arrive a first tap can show the layout.
 Opening an initialized tab synchronously switches its retained DOM. Scroll position, chat input, expanded sections and
 in-flight actions survive switching. Browser Back/Forward and direct links still work.
+
+Cold opens of these four pages get a shared startup curtain before application scripts run.
+It uses the owner's lightsaber animation (Uiverse.io, NlghtM4re), adapted to the console's
+light palette. The first successful render with authenticated data dismisses it immediately
+with a short fade; no minimum delay or artificial progress is added. Optional slow reads do
+not hold it open. A failed initial load, or ten seconds without readiness, offers retry and
+an option to enter the page and see its connection details. Signing out dismisses it to the
+existing sign-in state. It never returns for tab switches, polling or background resumes,
+and reduced-motion preferences disable its animation. No extra business request is made.
 Secondary tools and login use ordinary document navigation.
 
 The API client and its polling timers are shared. Switching tabs selects the active resources

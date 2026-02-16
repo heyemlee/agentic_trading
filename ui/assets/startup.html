@@ -1,0 +1,26 @@
+<section id="startup" class="startup" role="dialog" aria-modal="true" aria-labelledby="startup-title" aria-describedby="startup-message" tabindex="-1">
+  <div class="startup-center">
+    <div class="startup-brand"><img class="startup-mark" src="icons/mark.svg" width="42" height="42" alt="" /><h1 id="startup-title">Agentic Trading</h1></div>
+    <p class="startup-caption" data-i18n="startup.caption">Your investment workspace</p>
+    <!-- Animation adapted from Uiverse.io by NlghtM4re; supplied by the owner. -->
+    <div class="startup-stage" aria-hidden="true">
+      <div class="startup-loader">
+        <span class="lightsaber ls-left ls-green"></span>
+        <span class="lightsaber ls-right ls-red"></span>
+        <span class="ls-particles ls-part-1"></span><span class="ls-particles ls-part-2"></span>
+        <span class="ls-particles ls-part-3"></span><span class="ls-particles ls-part-4"></span>
+        <span class="ls-particles ls-part-5"></span>
+      </div>
+    </div>
+    <p id="startup-message" class="startup-message" role="status" aria-live="polite">
+      <span data-i18n="startup.preparing">Preparing your workspace…</span>
+      <span data-i18n="startup.slow" hidden>Taking a little longer. You can retry or open the app to check the connection.</span>
+      <span data-i18n="startup.failed" hidden>We couldn’t finish loading. Try again or open the app to see details.</span>
+    </p>
+    <div id="startup-actions" class="startup-actions" hidden>
+      <button id="startup-retry" class="btn btn-green" type="button" data-i18n="ux.retryLoad">Try again</button>
+      <button id="startup-continue" class="startup-continue" type="button" data-i18n="startup.continue">Open the app</button>
+    </div>
+  </div>
+</section>
+<script src="assets/startup.js"></script>

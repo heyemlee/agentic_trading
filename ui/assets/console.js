@@ -199,7 +199,7 @@
           ICON.back + '<span data-nav-label="' + parent.key + '">' +
           t('nav.' + parent.key) + '</span></a>'
       : '<a class="brand" href="index.html" data-od-id="brand">' +
-          '<span class="brand-mark" aria-hidden="true">CT</span><span>Trading</span></a>';
+          '<img class="brand-mark" src="icons/mark.svg" width="30" height="30" alt="" /><span>Agentic Trading</span></a>';
 
     return '' +
       '<a class="skip-link" href="#content">' + t('common.skip') + '</a>' +
@@ -533,8 +533,15 @@
         heldControls = null;
       }
       paintBlankState(!loaded && !shell, keys);
-      if (loaded) { try { render(); } catch (e) { console.error('[console] render failed', e); } }
+      let rendered = false;
+      if (loaded) {
+        try { render(); rendered = true; }
+        catch (e) { console.error('[console] render failed', e); }
+      }
       paintNavStatus(); paintFoot(); paintConnection();
+      document.dispatchEvent(new CustomEvent('ct:page-status', { detail: {
+        status: signedOut ? 'signedOut' : rendered ? 'ready' : loaded || reason?.retry ? 'error' : 'loading',
+      } }));
     };
     draw();
     if (!window.CT_API) return;

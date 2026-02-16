@@ -702,7 +702,7 @@ test('an audit trail that cannot be read says so instead of showing nothing', as
    renders as its own name — "sy.budget" where a label should be — which is
    visible but only to whoever happens to open that page. */
 const uiFile = f => fs.readFileSync(path.join(root, 'ui', f), 'utf8');
-const pages = fs.readdirSync(path.join(root, 'ui')).filter(f => f.endsWith('.html'));
+const pages = [...fs.readdirSync(path.join(root, 'ui')).filter(f => f.endsWith('.html')), 'assets/startup.html'];
 const dictionary = () => {
   const src = uiFile('assets/i18n.js');
   const block = lang => {
@@ -767,6 +767,20 @@ test('every script and stylesheet a page loads is actually shipped', () => {
       assert.ok(fs.existsSync(path.join(root, 'ui', target)),
                 `${file} loads ${target}, which does not exist`);
     }
+});
+
+test('the product name is Agentic Trading across visible console branding', () => {
+  for (const file of pages.filter(file => file !== 'assets/startup.html')) {
+    const html = uiFile(file);
+    assert.ok(html.includes('Agentic Trading'), `${file} has no product name`);
+    assert.ok(!html.includes('Conservative Trading'), `${file} carries an old product name`);
+    assert.ok(!html.includes('content="Trading"'), `${file} has the old home-screen name`);
+  }
+  assert.match(fs.readFileSync(path.join(root, 'ui/assets/startup.html'), 'utf8'), /icons\/mark\.svg.*>Agentic Trading</s);
+  assert.match(fs.readFileSync(path.join(root, 'ui/assets/console.js'), 'utf8'), /icons\/mark\.svg.*Agentic Trading/s);
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'ui/manifest.webmanifest'), 'utf8'));
+  assert.equal(manifest.name, 'Agentic Trading');
+  assert.equal(manifest.short_name, 'Agentic Trading');
 });
 
 test('the login form never falls back to putting a password in the URL', () => {
@@ -1192,6 +1206,79 @@ test('a late account read and another tab cannot restore an invalidated session'
   assert.equal(c.CT_API.state.authPending, false);
   assert.equal(c.CT_API.authenticated, false);
   assert.equal(c.CT_API.writesEnabled, false);
+});
+
+function startupPage() {
+  const c = context(), timers = new Map(); let nextTimer = 0;
+  c.setTimeout = (fn, ms) => { timers.set(++nextTimer, { fn, ms }); return nextTimer; };
+  c.clearTimeout = id => timers.delete(id);
+  c.fireTimer = ms => {
+    for (const [id, timer] of [...timers]) if (timer.ms === ms) { timers.delete(id); timer.fn(); }
+  };
+  c.hasTimer = ms => [...timers.values()].some(t => t.ms === ms);
+  c.document.documentElement = { removeAttribute: () => { c.revealed = true; } };
+  c.document.querySelector = () => null;
+  c.matchMedia = () => ({ matches: false });
+  c.element('startup').focus = () => {};
+  c.element('startup').contains = () => false;
+  c.element('startup').remove = () => { c.removed = true; };
+  c.element('startup-actions').hidden = true;
+  const copies = ['preparing', 'slow', 'failed'].map(key => ({ dataset: { i18n: 'startup.' + key } }));
+  c.element('startup-message').querySelectorAll = () => copies;
+  c.message = () => copies.find(x => !x.hidden)?.dataset.i18n;
+  c.CT_API = { authenticated: false, refresh: async () => {} };
+  c.emitStatus = status => c.document.dispatchEvent({ type: 'ct:page-status', detail: { status } });
+  c.run('startup.js');
+  return c;
+}
+
+test('startup waits for authenticated rendering, then stays dismissed through later loads', () => {
+  const c = startupPage();
+  c.emitStatus('ready');
+  assert.equal(c.revealed, undefined, 'an empty more page must still wait for identity');
+  c.CT_API.authenticated = true;
+  c.emitStatus('ready');
+  assert.equal(c.revealed, true);
+  assert.equal(c.hasTimer(10000), false, 'readiness cancels the watchdog, without a minimum delay');
+  c.fireTimer(180);
+  assert.equal(c.removed, true);
+  c.emitStatus('loading'); c.emitStatus('error'); c.fireTimer(10000);
+  assert.equal(c.element('startup-actions').hidden, true);
+});
+
+test('slow startup offers an escape and never blocks navigation again after continuing', () => {
+  const c = startupPage(); c.fireTimer(10000);
+  assert.equal(c.message(), 'startup.slow');
+  assert.equal(c.element('startup-actions').hidden, false);
+  c.element('startup-continue').events.click();
+  assert.equal(c.revealed, true);
+  c.fireTimer(180);
+  c.emitStatus('loading');
+  assert.equal(c.removed, true);
+});
+
+test('startup retry reloads when the page script never initialized', async () => {
+  const c = startupPage(); let reloads = 0;
+  c.location.reload = () => { reloads++; };
+  c.fireTimer(10000);
+  await c.element('startup-retry').events.click();
+  assert.equal(reloads, 1);
+});
+
+test('startup failure allows one read retry and closes on recovery or confirmed logout', async () => {
+  const c = startupPage(); let complete, calls = 0;
+  c.CT_API.refresh = () => { calls++; return new Promise(resolve => { complete = resolve; }); };
+  c.emitStatus('error');
+  assert.equal(c.message(), 'startup.failed');
+  const retry = c.element('startup-retry');
+  const pending = retry.events.click(); await retry.events.click();
+  assert.equal(calls, 1);
+  assert.equal(c.message(), 'startup.preparing');
+  assert.equal(retry.disabled, true);
+  c.CT_API.authenticated = true; c.emitStatus('ready'); complete(); await pending;
+  assert.equal(c.revealed, true);
+  const signedOut = startupPage(); signedOut.emitStatus('signedOut');
+  assert.equal(signedOut.revealed, true, 'sign-in must never be trapped behind the curtain');
 });
 
 /* Acting on a proposal usually closes it, and renderDetail hides the proposal and live-condition
