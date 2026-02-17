@@ -77,9 +77,25 @@ NESTED_SESSION_VARS = ("CLAUDECODE",)
 
 _LIMIT_RE = re.compile(
     r"(session limit|weekly limit|usage limit|rate limit|hit your [a-z ]{0,20}limit|limit reached|"
-    r"resets? (at )?\d|too many requests|\b429\b|out of extra usage|overloaded|capacity)",
+    r"too many requests|\b429\b|out of extra usage|overloaded|capacity constraints)",
     re.IGNORECASE,
 )
+#: A limit or overload notice is one short line. Longer text on a failed call is the model's own
+#: partial answer, which may say anything.
+_LIMIT_NOTICE_MAX_CHARS = 400
+
+
+def _looks_limited(text: str, stderr: str) -> bool:
+    """Whether a failed call was stopped by the subscription or the service, not by the work.
+
+    It matters beyond the message: a limit marks the job CLAUDE_LIMIT_REACHED, health reports it,
+    scheduled research stops, and the job is requeued hours later. The pattern used to include a
+    bare "capacity" and "resets <digit>", and was run over the model's answer too, so a failed
+    call whose partial report mentioned a company's production capacity counted as a limit.
+    """
+    if _LIMIT_RE.search(stderr or ""):
+        return True
+    return len(text or "") <= _LIMIT_NOTICE_MAX_CHARS and bool(_LIMIT_RE.search(text or ""))
 
 USAGE_LOG: list[dict[str, Any]] = []
 
@@ -523,10 +539,9 @@ class ClaudeCodeChatModel(BaseChatModel):
 
         text = _text(result.get("result"))
         if proc.returncode != 0 or result.get("is_error"):
-            blob = f"{text}\n{stderr}"
             raise ClaudeCodeError(
                 f"claude failed (exit {proc.returncode}, subtype {result.get('subtype')!r}): {text[:500]}",
-                rate_limited=bool(_LIMIT_RE.search(blob)), exit_code=proc.returncode, stderr=stderr,
+                rate_limited=_looks_limited(text, stderr), exit_code=proc.returncode, stderr=stderr,
             )
 
         usage = result.get("usage") or {}

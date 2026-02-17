@@ -114,9 +114,22 @@ def test_mcp_config_points_at_our_tool_server(tmp_path):
     "Usage limit reached for this period",
 ])
 def test_real_limit_wordings_are_classified(text):
-    from agentic_trading.llm.claude_code import _LIMIT_RE
+    from agentic_trading.llm.claude_code import _LIMIT_RE, _looks_limited
 
     assert _LIMIT_RE.search(text)
+    assert _looks_limited(text, "") and _looks_limited("", text)
+
+
+@pytest.mark.parametrize("text", [
+    "The fund's production capacity resets at 9 plants per quarter",
+    "## Market report\n" + "Demand overloaded the regional grid; rate limits on imports apply. " * 20,
+])
+def test_a_partial_answer_that_mentions_limits_is_not_a_limit(text):
+    """A failed call whose own answer mentions capacity is a failure to look into, not a quota
+    wait that pauses scheduled research for hours."""
+    from agentic_trading.llm.claude_code import _looks_limited
+
+    assert not _looks_limited(text, "")
 
 
 # -- web access scoping ------------------------------------------------------------
