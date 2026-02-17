@@ -43,10 +43,9 @@ Real-money execution is enabled for the `micro_live` bucket.
   from a side branch without moving `HEAD`, push a refspec — `git push origin <branch>:main`.
 - Before stopping or restarting the live API by hand: `deploy/macos/checks.sh`'s
   `--fail-on-unsettled` guard (see `release.sh publish`) is the check to run first, not a guess.
-  `start.sh`'s port cleanup calls `lsof -ti :PORT` without filtering to `LISTEN`, so it will list
-  (and try to kill) any process that merely has a stale, already-closed connection to that port
-  number — harmless against another app's helper process (macOS blocks the cross-app signal),
-  but worth knowing before reading its output as "these are all copies of the API."
+  `start.sh` boots the launchd API job out and stops whatever *listens* on the port (TERM, then
+  KILL after 30 seconds); until 2026-09-16 it also listed and `kill -9`ed any process with a
+  stale connection to that port number.
 - Code and documentation can be reorganised freely; they live in git and ship in a release.
 
 ## Boundaries that are load-bearing
