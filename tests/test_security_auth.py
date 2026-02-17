@@ -44,6 +44,12 @@ def test_csrf_host_and_fetch_metadata_checks(auth_client):
     assert auth_client.get('/health', headers={'Host': 'rebound.example'}).status_code == 400
 
 
+def test_a_non_ascii_csrf_token_is_refused_not_a_server_error(auth_client):
+    response = auth_client.post('/system/resume', headers={'X-CSRF-Token': b'caf\xe9'}, json={})
+    assert response.status_code == 403
+    assert response.headers['x-frame-options'] == 'DENY'
+
+
 def test_login_cookie_logout_and_headers(console_auth):
     client = TestClient(app, base_url='https://testserver', headers={
         'Origin': 'https://testserver', 'X-CT-Request': '1'})

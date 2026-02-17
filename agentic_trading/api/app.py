@@ -189,7 +189,11 @@ async def security_boundary(request: Request, call_next):
                                      "console credentials not configured; run ct-auth locally"},
                                     status_code=401 if configured else 503)
     if (response is None and unsafe and path != "/auth/login" and (
-            session is None or not hmac.compare_digest(request.headers.get("x-csrf-token", ""), session.csrf))):
+            # Bytes, not str: headers arrive decoded as latin-1, and compare_digest raises
+            # TypeError on a str with a non-ASCII character, which answered 500 without the
+            # security headers instead of refusing the request.
+            session is None or not hmac.compare_digest(request.headers.get("x-csrf-token", "").encode(),
+                                                       session.csrf.encode()))):
         response = JSONResponse({"detail": "invalid session or CSRF token"}, status_code=403)
     if response is None:
         request.state.identity = session.username if session else None
