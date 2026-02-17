@@ -34,6 +34,39 @@ def service(tmp_path, monkeypatch):
     return Service(cfg)
 
 
+def test_two_first_time_callers_end_up_with_one_signing_key(tmp_path, monkeypatch):
+    """If another process writes the key while this one is generating, this one must adopt it.
+    Overwriting it would rotate a key a device may already be subscribed with."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    state = tmp_path / "state"
+    state.mkdir()
+    winner = {"private": "winner-private", "public": "winner-public", "created_at": "2026-09-16T00:00:00+00:00"}
+    real_generate = ec.generate_private_key
+
+    def generate_while_another_process_writes(curve):
+        (state / webpush.KEY_FILE).write_text(json.dumps(winner))
+        return real_generate(curve)
+
+    monkeypatch.setattr(ec, "generate_private_key", generate_while_another_process_writes)
+    assert webpush.ensure_keys(state)["public"] == "winner-public"
+    assert json.loads((state / webpush.KEY_FILE).read_text())["public"] == "winner-public"
+    assert [p.name for p in state.iterdir()] == [webpush.KEY_FILE]      # no staging file left
+
+
+def test_a_key_file_without_a_pair_is_replaced_and_an_unreadable_one_is_not(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / webpush.KEY_FILE).write_text("{}")
+    created = webpush.ensure_keys(state)
+    assert created["public"] and webpush.ensure_keys(state)["public"] == created["public"]
+    assert (state / webpush.KEY_FILE).stat().st_mode & 0o077 == 0
+
+    (state / webpush.KEY_FILE).write_text('{"private": "trunc')
+    with pytest.raises(webpush.PushError, match="unreadable"):
+        webpush.ensure_keys(state)
+
+
 def test_the_signing_key_stays_on_this_machine_and_is_never_regenerated(service, tmp_path):
     """Rotating the identity would orphan every device already subscribed."""
     state = tmp_path / "state"

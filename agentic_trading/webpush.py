@@ -56,13 +56,11 @@ def ensure_keys(state_dir: Path) -> dict[str, str]:
     from cryptography.hazmat.primitives.asymmetric import ec
 
     path = Path(state_dir) / KEY_FILE
-    if path.exists():
-        try:
-            stored = json.loads(path.read_text())
-            if stored.get("private") and stored.get("public"):
-                return stored
-        except (OSError, ValueError) as exc:
-            raise PushError(f"the VAPID key file at {path} is unreadable: {exc}") from exc
+    # A file that exists but holds no key pair never gave a device a public key, so replacing it
+    # rotates nothing. Anything else is only ever created, never overwritten.
+    holds_no_pair = path.exists() and not _stored_pair(path)
+    if path.exists() and not holds_no_pair:
+        return _stored_pair(path)
 
     private = ec.generate_private_key(ec.SECP256R1())
     numbers = private.private_numbers()
@@ -73,9 +71,39 @@ def ensure_keys(state_dir: Path) -> dict[str, str]:
         "created_at": datetime.now(UTC).isoformat(),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(keys, indent=2))
-    path.chmod(0o600)
+    # Created whole and private, and only if absent. A plain write_text could leave a truncated
+    # file on a crash, which then raised "unreadable" on every send for good; it was readable
+    # by others until the chmod; and two processes generating at once let the second overwrite
+    # a key the first had already handed to a device, which is a silent rotation.
+    staged = path.with_name(f".{KEY_FILE}.{os.getpid()}.tmp")
+    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(json.dumps(keys, indent=2))
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            if holds_no_pair:
+                os.replace(staged, path)
+            else:
+                os.link(staged, path)
+        except FileExistsError:
+            # Another process got there first. Its key may already be on a device: use it.
+            stored = _stored_pair(path)
+            if not stored:
+                raise PushError(f"the VAPID key file at {path} appeared without a key pair") from None
+            return stored
+    finally:
+        staged.unlink(missing_ok=True)
     return keys
+
+
+def _stored_pair(path: Path) -> dict[str, str] | None:
+    try:
+        stored = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise PushError(f"the VAPID key file at {path} is unreadable: {exc}") from exc
+    return stored if isinstance(stored, dict) and stored.get("private") and stored.get("public") else None
 
 
 def public_key(state_dir: Path) -> str:
