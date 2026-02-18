@@ -129,6 +129,33 @@ def test_a_failed_delivery_is_retried_with_backoff_and_then_throttled(service, m
     assert notify.dispatch(db, settings, [event], now=now + timedelta(hours=5))["failed"]
 
 
+def test_the_notification_pass_does_not_open_the_venue_every_tick(service, monkeypatch):
+    """It runs every fifteen seconds. Reading recorded fills opened a Robinhood session for the
+    live order list, and asking whether the login still works ran the full connect and
+    preflight: two handshakes a tick."""
+    from types import SimpleNamespace
+
+    from agentic_trading import service as service_module
+
+    assert service._micro_enabled(service.profiles())
+    now = [1000.0]
+    monkeypatch.setattr(service_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    probes = []
+    monkeypatch.setattr(service, "micro_live",
+                        lambda: probes.append(now[0]) or SimpleNamespace(connect_error="token expired"))
+    monkeypatch.setattr(service, "_broker",
+                        lambda *_args: pytest.fail("recorded fills need no venue session"))
+
+    for _ in range(3):
+        assert [e for e in service.collect_notifications() if e.kind == "credential_invalid"]
+        now[0] += 15
+    assert probes == [1000.0]
+
+    now[0] = 1000.0 + service.BROKER_PROBE_SECONDS
+    service.collect_notifications()
+    assert len(probes) == 2
+
+
 def test_the_market_regime_is_not_announced_as_a_drawdown_ladder(service, monkeypatch):
     from agentic_trading import risk
     from agentic_trading.risk_scenarios import regime

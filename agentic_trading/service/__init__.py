@@ -1137,7 +1137,10 @@ class Service:
                     title="the Claude subscription limit stopped research",
                     detail=str(job.get("error") or "")[:300], link="/ui/research.html"))
 
-        for fill in self.orders(limit=10).fills:
+        # Recorded fills, read locally. `orders()` also opens a venue session for the live order
+        # list, and this pass runs every fifteen seconds: two Robinhood handshakes a tick, about
+        # eleven thousand a day, to list rows already in SQLite and to ask whether a login works.
+        for fill in self._recorded_fills(profiles, limit=10):
             fill_id = fill.fill_id or f"{fill.proposal_id}:{fill.at}"
             events.append(Event(
                 key=f"fill_recorded:{fill_id}", kind="fill_recorded",
@@ -1145,13 +1148,13 @@ class Service:
                 detail=f"{fill.quantity} @ {fill.price}", link="/ui/activity.html"))
 
         if self._micro_enabled(profiles):
-            micro = self.micro_live()
-            if micro.connect_error:
+            connect_error = self._broker_connect_error()
+            if connect_error:
                 events.append(Event(
                     key="credential_invalid:robinhood", kind="credential_invalid",
                     title="the broker connection needs attention",
                     # The error text can name an endpoint but never a token.
-                    detail=micro.connect_error[:200], link="/ui/system.html", urgent=True))
+                    detail=connect_error[:200], link="/ui/system.html", urgent=True))
 
         for name, ladder in self.risk_state().items():
             # risk_state also carries the market regime, which has a "level" too. Read as a
@@ -1612,9 +1615,20 @@ class Service:
         return out
 
     # ---------------------------------------------------------------- orders
-    def orders(self, limit: int = 50) -> Orders:
-        """Fills recorded locally, plus live order state from the venue when connected."""
-        profiles = self.profiles()
+    #: How often the notification pass opens a venue session only to learn whether it still can.
+    #: A standing condition is re-sent every notifications.min_interval_seconds (900) at most.
+    BROKER_PROBE_SECONDS: ClassVar[float] = 300.0
+
+    def _broker_connect_error(self) -> str | None:
+        probe = getattr(self, "_broker_probe", None)
+        now = time.monotonic()
+        if probe is None or now - probe[0] >= self.BROKER_PROBE_SECONDS:
+            probe = (now, self.micro_live().connect_error)
+            self._broker_probe = probe
+        return probe[1]
+
+    def _recorded_fills(self, profiles: Profiles, limit: int) -> list[Fill]:
+        """Fills this system recorded, newest first, without asking the venue anything."""
         fills_path = profiles.project_dir / str(
             (profiles.risk.get("broker") or {}).get("fills_file", "state/fills.jsonl"))
         rows = StateDB(fills_path).fills(limit)
@@ -1624,6 +1638,12 @@ class Service:
                     rows.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
+        return [Fill(**row) for row in reversed(rows)]
+
+    def orders(self, limit: int = 50) -> Orders:
+        """Fills recorded locally, plus live order state from the venue when connected."""
+        profiles = self.profiles()
+        fills = self._recorded_fills(profiles, limit)
         live: list[OpenOrder] = []
         error = None
         if self._micro_enabled(profiles):
@@ -1649,8 +1669,7 @@ class Service:
                                 filled_avg_price=p.filled_avg_price, reconciled_at=p.reconciled_at,
                                 reconciliation_error=p.reconciliation_error)
                    for p in self._store(profiles).all() if p.client_order_id]
-        return Orders(fills=[Fill(**row) for row in reversed(rows)],
-                      open_orders=live, tracked_orders=tracked, error=error)
+        return Orders(fills=fills, open_orders=live, tracked_orders=tracked, error=error)
 
     # ---------------------------------------------------------------- controls
     def _journal(self, profiles: Profiles, **fields: Any) -> None:
