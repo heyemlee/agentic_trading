@@ -67,6 +67,18 @@ class Event:
                 "at": datetime.now(UTC).isoformat()}
 
 
+def console_url(env_name: str) -> str:
+    """Where the console lives, from the environment, for the links a message carries.
+
+    It names this machine on the tailnet, so it is never written into config/, which is public;
+    config declares only the variable. A value that is not https is ignored rather than sent: a
+    phone would open it outside the tailnet's certificate, and a plain link to the approvals
+    screen is worse than none.
+    """
+    value = os.environ.get(env_name, "").strip().rstrip("/")
+    return value if value.startswith("https://") else ""
+
+
 @dataclass
 class Settings:
     channel: str = "none"
@@ -76,6 +88,7 @@ class Settings:
     wecom_url_env: str = "CT_WECOM_WEBHOOK"
     wechat_url_env: str = "CT_WECHAT_WEBHOOK"
     console_url: str = ""
+    console_url_env: str = "CT_CONSOLE_URL"
     push_subject_env: str = "CT_PUSH_SUBJECT"
     state_dir: Path = field(default_factory=Path)
     #: Set by the service so a webpush channel can see whether a device is subscribed.
@@ -103,7 +116,8 @@ class Settings:
             webhook_token_env=str(cfg.get("webhook_token_env", "CT_NOTIFY_TOKEN")),
             wecom_url_env=str(cfg.get("wecom_url_env", "CT_WECOM_WEBHOOK")),
             wechat_url_env=str(cfg.get("wechat_url_env", "CT_WECHAT_WEBHOOK")),
-            console_url=str(cfg.get("console_url", "")).rstrip("/"),
+            console_url=console_url(str(cfg.get("console_url_env", "CT_CONSOLE_URL"))),
+            console_url_env=str(cfg.get("console_url_env", "CT_CONSOLE_URL")),
             push_subject_env=str(cfg.get("push_subject_env", "CT_PUSH_SUBJECT")),
             state_dir=Path(profiles.project_dir) / "state",
             events=tuple(name for name in events if name in EVENTS),

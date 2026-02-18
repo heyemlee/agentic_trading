@@ -333,8 +333,8 @@ def wecom_settings(service, monkeypatch, **overrides):
 
 
 def test_a_wecom_message_says_what_happened_and_links_to_the_right_screen(service, monkeypatch):
-    settings = wecom_settings(service, monkeypatch,
-                              console_url='https://mac.tail1234.ts.net')
+    monkeypatch.setenv('CT_CONSOLE_URL', 'https://mac.tail1234.ts.net')
+    settings = wecom_settings(service, monkeypatch)
     body = notify.wecom_message(settings, notify.Event(
         key='k', kind='proposal_waiting', title='BUY VTI needs your approval',
         detail='$35.00 in micro_live (real money)', link='/ui/approvals.html'))
@@ -377,13 +377,25 @@ def test_an_unconfigured_wecom_channel_sends_nothing(service, monkeypatch):
         notify.send(settings, notify.Event(key='k', kind='proposal_waiting', title='t'))
 
 
+def test_the_console_address_is_read_from_the_environment_never_from_config(service, monkeypatch):
+    """The address names this machine on the tailnet, and config/ is published with the code."""
+    assert "console_url" not in service.profiles().risk["notifications"]
+    monkeypatch.delenv('CT_CONSOLE_URL', raising=False)
+    assert file_settings(service).console_url == ''
+    monkeypatch.setenv('CT_CONSOLE_URL', 'http://mac.tail1234.ts.net/')
+    assert file_settings(service).console_url == ''          # not https: no link rather than a bad one
+    monkeypatch.setenv('CT_CONSOLE_URL', 'https://mac.tail1234.ts.net/')
+    assert file_settings(service).console_url == 'https://mac.tail1234.ts.net'
+
+
 def wechat_settings(service, monkeypatch, **overrides):
     monkeypatch.setenv('CT_WECHAT_WEBHOOK', 'https://sctapi.ftqq.com/SCTxxxx.send')
     return file_settings(service, channel='wechat', **overrides)
 
 
 def test_a_wechat_message_fits_the_relay_and_keeps_the_full_title_in_the_body(service, monkeypatch):
-    settings = wechat_settings(service, monkeypatch, console_url='https://mac.tail1234.ts.net')
+    monkeypatch.setenv('CT_CONSOLE_URL', 'https://mac.tail1234.ts.net')
+    settings = wechat_settings(service, monkeypatch)
     long_title = 'BUY VTI 需要你审批，金额 35 美元，实盘账户，请尽快处理这条提案'
     body = notify.wechat_message(settings, notify.Event(
         key='k', kind='proposal_waiting', title=long_title,
@@ -412,7 +424,8 @@ def test_a_wechat_message_carries_nothing_the_relay_should_not_read(service, mon
     profiles = service.profiles()
     profiles.risk['broker']['state_file'] = 'state/proposals.json'
     ProposalStore(profiles.project_dir / 'state' / 'proposals.json').save(_proposal(status=PROPOSED))
-    settings = wechat_settings(service, monkeypatch, console_url='https://mac.tail1234.ts.net')
+    monkeypatch.setenv('CT_CONSOLE_URL', 'https://mac.tail1234.ts.net')
+    settings = wechat_settings(service, monkeypatch)
 
     blob = json.dumps([notify.wechat_message(settings, event)
                        for event in service.collect_notifications()]).lower()

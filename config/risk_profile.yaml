@@ -694,9 +694,11 @@ notifications:
   # what passes through it, which is why a message names what happened and never an account,
   # a credential or a quote.
   wechat_url_env: CT_WECHAT_WEBHOOK
-  # Where the console lives, so a notification can carry a link that actually opens. Left empty
-  # the message still says what happened; it just cannot be tapped through to the right screen.
-  console_url: ""
+  # Where the console lives, so a notification can carry a link that actually opens. Read from
+  # the environment (an https URL), never written here: it is this machine's tailnet name, and
+  # this repository is public. Unset, the message still says what happened; it just cannot be
+  # tapped through to the right screen.
+  console_url_env: CT_CONSOLE_URL
   # channel: webpush — the contact Apple is given for this deployment. Read from the
   # environment, never written here: it names the machine, and this repository is public.
   # Apple validates it and answers a placeholder with 403 BadJwtToken, which is indistinguish-
