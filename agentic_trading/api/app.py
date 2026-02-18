@@ -208,7 +208,10 @@ async def security_boundary(request: Request, call_next):
     response.headers["Cache-Control"] = _cache_policy(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    # same-origin, not no-referrer: the back link reads document.referrer to tell a step back
+    # inside the console from a cold open, and no-referrer emptied it on every navigation, so
+    # "back" always went to the section root. Nothing is still sent to another origin.
+    response.headers["Referrer-Policy"] = "same-origin"
     # The console uses external scripts only. Swagger's vendor-rendered documentation
     # needs its own CDN/inline policy; all business pages retain the strict policy.
     scripts = "'self'" if path not in ("/docs", "/redoc") else "'self' 'unsafe-inline' https://cdn.jsdelivr.net"

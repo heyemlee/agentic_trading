@@ -44,6 +44,12 @@ def test_csrf_host_and_fetch_metadata_checks(auth_client):
     assert auth_client.get('/health', headers={'Host': 'rebound.example'}).status_code == 400
 
 
+def test_the_referrer_stays_inside_the_console_and_goes_no_further(auth_client):
+    """The back link tells an in-app step back from a cold open by document.referrer, which
+    no-referrer emptied on every navigation. same-origin keeps it and still sends nothing out."""
+    assert auth_client.get('/ui/login.html').headers['referrer-policy'] == 'same-origin'
+
+
 def test_a_non_ascii_csrf_token_is_refused_not_a_server_error(auth_client):
     response = auth_client.post('/system/resume', headers={'X-CSRF-Token': b'caf\xe9'}, json={})
     assert response.status_code == 403
