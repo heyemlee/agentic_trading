@@ -31,6 +31,9 @@ cd "$project_dir"
 
 # pre-push receives "<local ref> <local sha> <remote ref> <remote sha>" per ref on stdin.
 # A deletion arrives as an all-zero local sha and has no tree to check.
+# Every distinct commit is checked. This took the first line only, so pushing a branch and a tag,
+# or two branches, checked one commit and let the others through unexamined.
+typeset -U pushed
 pushed=()
 while read -r _local_ref local_sha _remote_ref _remote_sha; do
   [[ "$local_sha" =~ '^0+$' ]] && continue
@@ -39,7 +42,6 @@ done
 if (( ${#pushed} == 0 )); then
   exit 0
 fi
-commit="${pushed[1]}"
 
 fails=0
 step() {
@@ -61,26 +63,32 @@ worktree="$(mktemp -d "${TMPDIR:-/tmp}/ct-prepush.XXXXXX")" || {
   exit 1
 }
 cleanup() {
-  git worktree remove --force "$worktree/checkout" 2>/dev/null
+  local checkout
+  for checkout in "$worktree"/checkout-*(N); do
+    git worktree remove --force "$checkout" 2>/dev/null
+  done
   git worktree prune
   rm -rf "$worktree"
 }
 trap cleanup EXIT INT TERM
 
 bare_checkout() {
-  git worktree add --detach --quiet "$worktree/checkout" "$commit" || return 1
+  local commit="$1" checkout="$worktree/checkout-${1[1,12]}"
+  git worktree add --detach --quiet "$checkout" "$commit" || return 1
   # The interpreter is the one this checkout already resolved. A worktree has no .venv of its
   # own and building a second one would check a different set of wheels than the release does.
-  ln -sfn "$project_dir/.venv" "$worktree/checkout/.venv"
-  "$worktree/checkout/deploy/checks.sh"
+  ln -sfn "$project_dir/.venv" "$checkout/.venv"
+  "$checkout/deploy/checks.sh"
 }
 
 stored_documents() {
   .venv/bin/python tools/validate_stored_shapes.py --config-dir "$project_dir/config"
 }
 
-print -r -- "pre-push: ${commit[1,12]}"
-step "bare checkout"      bare_checkout
+for commit in "${pushed[@]}"; do
+  print -r -- "pre-push: ${commit[1,12]}"
+  step "bare checkout ${commit[1,12]}"  bare_checkout "$commit"
+done
 step "stored documents"   stored_documents
 
 print -r -- ""
@@ -88,4 +96,4 @@ if (( fails )); then
   print -r -- "$fails gate(s) failed; push refused. Override with: git push --no-verify"
   exit 1
 fi
-print -r -- "both gates passed"
+print -r -- "every gate passed"
