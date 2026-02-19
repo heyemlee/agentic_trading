@@ -380,7 +380,11 @@ def schedule_status() -> dict[str, Any]:
 
 
 class PauseRequest(BaseModel):
-    reason: str = Field("paused from the interface", description="Recorded in the halt file and the audit trail.")
+    # Unknown fields are refused like every other write model here: a misspelt field was
+    # silently ignored. The reason is written whole into the halt file, so it is bounded.
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field("paused from the interface", max_length=500,
+                        description="Recorded in the halt file and the audit trail.")
 
 
 @app.post("/system/pause", tags=["system"], summary="Engage the kill switch: no orders may be submitted")
@@ -569,7 +573,8 @@ def approve(proposal_id: str, body: ApproveRequest, request: Request) -> dict[st
 
 
 class RejectRequest(BaseModel):
-    reason: str | None = None
+    model_config = ConfigDict(extra="forbid")
+    reason: str | None = Field(None, max_length=500)
 
 
 @app.post("/proposals/{proposal_id}/reject", tags=["proposals"], summary="Reject a proposal")

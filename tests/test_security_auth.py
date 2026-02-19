@@ -50,6 +50,17 @@ def test_the_referrer_stays_inside_the_console_and_goes_no_further(auth_client):
     assert auth_client.get('/ui/login.html').headers['referrer-policy'] == 'same-origin'
 
 
+def test_pause_and_reject_refuse_unknown_fields_and_unbounded_reasons(auth_client, monkeypatch):
+    calls = []
+    module = import_module('agentic_trading.api.app')
+    monkeypatch.setattr(module, '_service', SimpleNamespace(
+        pause=lambda *a, **k: calls.append('pause'), reject=lambda *a, **k: calls.append('reject')))
+    for path in ('/system/pause', '/proposals/example/reject'):
+        assert auth_client.post(path, json={'reason': 'x' * 501}).status_code == 422
+        assert auth_client.post(path, json={'reason': 'ok', 'reasn': 'typo'}).status_code == 422
+    assert calls == []
+
+
 def test_a_non_ascii_csrf_token_is_refused_not_a_server_error(auth_client):
     response = auth_client.post('/system/resume', headers={'X-CSRF-Token': b'caf\xe9'}, json={})
     assert response.status_code == 403
