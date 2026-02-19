@@ -70,7 +70,6 @@
   /* readable gloss for an API status code; the code itself is never rewritten */
   const code = (x) => (x == null ? '' : (t('code.' + x) === 'code.' + x ? titleise(x) : t('code.' + x)));
   const sysCopy = (x) => t('sys.' + x);
-  const mlCopy = (x) => t('ml.' + x);
   const psCopy = (x) => t('ps.' + x);
   const bucket = (k) => t('bucket.' + k);
 
@@ -750,7 +749,7 @@
     page: (name, init) => window.CT_NAV ? CT_NAV.register(name, init) : init(document),
     D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
     SHOW_CONCEPTUAL, showsBucket, showsAccount,
-    t, code, sysCopy, mlCopy, psCopy, bucket,
+    t, code, sysCopy, psCopy, bucket,
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,

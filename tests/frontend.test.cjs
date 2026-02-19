@@ -753,6 +753,38 @@ test('every key a page asks for is defined, in both languages', () => {
   assert.deepEqual([...used].filter(k => !zh.has(k)), [], 'used in a page, missing from zh');
 });
 
+/* Copy looked up by a status the API returns reads `C.psCopy(status)` or `C.sysCopy(status)`, which
+   no page lists in its markup, so the check above never saw it. SUBMITTED, UNKNOWN and CANCELED
+   proposals and the console's own UNKNOWN system state rendered as "ps.UNKNOWN" and "sys.UNKNOWN". */
+test('every status the API can return has copy, in both languages', () => {
+  const { en, zh } = dictionary();
+  const status = fs.readFileSync(path.join(root, 'agentic_trading/service/status.py'), 'utf8');
+  const members = name => [...status.match(new RegExp(`class ${name}\\(str, Enum\\):([\\s\\S]*?)\\n\\n\\n`))[1]
+    .matchAll(/^\s{4}([A-Z_]+) = "/gm)].map(m => m[1]);
+  const wanted = [...members('ProposalStatus').map(s => 'ps.' + s),
+                  ...members('SystemStatus').map(s => 'sys.' + s),
+                  'sys.UNKNOWN'];            // what systemStatus() answers while /health is not live
+  assert.ok(wanted.length > 20);
+  assert.deepEqual(wanted.filter(k => !en.has(k)), [], 'missing from en');
+  assert.deepEqual(wanted.filter(k => !zh.has(k)), [], 'missing from zh');
+});
+
+test('every key a script names outright is defined, in both languages', () => {
+  const { en, zh } = dictionary();
+  const scripts = [];
+  const walk = dir => fs.readdirSync(path.join(root, 'ui', dir), { withFileTypes: true }).forEach(entry =>
+    entry.isDirectory() ? walk(path.join(dir, entry.name))
+      : entry.name.endsWith('.js') && entry.name !== 'i18n.js' && scripts.push(path.join(dir, entry.name)));
+  walk('assets');
+  const used = new Set();
+  for (const file of scripts)
+    // a whole key only: t('ux.source.' + key) builds one at run time and is not checked here
+    for (const m of uiFile(file).matchAll(/\bt\(\s*'([a-z]\w*(?:\.\w+)+)'/g)) used.add(m[1]);
+  assert.ok(used.size > 50, 'the scripts should be naming a lot of copy');
+  assert.deepEqual([...used].filter(k => !en.has(k)), [], 'named in a script, missing from en');
+  assert.deepEqual([...used].filter(k => !zh.has(k)), [], 'named in a script, missing from zh');
+});
+
 test('neither language carries copy the other is missing', () => {
   const { en, zh } = dictionary();
   assert.deepEqual([...en].filter(k => !zh.has(k)), [], 'in en, missing from zh');
