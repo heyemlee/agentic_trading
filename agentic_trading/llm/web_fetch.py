@@ -158,8 +158,10 @@ def check_url(url: str, policy: WebPolicy, *, resolve=None) -> tuple[str | None,
     for address in addresses:
         if (address.is_private or address.is_loopback or address.is_link_local
                 or address.is_reserved or address.is_multicast or address.is_unspecified):
-            # Catches 169.254.169.254 and anything inside the house, including a name that
-            # resolves to a private address only on the second lookup.
+            # Catches 169.254.169.254 and anything inside the house as the name resolves now.
+            # urllib resolves it again when it connects, so a name that answers publicly here and
+            # privately a moment later (DNS rebinding) is not caught by this check; what bounds
+            # that is the allowlist, which names only domains this deployment trusts.
             return None, f"{host} resolves to the non-public address {address}"
     normalised = parts._replace(scheme="https", fragment="").geturl()
     return normalised, f"{host} is allowlisted and resolves publicly"
