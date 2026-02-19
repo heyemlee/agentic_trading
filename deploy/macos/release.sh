@@ -185,7 +185,11 @@ rollback)
   current=""
   [[ -L "$current_link" ]] && current="$(basename "$(cd "$current_link" && pwd -P)")"
   if [[ -z "$target" ]]; then
-    target="$(ls -1 "$releases_root" | grep -v '^current$' | grep -v "^$current\$" | sort | tail -1)"
+    # The newest release older than the one running. Release names begin with their UTC publish
+    # time, so they sort in time order. This took the newest release other than current, which
+    # after one rollback is the release just rolled back from: a second rollback went forward.
+    target="$(ls -1 "$releases_root" | grep -v '^current$' | sort |
+      awk -v current="$current" 'current == "" || $0 < current' | tail -1)"
   fi
   [[ -n "$target" ]] || die "no earlier release to roll back to"
   release="$(resolve_release "$target")"
