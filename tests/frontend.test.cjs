@@ -1391,3 +1391,17 @@ test('the stale-ledger control runs the ledger confirmation and reports a refusa
   assert.deepEqual(read, ['portfolio']);
   assert.equal(button.disabled, false);
 });
+
+test('a sign-in that fails with a non-JSON answer says so instead of showing a parse error', async () => {
+  const c = context();
+  c.I18N.applyStatic = () => {};
+  c.element('login-form').elements = { username: { value: 'owner' }, password: { value: 'pw' } };
+  let assigned = null;
+  c.location.assign = url => { assigned = url; };
+  c.fetch = async () => ({ ok: false, status: 502, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+  c.run('login.js');
+  await c.element('login-form').events.submit({ preventDefault() {} });
+  assert.equal(c.element('login-result').textContent, 'login.failed 502');
+  assert.equal(c.element('login-submit').disabled, false);
+  assert.equal(assigned, null);
+});

@@ -49,8 +49,12 @@ form.addEventListener('submit', async (event) => {
         password: form.elements.password.value,
       }),
     });
-    const body = await response.json();
-    if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Login failed');
+    /* A proxy in front of the API answers a gateway error with HTML, and parsing that as JSON
+       showed the reader a SyntaxError instead of the fact that the service did not answer. */
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(typeof body.detail === 'string' ? body.detail : t('login.failed', { status: response.status }));
+    }
     form.elements.password.value = '';
     window.location.assign(next || 'index.html');
   } catch (error) {
