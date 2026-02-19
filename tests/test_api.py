@@ -110,6 +110,29 @@ def test_a_legacy_run_log_does_not_report_the_subscription_as_limited(sandbox_se
     assert sandbox_service.health().status != SystemStatus.CLAUDE_LIMIT_REACHED
 
 
+def test_calls_today_are_counted_by_utc_date_from_the_end_of_the_audit(sandbox_service, monkeypatch):
+    """Timestamps carry the Mac's offset, and the count compared them with the UTC date as text,
+    missing every call made while the two dates differ; one bad line ended the count."""
+    import json as _json
+    from datetime import UTC, datetime, timedelta, timezone
+
+    import agentic_trading.service as service_module
+
+    now = datetime.now(UTC)
+    # an offset that puts the local date on a different day from the UTC one, whatever the hour
+    offset = timezone(timedelta(hours=13 if now.hour >= 12 else -13))
+    stamp = lambda moment: moment.astimezone(offset).strftime("%Y-%m-%dT%H:%M:%S%z")
+    audit = sandbox_service.profiles().project_dir / "runs" / "llm_calls.jsonl"
+    rows = [_json.dumps({"ts": stamp(now - timedelta(days=2)), "note": "x" * 900}) for _ in range(40)]
+    rows += [_json.dumps({"ts": stamp(now)}), "{not json", _json.dumps({"ts": stamp(now)})]
+    audit.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(service_module, "AUDIT_TAIL_BYTES", 4000)     # only the end is read
+    status = sandbox_service.claude_status()
+    assert status.calls_today == 2
+    assert status.last_call_at == stamp(now)
+
+
 def test_a_halt_that_needs_a_person_is_not_hidden_behind_a_quota_wait(sandbox_service, monkeypatch):
     from agentic_trading.service.shapes import ClaudeStatus
 

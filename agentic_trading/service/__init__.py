@@ -83,6 +83,9 @@ from .status import (
 
 logger = logging.getLogger(__name__)
 
+#: How much of runs/llm_calls.jsonl /health reads: several days of calls at the daily budget.
+AUDIT_TAIL_BYTES = 2_000_000
+
 #: The drawdown ladders `risk_state` reports, as opposed to the other entries beside them.
 LADDER_NAMES = ("total", "core", "sandbox", "micro_live")
 
@@ -203,16 +206,21 @@ class Service:
         profiles = self.profiles()
         audit = profiles.project_dir / "runs" / "llm_calls.jsonl"
         last_call, calls_today = None, 0
-        if audit.exists():
-            today = datetime.now(UTC).date().isoformat()
+        today = datetime.now(UTC).date()
+        # The audit is only ever appended to and nothing rotates it, and /health reads this on
+        # every poll: read its end, not all of it. Timestamps carry the Mac's local offset, so a
+        # call is counted by its UTC date; comparing the local string against the UTC date
+        # dropped every call made in the hours the two dates differ. One unreadable line used to
+        # end the count at that line.
+        for line in _file_tail(audit, AUDIT_TAIL_BYTES):
             try:
-                for line in audit.read_text(encoding="utf-8").splitlines()[-500:]:
-                    row = json.loads(line)
-                    last_call = row.get("ts", last_call)
-                    if str(row.get("ts", "")).startswith(today):
-                        calls_today += 1
-            except (OSError, json.JSONDecodeError):
-                pass
+                ts = str(json.loads(line).get("ts") or "")
+                when = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+            except (ValueError, TypeError, AttributeError):
+                continue
+            last_call = ts
+            if when.astimezone(UTC).date() == today:
+                calls_today += 1
         state, detail = "OK", "subscription-backed Claude Code runtime"
         jobs = self._research_manager(profiles).store.list(limit=1)
         if jobs and jobs[0].get("state") == "CLAUDE_LIMIT_REACHED":
@@ -1726,6 +1734,20 @@ def _fred_configured(profiles: Profiles) -> bool:
     if os.environ.get("FRED_API_KEY", "").strip():
         return True
     return bool(load_env(profiles.project_dir) and os.environ.get("FRED_API_KEY", "").strip())
+
+
+def _file_tail(path: Path, max_bytes: int) -> list[str]:
+    """The complete lines in the last ``max_bytes`` of a file; nothing if it cannot be read."""
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - max_bytes))
+            data = stream.read()
+    except OSError:
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return lines[1:] if size > max_bytes else lines        # the first may start mid-line
 
 
 #: How long a "no usable bar yet" answer stands before the vendor is asked again. A published
