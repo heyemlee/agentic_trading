@@ -11,10 +11,11 @@ state and returns a decision, which is what makes it testable without a model or
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 #: Statuses that make research pointless or impossible regardless of configuration. PAUSED is
 #: deliberately absent: the kill switch stops orders, and research is how the system notices
@@ -79,6 +80,24 @@ def period_key(cfg: dict[str, Any], now: datetime | None = None) -> str:
     return f"weekly:{year}-W{week:02d}"
 
 
+def system_zone():
+    """This Mac's own time zone, as a named zone rather than today's offset.
+
+    ``datetime.astimezone()`` with no argument attaches a fixed offset. Adding days to that across
+    a daylight-saving change keeps the old offset, so for the week spanning the change the next
+    scheduled run was shown an hour off. launchd fires by wall-clock time, and a named zone keeps
+    the arithmetic in wall-clock time too.
+    """
+    name = os.environ.get("TZ", "").strip()
+    if not name:
+        link = os.path.realpath("/etc/localtime")
+        name = link.split("zoneinfo/", 1)[1] if "zoneinfo/" in link else ""
+    try:
+        return ZoneInfo(name) if name else datetime.now().astimezone().tzinfo
+    except (ZoneInfoNotFoundError, ValueError):
+        return datetime.now().astimezone().tzinfo
+
+
 def next_run_at(cfg: dict[str, Any], now: datetime | None = None,
                 local_zone: ZoneInfo | None = None) -> str | None:
     """The next time the launchd job fires, in the Mac's own local time.
@@ -89,8 +108,7 @@ def next_run_at(cfg: dict[str, Any], now: datetime | None = None,
     launchd = dict(cfg.get("launchd") or {})
     hour, minute = int(launchd.get("hour", 13)), int(launchd.get("minute", 30))
     weekday = launchd.get("weekday")
-    local = (now or datetime.now(UTC)).astimezone(local_zone) if local_zone else (
-        now or datetime.now(UTC)).astimezone()
+    local = (now or datetime.now(UTC)).astimezone(local_zone or system_zone())
     candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if str(cfg.get("period", "weekly")) == "daily" or weekday is None:
         if candidate <= local:

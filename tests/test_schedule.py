@@ -133,6 +133,16 @@ def test_an_unusable_system_state_skips_with_the_reason(sandbox):
         assert decision.run is False and status in decision.reason
 
 
+def test_the_next_run_keeps_wall_clock_time_across_a_daylight_saving_change(monkeypatch):
+    """With no zone passed, as the scheduler calls it, the time used a fixed offset: for the week
+    spanning the change the screen promised a run an hour away from when launchd fires it."""
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    cfg = {"period": "weekly", "launchd": {"weekday": 5, "hour": 13, "minute": 30}}
+    friday_after_the_run = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)      # 14:00 PDT
+    # the next Friday is after the clocks go back on 1 November
+    assert schedule.next_run_at(cfg, friday_after_the_run) == "2026-11-06T13:30:00-08:00"
+
+
 def test_next_run_is_read_from_the_same_configuration_the_job_is_written_from(cfg):
     from zoneinfo import ZoneInfo
 
