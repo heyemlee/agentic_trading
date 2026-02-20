@@ -515,6 +515,10 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
                 return _defer(store, proposal, "REVIEW_FAILED", f"the venue's pre-trade review did not answer: {exc}",
                               rv.as_dict())
             return ExecutionResult(False, "REVIEW_FAILED", proposal.proposal_id, rv.as_dict(), error=str(exc))
+        # Every alert, warning, message and error the venue's review returns blocks the order.
+        # Investor decision, 2026-09-16: kept deliberately strict. No order has been reviewed in
+        # production, so nothing shows which of these are informational; if the venue attaches
+        # notice text to every order, the first real refusal carries the payload to decide on.
         blocking = [str(a) for a in review.get("alerts", []) if a]
         if blocking:
             proposal.status = REJECTED
