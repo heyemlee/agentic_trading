@@ -13,8 +13,8 @@ accept_all_recommended_defaults: true    # investor decision, 2026-09-15: every 
                                          # in both files is adopted as reviewed. Each carries its
                                          # reasoning beside it; the numbers that size a real order
                                          # are micro_live's 40% single-position cap and 3 open
-                                         # positions, under micro_live_execution's own $40 per
-                                         # order. Setting this to false again re-blocks real money
+                                         # positions, under the per-order caps of its risk
+                                         # tiers. Setting this to false again re-blocks real money
                                          # until every TODO is replaced by an explicit value.
 
 objective:

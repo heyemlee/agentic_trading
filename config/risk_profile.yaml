@@ -943,24 +943,20 @@ micro_live_execution:
     prefer_limit_in_whole_shares: true
     time_in_force: gfd
     market_hours: regular_hours
-    # NOT ENFORCED, every key from here to the end of order_rules. They were written for the
-    # $100 account and no code reads them. What bounds a Micro-Live order today:
+    # Limits on a Micro-Live order are not set here. They are enforced from, and only from:
     #   size       buckets.micro_live.tiers.<tier>.max_order_usd, position_limits and
     #              concentration caps (Hard Risk)
     #   minimum    sizing.min_order_usd
     #   spread     data_freshness.fast.max_spread_pct
     #   positions  buckets.micro_live.position_limits.max_open_positions
     #   rate       buckets.micro_live.activity_limits (HR12)
-    #   review     nothing compares the venue review's quote with our price
-    # Enforcing max_single_order_usd as written would cap every order at $40, below the tier
-    # limits above, so implementing these is a decision about limits, not a repair.
-    max_review_quote_drift_pct: 1.0      # the review's quote vs our revalidation price
-    max_spread_pct: 0.5                  # refuse to trade a wide book
-    min_order_usd: 10
-    max_single_order_usd: 40                 # no single order may commit more than 40% of the account
-    max_positions: 3
-    max_new_positions_per_day: 1
-    max_new_positions_per_week: 2
+    # Investor decision, 2026-09-16: six limits written here for the $100 account and never read
+    # by any code were removed rather than enforced. Four repeated values enforced above; a $10
+    # minimum and a $40 single-order cap contradicted the $25 minimum and the tier caps in force.
+    #
+    # NOT ENFORCED: nothing compares the venue review's quote with our revalidation price yet. It
+    # stays declared until a real review payload shows where that quote lives.
+    max_review_quote_drift_pct: 1.0
   freshness_class: core_conservative
   preflight_checks:                          # every one must pass before a real order is sent
     - agentic_account_connected
@@ -977,6 +973,3 @@ micro_live_execution:
     - research_runtime_has_no_broker_tools
     - market_calendar_available
     - order_state_followed_to_terminal
-
-# Micro-Live bucket limits. Same shape as the sandbox so the risk engine treats it generically.
-# Sized for a $100 account: one order is at most $40, at most three positions, one new per day.
