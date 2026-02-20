@@ -38,7 +38,6 @@ class SystemStatus(str, Enum):
     PAUSED = "PAUSED"                          # kill switch on: no orders, research still allowed
     HALTED = "HALTED"                          # a drawdown ladder halt; needs a manual reset
     CLAUDE_LIMIT_REACHED = "CLAUDE_LIMIT_REACHED"
-    BROKER_UNAVAILABLE = "BROKER_UNAVAILABLE"
     CONFIG_ERROR = "CONFIG_ERROR"
 
 

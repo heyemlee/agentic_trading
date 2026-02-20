@@ -761,10 +761,10 @@ test('every status the API can return has copy, in both languages', () => {
   const status = fs.readFileSync(path.join(root, 'agentic_trading/service/status.py'), 'utf8');
   const members = name => [...status.match(new RegExp(`class ${name}\\(str, Enum\\):([\\s\\S]*?)\\n\\n\\n`))[1]
     .matchAll(/^\s{4}([A-Z_]+) = "/gm)].map(m => m[1]);
-  const wanted = [...members('ProposalStatus').map(s => 'ps.' + s),
-                  ...members('SystemStatus').map(s => 'sys.' + s),
+  const proposals = members('ProposalStatus'), systems = members('SystemStatus');
+  assert.ok(proposals.includes('WAITING_FOR_APPROVAL') && systems.includes('READY'), 'the enums were read');
+  const wanted = [...proposals.map(s => 'ps.' + s), ...systems.map(s => 'sys.' + s),
                   'sys.UNKNOWN'];            // what systemStatus() answers while /health is not live
-  assert.ok(wanted.length > 20);
   assert.deepEqual(wanted.filter(k => !en.has(k)), [], 'missing from en');
   assert.deepEqual(wanted.filter(k => !zh.has(k)), [], 'missing from zh');
 });

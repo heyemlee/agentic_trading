@@ -157,7 +157,6 @@ than hand-writing types.
 | `PAUSED` | kill switch on; research continues, no orders |
 | `HALTED` | a drawdown ladder halt; needs a manual reset by the investor |
 | `CLAUDE_LIMIT_REACHED` | subscription limit hit; runs resume after the reset |
-| `BROKER_UNAVAILABLE` | venue state unreadable |
 | `CONFIG_ERROR` | configuration invalid; nothing will run |
 
 ### MicroLiveStatus (`/micro-live.status`)
