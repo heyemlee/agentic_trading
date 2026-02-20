@@ -93,7 +93,8 @@ window.CT_API = (function () {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 401) unauthorized();
-        throw new Error(typeof body.detail === 'string' ? body.detail : res.status + ' ' + res.statusText);
+        throw Object.assign(new Error(typeof body.detail === 'string' ? body.detail : res.status + ' ' + res.statusText),
+          { status: res.status });
       }
       return body;
     } catch (error) {
@@ -236,10 +237,26 @@ window.CT_API = (function () {
   });
   async function post(path, body) {
     if (demo) return { blocked: true, reason: 'Demo mode cannot change state.' };
-    if (state.authPending || !auth.authenticated || !auth.csrf_token) throw new Error('Sign in before performing this action.');
-    const result = await request(path, { method: 'POST', headers: {
-      'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': auth.csrf_token,
-    }, body: JSON.stringify(body || {}) }, 60000);
+    if (state.authPending || !auth.authenticated || !auth.csrf_token) {
+      throw Object.assign(new Error('Sign in before performing this action.'), { notSent: true });
+    }
+    let result;
+    try {
+      result = await request(path, { method: 'POST', headers: {
+        'Content-Type': 'application/json', 'X-CT-Request': '1', 'X-CSRF-Token': auth.csrf_token,
+      }, body: JSON.stringify(body || {}) }, 60000);
+    } catch (error) {
+      /* 401 and 403 on a write come only from the API's security layer, before any route runs,
+         so the action was not sent. Signing in from another tab replaces the session cookie and
+         leaves this tab's CSRF token stale: every write answered 403 until the tab was hidden
+         and shown again. The session is re-read now, so the next attempt carries the right
+         token. Nothing is retried here; an approval is only ever sent by a person. */
+      if (error.status === 401 || error.status === 403) {
+        if (error.status === 403) loadSession();
+        error.notSent = true;
+      }
+      throw error;
+    }
     if (path === '/auth/logout') { unauthorized(); announce(); }
     return result;
   }

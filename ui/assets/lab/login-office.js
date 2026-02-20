@@ -10,10 +10,12 @@
  * No one walks. A journey routes through the shared aisle, which is outside
  * the crop, so a figure would slide out of frame and back for no reason.
  *
- * pixel-office.js owns the drawing and is loaded first, so its canvas is
- * already bound by the time this runs.
+ * pixel-office.js owns the drawing and is loaded first. It exposes a factory
+ * because routed Lab pages initialize only when entered; the standalone login
+ * page initializes that same scene here.
  */
 (() => {
+  window.createLabPixelScene?.(document);
   const scene = window.labPixelScene;
   const frame = document.getElementById('login-office');
   if (!scene || !frame) return;
@@ -43,7 +45,5 @@
   }
 
   paint();
-  document.getElementById('scene-caption').textContent =
-    t('login.office', 'The research floor you are signing in to.');
   reduced.addEventListener('change', paint);
 })();

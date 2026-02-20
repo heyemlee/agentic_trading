@@ -29,8 +29,6 @@ back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
   '<span>' + t('common.cancel') + '</span>';
 
 window.I18N.applyStatic();
-document.getElementById('login-setup').innerHTML =
-  window.I18N.t('login.setup', { cmd: '<code>uv run ct-auth</code>' });
 
 const form = document.getElementById('login-form');
 const message = document.getElementById('login-result');

@@ -260,6 +260,32 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await direct.waitForSelector('#startup', {state:'detached'});
  await direct.close();
 
+ // The standalone login page initializes the shared office factory itself.
+ const login = await context.newPage();
+ login.on('pageerror', e => errors.push(e.message));
+ await login.goto(origin + '/ui/login.html');
+ await login.waitForFunction(() => window.labPixelScene && document.querySelector('#pixel-office'));
+ await login.waitForFunction(() => {
+   const canvas = document.querySelector('#pixel-office');
+   const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+   const first = pixels.slice(0, 4).join(',');
+   for (let i = 4; i < pixels.length; i += 4) {
+     if (pixels.slice(i, i + 4).join(',') !== first) return true;
+   }
+   return false;
+ });
+ assert.equal(await login.locator('#scene-caption').count(), 0);
+ assert.ok(await login.locator('#pixel-office').evaluate(canvas => {
+   const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+   const colours = new Set();
+   for (let i = 0; i < data.length; i += 64) colours.add(data.slice(i, i + 3).join(','));
+   return colours.size > 12;
+ }), 'login illustration must contain the agents and room, not one flat background');
+ if (process.env.CT_UI_CAPTURE_DIR) {
+   await login.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'login-phone.png')});
+ }
+ await login.close();
+
  // Reduced motion is a static pair of blades, and a frozen request has a bounded wait.
  const reduced = await browser.newContext({viewport:{width:390,height:844}, reducedMotion:'reduce'});
  const stalled = await reduced.newPage();

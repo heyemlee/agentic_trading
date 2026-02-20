@@ -823,6 +823,15 @@ test('the login form never falls back to putting a password in the URL', () => {
   assert.doesNotMatch(form, /\bmethod="get"/);
 });
 
+test('the sign-in screen keeps the office illustration visually quiet', () => {
+  const html = uiFile('login.html');
+  assert.doesNotMatch(html, /login\.subtitle|login\.setup|login\.office|个人控制台|首次使用请/);
+  const login = uiFile('assets/login.js');
+  assert.doesNotMatch(login, /login-setup|login\.setup/);
+  const office = uiFile('assets/lab/login-office.js');
+  assert.doesNotMatch(office, /login\.office|signing in to/);
+});
+
 /* ── the research room ────────────────────────────────────────────────
    The office draws one run. These cases pin the line the page must not cross:
    a desk changes only because an event says so, and the decision shown in the
@@ -1404,4 +1413,46 @@ test('a sign-in that fails with a non-JSON answer says so instead of showing a p
   assert.equal(c.element('login-result').textContent, 'login.failed 502');
   assert.equal(c.element('login-submit').disabled, false);
   assert.equal(assigned, null);
+});
+
+/* Signing in from another tab replaces the session cookie. This tab kept its old CSRF token, and
+   every write it made was refused with 403 until the tab was hidden and shown again. */
+test('a stale CSRF token re-reads the session, marks the write not sent, and never resends it', async () => {
+  const c = context(); let token = 'old', posts = 0, sessions = 0;
+  c.fetch = async (url, init = {}) => {
+    if (url === '/auth/session') { sessions++; return response({ authenticated: true, csrf_token: token }); }
+    if (init.method === 'POST') {
+      posts++;
+      return init.headers['X-CSRF-Token'] === token ? response({ status: 'SUBMITTED' })
+        : response({ detail: 'invalid session or CSRF token' }, 403);
+    }
+    return response([]);
+  };
+  c.run('api.js'); c.CT_API.start(['proposals']); await flush();
+  token = 'new';                                    // another tab signed in
+  const before = sessions;
+  const error = await c.CT_API.post('/proposals/A/approve', {}).catch(e => e);
+  assert.equal(error.notSent, true);
+  assert.equal(posts, 1, 'the refused write is not sent again');
+  await flush();
+  assert.equal(sessions, before + 1, 'the session is read again at once');
+  assert.equal((await c.CT_API.post('/proposals/A/approve', {})).status, 'SUBMITTED');
+});
+
+test('an approval the API refused before sending is a plain failure, not an uncertain order', async () => {
+  const c = approvalPage();
+  c.CT_API.post = async () => { throw Object.assign(new Error('invalid session or CSRF token'), { notSent: true }); };
+  c.element('btn-approve').events.click();
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  await c.element('approve-submit').events.click();
+  assert.match(c.element('result-slot').innerHTML, /ap.failed/);
+  assert.equal(c.element('btn-approve').disabled, false, 'nothing to reconcile, so approving again is allowed');
+
+  const timedOut = approvalPage();
+  timedOut.CT_API.post = async () => { throw new Error('Request timed out. Check the order state before retrying.'); };
+  timedOut.element('btn-approve').events.click();
+  timedOut.element('approve-confirm').checked = true; timedOut.element('approve-confirm').events.change();
+  await timedOut.element('approve-submit').events.click();
+  assert.match(timedOut.element('result-slot').innerHTML, /ap.checkOrderTitle/);
+  assert.equal(timedOut.element('btn-approve').disabled, true);
 });

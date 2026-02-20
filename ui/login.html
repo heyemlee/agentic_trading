@@ -27,14 +27,12 @@
   <figure class="login-office" id="login-office">
     <div class="login-office-frame">
       <canvas id="pixel-office" width="320" height="296" role="img"
-              data-i18n-aria="login.office" aria-label="The research floor"></canvas>
+              aria-label="Research room illustration"></canvas>
       <div id="ambient-bubbles" class="login-office-bubbles" aria-hidden="true"></div>
     </div>
-    <figcaption id="scene-caption" class="body-sm body-muted"></figcaption>
   </figure>
 
   <h1 data-i18n="login.title">Sign in</h1>
-  <p class="body-muted" data-i18n="login.subtitle">Agentic Trading · personal console</p>
 
   <!-- POST is the native fallback when login.js has not loaded. FastAPI expects JSON and
        will reject the form body, but the password stays out of the URL, browser history and
@@ -49,7 +47,6 @@
     <p id="login-result" class="body-sm" role="status" aria-live="polite"></p>
   </form>
 
-  <p class="body-sm body-muted" style="margin-top:24px;" id="login-setup"></p>
   <p style="margin-top:12px;"><a class="linkish body-sm" href="index.html?demo=1" data-i18n="login.demo">View the demo instead</a></p>
 </main>
 

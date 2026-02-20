@@ -46,7 +46,7 @@ window.Console.page('approvals', function (document) {
       confirmBox.checked = false;
       submitBtn.disabled = true;
       document.getElementById('approve-dialog-warning').textContent =
-        '提案或当前条件已变化，请关闭后重新核对。 / Proposal or conditions changed. Review again.';
+        C.t('ap.changedReview');
     }
     approveBtn.disabled = inFlight || uncertain || !canApprove();
     const detail = document.querySelector('[data-od-id="proposal-detail"]');
@@ -236,10 +236,12 @@ window.Console.page('approvals', function (document) {
       await CT_API.readOnce('proposals');
       await CT_API.readOnce('proposalDetail');
     } catch (error) {
+      /* Refused before it reached the service: nothing to reconcile, so say so plainly rather
+         than lock approval behind "check the order state" for an order that cannot exist. */
+      if (error.notSent) { errPanel('ap.verbApprove', error); return; }
       uncertain = true;
-      panel('需要查询结果 / Check order state', 'quiet',
-        error.message + ' 请查看订单状态，勿重复批准。 / Check Activity before retrying.', [],
-        '<a class="btn btn-secondary" href="activity.html">查看订单 / View orders</a>');
+      panel(C.t('ap.checkOrderTitle'), 'quiet', C.t('ap.checkOrderBody', { err: error.message }), [],
+        '<a class="btn btn-secondary" href="activity.html">' + C.escapeHtml(C.t('ap.viewOrders')) + '</a>');
     } finally {
       inFlight = false; intent = null;
       approveBtn.disabled = uncertain || !canApprove();
