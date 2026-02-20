@@ -15,12 +15,12 @@ window.Console.page('more', function (document) {
     document.getElementById('more-status-copy').textContent = C.code(status) + ' · ' + C.sysCopy(status);
     document.getElementById('more-language-value').textContent = nameOf(window.I18N.lang);
 
+    /* Signed in, devices and sign-in sessions are the "Devices & notifications" row above; a
+       second row to the same page read as two different settings. Only a signed-out visitor
+       needs a way in. */
     const signedIn = CT_API.authenticated;
-    const session = document.getElementById('more-session');
-    session.hidden = !window.CT_DEMO && !signedIn && (!CT_API.state.authChecked || CT_API.state.authPending);
-    session.href = signedIn ? 'notifications.html' : 'login.html?next=more.html';
-    document.getElementById('more-session-label').textContent = C.t(signedIn ? 'more.account' : 'more.signIn');
-    document.getElementById('more-session-hint').textContent = C.t(signedIn ? 'more.accountHint' : 'more.sessionHint');
+    document.getElementById('more-session').hidden =
+      signedIn || (!window.CT_DEMO && (!CT_API.state.authChecked || CT_API.state.authPending));
     document.getElementById('more-logout').hidden = !signedIn;
   }
 
@@ -67,7 +67,7 @@ window.Console.page('more', function (document) {
       window.location.assign('login.html');
     } catch (error) {
       button.disabled = false;
-      document.getElementById('more-session-hint').textContent = error.message;
+      document.getElementById('more-logout-hint').textContent = error.message;
     }
   });
   document.addEventListener('ct:auth', render);

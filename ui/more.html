@@ -32,12 +32,17 @@
         </a>
 
         <p class="more-section-label" data-i18n="more.records">Records</p>
-        <div class="more-grid">
-          <a class="more-link" href="risk.html"><span class="more-link-icon" data-icon="risk"></span><span class="list-main"><span class="list-title" data-i18n="nav.risk">Risk</span></span></a>
-          <a class="more-link" href="activity.html"><span class="more-link-icon" data-icon="activity"></span><span class="list-main"><span class="list-title" data-i18n="nav.activity">Activity</span></span></a>
-        </div>
-
         <div class="more-actions">
+          <a class="more-action" href="risk.html">
+            <span class="more-link-icon" data-icon="risk"></span>
+            <span class="list-main"><span class="list-title" data-i18n="nav.risk">Risk</span><span class="list-sub" data-i18n="more.riskHint">Market regime, limits and whether new positions may open</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
+          <a class="more-action" href="activity.html">
+            <span class="more-link-icon" data-icon="activity"></span>
+            <span class="list-main"><span class="list-title" data-i18n="nav.activity">Activity</span><span class="list-sub" data-i18n="more.activityHint">Recorded fills and orders open at the venue</span></span>
+            <span data-icon="chevron" aria-hidden="true"></span>
+          </a>
           <a class="more-action" href="evaluation.html">
             <span class="more-link-icon" data-icon="evaluation"></span>
             <span class="list-main"><span class="list-title" data-i18n="evl.title">Evaluation</span><span class="list-sub" data-i18n="more.evaluationHint">Strategy record against its declared benchmark</span></span>
@@ -59,17 +64,17 @@
           </button>
           <a class="more-action" href="notifications.html">
             <span class="more-link-icon" data-icon="notifications"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.notifications">Notifications</span><span class="list-sub" data-i18n="more.notificationsHint">Push status, test and subscribed devices</span></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.notifications">Devices &amp; notifications</span><span class="list-sub" data-i18n="more.notificationsHint">Signed-in devices, push status and a test</span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
           </a>
-          <a class="more-action" id="more-session" href="login.html">
+          <a class="more-action" id="more-session" href="login.html?next=more.html" hidden>
             <span class="more-link-icon" data-icon="session"></span>
-            <span class="list-main"><span class="list-title" id="more-session-label"></span><span class="list-sub" id="more-session-hint"></span></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.signIn">Sign in</span><span class="list-sub" data-i18n="more.sessionHint">Sign in to manage account access</span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
           </a>
           <button class="more-action" id="more-logout" type="button" hidden>
             <span class="more-link-icon" data-icon="session"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.signOut">Sign out</span><span class="list-sub" data-i18n="more.signOutHint">End the session on this device</span></span>
+            <span class="list-main"><span class="list-title" data-i18n="more.signOut">Sign out</span><span class="list-sub" id="more-logout-hint" data-i18n="more.signOutHint">End the session on this device</span></span>
             <span data-icon="chevron" aria-hidden="true"></span>
           </button>
         </div>

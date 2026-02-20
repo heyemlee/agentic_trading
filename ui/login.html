@@ -13,13 +13,7 @@
 <meta name="theme-color" content="#111318" />
 <link rel="stylesheet" href="assets/console.css" />
 </head>
-<body>
-<!-- No tab bar here on purpose: signed out, none of those destinations work.
-     The way out is the back link, which returns to the page that sent you. -->
-<header class="topnav"><div class="topnav-inner">
-  <a class="backlink" href="index.html" id="login-back" data-od-id="login-back"></a>
-</div></header>
-
+<body class="login-page">
 <main class="container section" id="content">
   <!-- Decoration that must never block the way in: if the sprites fail to load,
        pixel-office.js writes the reason into the caption and the form below is
@@ -32,22 +26,22 @@
     </div>
   </figure>
 
-  <h1 data-i18n="login.title">Sign in</h1>
+  <h1>Sign in</h1>
 
   <!-- POST is the native fallback when login.js has not loaded. FastAPI expects JSON and
        will reject the form body, but the password stays out of the URL, browser history and
        access log. login.js prevents this submission and sends the supported JSON request. -->
   <form id="login-form" method="post" action="/auth/login"
         class="stack stack-4" style="margin-top:24px;">
-    <label class="field"><span data-i18n="login.username">Username</span>
+    <label class="field"><span>Username</span>
       <input class="input" name="username" value="owner" autocomplete="username" required maxlength="100" /></label>
-    <label class="field"><span data-i18n="login.password">Password</span>
+    <label class="field"><span>Password</span>
       <input class="input" type="password" name="password" autocomplete="current-password" required maxlength="1024" /></label>
-    <button class="btn btn-green" type="submit" id="login-submit" data-i18n="login.submit">Sign in</button>
+    <button class="btn btn-green" type="submit" id="login-submit">Sign in</button>
     <p id="login-result" class="body-sm" role="status" aria-live="polite"></p>
   </form>
 
-  <p style="margin-top:12px;"><a class="linkish body-sm" href="index.html?demo=1" data-i18n="login.demo">View the demo instead</a></p>
+  <p style="margin-top:12px;"><a class="linkish body-sm" href="index.html?demo=1">View the demo instead</a></p>
 </main>
 
 <script src="assets/i18n.js"></script>

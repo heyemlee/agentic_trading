@@ -826,8 +826,11 @@ test('the login form never falls back to putting a password in the URL', () => {
 test('the sign-in screen keeps the office illustration visually quiet', () => {
   const html = uiFile('login.html');
   assert.doesNotMatch(html, /login\.subtitle|login\.setup|login\.office|个人控制台|首次使用请/);
+  assert.doesNotMatch(html, /data-i18n|login-back|class="topnav"|取消|登录/);
+  assert.match(html, /<h1>Sign in<\/h1>/);
   const login = uiFile('assets/login.js');
-  assert.doesNotMatch(login, /login-setup|login\.setup/);
+  assert.doesNotMatch(login, /login-setup|login\.setup|common\.cancel|applyStatic|login-back/);
+  assert.match(login, /Signing in/);
   const office = uiFile('assets/lab/login-office.js');
   assert.doesNotMatch(office, /login\.office|signing in to/);
 });
@@ -1403,14 +1406,13 @@ test('the stale-ledger control runs the ledger confirmation and reports a refusa
 
 test('a sign-in that fails with a non-JSON answer says so instead of showing a parse error', async () => {
   const c = context();
-  c.I18N.applyStatic = () => {};
   c.element('login-form').elements = { username: { value: 'owner' }, password: { value: 'pw' } };
   let assigned = null;
   c.location.assign = url => { assigned = url; };
   c.fetch = async () => ({ ok: false, status: 502, json: async () => { throw new SyntaxError('Unexpected token <'); } });
   c.run('login.js');
   await c.element('login-form').events.submit({ preventDefault() {} });
-  assert.equal(c.element('login-result').textContent, 'login.failed 502');
+  assert.equal(c.element('login-result').textContent, 'Sign-in did not complete (HTTP 502).');
   assert.equal(c.element('login-submit').disabled, false);
   assert.equal(assigned, null);
 });

@@ -5,7 +5,13 @@
    you lose your place. `?next=` carries the way home. */
 try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {}
 
-const t = (key, vars) => window.I18N.t(key, vars);
+const COPY = {
+  working: 'Signing in…',
+  failed: 'Sign-in did not complete (HTTP {status}).',
+};
+const copy = (key, vars = {}) => Object.entries(vars).reduce(
+  (text, [name, value]) => text.replaceAll('{' + name + '}', value), COPY[key],
+);
 
 /* Only ever return to a page of this app. A `next` that points anywhere else
    — another origin, a protocol handler — is discarded, not followed. */
@@ -22,13 +28,6 @@ function safeNext() {
 }
 
 const next = safeNext();
-const back = document.getElementById('login-back');
-back.href = next || 'index.html';
-back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
-  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 19.5l-7-7.5 7-7.5"/></svg>' +
-  '<span>' + t('common.cancel') + '</span>';
-
-window.I18N.applyStatic();
 
 const form = document.getElementById('login-form');
 const message = document.getElementById('login-result');
@@ -37,7 +36,7 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = document.getElementById('login-submit');
   button.disabled = true;
-  message.textContent = t('login.working');
+  message.textContent = copy('working');
   try {
     const response = await fetch('/auth/login', {
       method: 'POST', credentials: 'same-origin',
@@ -51,7 +50,7 @@ form.addEventListener('submit', async (event) => {
        showed the reader a SyntaxError instead of the fact that the service did not answer. */
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(typeof body.detail === 'string' ? body.detail : t('login.failed', { status: response.status }));
+      throw new Error(typeof body.detail === 'string' ? body.detail : copy('failed', { status: response.status }));
     }
     form.elements.password.value = '';
     window.location.assign(next || 'index.html');
