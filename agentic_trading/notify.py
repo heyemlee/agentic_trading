@@ -38,7 +38,6 @@ EVENTS = {
     "proposal_waiting": "a proposal is waiting for your approval",
     "research_failed": "a research run failed",
     "research_limit": "the Claude subscription limit stopped research",
-    "fill_recorded": "an order filled",
     "reconciliation_error": "an order could not be reconciled with the broker",
     "credential_invalid": "a stored credential no longer works",
     "risk_level_changed": "the drawdown ladder changed level",

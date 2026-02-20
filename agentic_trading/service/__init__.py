@@ -1145,15 +1145,10 @@ class Service:
                     title="the Claude subscription limit stopped research",
                     detail=str(job.get("error") or "")[:300], link="/ui/research.html"))
 
-        # Recorded fills, read locally. `orders()` also opens a venue session for the live order
-        # list, and this pass runs every fifteen seconds: two Robinhood handshakes a tick, about
-        # eleven thousand a day, to list rows already in SQLite and to ask whether a login works.
-        for fill in self._recorded_fills(profiles, limit=10):
-            fill_id = fill.fill_id or f"{fill.proposal_id}:{fill.at}"
-            events.append(Event(
-                key=f"fill_recorded:{fill_id}", kind="fill_recorded",
-                title=f"{fill.symbol or 'an order'} filled",
-                detail=f"{fill.quantity} @ {fill.price}", link="/ui/activity.html"))
+        # A fill is not announced from here. Robinhood tells the account holder about every
+        # trade in the Agentic account itself, so a message from this side would repeat it. What
+        # only this side can know -- an order it cannot reconcile, a decision nobody was asked
+        # about -- is announced below.
 
         if self._micro_enabled(profiles):
             connect_error = self._broker_connect_error()

@@ -711,7 +711,8 @@ notifications:
     - proposal_waiting                     # something needs a human decision
     - research_failed
     - research_limit                       # the subscription stopped the work
-    - fill_recorded
+    # A fill is not on this list: Robinhood itself notifies the account holder of every trade in
+    # the Agentic account, and a second message from here would only repeat it.
     - reconciliation_error                 # the broker and the ledger disagree
     - credential_invalid
     - risk_level_changed

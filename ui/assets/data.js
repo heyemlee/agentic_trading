@@ -364,7 +364,7 @@ window.CT = (function () {
   const notifications = {
     channel: "none", configured: false,
     detail: "no channel is configured, so nothing is sent. Set notifications.channel and supply its credentials to authorise sending.",
-    events_enabled: ["proposal_waiting", "research_failed", "research_limit", "fill_recorded",
+    events_enabled: ["proposal_waiting", "research_failed", "research_limit",
                      "reconciliation_error", "credential_invalid", "risk_level_changed",
                      "backup_overdue"],
     min_interval_seconds: 900, heartbeat_configured: false,

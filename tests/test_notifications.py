@@ -144,7 +144,7 @@ def test_the_notification_pass_does_not_open_the_venue_every_tick(service, monke
     monkeypatch.setattr(service, "micro_live",
                         lambda: probes.append(now[0]) or SimpleNamespace(connect_error="token expired"))
     monkeypatch.setattr(service, "_broker",
-                        lambda *_args: pytest.fail("recorded fills need no venue session"))
+                        lambda *_args: pytest.fail("the notification pass needs no venue session"))
 
     for _ in range(3):
         assert [e for e in service.collect_notifications() if e.kind == "credential_invalid"]
