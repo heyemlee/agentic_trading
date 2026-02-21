@@ -92,7 +92,9 @@ def fetch_snapshot(profiles, broker_factory=ObservationBroker) -> dict:
     """Explicitly scoped to all brokerage accounts, with no guessed/missing amounts as zero."""
     result = {"fetched_at": now(), "source": "Robinhood official MCP", "accounts": [],
               "candidates": [], "errors": [], "coverage": "stocks_and_etfs",
-              "coverage_note": "Equity positions only; options, crypto and other assets are not analysed."}
+              "coverage_note": "Equity positions only; options, crypto and other assets are not "
+                               "analysed. The Agentic account is not observed: it is the Micro-Live "
+                               "bucket this system manages, shown from its reconciled ledger."}
     candidates: dict[str, dict] = {}
 
     def add(symbol, source):
@@ -109,13 +111,17 @@ def fetch_snapshot(profiles, broker_factory=ObservationBroker) -> dict:
     broker = broker_factory(profiles)
     try:
         for account in broker._accounts():
+            if account.get("agentic_allowed") is True:
+                # The Agentic account is the Micro-Live bucket this system manages. Its holdings
+                # are shown from the reconciled ledger and researched by the executable path, so
+                # observing it here too would show one account twice and review it twice.
+                continue
             account_number = broker._account_number(account)
             if not account_number:
                 result["errors"].append("An account had no identifier and could not be read.")
                 continue
             account_id = hashlib.sha256(account_number.encode()).hexdigest()[:20]
             view = {"id": account_id, "label": "••••" + account_number[-4:],
-                    "agentic": account.get("agentic_allowed") is True,
                     "positions": [], "complete": False, "equity_usd": None, "cash_usd": None}
             result["accounts"].append(view)
             try:

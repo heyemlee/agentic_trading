@@ -70,7 +70,9 @@ def test_all_accounts_read_without_trade_permissions_and_with_pagination(profile
     broker = observation(profiles, responses)
     data = fetch_snapshot(profiles, broker_factory=lambda p: broker)
     assert data["complete"]
-    assert len(data["accounts"]) == 2
+    # The Agentic account is the Micro-Live bucket, shown and researched elsewhere; the
+    # assistant observes the accounts this system does not manage.
+    assert [a["label"] for a in data["accounts"]] == ["••••1234"]
     assert len(data["accounts"][0]["positions"]) == 2
     assert data["accounts"][0]["positions"][0]["unrealized_pct"] == 25
     symbols = [c["symbol"] for c in data["candidates"]]
