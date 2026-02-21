@@ -17,7 +17,7 @@ window.CT = (function () {
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
     labRoster: null, labTrace: {},
-    orders: {fills: [], open_orders: [], tracked_orders: [], error: null}
+    orders: {fills: [], tracked_orders: []}
   };
   const health = {
     status: "READY",
@@ -700,7 +700,7 @@ window.CT = (function () {
     }
   };
 
-  const orders = { fills: [], open_orders: [], tracked_orders: [], error: null };
+  const orders = { fills: [], tracked_orders: [] };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,

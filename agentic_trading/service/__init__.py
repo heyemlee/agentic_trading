@@ -22,7 +22,6 @@ from typing import Any, ClassVar
 
 from .. import agent_roster, autonomy
 from ..broker import make_broker
-from ..broker.base import BrokerError
 from ..env import load_env
 from ..execution import ExecutionResult, needs_reconciliation, reconcile_proposal, revalidate
 from ..execution import execute as execute_proposal
@@ -57,7 +56,6 @@ from .shapes import (
     MarketStatus,
     MicroLive,
     MicroLiveAccount,
-    OpenOrder,
     Orders,
     PersonalNotes,
     Portfolio,
@@ -1644,26 +1642,17 @@ class Service:
         return [Fill(**row) for row in reversed(rows)]
 
     def orders(self, limit: int = 50) -> Orders:
-        """Fills recorded locally, plus live order state from the venue when connected."""
+        """The fills this system recorded and the orders it is tracking, from its own record.
+
+        The venue's open-order list used to be read here too, on every poll of the Activity
+        screen: a Robinhood handshake every ten seconds to show a list the Robinhood app
+        already shows. What the app cannot show is what this side knows about an order -- the
+        proposal it came from, whether it reconciled, and where the two disagree -- and that
+        is what is returned. Execution still reads the venue's open orders where they decide
+        something, at revalidation.
+        """
         profiles = self.profiles()
         fills = self._recorded_fills(profiles, limit)
-        live: list[OpenOrder] = []
-        error = None
-        if self._micro_enabled(profiles):
-            try:
-                broker = self._broker(profiles, MICRO_BUCKET)
-                try:
-                    live = [OpenOrder(order_id=o.order_id, symbol=o.symbol, side=o.side,
-                                      status=o.status, quantity=o.quantity,
-                                      filled_quantity=o.filled_quantity,
-                                      filled_avg_price=o.filled_avg_price, is_open=o.is_open)
-                            for o in broker.get_open_orders()]
-                finally:
-                    _close(broker)
-            except (ServiceError, BrokerError) as exc:
-                # A venue that will not answer leaves the locally recorded orders standing:
-                # the picture is incomplete, which is not the same as there being no orders.
-                error = str(exc)
         tracked = [TrackedOrder(proposal_id=p.proposal_id, order_id=p.broker_order_id,
                                 client_order_id=p.client_order_id, symbol=p.ticker,
                                 status=proposal_status(p, profiles), venue_status=p.order_status,
@@ -1672,7 +1661,7 @@ class Service:
                                 filled_avg_price=p.filled_avg_price, reconciled_at=p.reconciled_at,
                                 reconciliation_error=p.reconciliation_error)
                    for p in self._store(profiles).all() if p.client_order_id]
-        return Orders(fills=fills, open_orders=live, tracked_orders=tracked, error=error)
+        return Orders(fills=fills, tracked_orders=tracked)
 
     # ---------------------------------------------------------------- controls
     def _journal(self, profiles: Profiles, **fields: Any) -> None:

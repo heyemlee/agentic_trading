@@ -355,21 +355,6 @@ class Fill(BaseModel):
     trade_date: str | None = None
 
 
-class OpenOrder(BaseModel):
-    """An order the venue still considers live, read from the venue itself."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    order_id: str
-    symbol: str
-    side: str
-    status: str
-    quantity: float | None = None
-    filled_quantity: float = 0.0
-    filled_avg_price: float | None = None
-    is_open: bool
-
-
 class TrackedOrder(BaseModel):
     """An order this system submitted, and what it knows about where it ended up.
 
@@ -395,19 +380,17 @@ class TrackedOrder(BaseModel):
 
 
 class Orders(BaseModel):
-    """Fills recorded locally, plus live order state from the venue when it can be reached.
+    """Fills recorded locally and the orders this system is tracking.
 
-    ``error`` carries a venue that would not answer. It does not empty the rest: the locally
-    recorded fills and the orders this system is tracking are what the screen falls back to,
-    and an unreachable venue must read as an incomplete picture rather than as no orders.
+    Both come from this side's own record; nothing here asks the venue. An order's venue-side
+    state arrives through reconciliation and is carried on the tracked order, beside the
+    product state that may disagree with it.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     fills: list[Fill] = Field(default_factory=list)
-    open_orders: list[OpenOrder] = Field(default_factory=list)
     tracked_orders: list[TrackedOrder] = Field(default_factory=list)
-    error: str | None = None
 
 
 class MarketStatus(BaseModel):

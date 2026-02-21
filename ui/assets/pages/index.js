@@ -205,15 +205,13 @@ window.Console.page('index', function (document) {
         note: C.t('home.gatesGreen'),
       }));
     }
-    const o = D.orders || { fills: [], open_orders: [] };
+    const o = D.orders || { fills: [], tracked_orders: [] };
     const pending = (o.tracked_orders || []).filter(x => ['UNKNOWN', 'SUBMITTED', 'PARTIALLY_FILLED'].includes(x.status));
     rows.push(C.listRow({
       id: 'latest-orders', href: 'activity.html',
       title: C.t('home.orders'),
-      sub: o.error ? o.error : pending.length ? pending.length + ' orders pending / 订单待核对或成交' : o.open_orders.length
-        ? C.t('home.ordersOpen', { n: o.open_orders.length })
-        : C.t('home.ordersNone'),
-      value: String(o.fills.length),
+      sub: pending.length ? C.t('home.ordersPending', { n: pending.length }) : C.t('home.ordersNone'),
+      value: String((o.fills || []).length),
       note: C.t('home.fills'),
     }));
     C.setHTML($('latest-list'), rows.join(''));

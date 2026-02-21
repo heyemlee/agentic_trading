@@ -3,7 +3,11 @@ window.Console.page('activity', function (document) {
   C.mount('activity');
   C.wireTabs();
 
-  /* ── orders: the venue side, re-read on every poll cycle ─────────── */
+  /* ── orders: this side's record, re-read on every poll cycle ────────
+     The venue's own open-order list was shown here too, and reading it cost
+     a Robinhood handshake every poll to show what the Robinhood app already
+     shows. What the app cannot show is which proposal an order came from and
+     whether it reconciled, which is the tracking list below. */
   function renderOrders() {
 
     const o = D.orders;
@@ -14,8 +18,6 @@ window.Console.page('activity', function (document) {
       note: C.bucket(x.bucket) + ' · ' + (x.venue_status || '—'),
     })).join('') || '<p class="body-sm">No tracked orders / 暂无订单记录</p>');
     document.getElementById('fill-count').textContent = C.t('ac.recorded', { n: o.fills.length });
-    document.getElementById('open-count').textContent = o.error
-      ? C.t('ac.venueUnreachable') : C.t('ac.live', { n: o.open_orders.length });
 
     C.setHTML(document.getElementById('fills-body'), o.fills.length
       ? '<div class="list">' + o.fills.map((f) => C.listRow({
@@ -26,19 +28,6 @@ window.Console.page('activity', function (document) {
         })).join('') + '</div>'
       : '<div class="empty" data-od-id="empty-fills">' +
           '<p class="empty-title">' + C.t('ac.noFills') + '</p></div>');
-
-    C.setHTML(document.getElementById('open-body'), o.open_orders.length
-      ? '<div class="list">' + o.open_orders.map((x) => C.listRow({
-          title: x.symbol + ' · ' + x.side,
-          sub: x.status,
-          value: (x.filled_quantity || 0) + ' / ' + x.quantity,
-          note: x.filled_avg_price ? C.usd(x.filled_avg_price) : C.t('ac.unfilled'),
-        })).join('') + '</div>'
-      : o.error
-        ? '<div class="empty" data-od-id="error-open">' +
-            '<p class="empty-title">' + C.t('ac.venueError') + '</p><p>' + C.escapeHtml(o.error) + '</p></div>'
-        : '<div class="empty" data-od-id="empty-open">' +
-            '<p class="empty-title">' + C.t('ac.noOpen') + '</p></div>');
   }
 
   /* ── the audit journal ───────────────────────────────────────────

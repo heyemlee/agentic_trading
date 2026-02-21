@@ -72,7 +72,7 @@ the age against the TTL and explain that approval will trigger revalidation, not
 **See NO_TRADE.** `GET /research` rows with `final_action: "NO_TRADE"`. Present the reasoning
 as a legitimate decision with its own detail view.
 
-**Order status.** `GET /orders` returns recorded fills and live open orders.
+**Order status.** `GET /orders` returns recorded fills and the orders this system is tracking.
 
 **History and audit.** `GET /research` for decision records; each proposal carries a `history`
 array of timestamped events.
@@ -126,7 +126,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/research?limit=` | completed decision records, newest first |
 | GET | `/research/jobs?limit=` | persistent queue, including queued/running/failed jobs |
 | GET | `/research/{run_key}` | one run's progress |
-| GET | `/orders?limit=` | recorded fills and live open orders |
+| GET | `/orders?limit=` | recorded fills and tracked orders, from the local record |
 
 ### Write
 
@@ -299,9 +299,12 @@ cursor drops or repeats them at the page boundary. Entries carry `actor`, `versi
 `outcome`; approval notes and anything credential-shaped are deliberately absent, so the
 journal can be shown without redacting it again.
 
-`GET /orders` returns `fills[]` (recorded locally at fill time) and `open_orders[]` (live from
-the venue). Order status values, mapped from the venue: `new`, `accepted`, `partially_filled`,
-`filled`, `canceled`, `rejected`, `expired`, `held`.
+`GET /orders` returns `fills[]` (recorded locally at fill time) and `tracked_orders[]` (every
+order this system submitted, with the proposal it came from, its reconciliation time and any
+reconciliation error). Nothing in it is read from the venue: the venue's own open-order list is
+what the Robinhood app shows, and a tracked order's `venue_status` arrives through
+reconciliation. Order status values, mapped from the venue: `new`, `accepted`,
+`partially_filled`, `filled`, `canceled`, `rejected`, `expired`, `held`.
 
 Micro-Live orders are **market orders with a dollar amount**, because Robinhood only allows
 fractional or notional sizing on market orders and a $100 account cannot buy a whole share of a
@@ -385,7 +388,7 @@ local process holding brokerage credentials; do not expose it to a network.
 | `approve_result_reanalysis.json` | approval refused on price drift |
 | `research_history.json` | completed runs |
 | `research_no_trade.json` | a real NO_TRADE outcome |
-| `orders.json` | empty fills and open orders |
+| `orders.json` | empty fills and tracked orders |
 
 Payloads with real history come from the live system; those describing states that have not
 occurred yet were generated through the real code paths so the shapes are accurate.
@@ -404,7 +407,7 @@ that moves is a quote.
 | `/portfolio`, `/risk` | 60s |
 | `/research/{run_key}` during a run | 5s |
 | `/research/jobs` | 10s; use it to resume an active run after page reload |
-| `/orders` when an order is open | 10s |
+| `/orders` when an order is open | 10s (a local read; it opens no venue session) |
 
 Recompute `freshness.age_minutes` client-side between polls so a countdown stays smooth. Always
 call `/proposals/{id}/revalidate` immediately before showing an approve button on a proposal

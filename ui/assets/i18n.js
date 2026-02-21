@@ -299,8 +299,8 @@ window.I18N = (function () {
       'home.blocking': '{ids} blocking', 'home.allGreen': 'Every gate green',
       'home.gatesGreen': 'gates green',
       'home.orders': 'Orders', 'home.fills': 'fills',
-      'home.ordersNone': 'Nothing recorded and nothing in flight at the venue',
-      'home.ordersOpen': '{n} in flight at the venue',
+      'home.ordersNone': 'Nothing recorded and nothing pending',
+      'home.ordersPending': '{n} pending reconciliation or fill',
       'home.noResult': 'no result',
 
       /* portfolio */
@@ -423,7 +423,7 @@ window.I18N = (function () {
       'rk.executionMode': 'Execution mode', 'rk.permissions': 'Venue permissions',
 
       /* activity */
-      'ac.title': 'Activity', 'ac.fills': 'Recorded fills', 'ac.open': 'Open at the venue',
+      'ac.title': 'Activity', 'ac.fills': 'Recorded fills',
       'ac.entries': '{n} entries loaded', 'ac.loadMore': 'Load older entries',
       'ac.morePages': 'Older entries exist; this is the newest page.',
       'ac.allLoaded': 'The whole record is loaded.',
@@ -439,11 +439,8 @@ window.I18N = (function () {
       'ev.research_completed': 'Research finished', 'ev.research_failed': 'Research did not finish',
       'ev.system_paused': 'Kill switch engaged', 'ev.system_resumed': 'Kill switch released',
       'ac.audit': 'Audit trail',
-      'ac.recorded': '{n} recorded', 'ac.live': '{n} live', 'ac.venueUnreachable': 'venue unreachable',
+      'ac.recorded': '{n} recorded',
       'ac.noFills': 'Nothing has filled — nothing has been sent',
-      'ac.noOpen': 'Nothing in flight at the venue',
-      'ac.venueError': 'Cannot read the venue',
-      'ac.unfilled': 'unfilled',
       'ac.incomplete': 'Incomplete',
 
       /* system */
@@ -805,8 +802,8 @@ window.I18N = (function () {
       'home.blocking': '{ids} 阻断中', 'home.allGreen': '全部通过',
       'home.gatesGreen': '项通过',
       'home.orders': '订单', 'home.fills': '成交',
-      'home.ordersNone': '没有成交记录，券商处也没有在途订单',
-      'home.ordersOpen': '{n} 笔在途',
+      'home.ordersNone': '没有成交记录，也没有待核对的订单',
+      'home.ordersPending': '{n} 笔待核对或成交',
       'home.noResult': '无结果',
 
       'pf.title': '资产', 'pf.totalAs': '总权益，截至 {d}',
@@ -923,7 +920,7 @@ window.I18N = (function () {
       'rk.cashEquity': '现金 · 权益', 'rk.buyingPower': '购买力',
       'rk.executionMode': '执行模式', 'rk.permissions': '交易场所权限',
 
-      'ac.title': '流水', 'ac.fills': '已记录成交', 'ac.open': '券商在途订单',
+      'ac.title': '流水', 'ac.fills': '已记录成交',
       'ac.entries': '已加载 {n} 条', 'ac.loadMore': '加载更早的记录',
       'ac.morePages': '还有更早的记录；这里是最新一页。',
       'ac.allLoaded': '全部记录已加载。',
@@ -939,11 +936,8 @@ window.I18N = (function () {
       'ev.research_completed': '研究完成', 'ev.research_failed': '研究未完成',
       'ev.system_paused': '已暂停下单', 'ev.system_resumed': '已恢复下单',
       'ac.audit': '审计流水',
-      'ac.recorded': '{n} 条记录', 'ac.live': '{n} 笔在途', 'ac.venueUnreachable': '券商不可达',
+      'ac.recorded': '{n} 条记录',
       'ac.noFills': '没有成交 —— 因为什么都没发出去',
-      'ac.noOpen': '券商处没有在途订单',
-      'ac.venueError': '无法读取券商',
-      'ac.unfilled': '未成交',
       'ac.incomplete': '未完成',
 
       'sy.title': '系统', 'sy.market': '市场 · {cal}',

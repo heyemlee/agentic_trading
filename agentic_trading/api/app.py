@@ -599,7 +599,7 @@ def activity(kind: Annotated[list[str] | None, Query()] = None,
                cursor=cursor, limit=limit)
 
 
-@app.get("/orders", tags=["orders"], summary="Recorded fills and live open orders")
+@app.get("/orders", tags=["orders"], summary="Recorded fills and the orders this system is tracking")
 def orders(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> Orders:
     return _ok(_service.orders, limit)
 

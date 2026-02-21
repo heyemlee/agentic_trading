@@ -9,10 +9,11 @@ window.CT_API = (function () {
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
-     preference. Two of these reads open a fresh Robinhood OAuth/MCP session at the API and
-     hold it for four to eight seconds — /micro-live on every call, /orders whenever
-     micro-live execution is enabled — and while that handshake runs it delays every other
-     read, including ones that never touch a venue. On 2026-09-15 this table was quickened to
+     preference. One of these reads opens a fresh Robinhood OAuth/MCP session at the API and
+     holds it for four to eight seconds — /micro-live, on every call; /orders did too until
+     its venue-side list was dropped as a copy of what the Robinhood app shows — and while
+     that handshake runs it delays every other read, including ones that never touch a
+     venue. On 2026-09-15 this table was quickened to
      5-15s across the board; the console then spent nearly all of its time handshaking, and a
      tab change sat on a skeleton for seconds waiting for a SQLite read that takes 26 ms on
      its own. Quickening a read here is therefore a decision about the whole console, not
@@ -131,16 +132,13 @@ window.CT_API = (function () {
         const payloadError = data && !Array.isArray(data) &&
           (data.error || data.errors && Object.keys(data.errors).length && JSON.stringify(data.errors));
         if (payloadError) {
-          /* Two payloads carry their own failure and are still worth reading.
-             Orders include local records even if the venue is unavailable. A ledger
+          /* One payload carries its own failure and is still worth reading. A ledger
              that has gone unconfirmed answers with its buckets emptied and the reason
-             in errors, and the pages are written for exactly that shape — a gap and the
+             in errors, and the page is written for exactly that shape — a gap and the
              reason, never a zero. Throwing it away instead leaves the reader on a blank
-             screen that cannot say why or offer the way out. Both stay marked incomplete,
-             so canAct() still refuses and nothing may be approved against them. */
-          const partial = key === 'orders' ? Array.isArray(data.fills) && Array.isArray(data.open_orders)
-                        : key === 'portfolio' ? !!data.buckets && !!data.accounts
-                        : false;
+             screen that cannot say why or offer the way out. It stays marked incomplete,
+             so canAct() still refuses and nothing may be approved against it. */
+          const partial = key === 'portfolio' && !!data.buckets && !!data.accounts;
           if (partial) {
             window.CT[key] = data;
             state.resources[key] = { ...(state.resources[key] || {}), receivedAt: Date.now(), error: String(payloadError), path };

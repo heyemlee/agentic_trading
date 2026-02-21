@@ -9,7 +9,7 @@ portfolio.html   Portfolio three buckets, sleeves, positions
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 research.html    Research  decision strength, run history, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
-activity.html    Activity  fills, open orders, audit trail
+activity.html    Activity  fills, tracked orders, audit trail
 system.html      System    health, notices, kill switch
 advisor.html     Assistant personal context, holdings review, candidates, chat
 lab.html         Lab       visual research-agent state and report handoffs
@@ -105,9 +105,10 @@ C.live(['health', 'portfolio', 'risk'], render);
 Each resource has its own success time and error. A failure or a timestamp older
 than twice its polling interval marks that resource unavailable/stale. The page
 waits for its initial data, then can display last-known values with this warning.
-One healthy endpoint cannot clear another endpoint's error. Order responses can
-still show local records when the venue portion fails, with an incomplete-data
-warning. Approval requires all of its critical resources to be current.
+One healthy endpoint cannot clear another endpoint's error. A ledger that has
+gone unconfirmed still answers, with its buckets emptied and the reason in
+`errors`, and the Portfolio page shows that gap rather than a zero. Approval
+requires all of its critical resources to be current.
 
 One screen also writes without being asked. The Robinhood block on the
 Portfolio screen is a snapshot maintained by an assistant `refresh` job, and

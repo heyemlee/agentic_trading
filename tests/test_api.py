@@ -411,12 +411,12 @@ def _tracked(profiles, **fields):
     return p
 
 
-def test_a_venue_that_will_not_answer_does_not_empty_the_orders_screen(sandbox_service):
-    """An unreachable venue is an incomplete picture, never a picture of no orders.
+def test_the_orders_screen_is_read_without_asking_the_venue(sandbox_service, monkeypatch):
+    """Fills and tracked orders are this side's own record, and reading them opens no session.
 
-    open_orders is the only part that comes from the venue. The recorded fills and the orders
-    this system is tracking are local, and they are what the screen falls back to — reporting
-    them as empty because Robinhood timed out would say the opposite of what happened.
+    The venue's open-order list used to be read here as well, once per poll of the Activity
+    screen, to show what the Robinhood app already shows. A venue that would not answer then
+    had to be kept from emptying the local part; now there is no venue part to fail.
     """
     profiles = sandbox_service.profiles()
     stored = _tracked(profiles, order_status="filled", reconciliation_error="venue lost the order")
@@ -425,12 +425,12 @@ def test_a_venue_that_will_not_answer_does_not_empty_the_orders_screen(sandbox_s
          "symbol": "VTI", "side": "buy", "quantity": 0.1, "price": 376.88, "notional": 37.69},
         profiles.project_dir / "state" / "fills.jsonl")
     arm(sandbox_service.config_dir / "risk_profile.yaml")
+    monkeypatch.setattr(sandbox_service, "_broker",
+                        lambda *_args: pytest.fail("the orders screen needs no venue session"))
 
     out = sandbox_service.orders()
 
-    assert out.error and "token" in out.error          # no credentials in a sandbox, by design
-    assert out.open_orders == []                        # the only part the venue owns
-    assert [f.fill_id for f in out.fills] == ["f1"]     # local, and still there
+    assert [f.fill_id for f in out.fills] == ["f1"]
     assert [t.proposal_id for t in out.tracked_orders] == [stored.proposal_id]
 
     # The venue sounded certain; this side could not account for it. The two must not be merged.
@@ -505,7 +505,7 @@ def test_openapi_schema_is_published_for_frontend_generation(auth_client):
             ("/portfolio", "Portfolio", {"as_of", "buckets", "accounts", "errors", "combined"}),
             ("/proposals/{proposal_id}", "ProposalDetail",
              {"proposal_id", "version", "status", "freshness", "research", "hard_risk"}),
-            ("/orders", "Orders", {"fills", "open_orders", "tracked_orders", "error"}),
+            ("/orders", "Orders", {"fills", "tracked_orders"}),
             ("/health", "Health", {"status", "detail", "checked_at", "market", "claude"}),
             ("/system/market", "MarketStatus", {"is_open", "calendar", "error"}),
             ("/system/claude", "ClaudeStatus", {"state", "billing", "calls_today"}),

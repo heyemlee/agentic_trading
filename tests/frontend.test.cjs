@@ -455,16 +455,6 @@ test('one successful endpoint cannot hide another failure or enable approval', a
   assert.equal(c.CT_API.isLive('health'), false);
 });
 
-test('venue failure preserves local orders with an explicit incomplete state', async () => {
-  const c = context();
-  c.fetch = async () => response({ fills: [], open_orders: [], tracked_orders: [{ status: 'UNKNOWN' }], error: 'venue offline' });
-  c.run('api.js'); await c.CT_API.readOnce('orders');
-  assert.equal(c.CT.orders.tracked_orders[0].status, 'UNKNOWN');
-  assert.equal(c.CT_API.loaded(['orders']), true);
-  assert.equal(c.CT_API.isLive('orders'), false);
-  assert.equal(c.CT_API.state.resources.orders.error, 'venue offline');
-});
-
 test('late proposal detail never attaches to a different queue item', async () => {
   const c = context(); let resolveA;
   c.CT.proposals = [{ proposal_id: 'A', version: 'a' }];
