@@ -4,14 +4,14 @@
 
 目标：手机上查看、启动研究、审批；Mac 常驻运行并按计划研究；过程可追溯、可恢复，研究价值可被验证。
 
-**当前状态：线上与工作区一致。手机推送已打通。真钱已开，至今未下过任何单。
+**当前状态：线上与工作区实质一致。手机推送已打通。真钱已开，至今未下过任何单。
 一整天的修复都指向同一件事——系统原本不会报告自己坏了。**
 
 | | |
 |---|---|
-| 运行版本 | `20260915T205502Z-ac5989c`，**落后工作区**——但差的都是 `TODO.md`、测试和尚未发布的本轮改动 |
-| 工作区 HEAD | 见 `git rev-parse --short HEAD`；本轮改了 `config/`（事件日历、删两个过时块）、`launchd.py`、前端 i18n |
-| 测试 | 640 项 pytest + 55 项前端用例 + Ruff + 密钥扫描全绿（`deploy/checks.sh`） |
+| 运行版本 | `20260916T015655Z-a38ac8a` |
+| 工作区 HEAD | `0335152`，比 release 多 4 个提交，**全是文档与测试**（`README*`、`.env.example`、`docs/OPERATIONS.md`、`TODO.md`、`tests/`），服务代码一行未动，**不需要重新发布** |
+| 测试 | 648 项 pytest + 55 项前端用例 + Ruff + 密钥扫描全绿（`deploy/checks.sh`） |
 | 真实资金 | **已开启**（2026-09-08，micro_live，上限 `max_capital_usd`）；**至今零订单、零持仓** |
 | 自主动作 | **三处全关**：`execution_policy.autonomy` 三项、`micro_live.autonomy.open`、`.reduce` |
 | 事件日历 | **已填**（2026-09-15），9 条，good through 2026-12-10；**2026-09-16 是 FOMC 决议日** |
@@ -252,7 +252,8 @@
       **命令是 `ct-trigger manual`,不是 `ct-research`**(2026-09-15 实测更正)。stage 3 下
       `cli.py` 的 `_load()` 对 `stage > 2` 直接拒绝,所以 `ct-research`、`ct-risk-check`、
       `ct-proposals`、`ct-approve` **四个命令行工具全部退役**。`docs/OPERATIONS.md` 里写的审批
-      流程正是这四条,**文档是错的**,待改。能用的是:
+      流程正是这四条——**`docs/OPERATIONS.md` 已于 2026-09-15 改正**（41aa8b7：审批只有控制台一个入口，
+      研究用 `ct-trigger`）。能用的是:
 
       ```bash
       uv run ct-trigger manual --bucket micro_live --ticker VTI
