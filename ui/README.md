@@ -1,6 +1,6 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Eleven screens, one shared
+Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
 asset layer, no build step.
 
 ```
@@ -15,12 +15,15 @@ advisor.html     Assistant personal context, holdings review, candidates, chat
 lab.html         Lab       visual research-agent state and report handoffs
 evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
+notifications.html Devices signed-in devices, push status and a test
+profile.html     Context   my personal context, read by the assistant
+login.html       Sign in   owner passphrase; the one page served without a session
 
 assets/console.css   tokens, components, motion
 assets/console.js    chrome, formatting, live() binding
 assets/api.js        polling layer
 assets/i18n.js       interface language (EN / 中文)
-assets/data.js       sanitized fixtures from docs/examples/
+assets/data.js       sanitized fixtures, rendered with ?demo=1
 ```
 
 ## Serving it

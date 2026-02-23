@@ -5,7 +5,7 @@ trading engine. Written for an implementation agent such as OpenDesign.
 
 - **Backend contract**: `http://127.0.0.1:8787/openapi.json` (start it with `uv run ct-api`)
 - **Interactive schema**: `http://127.0.0.1:8787/docs`
-- **Example payloads**: [`docs/examples/`](examples/) — real shapes, sanitized, safe to prototype against
+- **Example payloads**: [`ui/assets/data.js`](../ui/assets/data.js) — sanitized, rendered by the console with `?demo=1`
 - **Status vocabulary**: [`agentic_trading/service/status.py`](../agentic_trading/service/status.py)
 
 ---
@@ -367,31 +367,19 @@ The frontend must never be able to:
   changed by the investor on the machine, deliberately not through the API
 - read or write configuration, credentials or state files directly
 
-Run the API bound to `127.0.0.1` only. It has no authentication because it is a single-user
-local process holding brokerage credentials; do not expose it to a network.
+Run the API bound to `127.0.0.1` only. Every business endpoint requires a signed-in owner session
+and every write also carries that session's CSRF token; a phone reaches the API through a
+private HTTPS proxy, never by binding it to a network. The session model is in
+[CONSOLE_SETUP_AND_RECOVERY.md](CONSOLE_SETUP_AND_RECOVERY.md).
 
 ---
 
 ## 14. Example data
 
-[`docs/examples/`](examples/) contains real, sanitized payloads:
-
-| File | What it shows |
-|---|---|
-| `health.json` | system status with FRED and defaults warnings |
-| `portfolio.json` | three buckets, all cash, current real state |
-| `risk.json` | four ladders plus the market regime |
-| `micro_live.json` | `DISABLED` status with all 14 preflight gates |
-| `proposals_list.json` | a live proposal and a stale momentum one |
-| `proposal_detail.json` | full research, bull/bear, Hard Risk rules |
-| `approve_result_executed.json` | successful approval and fill |
-| `approve_result_reanalysis.json` | approval refused on price drift |
-| `research_history.json` | completed runs |
-| `research_no_trade.json` | a real NO_TRADE outcome |
-| `orders.json` | empty fills and tracked orders |
-
-Payloads with real history come from the live system; those describing states that have not
-occurred yet were generated through the real code paths so the shapes are accurate.
+[`ui/assets/data.js`](../ui/assets/data.js) holds sanitized payloads for every screen. The console
+renders them when opened with `?demo=1`, which sends no request and cannot act on an account.
+They are maintained alongside the screens, not generated, so `/openapi.json` stays the contract
+when the two disagree.
 
 ---
 

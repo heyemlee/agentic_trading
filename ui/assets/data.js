@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Fixture payloads — copied verbatim from docs/examples/ in the backend repo.
- * These are the real, sanitized shapes the API returns. Nothing here is
- * invented: no number, string or timestamp has been added or edited.
+ * Fixture payloads for ?demo=1, sanitized, in the shapes the API returns.
+ * They began as verbatim copies of recorded payloads and are maintained here;
+ * /openapi.json is the contract when the two disagree.
  *
  * In the built frontend these objects are replaced by fetch() calls against
  * http://127.0.0.1:8787 on the polling intervals in FRONTEND_HANDOFF.md §15.

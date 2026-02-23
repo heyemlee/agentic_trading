@@ -171,10 +171,6 @@ class Profiles:
         name = self.investor.get("objective", {}).get("mandate_file", "config/MANDATE.md")
         path = self.project_dir / name
         if not path.exists():
-            # MANDATE.md was delivered at the project root before config/ existed.
-            alt = self.project_dir / "MANDATE.md"
-            if alt.exists():
-                return alt.read_text(encoding="utf-8").strip()
             raise ProfileError(f"mandate file not found: {path}")
         return path.read_text(encoding="utf-8").strip()
 

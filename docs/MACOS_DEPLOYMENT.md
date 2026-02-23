@@ -1,8 +1,9 @@
 # macOS always-on deployment
 
 This deployment keeps the UI and API on `127.0.0.1:8787`, starts them after login, runs the
-configured weekly research trigger, and creates a verified SQLite backup every day. It does
-not enable real-money execution.
+configured weekly research trigger, and creates a verified SQLite backup every day. Installing
+it does not arm real-money execution: that is a separate switch, described under Real money in
+[OPERATIONS.md](OPERATIONS.md).
 
 Keep the deployed checkout outside macOS privacy-protected folders such as Desktop, Documents
 and Downloads. Background LaunchAgents cannot reliably read those folders. `~/Projects` is a
