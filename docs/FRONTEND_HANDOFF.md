@@ -378,8 +378,10 @@ private HTTPS proxy, never by binding it to a network. The session model is in
 
 [`ui/assets/data.js`](../ui/assets/data.js) holds sanitized payloads for every screen. The console
 renders them when opened with `?demo=1`, which sends no request and cannot act on an account.
-They are maintained alongside the screens, not generated, so `/openapi.json` stays the contract
-when the two disagree.
+They are maintained by hand alongside the screens. `tests/test_frontend.py` holds the payloads of
+the endpoints with a declared response model — health, portfolio, Micro-Live, orders, the
+proposal list and a proposal's detail — to those models; for the rest, `/openapi.json` is the
+contract when the two disagree.
 
 ---
 

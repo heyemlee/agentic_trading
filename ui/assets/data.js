@@ -145,9 +145,15 @@ window.CT = (function () {
     execution_mode: "human_approval",
   };
 
+  // The version is half of the identity an approval is made against: the console pins the
+  // detail to the list entry's (proposal_id, version) pair, so both carry the same one even
+  // though demo mode never approves anything.
+  const demoVersion = "c0ffee" + "0".repeat(58);
+
   const proposals = [
     {
       proposal_id: "2026-09-08-VTI-f4c6ec7f",
+      version: demoVersion,
       status: "WAITING_FOR_APPROVAL",
       ticker: "VTI",
       bucket: "micro_live",
@@ -176,9 +182,7 @@ window.CT = (function () {
 
   const proposalDetail = {
     proposal_id: "2026-09-08-VTI-f4c6ec7f",
-    // The version is half of the identity an approval is made against, so the demo carries
-    // one even though demo mode never approves anything.
-    version: "c0ffee" + "0".repeat(58),
+    version: demoVersion,
     status: "WAITING_FOR_APPROVAL",
     sell_quantity: null,
     order_status: null,
