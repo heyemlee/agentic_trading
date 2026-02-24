@@ -444,3 +444,37 @@ def test_every_env_var_the_code_requires_is_offered_by_the_template():
 
     for name in (webpush.SUBJECT_ENV, "CT_HEARTBEAT_URL", "FRED_API_KEY"):
         assert re.search(rf"(?m)^{name}=", template), f"{name} is not offered in .env.example"
+
+
+def test_maintenance_confirms_the_ledgers_and_survives_the_check_failing(service, capsys, monkeypatch):
+    """The ledgers expire on their own after a week in which nothing executed, and the daily
+    job is what keeps them current. The check keeps its own report; the job's part is to run
+    it against the service's own store and to finish the rest of the housekeeping when the
+    venue will not answer."""
+    from agentic_trading import ledger_confirm
+
+    monkeypatch.setattr(Service, "evaluation_snapshot",
+                        lambda self, on=None: {"recorded": False, "reason": "no study is running"})
+    seen = []
+
+    def agreed(profiles, store, **kwargs):
+        seen.append(store.db.path)
+        return {"date": "2026-09-17", "confirmed": True,
+                "ledgers": [{"ledger": "conceptual", "confirmed": True, "as_of": "2026-09-17"}]}
+
+    monkeypatch.setattr(ledger_confirm, "confirm_ledgers", agreed)
+    assert operations.main(["maintain", "--config-dir", str(service.config_dir)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ledgers"]["confirmed"] is True and seen == [service.state_db().path]
+
+    def broken(profiles, store, **kwargs):
+        raise RuntimeError("the venue is unreachable")
+
+    monkeypatch.setattr(ledger_confirm, "confirm_ledgers", broken)
+    assert operations.main(["maintain", "--config-dir", str(service.config_dir)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "the venue is unreachable" in out["ledgers"]["error"]
+    kept = service.state_db().read_meta(ledger_confirm.REPORT, {})
+    assert "the venue is unreachable" in kept["error"] and kept["at"]
+    assert operations.heartbeats(service.state_db())["maintenance"]["detail"], \
+        "the rest of the housekeeping still ran and said so"

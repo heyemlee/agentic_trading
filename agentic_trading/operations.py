@@ -20,7 +20,8 @@ from typing import Any
 
 from .env import load_env
 
-ACTIVITIES = ("reconciliation", "research_dispatch", "backup", "maintenance", "schedule")
+ACTIVITIES = ("reconciliation", "research_dispatch", "backup", "maintenance", "schedule",
+              "ledger_confirm")
 HEARTBEATS = "activity_heartbeats"
 
 
@@ -174,10 +175,28 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - housekeeping continues even if the study cannot
         marked = {"recorded": False, "reason": f"{type(exc).__name__}: {exc}"}
 
+    # The ledgers expire on their own: max_age_days fails a book closed once nothing has
+    # confirmed it, and in a stretch of NO_TRADE weeks nothing does, so the research that
+    # reads it stops before the first model call and the Portfolio screen goes blank. This is
+    # the same check the console button and `ct-state confirm` run, refusing the same way; it
+    # keeps its own report and heartbeat, so all that is left here is to survive it failing.
+    from .ledger_confirm import REPORT, confirm_ledgers
+    from .proposals import ProposalStore
+
+    try:
+        ledgers = confirm_ledgers(profiles, ProposalStore(profiles.project_dir / state_file))
+    except Exception as exc:  # noqa: BLE001 - housekeeping continues; the reason is kept
+        ledgers = {"confirmed": False, "ledgers": [], "error": f"{type(exc).__name__}: {exc}",
+                   "at": datetime.now(UTC).isoformat()}
+        try:
+            db.write_meta(REPORT, ledgers)
+        except Exception:
+            logging.getLogger(__name__).debug("could not keep the ledger report", exc_info=True)
+
     detail = f"{len(rotated)} log(s) rotated, {len(pruned)} run(s) pruned, {free['free_gb']} GB free"
     record(db, "maintenance", detail, min_interval_seconds=0)
     print(json.dumps({"rotated": rotated, "pruned": pruned, "disk": free,
-                      "evaluation": marked}, indent=2))
+                      "evaluation": marked, "ledgers": ledgers}, indent=2))
     # A full disk stops the database, the logs and the backups at once, so it is worth an
     # exit code the scheduler's own log will show.
     return 1 if free["low"] else 0

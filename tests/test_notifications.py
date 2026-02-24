@@ -257,8 +257,13 @@ def test_only_configured_event_kinds_are_delivered(service):
 
 
 def test_an_overdue_backup_is_something_a_person_is_told_about(service):
-    kinds = {event.kind for event in service.collect_notifications()}
+    events = service.collect_notifications()
+    kinds = {event.kind for event in events}
     assert "backup_overdue" in kinds       # nothing has ever run in a fresh state directory
+    # The daily ledger check is one of them: a job that never ran, or one whose check has
+    # been refusing, leaves the ledger a week from failing closed.
+    late = {event.key.split(":")[1] for event in events if event.kind == "backup_overdue"}
+    assert {"backup", "maintenance", "ledger_confirm"} <= late
 
 
 def test_the_heartbeat_is_silent_until_an_external_watcher_is_configured(service, monkeypatch):
@@ -526,3 +531,25 @@ def test_a_test_message_names_the_channel_it_actually_used(service, monkeypatch,
     reported = json.loads(capsys.readouterr().out)
     assert reported["sent"] is True and reported["channel"] == channel
     assert expected in reported["to"]
+
+
+def test_a_ledger_the_check_refused_is_reported_as_the_venue_and_the_book_disagreeing(service):
+    """The daily job's refusal would otherwise sit in a report nobody opens until the ledger
+    expired a week later and the research stopped."""
+    from agentic_trading.ledger_confirm import REPORT
+
+    db = service.state_db()
+    db.write_meta(REPORT, {
+        "date": "2026-09-17", "confirmed": False, "at": "2026-09-17T10:45:00+00:00",
+        "ledgers": [{"ledger": "conceptual", "confirmed": True},
+                    {"ledger": "micro_live", "confirmed": False,
+                     "error": "PortfolioError: cash mismatch: the venue holds $250.00 more"}]})
+    events = [e for e in service.collect_notifications() if e.key.startswith("ledger_unconfirmed")]
+    assert [e.key for e in events] == ["ledger_unconfirmed:micro_live:2026-09-17"]
+    assert events[0].kind == "reconciliation_error" and "$250.00" in events[0].detail
+    assert events[0].link.endswith("#ledger-notice")
+
+    # A check that later agreed -- the job's, the CLI's or the console button's -- clears it.
+    db.write_meta(REPORT, {"date": "2026-09-17", "confirmed": True, "at": "2026-09-17T10:50:00+00:00",
+                           "ledgers": [{"ledger": "micro_live", "confirmed": True}]})
+    assert not [e for e in service.collect_notifications() if e.key.startswith("ledger_unconfirmed")]

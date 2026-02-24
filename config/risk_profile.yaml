@@ -672,6 +672,7 @@ operations:
     backup: 1440
     maintenance: 1440
     schedule: 10080                        # weekly, with a day of slack
+    ledger_confirm: 1440                   # the maintenance job confirms both ledgers daily
 
 # What a person is told about without opening the console, and through what.
 #

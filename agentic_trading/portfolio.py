@@ -432,9 +432,20 @@ def snapshot_from_broker(
     ledger_cash = sum(b.cash_usd for b in ledger.buckets.values())
     tolerance = max(1.0, abs(account.cash) * 0.001)
     if abs(ledger_cash - account.cash) > tolerance:
+        # The venue has no record of transfers to read, so a deposit or withdrawal is the one
+        # thing only the person can explain; the message says how, with the figure filled in,
+        # because it is printed on the Portfolio screen and in a notification, where nobody
+        # has the command to hand. The difference is only ever stated, never booked: it could
+        # as well be interest, a fee or a loss, and a guess here would hide exactly the loss
+        # the ledger exists to show.
+        difference = round(account.cash - ledger_cash, 2)
+        bucket = next(iter(ledger.buckets)) if len(ledger.buckets) == 1 else "<bucket>"
+        kind, direction = ("deposit", "more") if difference > 0 else ("withdrawal", "less")
         raise PortfolioError(
             f"cash mismatch: broker reports ${account.cash:,.2f}, the ledger's buckets sum to "
-            f"${ledger_cash:,.2f} (tolerance ${tolerance:,.2f}); reconcile the ledger before trading"
+            f"${ledger_cash:,.2f} (tolerance ${tolerance:,.2f}); the venue holds "
+            f"${abs(difference):,.2f} {direction} than the ledger. If that is a {kind}, record it: "
+            f"ct-state cashflow --bucket {bucket} --amount {abs(difference):.2f} --kind {kind}"
         )
 
     positions, prices = [], {}

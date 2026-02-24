@@ -9,6 +9,7 @@ into this function, never two opinions about what confirming means.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,9 @@ from .state_db import StateDB
 
 logger = logging.getLogger(__name__)
 
+#: Where the last check leaves its report, refusal reasons included, so the notification pass
+#: can say why a ledger was not confirmed without opening the venue again.
+REPORT = "ledger_confirm_report"
 
 
 def ledger_paths(profiles: Profiles) -> dict[str, Path]:
@@ -74,7 +78,7 @@ def confirm_ledgers(profiles: Profiles, store, *, ledger: str = "all", trade_dat
                               "unsettled_orders": unsettled_orders(store.db), "ledgers": []}
     if report["unsettled_orders"]:
         report["detail"] = "settle these before confirming a ledger"
-        return report
+        return _remember(store.db, report)
 
     wanted = ledger_paths(profiles)
     if ledger != "all":
@@ -109,4 +113,29 @@ def confirm_ledgers(profiles: Profiles, store, *, ledger: str = "all", trade_dat
         report["ledgers"].append(row)
 
     report["confirmed"] = bool(report["ledgers"]) and all(r["confirmed"] for r in report["ledgers"])
+    return _remember(store.db, report)
+
+
+def _remember(db, report: dict[str, Any]) -> dict[str, Any]:
+    """Keep the last real check where the notification pass and the System screen read it.
+
+    Whoever ran it -- the daily job, the CLI, the console button -- the report is the same
+    fact about the ledgers, so a refusal the job found is cleared by the confirmation a person
+    then ran, and not only by the next morning's job. A dry run changes nothing and is not
+    remembered. Agreement is the activity having run; a refusal is not, so a book that keeps
+    refusing also shows up as an overdue activity.
+    """
+    if report.get("dry_run"):
+        return report
+    from . import operations
+
+    try:
+        db.write_meta(REPORT, {**report, "at": datetime.now(UTC).isoformat()})
+    except Exception:
+        logger.debug("could not keep the ledger confirmation report", exc_info=True)
+    if report["confirmed"]:
+        operations.record(db, "ledger_confirm",
+                          "; ".join(f"{row['ledger']} as_of {row.get('as_of')}"
+                                    for row in report["ledgers"]),
+                          min_interval_seconds=0)
     return report

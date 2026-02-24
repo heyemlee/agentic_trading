@@ -66,12 +66,24 @@ portfolio state as_of 2026-09-03 is 8 days older than 2026-09-11 (limit 7)
 ```
 
 That is the guard working. A stretch of NO_TRADE weeks is exactly when it fires, because
-nothing executed and so nothing advanced the date on its own. The way out is a check:
+nothing executed and so nothing advanced the date on its own. The way out is a check, and the
+daily maintenance job (`ct-ops maintain`, 03:45 local, after the backup) runs it on both
+ledgers every day, so the date only expires when the check has been refusing for a week. The
+same check by hand:
 
 ```bash
 uv run ct-state confirm --dry-run    # what the check finds, writing nothing
 uv run ct-state confirm              # renew as_of on what agreed
 ```
+
+Every check keeps its report — the job's, the CLI's, the console button's — and a refusal is
+notified as a `reconciliation_error`, the venue and a book disagreeing, with the reason. Like
+any standing condition it repeats each quiet period until a check agrees, so after putting the
+ledger right, confirm it from the console rather than waiting for the next morning's job. A
+cash difference names the figure and the `ct-state cashflow` command to record it *if* it was
+a deposit or withdrawal; nothing books the difference by itself, because it could as well be
+interest, a fee or a loss. `ct-ops status` and the System screen list `ledger_confirm` beside
+the other activities, overdue when no check has agreed for two days.
 
 What each book is held against:
 
@@ -88,12 +100,12 @@ the same question the release path asks — and a refusal leaves the date where 
 here widens `max_age_days`: raising that limit clears the same error by making the guard stop
 looking, on a real-money account, and the ledger is left as unconfirmed as it was.
 
-The Portfolio screen carries the same action. While a ledger is unconfirmed the strategy
-figures show a gap rather than a zero — the money is there, it is the ledger's claim about
-itself that expired — with the API's own reason underneath and a **Confirm the ledger**
-button that posts to `/portfolio/confirm`. That endpoint calls the same function as the CLI,
-so the console cannot clear a ledger the CLI would have refused, and a refusal is printed
-where the reader asked for it.
+The Portfolio screen carries the same action, as the fallback for a job that has been refusing.
+While a ledger is unconfirmed the strategy figures show a gap rather than a zero — the money
+is there, it is the ledger's claim about itself that expired — with the API's own reason
+underneath and a **Confirm the ledger** button that posts to `/portfolio/confirm`. That
+endpoint calls the same function as the CLI and the job, so the console cannot clear a ledger
+they would have refused, and a refusal is printed where the reader asked for it.
 
 ## Brokers
 
@@ -375,7 +387,7 @@ uv run ct-state restore --source <f> --into <d> # restore, revoke sessions, list
 uv run ct-state sessions                        # persistent console logins and their expiry
 uv run ct-state cashflow --bucket core --amount 500 --kind deposit
 uv run ct-state confirm [--ledger conceptual|micro_live] [--dry-run]
-uv run ct-ops maintain                          # rotate logs, prune run artefacts, check disk
+uv run ct-ops maintain                          # rotate logs, prune runs, confirm the ledgers, check disk
 uv run ct-notify status|pending|test            # notification channel and delivery record
 uv run ct-trigger scheduled --dry-run           # the schedule's decision, starting nothing
 deploy/checks.sh                                # lint, tests, frontend cases, secret scan

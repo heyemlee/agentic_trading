@@ -14,9 +14,10 @@ import shutil
 import pytest
 import yaml
 
-from agentic_trading import state_cli
+from agentic_trading import operations, state_cli
 from agentic_trading.broker.base import Account, BrokerPosition
 from agentic_trading.execution_scenarios import _ledger, _profiles, _proposal
+from agentic_trading.ledger_confirm import REPORT
 from agentic_trading.portfolio import (
     PortfolioError,
     confirm_from_broker,
@@ -232,3 +233,35 @@ def test_the_venue_session_is_handed_back_however_the_check_ends(project, unread
 
     assert venue.closed is True
     assert report["confirmed"] is not unreadable
+
+
+def test_a_check_leaves_its_report_and_only_agreement_counts_as_the_activity(project, monkeypatch):
+    """The daily job, the CLI and the console button all run this check. The report is where
+    the notification pass reads a refusal; the heartbeat is what the System screen dates, and
+    a refusal must not advance it, or a book that keeps refusing would look maintained."""
+    db = StateDB(project / "state" / "proposals.json")
+
+    code, _ = confirm(project, "--ledger", "conceptual", "--dry-run")
+    assert code == 0 and db.read_meta(REPORT, {}) == {}, "a dry run is not remembered"
+
+    code, report = confirm(project, "--ledger", "conceptual")
+    assert code == 0
+    kept = db.read_meta(REPORT, {})
+    assert kept["confirmed"] is True and kept["date"] == report["date"] and kept["at"]
+    assert "conceptual as_of" in operations.heartbeats(db)["ledger_confirm"]["detail"]
+
+    micro_project(project)                                       # the ledger says $100
+    monkeypatch.setattr("agentic_trading.broker.robinhood.RobinhoodBroker",
+                        lambda _profiles: FakeVenue(cash=350.0))
+    code, report = confirm(project, "--ledger", "micro_live")
+    assert code == 3
+    kept = db.read_meta(REPORT, {})
+    assert kept["confirmed"] is False
+    error = kept["ledgers"][0]["error"]
+    # The difference is stated, with the command that records it if it was a deposit, and
+    # never booked: it could as well be interest, a fee or a loss.
+    assert "the venue holds $250.00 more than the ledger" in error
+    assert "ct-state cashflow --bucket micro_live --amount 250.00 --kind deposit" in error
+    assert load_portfolio(project / "state" / "micro_live_portfolio.yaml").as_of == TRADE_DATE
+    assert "conceptual as_of" in operations.heartbeats(db)["ledger_confirm"]["detail"], \
+        "a refusal leaves the last agreement's heartbeat where it was"

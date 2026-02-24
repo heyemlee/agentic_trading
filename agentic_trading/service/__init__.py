@@ -1208,8 +1208,26 @@ class Service:
                     detail=f"drawdown {ladder.get('drawdown_pct', 0):.2f}% from the high-water mark",
                     link="/ui/risk.html", urgent=ladder.get("manual_reset_required", False)))
 
+        # The last ledger check, whoever ran it. A refusal is the venue and a book disagreeing,
+        # which is what reconciliation_error already means; like any standing condition it is
+        # repeated each quiet period until a check agrees, and the console button is one way
+        # to make that happen today rather than at the next morning's job.
+        from ..ledger_confirm import REPORT
+
+        report = self.state_db(profiles).read_meta(REPORT, {}) or {}
+        refused = [(row["ledger"], row["error"]) for row in report.get("ledgers") or []
+                   if isinstance(row, dict) and row.get("error")]
+        if report.get("error"):
+            refused.append(("ledgers", report["error"]))
+        for ledger, error in refused:
+            events.append(Event(
+                key=f"ledger_unconfirmed:{ledger}:{report.get('date', '')}",
+                kind="reconciliation_error",
+                title=f"the {ledger} ledger could not be confirmed",
+                detail=str(error)[:300], link="/ui/portfolio.html#ledger-notice"))
+
         for activity in self.operations()["activities"]:
-            if activity["overdue"] and activity["id"] in ("backup", "maintenance"):
+            if activity["overdue"] and activity["id"] in ("backup", "maintenance", "ledger_confirm"):
                 events.append(Event(
                     key=f"backup_overdue:{activity['id']}:{utcnow().date()}",
                     kind="backup_overdue",
