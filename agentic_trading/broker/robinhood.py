@@ -335,7 +335,10 @@ class RobinhoodBroker:
             )
         )
         read, write = await self._exit_stack.enter_async_context(
-            streamable_http_client(self.url, http_client=http_client)
+            # No DELETE on close. The spec lets a server that does not end sessions on request
+            # answer 405, which the SDK passes over quietly; Robinhood answers 400, which it logs
+            # as a warning on every close. The session expires on the venue's side either way.
+            streamable_http_client(self.url, http_client=http_client, terminate_on_close=False)
         )
         self._session = await self._exit_stack.enter_async_context(ClientSession(read, write))
         await self._session.initialize()
