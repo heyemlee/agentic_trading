@@ -719,7 +719,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
     .map(m => [m[1], Number(m[2])]));
   const budget = {
     advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
-    notifications: 120000, pushDevices: 120000, authSessions: 60000, evaluation: 300000,
+    notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
     research: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,
@@ -1447,4 +1447,85 @@ test('an approval the API refused before sending is a plain failure, not an unce
   await timedOut.element('approve-submit').events.click();
   assert.match(timedOut.element('result-slot').innerHTML, /ap.checkOrderTitle/);
   assert.equal(timedOut.element('btn-approve').disabled, true);
+});
+
+/* ── settings: config edits go through one preview-then-confirm sheet ───── */
+function settingsPage(overrides, preview) {
+  const c = context(true); c.run('console.js');
+  Object.assign(c.CT, overrides || {});
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.Console.openSheet = id => { c.element(id).open = true; };
+  c.Console.closeSheet = id => { c.element(id).open = false; };
+  c.posted = [];
+  c.CT_API = { canAct: () => true, isLive: () => true, writesEnabled: true, authenticated: true,
+    readOnce: async () => {}, fetchJSON: async () => ({ text: 'x: 1', revision: 'r', guarded: false }),
+    post: async (url, body) => {
+      c.posted.push({ url, body });
+      if (url === '/config/preview') return preview || { changed: true, classification: 'immediate', diff: '-a\n+b', reasons: [] };
+      return { status: 'applied', outcome: { git: 'committed abc' } };
+    } };
+  c.run('pages/settings.js');
+  return c;
+}
+
+test('settings lists what is cooling, with a withdraw control, and every section by file', () => {
+  const c = settingsPage();
+  assert.equal(c.element('pending-section').hidden, false);
+  const pending = c.element('pending-list').innerHTML;
+  assert.ok(pending.includes('data-cancel="demo1"') && pending.includes('cf.withdraw'));
+  assert.ok(pending.includes('micro_live_execution.max_capital_usd'));
+  const files = c.element('file-list').innerHTML;
+  assert.ok(files.includes('data-edit-key="micro_live_execution"') && files.includes('cf.guarded'));
+  assert.ok(files.includes('event_calendar.yaml'));
+  assert.equal(c.element('sc-hour').value, '13');
+  assert.ok(c.element('wl-chips').innerHTML.includes('data-wl-remove="AAPL"'));
+  assert.ok(c.element('recent-list').innerHTML.includes('committed abc') || c.element('recent-list').innerHTML.includes('applied'));
+});
+
+test('a loosening change previews, then needs the password before it is sent', async () => {
+  const c = settingsPage({}, { changed: true, classification: 'cooling', diff: '-  max_capital_usd: 2000\n+  max_capital_usd: 2500',
+    reasons: ['micro_live_execution.max_capital_usd'] });
+  c.element('sc-hour').value = '14';
+  c.element('sc-save').events.click();
+  await flush();
+  assert.equal(c.posted[0].url, '/config/preview');
+  assert.equal(JSON.stringify(c.posted[0].body.set), JSON.stringify({ 'research_schedule.launchd.hour': 14 }));
+  assert.equal(c.posted[0].body.revision, 'demo-risk');
+  assert.equal(c.element('confirm-dialog').open, true);
+  assert.equal(c.element('confirm-password-field').hidden, false);
+  assert.ok(c.element('confirm-diff').innerHTML.includes('diff-add'));
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(c.posted.length, 1, 'nothing is sent without the password');
+  assert.equal(c.element('confirm-status').textContent, 'cf.passwordNeeded');
+  c.element('confirm-password').value = 'pw';
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(c.posted[1].url, '/config/changes');
+  assert.equal(c.posted[1].body.password, 'pw');
+  assert.equal(JSON.stringify(c.posted[1].body.set), JSON.stringify({ 'research_schedule.launchd.hour': 14 }));
+  assert.equal(c.element('confirm-dialog').open, false);
+});
+
+test('a tightening change previews without a password field and sends on confirm', async () => {
+  const c = settingsPage();
+  c.element('wl-chips').events.click({ target: { closest: () => ({ dataset: { wlRemove: 'AAPL' } }) } });
+  c.element('wl-save').events.click();
+  await flush();
+  assert.equal(JSON.stringify(c.posted[0].body), JSON.stringify({ file: 'investor_profile.yaml', revision: 'demo-investor',
+    set: { 'universe.core.individual_stocks.watchlist': [] } }));
+  assert.equal(c.element('confirm-password-field').hidden, true);
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(c.posted[1].url, '/config/changes');
+  assert.equal(c.posted[1].body.password, undefined);
+});
+
+test('withdrawing a cooling change posts its cancel and nothing else', async () => {
+  const c = settingsPage();
+  const button = { disabled: false, dataset: { cancel: 'demo1' }, textContent: '' };
+  c.element('pending-list').events.click({ target: { closest: () => button } });
+  await flush();
+  assert.equal(JSON.stringify(c.posted), JSON.stringify([{ url: '/config/changes/demo1/cancel', body: {} }]));
 });

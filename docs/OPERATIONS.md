@@ -261,9 +261,11 @@ as its skip reason. One setting, one behaviour, in the code and here.
 `micro_live_execution.enabled` in `config/risk_profile.yaml` is the master switch and is
 **`true`**, armed 2026-09-08 after `uv run ct-robinhood preflight` came back green — which
 additionally requires accepting the documented risk defaults (`accept_all_recommended_defaults`)
-or replacing them with explicit values. It is deliberately not changeable through the API: the
-switch can only be moved by editing that file on this Mac, and the console has no endpoint that
-writes configuration.
+or replacing them with explicit values. Turning it **off** is one gesture from the console's
+Settings page and applies at once; turning it **on** again from there re-asks the console
+password and waits 24 hours, during which any signed-in device is told and can withdraw it (see
+[Configuration changes from the console](#configuration-changes-from-the-console)). An edit on
+this Mac applies as soon as it is saved, as it always did.
 
 Arming it submits nothing by itself. Every real order still needs a human approval, the
 revalidation above, and Hard Risk twice; what the switch changes is that an approval can now
@@ -422,6 +424,38 @@ Fields marked `value: TODO` carry a `recommended_default` and `reasoning`.
 Research runs work with TODOs present; execution stages refuse to start until
 every TODO is resolved (or `accept_all_recommended_defaults: true`).
 
+### Configuration changes from the console
+
+Since 2026-09-17 the console's Settings page (More → Settings) edits `risk_profile.yaml`,
+`investor_profile.yaml` and `event_calendar.yaml`. The mandate documents and `.env` are not
+offered. Two ways in, one pipeline (`agentic_trading/config_changes.py`):
+
+- **Forms** for the things that change often — research schedule, stock watchlist, macro
+  event calendar — set named values; the file is rewritten by a round-trip YAML writer with
+  every comment kept, and only the edited lines differ.
+- **Section editor** for everything else: one top-level key's text, comment block included,
+  replaced verbatim. The key may not be renamed and sections may not be added or removed.
+
+Whichever way, the rebuilt file is loaded by the same `load_profiles` the service runs on
+before anything is written; a file the service could not load is refused with the loader's
+message. Then every changed value is classified by a rule table as tightening, loosening or
+neutral. A change that loosens nothing applies at once. A change that loosens anything — a
+higher cap, a switch turned on, a permission granted, a floor lowered, a longer allow-list — is
+**parked for 24 hours**: it needs the console password again when submitted, it is announced
+to every device as `config_change_pending`, it can be withdrawn from the Settings page until
+it applies, and it applies against the file as it is then, failing rather than re-raising a
+ceiling from a stale premise if the part it touches was edited meanwhile. The rule table fails
+closed: a guarded path whose direction it cannot tell counts as loosening.
+
+Every applied change is committed locally to this checkout (`git log -- config/`), author
+`<user> via console`, never pushed; and journaled as `config_changed` in the audit trail with
+the paths touched. A schedule change re-registers the research launchd job by itself, without
+restarting the API (`launchd.reregister_research`), and reports what it did beside the change.
+
+The same page records deposits and withdrawals (`POST /portfolio/cashflow`, the same call as
+`ct-state cashflow`), stops or restores autonomous action (`ct-autonomy stop`/`resume`; restoring
+needs the password), and rotates the console password (which signs every device out).
+
 ## Tests
 
 ```bash
@@ -541,9 +575,9 @@ rather than a number typed into a file: a deposit widens the caps without a conf
 the half that matters more — a loss narrows them without anyone having to remember to.
 
 What bounds it is `micro_live_execution.max_capital_usd`, **$2,000**, with $50 of tolerance for
-market drift above it. Raising that number is the deliberate act that widens the mandate, and it
-is the one thing the console cannot do: tightening is a phone gesture, loosening is a file edit
-on this Mac. The ceiling is enforced twice, independently — in the bucket's own accounting and
+market drift above it. Raising that number is the deliberate act that widens the mandate:
+lowering it is a phone gesture that applies at once, raising it from the phone re-asks the
+password and waits a day. The ceiling is enforced twice, independently — in the bucket's own accounting and
 again in the broker adapter (`refuse_if_account_equity_above_usd`) — so one edited number is not
 enough to move the boundary everywhere.
 

@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   const routes = new Set(['index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
-    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab']);
+    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab', 'settings']);
   const dependencies = { advisor: ['advisor-session.js'], notifications: ['push.js'],
     approvals: ['approval-intent.js'], lab: ['lab/pixel-office.js'] };
   const views = new Map(), factories = new Map(), pending = new Map();

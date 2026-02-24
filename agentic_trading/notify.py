@@ -46,6 +46,11 @@ EVENTS = {
     # is, which is why these two are not optional in the way the others are.
     "autonomy_acted": "an order was placed without asking you",
     "autonomy_withdrawn": "autonomous action was withdrawn and needs a manual reset",
+    # A loosening change made from the console waits a day before it applies. Whoever holds
+    # the phone can make one; whoever holds the other devices is told, while it can still be
+    # withdrawn, and again when it lands.
+    "config_change_pending": "a loosening configuration change is waiting to apply",
+    "config_change_applied": "a configuration change from the console was applied",
 }
 
 

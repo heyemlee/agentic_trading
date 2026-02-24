@@ -15,7 +15,7 @@ ui = Path('ui')
 files = ConsoleFiles(ui)
 print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_text(), name)
                   for name in ('index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
-                               'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab')}))
+                               'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab', 'settings')}))
 `], {cwd: root, encoding:'utf8'}));
 (async () => {
  const server = http.createServer(async (req, res) => {

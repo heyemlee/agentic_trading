@@ -13,6 +13,7 @@ window.CT = (function () {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
     schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
+    config: null,
     evaluation: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
@@ -704,12 +705,50 @@ window.CT = (function () {
     }
   };
 
+  const config = {
+    files: [
+      { file: "risk_profile.yaml", revision: "demo-risk", sections: [
+        { key: "execution_policy", lines: 78, guarded: true }, { key: "buckets", lines: 217, guarded: true },
+        { key: "research_schedule", lines: 19, guarded: false }, { key: "notifications", lines: 65, guarded: false },
+        { key: "micro_live_execution", lines: 89, guarded: true } ] },
+      { file: "investor_profile.yaml", revision: "demo-investor", sections: [
+        { key: "capital", lines: 13, guarded: true }, { key: "universe", lines: 27, guarded: false } ] },
+      { file: "event_calendar.yaml", revision: "demo-calendar", sections: [
+        { key: "maintained_through", lines: 4, guarded: false }, { key: "events", lines: 36, guarded: false } ] },
+    ],
+    values: {
+      "research_schedule.enabled": true, "research_schedule.period": "weekly",
+      "research_schedule.launchd.weekday": 5, "research_schedule.launchd.hour": 13,
+      "research_schedule.launchd.minute": 30, "research_schedule.on_non_session_day": "previous_session",
+      "research_schedule.tickers": [], "research_schedule.max_tickers_per_run": 3,
+      "research_schedule.max_analyses_per_day": 6, "research_schedule.run_while_paused": true,
+      "universe.core.individual_stocks.watchlist": ["AAPL"],
+      "maintained_through": "2026-12-10",
+      "events": [{ date: "2026-10-28", kind: "fomc_decision", note: "October 27-28 meeting; statement day" },
+                 { date: "2026-11-10", kind: "cpi", note: "October 2026 CPI" }],
+    },
+    cooling_hours: 24,
+    pending: [{ id: "demo1", file: "risk_profile.yaml", kind: "values", key: null, classification: "cooling",
+                changes: [{ path: "micro_live_execution.max_capital_usd", from: 2000, to: 2500, effect: "loosening" }],
+                reasons: ["micro_live_execution.max_capital_usd"], paths: ["micro_live_execution.max_capital_usd"],
+                requested_at: "2026-09-16T10:00:00+00:00", requested_by: "owner", reason: "",
+                apply_after: "2026-09-17T10:00:00+00:00", status: "pending", applied_at: null, outcome: {}, error: null }],
+    recent: [{ id: "demo0", file: "investor_profile.yaml", kind: "values", key: null, classification: "immediate",
+               changes: [{ path: "universe.core.individual_stocks.watchlist", from: [], to: ["AAPL"], effect: "neutral" }],
+               reasons: [], paths: ["universe.core.individual_stocks.watchlist"],
+               requested_at: "2026-09-15T09:00:00+00:00", requested_by: "owner", reason: "first candidate",
+               apply_after: null, status: "applied", applied_at: "2026-09-15T09:00:00+00:00",
+               outcome: { git: "committed 1a2b3c4" }, error: null }],
+    autonomy: { armed: false, withdrawn: false, reason: null, at: null },
+    launchd_managed: true,
+  };
+
   const orders = { fills: [], tracked_orders: [] };
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
     schedule, operations, notifications, evaluation, labRoster, labTrace,
-    pushDevices: { devices: [] }, authSessions, activity,
+    pushDevices: { devices: [] }, authSessions, activity, config,
   };
 })();

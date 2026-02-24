@@ -133,6 +133,7 @@
     plus: sv('<path d="M12 5.5v13M5.5 12h13"/>', 2),
     back: sv('<path d="M15.5 19.5l-7-7.5 7-7.5"/>', 2.2),
     evaluation: sv('<path d="M4 19V9M10 19V5M16 19v-7M3 19h18M15.5 6.5L19 3l2 2"/>'),
+    settings: sv('<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--bg)"/><circle cx="15" cy="12" r="2" fill="var(--bg)"/><circle cx="8" cy="17" r="2" fill="var(--bg)"/>'),
   };
 
   const CHEVRON = '<svg class="chevron" viewBox="0 0 8 14" fill="none" stroke="currentColor" ' +

@@ -1,6 +1,6 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
+Frontend for the local API in `agentic_trading`. Fifteen pages, one shared
 asset layer, no build step.
 
 ```
@@ -17,6 +17,7 @@ evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
 notifications.html Devices signed-in devices, push status and a test
 profile.html     Context   my personal context, read by the assistant
+settings.html    Settings  schedule, watchlist, calendar, cash flows, every config section
 login.html       Sign in   owner passphrase; the one page served without a session
 
 assets/console.css   tokens, components, motion

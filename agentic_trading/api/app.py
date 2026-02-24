@@ -72,6 +72,12 @@ async def lifespan(app):
             except Exception:
                 logger.exception("autonomous reduction pass failed")
             try:
+                # A loosening config change made from the console waits a day; this is where
+                # it lands once the day is up. Returns at once while nothing is due.
+                await asyncio.to_thread(_service.apply_config_changes)
+            except Exception:
+                logger.exception("applying cooled-down configuration changes failed")
+            try:
                 await asyncio.to_thread(_service.dispatch_notifications)
             except Exception:
                 logger.exception("notification dispatch failed")
@@ -295,6 +301,44 @@ def revoke_other_sessions(request: Request) -> dict[str, Any]:
     return {"revoked": _auth.revoke_others(request.cookies.get(COOKIE))}
 
 
+def _step_up(request: Request, password: str | None) -> bool:
+    """Re-verify the console password for an action that needs more than a session.
+
+    Returns whether a password was given and matched. A wrong one is a 400 with a message,
+    never a 401 or a 403: the console treats those as "signed out" and "not sent".
+    """
+    if password is None:
+        return False
+    status = _auth.verify_password(request.state.identity, password)
+    if status == "rate_limited":
+        raise HTTPException(429, "try again in five minutes")
+    if status != "ok":
+        raise HTTPException(400, "the console password did not match")
+    return True
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current: str = Field(min_length=1, max_length=1024)
+    new: str = Field(min_length=1, max_length=1024)
+
+
+@app.post("/auth/password", tags=["authentication"],
+          summary="Rotate the console password; every device is signed out, this one included")
+def change_password(body: PasswordChange, request: Request):
+    from .auth import configure_password
+
+    _step_up(request, body.current)
+    try:
+        configure_password(_auth.path, request.state.identity, body.new)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _ok(_service.record_password_change, identity=request.state.identity)
+    response = JSONResponse({"authenticated": False, "rotated": True})
+    response.delete_cookie(COOKIE, path="/")
+    return response
+
+
 def _ok(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -420,6 +464,94 @@ class PortfolioConfirm(BaseModel):
           summary="Confirm a ledger against what can contradict it, then renew its as_of")
 def confirm_portfolio(body: PortfolioConfirm) -> dict[str, Any]:
     return _ok(_service.confirm_portfolio, ledger=body.ledger, dry_run=body.dry_run)
+
+
+class CashflowRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    bucket: Literal["core", "sandbox", "micro_live"]
+    amount_usd: float = Field(gt=0, le=1_000_000)
+    kind: Literal["deposit", "withdrawal"] = "deposit"
+    date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    reason: str = Field(default="", max_length=500)
+
+
+@app.post("/portfolio/cashflow", tags=["portfolio"],
+          summary="Record a deposit or withdrawal, so the drawdown ladder does not read it as performance")
+def record_cashflow(body: CashflowRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.record_cashflow, bucket=body.bucket, amount_usd=body.amount_usd,
+               kind=body.kind, date=body.date, reason=body.reason,
+               identity=request.state.identity)
+
+
+# ----------------------------------------------------------------- configuration
+class ConfigChange(BaseModel):
+    """One section's new text, or values for dotted paths; never both."""
+
+    model_config = ConfigDict(extra="forbid")
+    file: Literal["risk_profile.yaml", "investor_profile.yaml", "event_calendar.yaml"]
+    revision: str = Field(default="", max_length=64)
+    key: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    text: str | None = Field(default=None, max_length=200_000)
+    set: dict[str, Any] | None = None
+
+
+class ConfigSubmit(ConfigChange):
+    password: str | None = Field(default=None, max_length=1024)
+    reason: str = Field(default="", max_length=500)
+
+
+@app.get("/config", tags=["configuration"],
+         summary="Editable configuration: files, sections, form values, pending and recent changes")
+def config_overview() -> dict[str, Any]:
+    return _ok(_service.config_overview)
+
+
+@app.get("/config/section", tags=["configuration"], summary="One top-level section's text")
+def config_section(file: Annotated[str, Query(max_length=40)],
+                   key: Annotated[str, Query(max_length=80)]) -> dict[str, Any]:
+    return _ok(_service.config_section, file, key)
+
+
+@app.post("/config/preview", tags=["configuration"],
+          summary="What a change would do: the diff, and whether it loosens anything")
+def config_preview(body: ConfigChange) -> dict[str, Any]:
+    return _ok(_service.preview_config_change, **body.model_dump())
+
+
+@app.post("/config/changes", tags=["configuration"],
+          summary="Apply a change now, or start its cooling period if it loosens a limit")
+def config_submit(body: ConfigSubmit, request: Request) -> dict[str, Any]:
+    confirmed = _step_up(request, body.password)
+    return _ok(_service.submit_config_change, **body.model_dump(exclude={"password"}),
+               identity=request.state.identity, confirmed=confirmed)
+
+
+@app.post("/config/changes/{change_id}/cancel", tags=["configuration"],
+          summary="Withdraw a change that is still in its cooling period")
+def config_cancel(change_id: str, request: Request) -> dict[str, Any]:
+    return _ok(_service.cancel_config_change, change_id, identity=request.state.identity)
+
+
+class AutonomyStop(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AutonomyResume(AutonomyStop):
+    password: str = Field(min_length=1, max_length=1024)
+
+
+@app.post("/autonomy/stop", tags=["configuration"],
+          summary="Stop autonomous action in one gesture; it stays off until restored by hand")
+def autonomy_stop(body: AutonomyStop, request: Request) -> dict[str, Any]:
+    return _ok(_service.autonomy_stop, body.reason, identity=request.state.identity)
+
+
+@app.post("/autonomy/resume", tags=["configuration"],
+          summary="Restore autonomous action after looking at why it stopped")
+def autonomy_resume(body: AutonomyResume, request: Request) -> dict[str, Any]:
+    _step_up(request, body.password)
+    return _ok(_service.autonomy_resume, body.reason, identity=request.state.identity)
 
 
 @app.get("/risk", tags=["portfolio"], summary="Drawdown ladders and the market regime")
@@ -642,7 +774,7 @@ def main() -> None:
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
 _PRIMARY_PAGES = ("index", "portfolio", "advisor", "more", "risk", "activity", "evaluation",
-                  "profile", "notifications", "system", "approvals", "research", "lab")
+                  "profile", "notifications", "system", "approvals", "research", "lab", "settings")
 
 
 class ConsoleFiles(StaticFiles):

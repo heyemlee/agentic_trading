@@ -153,22 +153,37 @@ class ConsoleAuth:
     def allowed_origin(self, origin: str | None) -> bool:
         return origin is not None and origin in self.origins
 
+    def verify_password(self, username: str, password: str) -> str:
+        """``ok``, ``invalid``, ``rate_limited`` or ``unconfigured``, without minting a session.
+
+        The step-up check before a loosening change or a password rotation. It shares the
+        login limiter, so guessing here is no cheaper than guessing at the sign-in screen.
+        """
+        with self._lock:
+            return self._check(username, password)[1]
+
+    def _check(self, username: str, password: str) -> tuple[dict | None, str]:
+        monotonic_now = time.monotonic()
+        self._failures = [stamp for stamp in self._failures if monotonic_now - stamp < 300]
+        if len(self._failures) >= 5:
+            return None, "rate_limited"
+        credentials = self.credentials()
+        if credentials is None:
+            return None, "unconfigured"
+        try:
+            valid_password = hmac.compare_digest(password_hash(password, credentials["salt"]), credentials["hash"])
+        except (ValueError, TypeError):
+            return None, "unconfigured"
+        if not valid_password or not hmac.compare_digest(username.encode(), credentials["username"].encode()):
+            self._failures.append(monotonic_now)
+            return None, "invalid"
+        return credentials, "ok"
+
     def login(self, username: str, password: str, user_agent: str | None = None) -> tuple[str | None, str]:
         with self._lock:
-            monotonic_now = time.monotonic()
-            self._failures = [stamp for stamp in self._failures if monotonic_now - stamp < 300]
-            if len(self._failures) >= 5:
-                return None, "rate_limited"
-            credentials = self.credentials()
+            credentials, status = self._check(username, password)
             if credentials is None:
-                return None, "unconfigured"
-            try:
-                valid_password = hmac.compare_digest(password_hash(password, credentials["salt"]), credentials["hash"])
-            except (ValueError, TypeError):
-                return None, "unconfigured"
-            if not valid_password or not hmac.compare_digest(username.encode(), credentials["username"].encode()):
-                self._failures.append(monotonic_now)
-                return None, "invalid"
+                return None, status
             now = time.time()
             token = secrets.token_urlsafe(32)
             with self.db.transaction() as connection:

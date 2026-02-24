@@ -337,7 +337,12 @@ failures:
 ## 12. Actions the frontend may invoke
 
 Start research · cancel a running research job · approve · reject · request reanalysis · pause ·
-resume · sign a device out · read anything.
+resume · sign a device out · read anything · and, since 2026-09-17, the Settings page: change a
+section or a form's values in `config/{risk_profile,investor_profile,event_calendar}.yaml`
+through `POST /config/preview` then `POST /config/changes`, withdraw a change that is still
+cooling, record a cash flow, stop or restore autonomous action, rotate the console password.
+A loosening change carries the console password in the request and is parked for 24 hours
+server-side; the frontend never decides what loosens what.
 
 A session is identified to the interface by an opaque id. The token hash never leaves the
 database, so listing devices can never yield a way to impersonate one. Using a session records
@@ -363,9 +368,12 @@ The frontend must never be able to:
 - cross **Core / Sandbox / Micro-Live isolation** — a bucket may only execute at its own venue
 - skip **stale-proposal revalidation** — approval always re-reads the world first
 - skip the **broker's pre-trade review**
-- **enable real-money execution** — the master switch lives in `config/risk_profile.yaml` and is
-  changed by the investor on the machine, deliberately not through the API
-- read or write configuration, credentials or state files directly
+- **enable real-money execution at once** — the master switch lives in `config/risk_profile.yaml`;
+  switching it off from the console applies immediately, switching it on goes through the
+  24-hour cooling period behind the password, like every loosening change
+- read or write credentials or state files directly, or write configuration by any path other
+  than the change pipeline (`agentic_trading/config_changes.py`), which validates with the real
+  loader, classifies, journals and commits every write
 
 Run the API bound to `127.0.0.1` only. Every business endpoint requires a signed-in owner session
 and every write also carries that session's CSRF token; a phone reaches the API through a

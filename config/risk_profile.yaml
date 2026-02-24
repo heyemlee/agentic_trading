@@ -722,6 +722,10 @@ notifications:
     # opened; do not, while any autonomy is armed.
     - autonomy_acted                       # an order was decided without you
     - autonomy_withdrawn                   # autonomy stopped itself and needs a manual reset
+    # A loosening change made from the console waits a day before it applies. The other
+    # signed-in devices hear about it while it can still be withdrawn, and when it lands.
+    - config_change_pending
+    - config_change_applied
   heartbeat:
     # Nothing running on this Mac can report that this Mac is gone. An external watcher that
     # expects a regular ping is the only way an outage reaches a phone.
@@ -895,18 +899,18 @@ micro_live_execution:
   # micro_live run has to be started deliberately, it has to survive Hard Risk, and the
   # order still waits for a human approval in the console and is revalidated at execution
   # time. The kill switch (/system/pause) stops all orders and can be reached from the
-  # phone; this file cannot — the console has no endpoint that writes configuration, by
-  # design, so turning this back off means editing it here.
+  # phone, and so can this switch since 2026-09-17: off applies at once, on again from the
+  # console re-asks the password and waits 24 hours, withdrawable until then.
   bucket_name: micro_live
   ledger_file: state/micro_live_portfolio.yaml   # reconciles against the Robinhood Agentic account, separate from the conceptual portfolio
   risk_state_file: state/micro_live_risk_state.json   # its own drawdown high-water mark
   # Investor decision, 2026-09-09. The account manages whatever is in it, up to this ceiling:
   # adding money needs no config edit, which is the point, but a mistaken transfer cannot hand
   # the system an authority nobody chose. Above the ceiling it stops and says so rather than
-  # taking the money on. Raising this number is the deliberate act that widens the mandate, and
-  # it is the one thing the console cannot do — tightening is a phone gesture, loosening is a
-  # file edit. Funding the account should also be recorded with `ct-state cashflow`, or the
-  # drawdown ladder reads a deposit as performance.
+  # taking the money on. Raising this number is the deliberate act that widens the mandate —
+  # lowering it from the console applies at once, raising it there waits a day behind the
+  # password. Funding the account should also be recorded, with `ct-state cashflow` or the
+  # console's Settings page, or the drawdown ladder reads a deposit as performance.
   max_capital_usd: 2000                      # the ceiling, verified against the live account
   capital_tolerance_usd: 50                  # headroom for market drift above it, not extra
                                              # authority: sizing still follows live equity

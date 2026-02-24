@@ -27,6 +27,7 @@ window.CT_API = (function () {
     notifications: { path: () => '/system/notifications', ms: 120000 },
     pushDevices: { path: () => '/notifications/devices', ms: 120000 },
     authSessions: { path: () => '/auth/sessions', ms: 60000 },
+    config: { path: () => '/config', ms: 60000 },
     evaluation: { path: () => '/evaluation', ms: 300000 },
     portfolio: { path: () => '/portfolio', ms: 60000 },
     risk: { path: () => '/risk', ms: 60000 },

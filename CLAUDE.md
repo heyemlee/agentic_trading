@@ -21,6 +21,10 @@ a second copy to keep in sync.
 Real-money execution is enabled for the `micro_live` bucket.
 
 - Editing `config/*.yaml` changes the running system's behaviour, not just the development copy.
+- The console's Settings page writes `config/*.yaml` too, and commits each write locally to
+  this checkout (author `<user> via console`, never pushed). A `config/` change in `git log`
+  or `git status` you did not make yourself is that, not an accident; see
+  `docs/OPERATIONS.md` → "Configuration changes from the console".
 - `state/` holds the ledger, the SQLite audit database and the drawdown high-water marks. Never
   move, rename or hand-edit anything in it, symlink or not. Use `ct-state`.
 - **Edit `.env` by writing through it, never by replacing it.** `mv tmp .env`, `sed -i`, and the

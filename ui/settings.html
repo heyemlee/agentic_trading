@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Settings · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" type="image/svg+xml" href="icons/mark.svg" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Agentic Trading" />
+<meta name="theme-color" content="#111318" />
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+
+<main id="content" hidden data-i18n-title="cf.title">
+
+  <section class="section pagehead" data-od-id="pagehead">
+    <div class="container">
+      <h1 data-i18n="cf.title">Settings</h1>
+      <p class="body-muted" data-i18n="cf.intro">Everything in config/ that is not code. Tightening applies at once; loosening a limit asks for the password and waits a day, during which it can be withdrawn.</p>
+    </div>
+  </section>
+
+  <!-- ── changes still cooling ─────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" id="pending-section" data-od-id="pending" hidden>
+    <div class="container">
+      <div class="card card-tinted">
+        <div class="section-head">
+          <p class="eyebrow" data-i18n="cf.pending">Waiting to apply</p>
+          <span class="chip chip-warn" id="pending-count">—</span>
+        </div>
+        <div class="list list-inset" style="margin-top:12px;" id="pending-list"></div>
+        <p class="body-sm body-muted" style="margin-top:12px;" data-i18n="cf.pendingHint">A change applies against the file as it is then; if the part it touches was edited meanwhile, it fails and says so.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── the forms ─────────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="forms">
+    <div class="container">
+
+      <details class="settings-group" id="form-schedule" data-od-id="form-schedule">
+        <summary data-i18n="cf.schedule">Research schedule</summary>
+        <div class="card">
+          <div class="grid-2">
+            <div class="field"><label for="sc-period" data-i18n="cf.period">Period</label>
+              <select class="select" id="sc-period"><option value="weekly">weekly</option><option value="daily">daily</option></select></div>
+            <div class="field"><label for="sc-weekday" data-i18n="cf.weekday">Weekday</label>
+              <select class="select" id="sc-weekday">
+                <option value="1">1 · Mon</option><option value="2">2 · Tue</option><option value="3">3 · Wed</option>
+                <option value="4">4 · Thu</option><option value="5">5 · Fri</option><option value="6">6 · Sat</option><option value="7">7 · Sun</option>
+              </select></div>
+            <div class="field"><label for="sc-hour" data-i18n="cf.hour">Hour (Mac local time)</label>
+              <input class="input" id="sc-hour" type="number" inputmode="numeric" min="0" max="23" /></div>
+            <div class="field"><label for="sc-minute" data-i18n="cf.minute">Minute</label>
+              <input class="input" id="sc-minute" type="number" inputmode="numeric" min="0" max="59" /></div>
+            <div class="field"><label for="sc-max-tickers" data-i18n="cf.maxTickers">Tickers per run</label>
+              <input class="input" id="sc-max-tickers" type="number" inputmode="numeric" min="1" max="20" /></div>
+            <div class="field"><label for="sc-max-daily" data-i18n="cf.maxDaily">Analyses per day</label>
+              <input class="input" id="sc-max-daily" type="number" inputmode="numeric" min="1" max="50" /></div>
+            <div class="field"><label for="sc-holiday" data-i18n="cf.holiday">On a holiday</label>
+              <select class="select" id="sc-holiday"><option value="previous_session">previous_session</option><option value="skip">skip</option></select></div>
+            <div class="field"><label for="sc-paused" data-i18n="cf.whilePaused">While paused</label>
+              <select class="select" id="sc-paused"><option value="true" data-i18n="cf.keepResearching">keep researching</option><option value="false" data-i18n="cf.stopToo">stop research too</option></select></div>
+          </div>
+          <div class="field" style="margin-top:12px;"><label for="sc-tickers" data-i18n="cf.tickers">Tickers to analyse (blank: one per exposure group)</label>
+            <input class="input" id="sc-tickers" type="text" autocapitalize="characters" autocomplete="off" placeholder="VTI, BND" /></div>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-green" type="button" id="sc-save" data-od-id="cta-save-schedule" data-i18n="cf.review">Review change</button>
+          </div>
+          <p class="body-sm body-muted" style="margin-top:12px;" id="sc-launchd"></p>
+        </div>
+      </details>
+
+      <details class="settings-group" id="form-watchlist" data-od-id="form-watchlist">
+        <summary data-i18n="cf.watchlist">Stock watchlist</summary>
+        <div class="card">
+          <p class="body-sm body-muted" data-i18n="cf.watchlistHint">Candidates come from you; the system screens and analyses what is listed here and never invents a name.</p>
+          <div class="row row-wrap" style="margin-top:12px;" id="wl-chips"></div>
+          <div class="settings-inline" style="margin-top:12px;">
+            <input class="input" id="wl-add" type="text" autocapitalize="characters" autocomplete="off" placeholder="NVDA" />
+            <button class="btn btn-secondary" type="button" id="wl-add-btn" data-i18n="common.add">Add</button>
+          </div>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-green" type="button" id="wl-save" data-od-id="cta-save-watchlist" data-i18n="cf.review">Review change</button>
+          </div>
+          <p class="body-sm" style="margin-top:12px;" id="wl-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+
+      <details class="settings-group" id="form-calendar" data-od-id="form-calendar">
+        <summary data-i18n="cf.calendar">Macro event calendar</summary>
+        <div class="card">
+          <p class="body-sm body-muted" data-i18n="cf.calendarHint">FOMC, CPI and payrolls dates, kept by hand from the primary sources. Autonomous opens stop past the maintained-through date.</p>
+          <div class="field" style="margin-top:12px;"><label for="cal-through" data-i18n="cf.maintainedThrough">Maintained through</label>
+            <input class="input" id="cal-through" type="date" /></div>
+          <div class="list list-inset" style="margin-top:12px;" id="cal-events"></div>
+          <div class="grid-3" style="margin-top:12px;">
+            <input class="input" id="cal-date" type="date" />
+            <select class="select" id="cal-kind"><option value="fomc_decision">fomc_decision</option><option value="cpi">cpi</option><option value="payrolls">payrolls</option><option value="pce">pce</option><option value="gdp">gdp</option></select>
+            <input class="input" id="cal-note" type="text" autocomplete="off" data-i18n-ph="cf.notePh" placeholder="" />
+          </div>
+          <div class="btn-row" style="margin-top:12px;">
+            <button class="btn btn-secondary" type="button" id="cal-add" data-i18n="cf.addEvent">Add event</button>
+          </div>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-green" type="button" id="cal-save" data-od-id="cta-save-calendar" data-i18n="cf.review">Review change</button>
+          </div>
+          <p class="body-sm" style="margin-top:12px;" id="cal-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+
+      <details class="settings-group" id="form-cashflow" data-od-id="form-cashflow">
+        <summary data-i18n="cf.cashflow">Record a deposit or withdrawal</summary>
+        <div class="card">
+          <p class="body-sm body-muted" data-i18n="cf.cashflowHint">Money moved in or out of a bucket must be recorded, or the drawdown ladder reads a deposit as performance.</p>
+          <div class="grid-2" style="margin-top:12px;">
+            <div class="field"><label for="cash-bucket" data-i18n="cf.bucket">Bucket</label>
+              <select class="select" id="cash-bucket"><option value="micro_live">micro_live</option><option value="core">core</option><option value="sandbox">sandbox</option></select></div>
+            <div class="field"><label for="cash-kind" data-i18n="cf.kind">Kind</label>
+              <select class="select" id="cash-kind"><option value="deposit" data-i18n="cf.deposit">deposit</option><option value="withdrawal" data-i18n="cf.withdrawal">withdrawal</option></select></div>
+            <div class="field"><label for="cash-amount" data-i18n="cf.amount">Amount (USD)</label>
+              <input class="input" id="cash-amount" type="number" inputmode="decimal" min="0.01" step="0.01" /></div>
+            <div class="field"><label for="cash-date" data-i18n="cf.date">Date</label>
+              <input class="input" id="cash-date" type="date" /></div>
+          </div>
+          <div class="field" style="margin-top:12px;"><label for="cash-reason" data-i18n="ap.reason">Reason (optional)</label>
+            <input class="input" id="cash-reason" type="text" maxlength="500" autocomplete="off" /></div>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-green" type="button" id="cash-save" data-od-id="cta-cashflow" data-i18n="cf.record">Record</button>
+          </div>
+          <p class="body-sm" style="margin-top:12px;" id="cash-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+
+      <details class="settings-group" id="form-autonomy" data-od-id="form-autonomy">
+        <summary data-i18n="cf.autonomy">Autonomous action</summary>
+        <div class="card">
+          <div class="section-head">
+            <p class="eyebrow" data-i18n="cf.autonomyState">State</p>
+            <span class="chip" id="au-state">—</span>
+          </div>
+          <p class="body-sm body-muted" style="margin-top:8px;" id="au-detail"></p>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-danger" type="button" id="au-stop" data-od-id="cta-autonomy-stop" data-i18n="cf.stopAutonomy">Stop autonomous action</button>
+            <button class="btn btn-secondary" type="button" id="au-resume" data-od-id="cta-autonomy-resume" data-i18n="cf.resumeAutonomy" hidden>Restore autonomous action</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-group" id="form-password" data-od-id="form-password">
+        <summary data-i18n="cf.password">Console password</summary>
+        <div class="card">
+          <p class="body-sm body-muted" data-i18n="cf.passwordHint">Rotating it signs every device out, this one included. 16 characters or more, or 8–15 with upper, lower, digit and symbol.</p>
+          <form id="pw-form" autocomplete="off" onsubmit="return false;">
+            <div class="field" style="margin-top:12px;"><label for="pw-current" data-i18n="cf.currentPassword">Current password</label>
+              <input class="input" id="pw-current" type="password" autocomplete="current-password" /></div>
+            <div class="field" style="margin-top:12px;"><label for="pw-new" data-i18n="cf.newPassword">New password</label>
+              <input class="input" id="pw-new" type="password" autocomplete="new-password" /></div>
+            <div class="field" style="margin-top:12px;"><label for="pw-again" data-i18n="cf.newPasswordAgain">New password, again</label>
+              <input class="input" id="pw-again" type="password" autocomplete="new-password" /></div>
+          </form>
+          <div class="btn-row" style="margin-top:20px;">
+            <button class="btn btn-dark" type="button" id="pw-save" data-od-id="cta-password" data-i18n="cf.rotate">Change password</button>
+          </div>
+          <p class="body-sm" style="margin-top:12px;" id="pw-status" role="status" aria-live="polite"></p>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <!-- ── every section of every file ───────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="files">
+    <div class="container">
+      <div class="section-head"><h2 data-i18n="cf.allSections">All settings, by file</h2></div>
+      <p class="body-sm body-muted" data-i18n="cf.allSectionsHint">Each file is edited one top-level section at a time, comments included. A section marked guarded holds limits: loosening one waits a day.</p>
+      <div id="file-list" style="margin-top:12px;"></div>
+    </div>
+  </section>
+
+  <!-- ── recent changes ────────────────────────────────────────────── -->
+  <section class="section" style="padding-top:0;" data-od-id="recent">
+    <div class="container">
+      <div class="section-head"><h2 data-i18n="cf.recent">Recent changes</h2></div>
+      <div class="list list-inset" id="recent-list"></div>
+      <p class="empty" id="recent-empty" data-i18n="cf.noRecent" hidden>No changes made from the console yet.</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- The section editor: one top-level key's text, comments and all. -->
+<dialog class="modal" data-sheet id="editor-dialog" data-od-id="editor-dialog">
+  <form method="dialog" class="dialog-body dialog-tall">
+    <h2 id="editor-title">—</h2>
+    <p class="body-sm body-muted" style="margin-top:8px;" id="editor-copy"></p>
+    <div class="field" style="margin-top:16px;">
+      <label for="editor-text" data-i18n="cf.sectionText">Section text (YAML)</label>
+      <textarea class="textarea textarea-code" id="editor-text" rows="18" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    </div>
+    <p class="body-sm" style="margin-top:8px;" id="editor-status" role="status" aria-live="polite"></p>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-green" id="editor-preview" data-i18n="cf.review">Review change</button>
+    <button class="btn btn-secondary" id="editor-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- One confirmation for everything: what will change, whether it waits, the password. -->
+<dialog class="modal" data-sheet id="confirm-dialog" data-od-id="confirm-dialog">
+  <form method="dialog" class="dialog-body dialog-tall" id="confirm-form">
+    <h2 id="confirm-title">—</h2>
+    <p class="body-sm" style="margin-top:8px;" id="confirm-verdict"></p>
+    <pre class="diffview" id="confirm-diff" hidden></pre>
+    <div id="confirm-summary" class="body-sm" style="margin-top:12px;"></div>
+    <div class="field" style="margin-top:16px;" id="confirm-reason-field">
+      <label for="confirm-reason" data-i18n="ap.reason">Reason (optional)</label>
+      <input class="input" id="confirm-reason" type="text" maxlength="500" autocomplete="off" />
+    </div>
+    <div class="field" style="margin-top:12px;" id="confirm-password-field" hidden>
+      <label for="confirm-password" data-i18n="cf.confirmPassword">Console password</label>
+      <input class="input" id="confirm-password" type="password" autocomplete="current-password" />
+    </div>
+    <p class="body-sm" style="margin-top:8px;" id="confirm-status" role="status" aria-live="polite"></p>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-dark" id="confirm-submit">—</button>
+    <button class="btn btn-secondary" id="confirm-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/navigation.js"></script>
+<script src="assets/pages/settings.js"></script>
+</body>
+</html>

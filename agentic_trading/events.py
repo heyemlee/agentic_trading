@@ -34,6 +34,13 @@ KINDS = {
     "research_failed": "a research run did not finish",
     "system_paused": "the kill switch was engaged",
     "system_resumed": "the kill switch was released",
+    "config_changed": "a configuration file was changed from the console",
+    "config_change_pending": "a loosening configuration change entered its cooling period",
+    "config_change_cancelled": "a pending configuration change was withdrawn",
+    "cashflow_recorded": "a deposit or withdrawal was recorded against a ledger",
+    "autonomy_stopped": "autonomous action was stopped by hand",
+    "autonomy_resumed": "autonomous action was restored by hand",
+    "password_changed": "the console password was rotated",
 }
 
 #: Proposal history verbs, as written by Proposal.note(), mapped onto journal kinds.

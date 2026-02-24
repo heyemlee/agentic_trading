@@ -488,7 +488,7 @@ def test_primary_layouts_arrive_before_navigation_without_executable_scripts(con
     """The first tap must not wait for another HTML request, even on a cold connection."""
     client = TestClient(app, base_url='https://testserver')
     names = {'index', 'portfolio', 'advisor', 'more', 'risk', 'activity', 'evaluation',
-             'profile', 'notifications', 'system', 'approvals', 'research', 'lab'}
+             'profile', 'notifications', 'system', 'approvals', 'research', 'lab', 'settings'}
     for name in names:
         page = client.get(f'/ui/{name}.html?demo=1')
         templates = re.findall(r'<template data-ct-page="([^"]+)"[^>]*>(.*?)</template>', page.text, re.DOTALL)

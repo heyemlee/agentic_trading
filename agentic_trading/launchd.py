@@ -174,6 +174,57 @@ def render(*, data_dir: Path, release_dir: Path | None = None, home: Path,
     }
 
 
+def reregister_research(*, data_dir: Path, launch_agents: Path | None = None,
+                        release_dir: Path | None = None, home: Path | None = None,
+                        run=None) -> str:
+    """Re-register the research job after its schedule changed in config. Returns a summary.
+
+    The same sequence install.sh follows, for the same reasons: the plist is rewritten only
+    when its bytes change (re-registering an unchanged LaunchAgent trains macOS to throttle
+    it), ``bootout`` is given time to finish before ``bootstrap`` is retried, and the result
+    is proven with ``launchctl print``. Only the research job is touched; the API's own
+    registration and process are never restarted from here.
+
+    Outside a managed deployment -- no ``CT_RELEASE_DIR``, no installed API plist -- nothing
+    is done and the summary says so, which is what a checkout run by hand should see.
+    """
+    import hashlib
+    import os
+    import subprocess
+    import time
+
+    run = run or (lambda *args: subprocess.run(args, check=False, capture_output=True, text=True, timeout=60))
+    launch_agents = Path(launch_agents or Path.home() / "Library/LaunchAgents")
+    release_dir = release_dir or (Path(os.environ["CT_RELEASE_DIR"]) if os.environ.get("CT_RELEASE_DIR") else None)
+    api_plist = launch_agents / f"{API}.plist"
+    if release_dir is None or not api_plist.exists():
+        return "launchd not managed here; the schedule applies to the next installed release"
+    jobs = render(data_dir=data_dir, release_dir=release_dir, home=home or Path.home(),
+                  origins=allowed_origins(origin=None, keep=installed_origins(launch_agents)))
+    target = launch_agents / f"{RESEARCH}.plist"
+    before = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+    write(launch_agents, {RESEARCH: jobs[RESEARCH]})
+    if before == hashlib.sha256(target.read_bytes()).hexdigest():
+        return "launchd job unchanged"
+    domain = f"gui/{os.getuid()}"
+    run("launchctl", "bootout", f"{domain}/{RESEARCH}")
+    for _ in range(60):
+        if run("launchctl", "print", f"{domain}/{RESEARCH}").returncode != 0:
+            break
+        time.sleep(0.5)
+    error = ""
+    for _ in range(60):
+        result = run("launchctl", "bootstrap", domain, str(target))
+        if result.returncode == 0:
+            break
+        error = (result.stderr or result.stdout or "").strip()
+        time.sleep(0.5)
+    if run("launchctl", "print", f"{domain}/{RESEARCH}").returncode != 0:
+        return f"launchd job did not register: {error or 'no error reported'}; run deploy/macos/install.sh"
+    run("launchctl", "enable", f"{domain}/{RESEARCH}")
+    return "launchd job re-registered"
+
+
 def write(destination: Path, jobs: dict[str, dict[str, Any]]) -> list[Path]:
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
