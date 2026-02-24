@@ -582,12 +582,6 @@ class AdvisorNotes(BaseModel):
     revision: int = Field(ge=0)
 
 
-class AdvisorReview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    request_id: str
-    language: Literal["zh", "en"] = "zh"
-
-
 @app.get("/advisor", tags=["assistant"])
 def advisor_state() -> AdvisorState:
     return _ok(_service.advisor_state)
@@ -606,11 +600,6 @@ def advisor_start(body: AdvisorRequest) -> dict[str, Any]:
 @app.post("/advisor/notes", tags=["assistant"])
 def advisor_notes(body: AdvisorNotes) -> PersonalNotes:
     return _ok(_service.advisor_notes, body.text, body.revision)
-
-
-@app.post("/advisor/review", tags=["assistant"])
-def advisor_review(body: AdvisorReview) -> dict[str, Any]:
-    return _ok(_service.review_observed_holdings, body.request_id, body.language)
 
 
 class ResearchRequest(BaseModel):

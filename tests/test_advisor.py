@@ -22,7 +22,7 @@ from agentic_trading.broker.base import BrokerUnavailable
 from agentic_trading.broker.robinhood import RobinhoodBroker
 from agentic_trading.records import write_record
 from agentic_trading.research_jobs import ResearchJobManager
-from agentic_trading.service import ServiceConflict, ServiceError
+from agentic_trading.service import ServiceConflict
 from tests.test_api import sandbox_service  # noqa: F401 - shared isolated fixture
 from tests.test_robinhood import FakeMCP
 
@@ -248,19 +248,6 @@ def test_shortlist_only_returns_candidates_from_sources(assistant_service, monke
     assert [c["symbol"] for c in s._advisor_result(job["run_key"])["research_candidates"]] == ["VTI"]
 
 
-def test_batch_review_reports_deferred_budget_and_idempotent_retry(assistant_service):
-    s = assistant_service
-    snap = snapshot()
-    snap["accounts"][0]["positions"] = [{"symbol": f"ETF{i}", "quantity": 1} for i in range(8)]
-    s.state_db().write_meta(SNAPSHOT, snap)
-    request_id = str(uuid.uuid4())
-    first = s.review_observed_holdings(request_id)
-    again = s.review_observed_holdings(request_id)
-    assert len(first["started"]) == 6 and len(first["deferred"]) == 2
-    assert again == first
-    assert len(s._research_manager(s.profiles()).store.list()) == 6
-
-
 def test_readonly_analysis_reuses_upstream_graph_and_cannot_create_proposals(
         assistant_service, fake_claude, monkeypatch, real_audit_guard):
     s = assistant_service
@@ -335,14 +322,6 @@ def test_assistant_routes_are_authenticated_and_reject_order_fields(assistant_se
     assert response.status_code == 200 and response.json()["proposal_created"] is False
     auth_client.cookies.clear()
     assert auth_client.get("/advisor").status_code == 401
-
-
-def test_stale_snapshot_cannot_start_a_batch(assistant_service):
-    snap = snapshot()
-    snap["fetched_at"] = "2000-01-01T00:00:00+00:00"
-    assistant_service.state_db().write_meta(SNAPSHOT, snap)
-    with pytest.raises(ServiceError, match="Refresh"):
-        assistant_service.review_observed_holdings(str(uuid.uuid4()))
 
 
 def test_cancelled_chat_output_is_not_presented_as_a_completed_answer(assistant_service):

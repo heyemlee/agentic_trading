@@ -1086,18 +1086,6 @@ test('home follows active research and clears stale account details when the led
   assert.match(c.element('needs-you-slot').innerHTML, /portfolio.html#ledger-notice/);
 });
 
-test('holdings research starts once with visible pending feedback', async () => {
-  let finish, posts = 0;
-  const c = portfolioPage(() => { posts++; return new Promise(resolve => { finish = resolve; }); },
-    { stale: false, jobs: [], snapshot: { ...savedSnapshot, accounts: [{ complete: true, positions: [{ symbol: 'VTI', quantity: 1 }] }] } });
-  const button = c.element('review-holdings');
-  const pending = button.events.click(); await button.events.click();
-  assert.equal(posts, 1); assert.equal(button.disabled, true);
-  assert.match(c.element('review-status').textContent, /ai.running/);
-  finish({ started: ['VTI'], deferred: [] }); await pending;
-  assert.equal(button.disabled, false); assert.match(c.element('review-status').textContent, /ai.batch/);
-});
-
 function loadingPage(fetch) {
   const c = context();
   c.location.pathname = '/ui/portfolio.html';

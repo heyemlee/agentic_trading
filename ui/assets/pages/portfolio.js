@@ -3,7 +3,6 @@ window.Console.page('portfolio', function (document) {
   C.mount('portfolio');
 
   let refreshing = false, refreshRequest = null;
-  let reviewing = false, reviewRequest = null, reviewStatus = '';
 
   /* The Robinhood block is a saved snapshot, written by a refresh job, never
      by this page's polling reads. Offer an explicit refresh beside its time,
@@ -35,19 +34,9 @@ window.Console.page('portfolio', function (document) {
   }
 
   document.getElementById('refresh-holdings').addEventListener('click', () => askRefresh(D.advisor || {}, true));
-  document.getElementById('review-holdings').addEventListener('click', async () => {
-    if (reviewing || document.getElementById('review-holdings').disabled) return;
-    reviewing = true; reviewRequest ||= crypto.randomUUID(); reviewStatus = C.t('ai.running'); render();
-    try {
-      const result = await API.post('/advisor/review', { request_id: reviewRequest, language: window.I18N.lang });
-      if (result.blocked) { reviewStatus = C.t('ai.demo'); return; }
-      reviewRequest = null;
-      reviewStatus = C.t('ai.batch', { started: result.started.length, deferred: result.deferred.length }) + ' ' +
-        result.deferred.map(d => d.symbol + ': ' + d.reason).join(' · ');
-      await API.readOnce('advisor');
-    } catch (error) { reviewStatus = C.t('ai.error', { error: error.message }); }
-    finally { reviewing = false; render(); }
-  });
+  /* Research is started one holding at a time, from the holding's own row. A button that
+     queued every holding at once was as many full runs as there were holdings, each thirteen
+     model calls, all drawn from the same daily budget as the trading system's own research. */
 
   /* The strategy figures come from the ledgers, and a ledger fails closed once nothing
      has confirmed it for max_age_days. The API then answers with its buckets emptied and
@@ -79,9 +68,6 @@ window.Console.page('portfolio', function (document) {
        only for the refresh requested from this page. */
     const mine = refreshJobs(saved).find(ACTIVE) || refreshJobs(saved).find((job) => job.run_key === askedFor);
     document.getElementById('refresh-holdings').disabled = refreshing || !!(mine && ACTIVE(mine)) || !API.writesEnabled || !live;
-    document.getElementById('review-holdings').disabled = reviewing || !API.writesEnabled || !live || saved.stale ||
-      !(snapshot.accounts || []).some(a => a.complete && a.positions?.length);
-    document.getElementById('review-status').textContent = reviewStatus;
     document.getElementById('broker-stamp').textContent =
       askError ? C.t('ux.refreshFailed', { error: askError })
       : refreshing || mine && ACTIVE(mine) ? C.t('ux.refreshing')

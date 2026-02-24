@@ -974,32 +974,6 @@ class Service:
         manager.dispatch()
         return {**(manager.store.get(job["run_key"]) or job), "deduplicated": not created}
 
-    def review_observed_holdings(self, request_id: str, language: str = "zh") -> dict[str, Any]:
-        from ..advisor import SNAPSHOT, age
-
-        try:
-            request_uuid = uuid.UUID(request_id)
-        except ValueError as exc:
-            raise ServiceError("request_id must be a UUID") from exc
-        snapshot = self.state_db().read_meta(SNAPSHOT, {}) or {}
-        if age(snapshot) > 300:
-            raise ServiceError("Refresh Robinhood holdings before starting a portfolio review.")
-        started, deferred = [], []
-        for account in snapshot.get("accounts", []):
-            for position in account["positions"]:
-                symbol = position["symbol"]
-                if not account["complete"]:
-                    deferred.append({"symbol": symbol, "reason": "account data incomplete"})
-                    continue
-                try:
-                    job = self.start_advisor(kind="analysis", ticker=symbol, account_id=account["id"],
-                        request_id=str(uuid.uuid5(request_uuid, account["id"] + ":" + symbol)), language=language)
-                    started.append({"symbol": symbol, "run_key": job["run_key"]})
-                except ServiceError as exc:
-                    deferred.append({"symbol": symbol, "reason": str(exc)})
-        return {"started": started, "deferred": deferred,
-                "total_holdings": len(started) + len(deferred)}
-
     def start_research(self, ticker: str, *, bucket: str = "core", instrument_type: str = "auto",
                        trade_date: str | None = None, trigger: str = "manual") -> dict[str, Any]:
         """Persist and enqueue a research run, deduplicating an identical active run."""
