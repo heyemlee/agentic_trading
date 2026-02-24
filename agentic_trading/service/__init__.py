@@ -14,14 +14,16 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from datetime import date as calendar_date
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeVar
 
 from .. import agent_roster, autonomy
 from ..broker import make_broker
+from ..broker.read_session import ReadSession, SessionUnavailable
 from ..env import load_env
 from ..execution import ExecutionResult, needs_reconciliation, reconcile_proposal, revalidate
 from ..execution import execute as execute_proposal
@@ -81,6 +83,8 @@ from .status import (
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
 #: How much of runs/llm_calls.jsonl /health reads: several days of calls at the daily budget.
 AUDIT_TAIL_BYTES = 2_000_000
 
@@ -99,10 +103,16 @@ class ServiceConflict(ServiceError):
 
 
 class Service:
-    """One instance per process. Cheap to construct; holds no broker session between calls."""
+    """One instance per process. Cheap to construct.
+
+    Between calls it keeps at most one venue session, and only for reads that record nothing
+    when the venue fails them (see :meth:`_read_venue`). An order, and the reconciliation of
+    one, opens a session of its own every time.
+    """
 
     def __init__(self, config_dir: str | Path = "config"):
         self.config_dir = Path(config_dir)
+        self._venue_reads = ReadSession()
 
     # ---------------------------------------------------------------- profiles
     def profiles(self) -> Profiles:
@@ -129,15 +139,41 @@ class Service:
     def _micro_enabled(self, profiles: Profiles) -> bool:
         return bool((profiles.risk.get("micro_live_execution") or {}).get("enabled", False))
 
+    def _require_micro_enabled(self, profiles: Profiles) -> None:
+        if not self._micro_enabled(profiles):
+            raise ServiceError("real-money execution is disabled (micro_live_execution.enabled is false)")
+
     def _broker(self, profiles: Profiles, bucket: str):
         """The venue that owns a bucket. Real money only ever comes from the Micro-Live path."""
         if bucket == MICRO_BUCKET:
             from ..broker.robinhood import RobinhoodBroker
 
-            if not self._micro_enabled(profiles):
-                raise ServiceError("real-money execution is disabled (micro_live_execution.enabled is false)")
+            self._require_micro_enabled(profiles)
             return RobinhoodBroker(profiles)
         return make_broker(profiles)
+
+    def _read_venue(self, profiles: Profiles, read: Callable[[Any], _T]) -> _T:
+        """Run a read against the real-money venue on the session kept for reads.
+
+        For reads that record nothing when the venue fails them, and no others. A read that
+        fails on a kept session is run again on a fresh one, so whatever it recorded the first
+        time would be recorded twice, and a failure it recorded would describe a session the
+        venue had ended rather than the venue. Reconciliation marks the order it could not read,
+        which is why it opens its own session. Raises SessionUnavailable when no session can be
+        opened.
+        """
+        from ..broker import robinhood
+
+        return self._venue_reads.read(robinhood.session_key(profiles),
+                                      lambda: robinhood.RobinhoodBroker(profiles), read)
+
+    def release_idle_venue_session(self) -> bool:
+        """Close the kept venue session if nobody has read through it lately."""
+        return self._venue_reads.release_idle()
+
+    def close(self) -> None:
+        """Close the kept venue session. The API does this as it stops."""
+        self._venue_reads.close()
 
     # ---------------------------------------------------------------- health
     def health(self) -> Health:
@@ -389,38 +425,33 @@ class Service:
         profiles = self.profiles()
         micro = profiles.risk.get("micro_live_execution") or {}
         enabled = self._micro_enabled(profiles)
-        broker, connected, connect_error = None, False, None
+        connected, connect_error = False, None
         try:
-            from ..broker.robinhood import RobinhoodBroker
-
-            broker = RobinhoodBroker(profiles)
+            # Preflight reads the account and records nothing, so it may share the kept session.
+            preflight = self._read_venue(profiles, lambda broker: run_preflight(profiles, broker))
             connected = True
-        except Exception as exc:  # noqa: BLE001 - not connected is a normal state, not a crash
+        except SessionUnavailable as exc:  # not connected is a normal state, not a crash
             connect_error = str(exc)
-        try:
-            preflight = run_preflight(profiles, broker)
-            open_proposal = next((p for p in self._store(profiles).open_proposals(profiles)
-                                  if p.bucket == MICRO_BUCKET), None)
-            status = micro_live_status(enabled=enabled, connected=connected,
-                                       preflight_ready=preflight.ready, open_proposal=open_proposal,
-                                       profiles=profiles)
-            return MicroLive(
-                status=status,
-                enabled=enabled,
-                connected=connected,
-                connect_error=connect_error,
-                capital_boundary_usd=float(micro.get("max_capital_usd", 100)),
-                account=MicroLiveAccount(**preflight.account) if preflight.account else None,
-                preflight_ready=preflight.ready,
-                checks=[PreflightCheck(id=c.check_id, name=c.name, passed=c.passed, detail=c.detail)
-                        for c in preflight.checks],
-                blocking=[c.check_id for c in preflight.failures],
-                permissions=dict(micro.get("permissions") or {}),
-                execution_mode=str(micro.get("execution_mode", "human_approval")),
-            )
-        finally:
-            if broker is not None:
-                broker.close()
+            preflight = run_preflight(profiles, None)
+        open_proposal = next((p for p in self._store(profiles).open_proposals(profiles)
+                              if p.bucket == MICRO_BUCKET), None)
+        status = micro_live_status(enabled=enabled, connected=connected,
+                                   preflight_ready=preflight.ready, open_proposal=open_proposal,
+                                   profiles=profiles)
+        return MicroLive(
+            status=status,
+            enabled=enabled,
+            connected=connected,
+            connect_error=connect_error,
+            capital_boundary_usd=float(micro.get("max_capital_usd", 100)),
+            account=MicroLiveAccount(**preflight.account) if preflight.account else None,
+            preflight_ready=preflight.ready,
+            checks=[PreflightCheck(id=c.check_id, name=c.name, passed=c.passed, detail=c.detail)
+                    for c in preflight.checks],
+            blocking=[c.check_id for c in preflight.failures],
+            permissions=dict(micro.get("permissions") or {}),
+            execution_mode=str(micro.get("execution_mode", "human_approval")),
+        )
 
     # ---------------------------------------------------------------- proposals
     def proposals(self, include_closed: bool = False) -> list[ProposalSummary]:
@@ -512,11 +543,18 @@ class Service:
             raise ServiceError(f"no proposal {proposal_id!r}")
         if p.status == PROPOSED:
             p = replace(p, status=APPROVED, approved_at=utcnow().isoformat())
-        broker = self._broker(profiles, p.bucket)
-        try:
-            rv = revalidate(profiles, p, broker, persist_risk=False)
-        finally:
-            _close(broker)
+        if p.bucket == MICRO_BUCKET:
+            # A preview persists no risk state and places nothing, so it shares the kept session.
+            # The approval itself revalidates again, on a session opened for it.
+            self._require_micro_enabled(profiles)
+            rv = self._read_venue(profiles, lambda broker: revalidate(profiles, p, broker,
+                                                                      persist_risk=False))
+        else:
+            broker = self._broker(profiles, p.bucket)
+            try:
+                rv = revalidate(profiles, p, broker, persist_risk=False)
+            finally:
+                _close(broker)
         return {"proposal_id": p.proposal_id, "outcome": rv.outcome, "reasons": rv.reasons,
                 "changes": rv.changes, "current_price": rv.current_price,
                 "price_drift_pct": rv.price_drift_pct,

@@ -837,3 +837,137 @@ def test_the_acknowledgement_gate_counts_what_the_profile_scan_found(profiles):
     profiles.unresolved = []
     explicit = next(c for c in run_preflight(profiles, broker).checks if c.check_id == "PF13")
     assert explicit.passed is True and explicit.detail == "all risk parameters are explicit values"
+
+
+# ---------------------------------------------------------------- the session kept for reads
+def test_a_transport_failure_retires_the_session_and_a_tool_error_does_not(profiles):
+    """How a kept read session knows to replace itself: the venue answering with an error says
+    nothing about the session, a call that never got an answer says it cannot be trusted."""
+    class Dropping(FakeMCP):
+        def call_tool(self, name, arguments):
+            if name == "get_equity_positions":
+                raise ConnectionError("connection reset by peer")
+            return super().call_tool(name, arguments)
+
+    fake = Dropping(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO},
+                    error_tools={"get_equity_orders"})
+    broker = make_broker(profiles, fake, enabled=True)
+    assert broker.usable
+    with pytest.raises(BrokerUnavailable, match="returned an error"):
+        broker.get_open_orders()
+    assert broker.usable
+    with pytest.raises(BrokerUnavailable, match="ConnectionError"):
+        broker.get_positions()
+    assert not broker.usable
+
+    broker = make_broker(profiles, FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS}), enabled=True)
+
+    def timed_out(coro, timeout):
+        raise TimeoutError
+
+    broker._portal = SimpleNamespace(call=timed_out, close=lambda: None)
+    with pytest.raises(BrokerUnavailable, match="timed out"):
+        broker.get_account()
+    assert not broker.usable
+
+
+def test_a_session_whose_tools_cannot_be_bound_is_closed_not_abandoned(profiles, monkeypatch):
+    """A kept read session reconnects on the next read after a failure, so a venue missing a
+    capability must not leave a portal thread and its descriptors behind on every poll."""
+    from agentic_trading.broker import robinhood
+
+    closed = []
+
+    class Portal:
+        def call(self, coro, timeout):
+            if asyncio.iscoroutine(coro):
+                coro.close()            # _aconnect; the session is put in place below instead
+                return None
+            return coro
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(robinhood, "_Portal", Portal)
+    broker = RobinhoodBroker(profiles, connect=False)
+    broker.storage = SimpleNamespace(connected=True)
+    broker._session = FakeMCP(["get_accounts"])
+    with pytest.raises(BrokerUnavailable, match="does not expose a tool"):
+        broker.connect()
+    assert closed == [True] and not broker.usable
+
+
+def test_the_session_is_renewed_exactly_when_a_new_one_would_refresh_the_token(profiles, tmp_path):
+    """Kept past this moment a session carries a token the MCP client will not refresh; opened
+    before it, a new session would carry the same old token and change nothing."""
+    storage = FileTokenStorage(tmp_path / "token.json")
+    asyncio.run(storage.set_tokens(token(expires_in=3600)))
+    broker = RobinhoodBroker(profiles, connect=False)
+    broker.storage = storage
+    stored = json.loads((tmp_path / "token.json").read_text())
+    assert broker.credential_deadline() == stored["expires_at"] - 60
+    assert asyncio.run(storage.get_tokens()).access_token == "access"
+
+    # Inside that last minute the stored token is withheld, so a session opened then refreshes.
+    stored["expires_at"] = datetime.now(UTC).timestamp() + 59
+    (tmp_path / "token.json").write_text(json.dumps(stored))
+    assert datetime.now(UTC).timestamp() >= broker.credential_deadline()
+    assert asyncio.run(storage.get_tokens()).access_token == ""
+
+    broker.storage = FileTokenStorage(tmp_path / "missing.json")
+    assert broker.credential_deadline() is None
+
+
+def test_micro_live_status_is_read_through_one_kept_session(profiles_with_state, tmp_path, monkeypatch):
+    """Every screen showing the real-money account polls /micro-live. Each poll used to open a
+    Robinhood session and close it again, three to thirteen seconds apiece."""
+    from agentic_trading.broker import robinhood
+    from agentic_trading.proposals import ProposalStore
+    from agentic_trading.service import Service
+
+    profiles = profiles_with_state
+    profiles.risk["micro_live_execution"]["enabled"] = True
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO})
+    opened = []
+
+    def connect(p):
+        opened.append(True)
+        return make_broker(p, fake, enabled=p.risk["micro_live_execution"]["enabled"])
+
+    monkeypatch.setattr(robinhood, "RobinhoodBroker", connect)
+    service = Service()
+    monkeypatch.setattr(service, "profiles", lambda: profiles)
+    monkeypatch.setattr(service, "_store", lambda _: ProposalStore(tmp_path / "proposals.json"))
+
+    first, second = service.micro_live(), service.micro_live()
+    assert first.connected and second.connected
+    assert first.account.equity == second.account.equity == 100.0
+    assert len(opened) == 1
+    assert [name for name, _ in fake.calls].count("get_portfolio") == 2
+
+    # Switching real money off replaces the session rather than reading on under the old config.
+    profiles.risk["micro_live_execution"]["enabled"] = False
+    third = service.micro_live()
+    assert third.enabled is False and len(opened) == 2
+
+    service.close()
+    assert not service._venue_reads.is_open
+
+
+def test_a_venue_that_cannot_be_reached_still_reads_as_disconnected(profiles_with_state, tmp_path,
+                                                                     monkeypatch):
+    from agentic_trading.broker import robinhood
+    from agentic_trading.proposals import ProposalStore
+    from agentic_trading.service import Service
+
+    def refuse(_profiles):
+        raise robinhood.RobinhoodNotConnected("no Robinhood OAuth token. Run `uv run ct-robinhood connect`")
+
+    monkeypatch.setattr(robinhood, "RobinhoodBroker", refuse)
+    service = Service()
+    monkeypatch.setattr(service, "profiles", lambda: profiles_with_state)
+    monkeypatch.setattr(service, "_store", lambda _: ProposalStore(tmp_path / "proposals.json"))
+    status = service.micro_live()
+    assert status.connected is False and status.account is None
+    assert status.connect_error.startswith("no Robinhood OAuth token")
+    assert "PF01" in status.blocking

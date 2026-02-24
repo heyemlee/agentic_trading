@@ -291,6 +291,10 @@ def service_for(profiles, store, broker, monkeypatch):
     monkeypatch.setattr(service, 'profiles', lambda: profiles)
     monkeypatch.setattr(service, '_store', lambda _: store)
     monkeypatch.setattr(service, '_broker', lambda *_: broker)
+    # Approval, execution and reconciliation each open a venue session of their own. The one
+    # kept for reads is for reads that record nothing when they fail; none of these is that.
+    monkeypatch.setattr(service, '_read_venue', lambda *_: pytest.fail(
+        'orders and their reconciliation must not use the venue session kept for reads'))
     return service
 
 

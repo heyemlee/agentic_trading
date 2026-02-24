@@ -9,15 +9,16 @@ window.CT_API = (function () {
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
-     preference. One of these reads opens a fresh Robinhood OAuth/MCP session at the API and
-     holds it for four to eight seconds — /micro-live, on every call; /orders did too until
-     its venue-side list was dropped as a copy of what the Robinhood app shows — and while
-     that handshake runs it delays every other read, including ones that never touch a
-     venue. On 2026-09-15 this table was quickened to
-     5-15s across the board; the console then spent nearly all of its time handshaking, and a
-     tab change sat on a skeleton for seconds waiting for a SQLite read that takes 26 ms on
-     its own. Quickening a read here is therefore a decision about the whole console, not
-     about one screen. */
+     preference. /micro-live reads the Robinhood venue on every call: two venue calls on the
+     session the API keeps open for reads, and a full OAuth/MCP handshake of four to eight
+     seconds whenever that session has to be opened again (broker/read_session.py). Until
+     2026-09-16 every call opened a session of its own, and /orders did too until its
+     venue-side list was dropped as a copy of what the Robinhood app shows; while a handshake
+     runs it delays every other read, including ones that never touch a venue. On 2026-09-15
+     this table was quickened to 5-15s across the board; the console then spent nearly all of
+     its time handshaking, and a tab change sat on a skeleton for seconds waiting for a SQLite
+     read that takes 26 ms on its own. Quickening a read here is therefore a decision about the
+     whole console, not about one screen. */
   const SOURCES = {
     advisor: { path: () => '/advisor', ms: 5000 },
     health: { path: () => '/health', ms: 30000 },

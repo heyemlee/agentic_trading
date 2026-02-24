@@ -75,6 +75,12 @@ async def lifespan(app):
                 await asyncio.to_thread(_service.dispatch_notifications)
             except Exception:
                 logger.exception("notification dispatch failed")
+            try:
+                # The venue session kept for reads closes once nobody has read through it lately,
+                # rather than holding a thread and a connection open for a screen nobody watches.
+                await asyncio.to_thread(_service.release_idle_venue_session)
+            except Exception:
+                logger.exception("closing the idle venue session failed")
             await asyncio.sleep(15)
 
     async def heartbeat_loop():
@@ -100,6 +106,7 @@ async def lifespan(app):
                 await task
             except asyncio.CancelledError:
                 pass
+        await asyncio.to_thread(_service.close)
 
 
 app = FastAPI(

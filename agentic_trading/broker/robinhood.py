@@ -139,6 +139,10 @@ def _token_expiry(data: dict[str, Any]) -> float | None:
         return None
 
 
+#: An access token this close to its deadline is withheld from a new session, which then refreshes.
+REFRESH_WINDOW_SECONDS = 60
+
+
 class _Portal:
     """A private event loop on a background thread, so a sync adapter can drive an async client."""
 
@@ -206,7 +210,7 @@ class FileTokenStorage:
         # preserving the refresh token. That makes OAuthClientProvider take its refresh-token
         # branch before it sends the broker request.
         expires_at = _token_expiry(data)
-        if expires_at is not None and expires_at <= datetime.now(UTC).timestamp() + 60:
+        if expires_at is not None and expires_at <= datetime.now(UTC).timestamp() + REFRESH_WINDOW_SECONDS:
             return token.model_copy(update={"access_token": ""})
         return token
 
@@ -260,10 +264,26 @@ async def _prime_refresh_endpoint(auth, storage: FileTokenStorage, httpx2, serve
     auth.context.auth_server_url = str(metadata.issuer)
 
 
+def session_key(profiles) -> str:
+    """Everything a RobinhoodBroker is built from, as one comparable value.
+
+    A session kept open between reads was built from the configuration of its moment. When this
+    value changes -- the real-money switch, the account pin, the endpoint, the token file -- the
+    session is replaced rather than carried on under settings that are no longer the owner's.
+    """
+    return json.dumps({"project_dir": str(profiles.project_dir),
+                       "robinhood": profiles.risk.get("robinhood") or {},
+                       "micro_live_execution": profiles.risk.get("micro_live_execution") or {}},
+                      sort_keys=True, default=str)
+
+
 class RobinhoodBroker:
     """Implements the project's BrokerAdapter over Robinhood's official MCP tools."""
 
     name = "robinhood"
+    #: Set once a call fails below the tool level. A class default, so every instance starts out
+    #: usable however it was assembled.
+    _failed = False
 
     def __init__(self, profiles, *, redirect_handler=None, callback_handler=None, connect: bool = True):
         cfg = dict(profiles.risk.get("robinhood") or {})
@@ -297,6 +317,7 @@ class RobinhoodBroker:
                 "no Robinhood OAuth token. Run `uv run ct-robinhood connect` once: it opens a browser, "
                 "you sign in to Robinhood and approve access, and the token is stored locally."
             )
+        self._failed = False
         self._portal = _Portal()
         timeout = 300.0 if self._callback_handler is not None else self.connect_timeout
         try:
@@ -304,7 +325,14 @@ class RobinhoodBroker:
         except Exception as exc:
             self.close()
             raise BrokerUnavailable(f"could not connect to the Robinhood MCP: {type(exc).__name__}: {exc}") from exc
-        self._resolve_tools()
+        try:
+            self._resolve_tools()
+        except Exception:
+            # Closed here, or the portal -- a thread and three descriptors -- outlives the
+            # exception that abandoned it. The session kept for reads reconnects on its next
+            # read, so a venue missing a tool would otherwise leak a portal per poll.
+            self.close()
+            raise
 
     async def _aconnect(self) -> None:
         from contextlib import AsyncExitStack
@@ -370,6 +398,22 @@ class RobinhoodBroker:
             self._portal.close()
             self._portal = None
 
+    @property
+    def usable(self) -> bool:
+        """Whether another call may go down this session: open, and nothing below the tool level
+        has failed on it. A tool that answered with an error leaves the session usable."""
+        return self._session is not None and self._portal is not None and not self._failed
+
+    def credential_deadline(self) -> float | None:
+        """From when a session opened now would refresh the stored token, as a Unix time.
+
+        One refresh window before the access token lapses. A session kept past this moment
+        carries the old token to its end, which the MCP client answers with a browser sign-in;
+        one opened at it refreshes instead. None when the deadline is unknown.
+        """
+        expires_at = _token_expiry(self.storage._read())
+        return None if expires_at is None else expires_at - REFRESH_WINDOW_SECONDS
+
     # ------------------------------------------------------------------ calls
     #: Capabilities whose tool-level error is the venue refusing an order. Any other tool that
     #: answers with an error failed to tell us something, which is not a refusal of anything.
@@ -384,11 +428,15 @@ class RobinhoodBroker:
         try:
             result = self._portal.call(self._session.call_tool(tool, arguments or {}), timeout=self.call_timeout)
         except TimeoutError as exc:
+            # Below the tool level the session's state is unknown, so no further call goes down
+            # it: whatever keeps this session replaces it (see read_session.py).
+            self._failed = True
             raise BrokerUnavailable(
                 f"the Robinhood call {tool} timed out. If this was an order, it MAY have been placed: "
                 "look it up by client order id before any retry."
             ) from exc
         except Exception as exc:
+            self._failed = True
             raise BrokerUnavailable(f"the Robinhood call {tool} failed: {type(exc).__name__}: {exc}") from exc
         if getattr(result, "isError", False):
             # Execution reads a BrokerRejection as "the venue refused this order" and closes the
