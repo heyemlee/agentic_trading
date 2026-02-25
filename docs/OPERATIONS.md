@@ -131,6 +131,8 @@ in this project can reach a trading tool. Preflight check PF11 asserts that on e
 uv run ct-robinhood connect     # one-time OAuth in a browser; stores a local token
 uv run ct-robinhood status      # accounts, the Agentic account, bound tools
 uv run ct-robinhood preflight   # every gate that must pass before a real order
+uv run ct-robinhood probe get_earnings_calendar --args '{"symbols":["AAPL"]}'
+                                # one read-only tool's answer, verbatim; get_* and search only
 ```
 
 Tool names are discovered from the server and matched against candidates in config. A missing
@@ -378,7 +380,7 @@ uv run ct-api                                  # backend API for the frontend
 uv run ct-trigger manual --ticker VTI          # research now, conceptual core book
 uv run ct-trigger manual --bucket micro_live --ticker VTI   # research now, real money
 uv run ct-trigger scheduled --dry-run          # the schedule's decision, starting nothing
-uv run ct-robinhood status|preflight|connect   # the real-money venue
+uv run ct-robinhood status|preflight|connect|probe   # the real-money venue; probe reads one tool
 uv run ct-risk-scenarios                       # Hard Risk validation scenarios
 uv run ct-execution-scenarios                  # proposal, approval and execution validation
 uv run ct-state migrate                         # one-time import of legacy state

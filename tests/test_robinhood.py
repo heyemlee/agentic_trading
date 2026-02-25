@@ -971,3 +971,31 @@ def test_a_venue_that_cannot_be_reached_still_reads_as_disconnected(profiles_wit
     assert status.connected is False and status.account is None
     assert status.connect_error.startswith("no Robinhood OAuth token")
     assert "PF01" in status.blocking
+
+
+def test_probe_prints_a_read_tools_answer_verbatim_and_refuses_anything_that_acts(profiles, monkeypatch, capsys):
+    """Most of the venue's tools have never been called from this code. Before any of them is
+    parsed, its real answer is looked at once through ``ct-robinhood probe`` -- which must be
+    unable to send a name that places, cancels or edits, however it is spelled."""
+    from agentic_trading import robinhood_cli
+
+    fake = FakeMCP([*CURRENT_TOOLS, "get_equity_news"],
+                   {"get_equity_news": {"data": {"news": [{"headline": "Apple reports"}]}}})
+    broker = make_broker(profiles, fake)
+    monkeypatch.setattr("agentic_trading.broker.robinhood.RobinhoodBroker", lambda p: broker)
+    config = ["--config-dir", str(profiles.config_dir)]
+
+    assert robinhood_cli.main(["probe", "get_equity_news", "--args", '{"symbols": ["AAPL"]}', *config]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["payload"] == {"data": {"news": [{"headline": "Apple reports"}]}} and out["is_error"] is False
+    assert fake.calls == [("get_equity_news", {"symbols": ["AAPL"]})]
+
+    monkeypatch.setattr("agentic_trading.broker.robinhood.RobinhoodBroker",
+                        lambda p: pytest.fail("a refused name must not open a session"))
+    for name in ("place_equity_order", "cancel_equity_order", "create_alert", "update_watchlist",
+                 "exercise_option", "get_accounts; place_equity_order"):
+        assert robinhood_cli.main(["probe", name, *config]) == 2
+        assert "refused" in capsys.readouterr().out
+    assert robinhood_cli.main(["probe", "get_accounts", "--args", "[1]", *config]) == 2
+    assert robinhood_cli.main(["probe", *config]) == 2
+    assert fake.calls == [("get_equity_news", {"symbols": ["AAPL"]})]
