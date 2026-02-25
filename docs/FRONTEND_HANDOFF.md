@@ -118,6 +118,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/evaluation` | the forward record against a passive benchmark, including what it did not do |
 | GET | `/activity?kind=&subject=&cursor=&limit=` | the audit journal, newest first, with `next_cursor` |
 | GET | `/portfolio` | all buckets, positions, cash, sleeves |
+| GET | `/portfolio/ledgers` | the last ledger check's report, refusal figures (`cash_difference_usd`) included; opens no venue session |
 | GET | `/risk` | drawdown ladders and market regime |
 | GET | `/micro-live` | real-money status, preflight gates, capital boundary |
 | GET | `/proposals?include_closed=` | proposal list with product status and freshness |
@@ -136,6 +137,8 @@ for a product-level refusal and 500 for an unexpected fault.
 | POST | `/proposals/{id}/approve` | `{note?, confirm}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute |
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |
+| POST | `/portfolio/confirm` | `{ledger?, dry_run?}` | runs the ledger check and renews `as_of` where it agrees |
+| POST | `/portfolio/cashflow` | `{bucket, amount_usd, kind, date?, reason?}` | records funding (`deposit`/`withdrawal`, never return) or `income`/`fee` (return) against a bucket |
 | POST | `/research/{run_key}/cancel` | `{reason?}` | stops a queued or running job; 409 if it already finished |
 | POST | `/auth/sessions/{session_id}/revoke` | none | signs one device out; 404 if it is already gone |
 | POST | `/auth/sessions/revoke-others` | none | signs out every device except this one |

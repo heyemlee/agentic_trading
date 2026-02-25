@@ -601,6 +601,17 @@ def test_a_deposit_is_funding_and_never_a_return(sandbox_service):
     assert out.recorded_flows_usd == 150.0
     assert out.investment_pnl_usd == 0.0
 
+    # Interest, a dividend or a fee moves cash the same way, but it is the account's return,
+    # not its funding: equity moves, net deposits do not, and the result shows it.
+    record_cash_flow(ledger, bucket="core", amount_usd=3.0, kind="income", date="2026-09-03")
+    record_cash_flow(ledger, bucket="core", amount_usd=1.0, kind="fee", date="2026-09-03")
+    earned = sandbox_service.portfolio().accounts["conceptual"]
+    assert earned.equity_usd == out.equity_usd + 2.0
+    assert earned.recorded_flows_usd == 150.0 and earned.net_deposits_usd == out.net_deposits_usd
+    assert earned.investment_pnl_usd == 2.0
+    with pytest.raises(ValueError, match="kind must be"):
+        record_cash_flow(ledger, bucket="core", amount_usd=1.0, kind="gift")
+
 
 def test_portfolio_reports_the_book_it_read_and_names_the_one_it_could_not(
         auth_client, monkeypatch, sandbox_service):
@@ -771,6 +782,17 @@ def test_a_dry_run_confirmation_writes_nothing(sandbox_service):
     assert load_portfolio(ledger).as_of == before
 
 
+def test_the_last_ledger_check_is_read_back_without_opening_the_venue(sandbox_service, monkeypatch):
+    """The Portfolio screen shows the last check on every visit and offers its refusal
+    figures for recording, so the report is read from the database, never by checking again."""
+    assert sandbox_service.ledger_check() == {}                  # nothing has checked yet
+    monkeypatch.setattr(sandbox_service, "_broker",
+                        lambda *_args: pytest.fail("reading the last check must not open the venue"))
+    sandbox_service.confirm_portfolio(ledger="conceptual")
+    kept = sandbox_service.ledger_check()
+    assert kept["confirmed"] is True and kept["ledgers"][0]["ledger"] == "conceptual" and kept["at"]
+
+
 def test_confirm_route_needs_a_session(auth_client, monkeypatch, sandbox_service):
     from fastapi.testclient import TestClient
 
@@ -780,6 +802,8 @@ def test_confirm_route_needs_a_session(auth_client, monkeypatch, sandbox_service
     result = auth_client.post("/portfolio/confirm", json={"ledger": "conceptual"})
     assert result.status_code == 200
     assert result.json()["confirmed"] is True
+    kept = auth_client.get("/portfolio/ledgers")
+    assert kept.status_code == 200 and kept.json()["confirmed"] is True
 
     anonymous = TestClient(app, base_url="https://testserver")
     anonymous.headers.update({"Origin": "https://testserver", "X-CT-Request": "1",

@@ -262,6 +262,10 @@ def test_a_check_leaves_its_report_and_only_agreement_counts_as_the_activity(pro
     # never booked: it could as well be interest, a fee or a loss.
     assert "the venue holds $250.00 more than the ledger" in error
     assert "ct-state cashflow --bucket micro_live --amount 250.00 --kind deposit" in error
+    # ...and as figures, for the Portfolio screen's two recording buttons.
+    assert kept["ledgers"][0]["cash_difference_usd"] == 250.0
+    assert kept["ledgers"][0]["bucket"] == "micro_live"
+    assert (kept["ledgers"][0]["venue_cash_usd"], kept["ledgers"][0]["ledger_cash_usd"]) == (350.0, 100.0)
     assert load_portfolio(project / "state" / "micro_live_portfolio.yaml").as_of == TRADE_DATE
     assert "conceptual as_of" in operations.heartbeats(db)["ledger_confirm"]["detail"], \
         "a refusal leaves the last agreement's heartbeat where it was"

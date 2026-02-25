@@ -466,11 +466,19 @@ def confirm_portfolio(body: PortfolioConfirm) -> dict[str, Any]:
     return _ok(_service.confirm_portfolio, ledger=body.ledger, dry_run=body.dry_run)
 
 
+@app.get("/portfolio/ledgers", tags=["portfolio"],
+         summary="The last ledger check's report, refusal figures included; opens no venue session")
+def ledger_check() -> dict[str, Any]:
+    return _ok(_service.ledger_check)
+
+
 class CashflowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bucket: Literal["core", "sandbox", "micro_live"]
     amount_usd: float = Field(gt=0, le=1_000_000)
-    kind: Literal["deposit", "withdrawal"] = "deposit"
+    # deposit/withdrawal is funding the person moved and never counts as return;
+    # income/fee is interest, a dividend or a charge, and does.
+    kind: Literal["deposit", "withdrawal", "income", "fee"] = "deposit"
     date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     reason: str = Field(default="", max_length=500)
 

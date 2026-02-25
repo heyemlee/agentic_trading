@@ -13,7 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .portfolio import confirm_from_broker, confirm_unbacked, last_session_date, load_portfolio
+from .portfolio import (
+    CashMismatch,
+    confirm_from_broker,
+    confirm_unbacked,
+    last_session_date,
+    load_portfolio,
+)
 from .profile import Profiles
 from .proposals import EXECUTED
 from .state_db import StateDB
@@ -110,6 +116,11 @@ def confirm_ledgers(profiles: Profiles, store, *, ledger: str = "all", trade_dat
                        cash_usd=round(sum(b.cash_usd for b in state.buckets.values()), 2))
         except Exception as exc:  # noqa: BLE001 - anything that stops the check refuses the date
             row["error"] = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, CashMismatch):
+                # The figures, so the Portfolio screen can offer to record the difference as
+                # what the person says it was, amount filled in. Never booked from here.
+                row.update(bucket=exc.bucket, cash_difference_usd=exc.difference_usd,
+                           venue_cash_usd=exc.venue_cash_usd, ledger_cash_usd=exc.ledger_cash_usd)
         report["ledgers"].append(row)
 
     report["confirmed"] = bool(report["ledgers"]) and all(r["confirmed"] for r in report["ledgers"])

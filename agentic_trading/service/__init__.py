@@ -381,6 +381,16 @@ class Service:
             ),
         )
 
+    def ledger_check(self) -> dict[str, Any]:
+        """The last ledger check's report, whoever ran it: the daily job, the CLI or the console.
+
+        Read from the state database, never by opening the venue: the Portfolio screen shows
+        it on every visit, and a refusal's figures are what its two recording buttons offer.
+        """
+        from ..ledger_confirm import REPORT
+
+        return self.state_db().read_meta(REPORT, {}) or {}
+
     def confirm_portfolio(self, *, ledger: str = "all", dry_run: bool = False) -> dict[str, Any]:
         """Renew the ledgers' as_of, but only where a check agrees with them.
 

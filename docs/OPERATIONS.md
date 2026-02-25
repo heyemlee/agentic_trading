@@ -82,8 +82,12 @@ any standing condition it repeats each quiet period until a check agrees, so aft
 ledger right, confirm it from the console rather than waiting for the next morning's job. A
 cash difference names the figure and the `ct-state cashflow` command to record it *if* it was
 a deposit or withdrawal; nothing books the difference by itself, because it could as well be
-interest, a fee or a loss. `ct-ops status` and the System screen list `ledger_confirm` beside
-the other activities, overdue when no check has agreed for two days.
+interest, a fee or a loss. The Portfolio screen shows the same refusal with two buttons that
+record the figure as what the reader says it was -- money they moved (`deposit`/`withdrawal`,
+never return) or income the account earned or was charged (`income`/`fee`, part of the return)
+-- on a second tap, then run the check again (`GET /portfolio/ledgers`, `POST
+/portfolio/cashflow`, `POST /portfolio/confirm`). `ct-ops status` and the System screen list
+`ledger_confirm` beside the other activities, overdue when no check has agreed for two days.
 
 What each book is held against:
 

@@ -378,11 +378,12 @@ test('an unconfirmed ledger still reaches the page, and still cannot be approved
   assert.equal(c.CT_API.loaded(['portfolio']), true);
 });
 
-function ledgerPage(post, portfolio) {
+function ledgerPage(post, portfolio, fetchJSON) {
   const c = context(); c.run('console.js');
   c.Console.mount = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
-  c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => { c.reread = true; }, post };
+  c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => { c.reread = true; }, post,
+               fetchJSON: fetchJSON || (async () => ({})) };
   c.CT.advisor = { stale: false, jobs: [], snapshot: { fetched_at: '2026-09-11T12:00:00Z', accounts: [] } };
   c.CT.portfolio = portfolio;
   c.run('pages/portfolio.js');
@@ -432,6 +433,69 @@ test('a reader who cannot write is not offered the check', () => {
   const c = ledgerPage(async () => ({}), heldBack);
   c.CT_API.writesEnabled = false; c.render();
   assert.equal(c.element('confirm-ledger').disabled, true);
+});
+
+/* The daily job's refusal over cash carries the figure. The card shows it before the ledger
+   has expired, and records it as what the reader says it was — on a second tap, with the
+   amount filled in — then runs the same check again. */
+const refusedOverCash = {
+  date: '2026-09-17', confirmed: false, at: '2026-09-17T10:45:00+00:00',
+  ledgers: [{ ledger: 'micro_live', bucket: 'micro_live', error: 'CashMismatch: cash mismatch: broker reports $350.00',
+              cash_difference_usd: 250, venue_cash_usd: 350, ledger_cash_usd: 100 }],
+};
+
+test('a cash difference the check found is shown with the figures while the ledger is still current', async () => {
+  const c = ledgerPage(async () => ({}), { ...heldBack, errors: {} }, async () => refusedOverCash);
+  await flush();
+  assert.equal(c.element('ledger-notice').hidden, false);
+  assert.equal(c.element('ledger-held').hidden, true, 'the figures are not withheld yet');
+  assert.match(c.element('ledger-check').textContent, /pf.lastCheck.*pf.checkRefused/);
+  assert.equal(c.element('ledger-diff').hidden, false);
+  assert.match(c.element('diff-text').textContent, /pf.cashMore.*250/);
+  assert.match(c.element('book-transfer').textContent, /cf.deposit/);
+  assert.match(c.element('book-income').textContent, /cf.income/);
+
+  const agreed = ledgerPage(async () => ({}), { ...heldBack, errors: {} },
+    async () => ({ date: '2026-09-17', confirmed: true, ledgers: [{ ledger: 'micro_live', confirmed: true }] }));
+  await flush();
+  assert.equal(agreed.element('ledger-notice').hidden, true);
+});
+
+test('recording the difference takes a second tap, sends the figure as the chosen kind and checks again', async () => {
+  const sent = [];
+  const post = async (path, body) => {
+    sent.push([path, body]);
+    return path === '/portfolio/confirm'
+      ? { confirmed: true, ledgers: [{ ledger: 'micro_live', confirmed: true }] }
+      : { bucket: 'micro_live', cash_usd: 350 };
+  };
+  const c = ledgerPage(post, { ...heldBack, errors: {} }, async () => refusedOverCash);
+  await flush();
+
+  await c.element('book-transfer').events.click();
+  assert.equal(sent.length, 0, 'the first tap only arms the button');
+  assert.match(c.element('book-transfer').textContent, /pf.tapAgain/);
+  await c.element('book-income').events.click();
+  assert.equal(sent.length, 0, 'switching buttons re-arms rather than sends');
+  await c.element('book-income').events.click(); await flush();
+
+  assert.deepEqual(sent.map(([path]) => path), ['/portfolio/cashflow', '/portfolio/confirm']);
+  /* Objects made inside the page's realm have another prototype, so compare by value. */
+  assert.equal(JSON.stringify(sent[0][1]), JSON.stringify({ bucket: 'micro_live', amount_usd: 250, kind: 'income',
+                                                            reason: 'recorded from the ledger check of 2026-09-17' }));
+  assert.equal(JSON.stringify(sent[1][1]), JSON.stringify({ ledger: 'micro_live' }));
+  assert.match(c.element('book-status').textContent, /pf.booked/);
+  assert.equal(c.reread, true, 'the figures are read again after the book changed');
+
+  const less = ledgerPage(post, { ...heldBack, errors: {} }, async () => ({ ...refusedOverCash,
+    ledgers: [{ ...refusedOverCash.ledgers[0], cash_difference_usd: -40 }] }));
+  await flush();
+  assert.match(less.element('diff-text').textContent, /pf.cashLess.*40/);
+  assert.match(less.element('book-transfer').textContent, /cf.withdrawal/);
+  assert.match(less.element('book-income').textContent, /cf.fee/);
+  sent.length = 0;
+  await less.element('book-transfer').events.click(); await less.element('book-transfer').events.click(); await flush();
+  assert.deepEqual(sent[0][1].kind, 'withdrawal'); assert.equal(sent[0][1].amount_usd, 40);
 });
 
 test('shared notice card keeps the full warning and escapes its text', () => {

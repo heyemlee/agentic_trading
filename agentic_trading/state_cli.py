@@ -318,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="status: exit 3 when an order is still open at the broker")
     parser.add_argument("--bucket", help="cashflow: core, sandbox or micro_live")
     parser.add_argument("--amount", type=float, help="cashflow: positive USD amount")
-    parser.add_argument("--kind", choices=("deposit", "withdrawal"), default="deposit")
+    parser.add_argument("--kind", choices=("deposit", "withdrawal", "income", "fee"), default="deposit",
+                        help="cashflow: deposit/withdrawal is funding, never return; income/fee is "
+                             "interest, a dividend or a charge, and is return")
     parser.add_argument("--date", help="cashflow: yyyy-mm-dd, defaults to today")
     parser.add_argument("--note", default="", help="cashflow: free text")
     parser.add_argument("--ledger", choices=("all", "conceptual", "micro_live"), default="all",

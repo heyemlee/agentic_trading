@@ -23,9 +23,32 @@ from pydantic import BaseModel, ConfigDict, Field
 from .profile import Profiles
 from .state_db import StateDB
 
+#: What a cash flow can be. Funding is money the person moved and is never a gain or a loss;
+#: income is money the account earned or was charged -- interest, a dividend, a fee -- and is
+#: part of the return. Return is equity less funding, so the two must never be confused.
+FUNDING_KINDS = ("deposit", "withdrawal")
+INCOME_KINDS = ("income", "fee")
+
 
 class PortfolioError(ValueError):
     """Portfolio state is missing, malformed, stale or inconsistent: fail closed."""
+
+
+class CashMismatch(PortfolioError):
+    """The venue's cash and the ledger's disagree by more than the tolerance.
+
+    Carries the figures, so a screen can offer to record the difference as whatever the
+    person says it was -- a transfer they made, or income the account earned -- with the
+    amount already filled in. The message alone would have to be parsed for that.
+    """
+
+    def __init__(self, message: str, *, bucket: str, difference_usd: float,
+                 venue_cash_usd: float, ledger_cash_usd: float):
+        super().__init__(message)
+        self.bucket = bucket
+        self.difference_usd = difference_usd
+        self.venue_cash_usd = venue_cash_usd
+        self.ledger_cash_usd = ledger_cash_usd
 
 
 class BucketCash(BaseModel):
@@ -75,17 +98,20 @@ class RealizedTrade(BaseModel):
 
 
 class CashFlow(BaseModel):
-    """Money entering or leaving a bucket, which is never a gain or a loss.
+    """Money entering or leaving a bucket other than through a trade.
 
-    Without this record the only way to explain a rise in equity is to call it performance, and
-    a funded account then reports its own deposits as return.
+    ``deposit``/``withdrawal`` is funding, which is never a gain or a loss: without this record
+    the only way to explain a rise in equity is to call it performance, and a funded account
+    then reports its own deposits as return. ``income``/``fee`` is interest, a dividend or a
+    charge -- cash that moved and *is* return, recorded so the ledger's cash can agree with the
+    venue's without a deposit being invented to explain it.
     """
 
     model_config = ConfigDict(extra="forbid")
     date: str
     bucket: str
-    amount_usd: float                     # positive funds the bucket, negative takes money out
-    kind: str = "deposit"
+    amount_usd: float                     # positive adds to the bucket's cash, negative takes it out
+    kind: str = "deposit"                 # see FUNDING_KINDS and INCOME_KINDS
     note: str | None = None
 
 
@@ -441,11 +467,13 @@ def snapshot_from_broker(
         difference = round(account.cash - ledger_cash, 2)
         bucket = next(iter(ledger.buckets)) if len(ledger.buckets) == 1 else "<bucket>"
         kind, direction = ("deposit", "more") if difference > 0 else ("withdrawal", "less")
-        raise PortfolioError(
+        raise CashMismatch(
             f"cash mismatch: broker reports ${account.cash:,.2f}, the ledger's buckets sum to "
             f"${ledger_cash:,.2f} (tolerance ${tolerance:,.2f}); the venue holds "
             f"${abs(difference):,.2f} {direction} than the ledger. If that is a {kind}, record it: "
-            f"ct-state cashflow --bucket {bucket} --amount {abs(difference):.2f} --kind {kind}"
+            f"ct-state cashflow --bucket {bucket} --amount {abs(difference):.2f} --kind {kind}",
+            bucket=bucket, difference_usd=difference,
+            venue_cash_usd=round(account.cash, 2), ledger_cash_usd=round(ledger_cash, 2),
         )
 
     positions, prices = [], {}
@@ -562,24 +590,43 @@ def realized_on(state: PortfolioState, bucket: str, trade_date: str) -> float:
 
 
 def cash_flow_summary(state: PortfolioState) -> dict[str, float]:
-    """Net deposits per bucket, from the flows actually recorded. Empty when none were."""
+    """Net funding per bucket -- deposits less withdrawals -- from the flows actually recorded.
+
+    Income and fees are left out on purpose: they moved cash too, but they are the account's
+    return, and this figure is what return is measured against.
+    """
     totals: dict[str, float] = defaultdict(float)
     for flow in state.cash_flows:
-        totals[flow.bucket] += float(flow.amount_usd)
+        if flow.kind in FUNDING_KINDS:
+            totals[flow.bucket] += float(flow.amount_usd)
+    return {bucket: round(value, 2) for bucket, value in totals.items()}
+
+
+def income_summary(state: PortfolioState) -> dict[str, float]:
+    """Net income per bucket -- interest and dividends less fees -- from the flows recorded."""
+    totals: dict[str, float] = defaultdict(float)
+    for flow in state.cash_flows:
+        if flow.kind in INCOME_KINDS:
+            totals[flow.bucket] += float(flow.amount_usd)
     return {bucket: round(value, 2) for bucket, value in totals.items()}
 
 
 def record_cash_flow(path: str | Path, *, bucket: str, amount_usd: float, kind: str = "deposit",
                      date: str | None = None, note: str = "") -> PortfolioState:
-    """Fund or defund a bucket in one durable commit, moving cash and recording the reason."""
+    """Move cash in or out of a bucket in one durable commit, recording what the money was.
+
+    ``deposit``/``withdrawal`` is funding the person moved; ``income``/``fee`` is what the
+    account earned or was charged. Both change cash the same way; only the first kind is
+    excluded from return.
+    """
     import math
 
     path = Path(path)
-    if kind not in ("deposit", "withdrawal"):
-        raise ValueError("kind must be deposit or withdrawal")
+    if kind not in (*FUNDING_KINDS, *INCOME_KINDS):
+        raise ValueError("kind must be deposit, withdrawal, income or fee")
     if not math.isfinite(amount_usd) or amount_usd <= 0:
         raise ValueError("amount must be a positive finite number of dollars")
-    signed = amount_usd if kind == "deposit" else -amount_usd
+    signed = amount_usd if kind in ("deposit", "income") else -amount_usd
     db = StateDB(path)
     with db.transaction() as conn:
         state = load_portfolio(path)
@@ -588,7 +635,7 @@ def record_cash_flow(path: str | Path, *, bucket: str, amount_usd: float, kind: 
         moved = round(state.buckets[bucket].cash_usd + signed, 2)
         if moved < 0:
             raise ValueError(f"{bucket} holds ${state.buckets[bucket].cash_usd:,.2f}; "
-                             f"cannot withdraw ${amount_usd:,.2f}")
+                             f"cannot take ${amount_usd:,.2f} out of it")
         state.buckets[bucket].cash_usd = moved
         state.cash_flows.append(CashFlow(
             date=date or datetime.now(UTC).date().isoformat(), bucket=bucket,

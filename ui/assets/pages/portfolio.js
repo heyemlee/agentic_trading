@@ -57,8 +57,41 @@ window.Console.page('portfolio', function (document) {
       await API.readOnce('portfolio');
     } catch (error) {
       confirmStatus = C.t('pf.confirmRefused', { error: error.message });
-    } finally { confirming = false; render(); }
+    } finally { confirming = false; loadCheck(); render(); }
   });
+
+  /* The last ledger check, whoever ran it — the 03:45 job, ct-state confirm, the button
+     above — read from its report rather than by opening the venue again. A refusal over
+     cash carries the figure, and the two buttons record that figure as what the reader says
+     it was: money they moved, which is never return, or income and fees, which are. The
+     amount is never typed and never guessed, and a second tap confirms before anything is
+     sent. Then the same check runs again, so agreement is proven rather than assumed. */
+  let check = {}, armedKind = null, booking = false, bookStatus = '';
+  async function loadCheck() {
+    if (window.CT_DEMO || !API.fetchJSON) return;
+    try { check = (await API.fetchJSON('/portfolio/ledgers')) || {}; } catch (_) { check = {}; }
+    render();
+  }
+  const refusedRow = () => (check.ledgers || []).find((l) => l.error && l.cash_difference_usd != null);
+  async function book(kind) {
+    const row = refusedRow();
+    if (!row || booking || !API.writesEnabled) return;
+    if (armedKind !== kind) { armedKind = kind; render(); return; }
+    armedKind = null; booking = true; bookStatus = C.t('pf.booking'); render();
+    const diff = row.cash_difference_usd;
+    const what = kind === 'transfer' ? (diff > 0 ? 'deposit' : 'withdrawal') : (diff > 0 ? 'income' : 'fee');
+    try {
+      await API.post('/portfolio/cashflow', { bucket: row.bucket, amount_usd: Math.abs(diff), kind: what,
+        reason: 'recorded from the ledger check of ' + (check.date || '') });
+      const report = await API.post('/portfolio/confirm', { ledger: row.ledger });
+      bookStatus = report.confirmed ? C.t('pf.booked')
+        : C.t('pf.confirmRefused', { error: (report.ledgers || []).filter((l) => l.error).map((l) => l.error).join(' · ') || report.detail || '' });
+      await API.readOnce('portfolio');
+    } catch (error) { bookStatus = C.t('pf.bookFailed', { error: error.message }); }
+    finally { booking = false; await loadCheck(); }
+  }
+  document.getElementById('book-transfer').addEventListener('click', () => book('transfer'));
+  document.getElementById('book-income').addEventListener('click', () => book('income'));
 
   /* Everything below is re-run on every poll cycle. */
   function render() {
@@ -101,9 +134,30 @@ window.Console.page('portfolio', function (document) {
        verbatim as the API worded it. */
     const failures = Object.values(D.portfolio.errors || {});
     const withheld = failures.length > 0 && Object.keys(B).length === 0;
+    /* The card also carries the last check while it refused, before the ledger has expired:
+       the figures are still on screen, and the reader can put the book right today. */
+    const refusals = (check.ledgers || []).filter((l) => l.error).map((l) => l.error);
     const notice = document.getElementById('ledger-notice');
-    notice.hidden = !failures.length;
-    document.getElementById('ledger-reason').textContent = failures.join(' · ');
+    notice.hidden = !failures.length && !refusals.length;
+    document.getElementById('ledger-held').hidden = !failures.length;
+    document.getElementById('ledger-check').textContent = check.date
+      ? C.t('pf.lastCheck', { date: C.dateOnly(check.date),
+                              result: C.t(check.confirmed ? 'pf.checkAgreed' : 'pf.checkRefused') })
+      : '';
+    document.getElementById('ledger-reason').textContent = (failures.length ? failures : refusals).join(' · ');
+    const row = refusedRow();
+    document.getElementById('ledger-diff').hidden = !row;
+    if (row) {
+      const more = row.cash_difference_usd > 0, amount = C.usd(Math.abs(row.cash_difference_usd));
+      document.getElementById('diff-text').textContent = C.t(more ? 'pf.cashMore' : 'pf.cashLess', { amount });
+      const transfer = document.getElementById('book-transfer'), income = document.getElementById('book-income');
+      transfer.textContent = armedKind === 'transfer' ? C.t('pf.tapAgain')
+        : C.t('pf.bookTransfer', { kind: C.t(more ? 'cf.deposit' : 'cf.withdrawal'), amount });
+      income.textContent = armedKind === 'income' ? C.t('pf.tapAgain')
+        : C.t('pf.bookIncome', { kind: C.t(more ? 'cf.income' : 'cf.fee'), amount });
+      transfer.disabled = income.disabled = booking || !API.writesEnabled;
+    }
+    document.getElementById('book-status').textContent = bookStatus;
     document.getElementById('confirm-ledger').disabled = confirming || !API.writesEnabled;
     document.getElementById('confirm-status').textContent = confirmStatus;
     /* Nothing conceptual is on screen, so the mixed-money warning would be
@@ -204,4 +258,5 @@ window.Console.page('portfolio', function (document) {
   }
 
   C.live(['portfolio'], render, ['advisor']);
+  loadCheck();
 });
