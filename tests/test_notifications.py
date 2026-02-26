@@ -23,12 +23,15 @@ def service(tmp_path, monkeypatch):
     # The notifications read the market regime and the last session through the data layer;
     # which of them fire must not depend on today's market or on reaching it.
     from agentic_trading import risk
-    from agentic_trading import service as service_module
     from agentic_trading.risk_scenarios import regime
+    from agentic_trading.service import base, books
     from tests.conftest import recent_session
 
     monkeypatch.setattr(risk, "assess_regime", lambda *_args, **_kwargs: regime("NORMAL"))
-    monkeypatch.setattr(service_module, "_last_session", lambda *_args, **_kwargs: recent_session())
+    # Each module that anchors to a session resolves its own name, so each one is stubbed: the
+    # kept readings in base, the priced portfolio in books.
+    for module in (base, books):
+        monkeypatch.setattr(module, "_last_session", lambda *_args, **_kwargs: recent_session())
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"
@@ -135,11 +138,12 @@ def test_the_notification_pass_does_not_open_the_venue_every_tick(service, monke
     preflight: two handshakes a tick."""
     from types import SimpleNamespace
 
-    from agentic_trading import service as service_module
+    from agentic_trading.service import books
 
     assert service._micro_enabled(service.profiles())
     now = [1000.0]
-    monkeypatch.setattr(service_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    # The venue-probe cooldown is read where the probe is: service/books.py.
+    monkeypatch.setattr(books, "time", SimpleNamespace(monotonic=lambda: now[0]))
     probes = []
     monkeypatch.setattr(service, "micro_live",
                         lambda: probes.append(now[0]) or SimpleNamespace(connect_error="token expired"))

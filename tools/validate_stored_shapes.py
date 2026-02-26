@@ -90,7 +90,7 @@ def checks(service: Any) -> list[tuple[str, Callable[[], str]]]:
     this tool must be safe to run against an armed deployment. The rows ``orders`` projects are
     read here directly instead, which is the half of it that stored data can contradict.
     """
-    from agentic_trading.service import _hard_risk_view
+    from agentic_trading.service.approvals import _hard_risk_view
     from agentic_trading.service.shapes import Fill
     from agentic_trading.state_db import StateDB
 

@@ -116,7 +116,7 @@ def test_calls_today_are_counted_by_utc_date_from_the_end_of_the_audit(sandbox_s
     import json as _json
     from datetime import UTC, datetime, timedelta, timezone
 
-    import agentic_trading.service as service_module
+    from agentic_trading.service import system as service_module
 
     now = datetime.now(UTC)
     # an offset that puts the local date on a different day from the UTC one, whatever the hour
@@ -392,7 +392,7 @@ def test_a_proposal_whose_research_survives_carries_the_case_and_the_rules(sandb
 
 def test_a_record_that_says_nothing_never_reads_as_a_waived_human(sandbox_service):
     """An empty Hard Risk block must not come back saying no approval is needed."""
-    from agentic_trading.service import _hard_risk_view
+    from agentic_trading.service.approvals import _hard_risk_view
 
     view = _hard_risk_view({})
     assert view.requires_human_approval is True
@@ -874,7 +874,7 @@ def test_the_regime_is_assessed_once_for_everything_that_polls_it(sandbox_servic
     assert regime["level"] == "NORMAL" and regime["checked_at"]
 
     # A new session is a new assessment, at once.
-    monkeypatch.setattr("agentic_trading.service._last_session", lambda: "2031-01-02")
+    monkeypatch.setattr("agentic_trading.service.base._last_session", lambda: "2031-01-02")
     assert sandbox_service.risk_state()["regime"]["checked_at"]
     assert assessed == [assessed[0], "2031-01-02"]
 
@@ -922,7 +922,7 @@ def test_the_console_portfolio_is_kept_until_something_it_was_read_from_changes(
     sandbox_service.kept_portfolio()
     assert len(books) == 8
 
-    monkeypatch.setattr("agentic_trading.service._last_session", lambda: "2031-01-02")
+    monkeypatch.setattr("agentic_trading.service.base._last_session", lambda: "2031-01-02")
     sandbox_service.kept_portfolio()                               # the session rolled over
     assert len(books) == 10
 

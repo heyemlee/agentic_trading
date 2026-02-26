@@ -394,7 +394,7 @@ def test_an_exception_out_of_execution_ends_in_a_recorded_answer(tmp_path, monke
 
 
 def test_an_exception_after_the_order_intent_is_left_for_reconciliation(tmp_path, monkeypatch):
-    import agentic_trading.service as service_module
+    from agentic_trading.service import approvals as service_module
 
     _, p, _, store, service = waiting(tmp_path, monkeypatch)
 

@@ -12,20 +12,20 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from agentic_trading import service as service_module
+from agentic_trading.service import base as base_module
 
 SESSION = "2026-09-15"
 
 
 @pytest.fixture(autouse=True)
 def no_remembered_probes(monkeypatch):
-    monkeypatch.setattr(service_module, "_session_probes", {}, raising=False)
+    monkeypatch.setattr(base_module, "_session_probes", {})
 
 
 @pytest.fixture
 def clock(monkeypatch):
     now = [5_000.0]
-    monkeypatch.setattr(service_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(base_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
     return now
 
 
@@ -45,22 +45,22 @@ def vendor(monkeypatch):
 
 
 def test_a_session_probed_before_its_bar_was_published_is_asked_again(clock, vendor):
-    assert service_module._session_has_data(SESSION) is False
+    assert base_module._session_has_data(SESSION) is False
 
     vendor.published.add(SESSION)
     # Within the retry window the "no" stands, so a console polling every few seconds does not
     # send each poll to the vendor.
-    assert service_module._session_has_data(SESSION) is False
+    assert base_module._session_has_data(SESSION) is False
     assert vendor.asked == [SESSION]
 
-    clock[0] += service_module.SESSION_PROBE_RETRY_SECONDS + 1
-    assert service_module._session_has_data(SESSION) is True
+    clock[0] += base_module.SESSION_PROBE_RETRY_SECONDS + 1
+    assert base_module._session_has_data(SESSION) is True
     assert vendor.asked == [SESSION, SESSION]
 
 
 def test_a_published_session_is_remembered(clock, vendor):
     vendor.published.add(SESSION)
-    assert service_module._session_has_data(SESSION) is True
+    assert base_module._session_has_data(SESSION) is True
     clock[0] += 30 * 86_400
-    assert service_module._session_has_data(SESSION) is True
+    assert base_module._session_has_data(SESSION) is True
     assert vendor.asked == [SESSION]
