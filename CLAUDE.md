@@ -87,8 +87,10 @@ agentic_trading/     the package
   api/               HTTP layer only — a thin FastAPI wrapper over service/
   service/           every product operation, plain Python, no HTTP; shared by the CLI, the
                      scheduler and the API. One module per domain, combined into `Service` by
-                     mixins in `__init__.py`; `approvals.py` is the only one that may import
-                     what places an order, held there by tests/test_money_paths.py
+                     mixins in `__init__.py`. `service/approvals.py` is the only live path that
+                     places an order: `cli.py` (ct-approve) imports the same function but is
+                     refused above `execution_policy.stage` 2, and execution_scenarios.py only
+                     ever builds a SimulatedBroker. tests/test_money_paths.py holds all three
   broker/            venue adapters (simulated, Robinhood)
   llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime
