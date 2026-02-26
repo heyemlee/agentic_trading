@@ -136,7 +136,7 @@ app = FastAPI(
         "Research runs on a Claude subscription, a deterministic Hard Risk Layer decides what is "
         "permitted, and the investor approves anything that touches money. Approval authorises an "
         "idea, never a stored order: the world is re-read and re-checked before anything is sent.\n\n"
-        "Real-money execution is confined to a $100 Micro-Live account at Robinhood and is disabled "
+        "Real-money execution is confined to a $100 Agentic account at Robinhood and is disabled "
         "by default."
     ),
 )

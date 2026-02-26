@@ -159,7 +159,7 @@ window.I18N = (function () {
       'ai.message': 'Your question', 'ai.send': 'Send',
       'ai.chatNote': 'Uses your saved profile, holdings and research. Formal trades go through research and approval.',
       'ai.refresh': 'Refresh accounts & candidates',
-      'ai.coverage': 'Stocks and ETFs only; the Agentic account is Micro-Live below, with its own research path. Tap a holding to research it on its own.',
+      'ai.coverage': 'Stocks and ETFs only; the Agentic Account is shown below, with its own research path. Tap a holding to research it on its own.',
       'ai.candidates': 'Research candidates',
       'ai.sources': 'From Robinhood watchlists, saved scans and your existing ETF universe. Screened for personal fit.',
       'ai.shortlist': 'Find suitable candidates', 'ai.symbol': 'Or enter a stock / ETF symbol',
@@ -308,12 +308,12 @@ window.I18N = (function () {
       'ps.NO_TRADE': 'No action was warranted',
 
       /* buckets */
-      'bucket.core': 'Core', 'bucket.sandbox': 'Sandbox', 'bucket.micro_live': 'Micro-Live',
-      'bucket.real': 'Real money · {venue}', 'bucket.conceptual': 'Conceptual · no venue',
+      'bucket.core': 'Demo · Core', 'bucket.sandbox': 'Demo · Sandbox', 'bucket.micro_live': 'Agentic',
+      'bucket.real': 'Real money · {venue}', 'bucket.conceptual': 'Demo · no venue',
       'bucket.realShort': 'Real money', 'bucket.ofAllocation': 'of a {v} allocation',
 
       /* home */
-      'acct.conceptual': 'Conceptual portfolio', 'acct.micro_live': 'Micro-Live account',
+      'acct.conceptual': 'Demo Account', 'acct.micro_live': 'Agentic Account',
       'acct.src.conceptual': 'local ledger', 'acct.src.micro_live': 'Robinhood, reconciled',
       'acct.asOf': 'Ledger as of {d} · priced for {p}',
       'acct.opening': 'Opening allocation', 'acct.flows': 'Recorded deposits and withdrawals',
@@ -355,7 +355,7 @@ window.I18N = (function () {
 
       /* portfolio */
       'pf.title': 'Assets', 'pf.totalAs': 'Total equity as of {d}',
-      'pf.totalMixed': 'Conceptual and real money added together, as of {d}. '
+      'pf.totalMixed': 'Demo and real money added together, as of {d}. '
                        + 'Compare each account below against its own high-water mark, never this figure.',
       'pf.allocation': 'Allocation across buckets', 'pf.ofTotal': '{p} of total',
       'pf.cash': 'Cash', 'pf.positionsValue': 'Positions value', 'pf.sleeve': 'Sleeve · {k}',
@@ -433,7 +433,7 @@ window.I18N = (function () {
       'rs.trgManual': 'Manual', 'rs.trgScheduled': 'Scheduled',
       'rs.trgEvent': 'Event', 'rs.trgReanalysis': 'Reanalysis',
       'rs.hintMicro': 'Research runs normally while real-money execution is off. Any proposal still waits for you.',
-      'rs.hintConceptual': 'Conceptual bucket. No venue exists for it, so nothing it produces can reach a broker.',
+      'rs.hintConceptual': 'Demo bucket. No venue exists for it, so nothing it produces can reach a broker.',
       'rs.starting': 'Starting…',
       'rs.startFailed': 'Could not start the run — {err}',
       'rs.writesOff': '<strong>Writes are off.</strong> Set <span class="mono">CT_API.writesEnabled = true</span> to start real runs.',
@@ -715,7 +715,7 @@ window.I18N = (function () {
       'ai.message': '你的问题', 'ai.send': '发送',
       'ai.chatNote': '回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。',
       'ai.refresh': '刷新账户与候选',
-      'ai.coverage': '只列出股票与 ETF；Agentic 账户即下方的 Micro-Live，走原有研究链路。点一个持仓可单独研究它。',
+      'ai.coverage': '只列出股票与 ETF；Agentic 账户见下方，走自己的研究链路。点一个持仓可单独研究它。',
       'ai.candidates': '值得研究的候选',
       'ai.sources': '来自你的 Robinhood 自选、已保存的筛选器，以及现有 ETF 投资范围。按个人适合度筛选。',
       'ai.shortlist': '帮我筛选候选', 'ai.symbol': '或输入股票 / ETF 代码',
@@ -862,11 +862,11 @@ window.I18N = (function () {
       'ps.REJECTED': '你已拒绝',
       'ps.NO_TRADE': '不需要采取任何行动',
 
-      'bucket.core': '核心仓', 'bucket.sandbox': '沙盒仓', 'bucket.micro_live': '微实盘',
-      'bucket.real': '真金 · {venue}', 'bucket.conceptual': '概念仓 · 无交易场所',
+      'bucket.core': '模拟·核心', 'bucket.sandbox': '模拟·沙盒', 'bucket.micro_live': 'Agentic',
+      'bucket.real': '真金 · {venue}', 'bucket.conceptual': '模拟 · 无交易场所',
       'bucket.realShort': '真金', 'bucket.ofAllocation': '配额 {v}',
 
-      'acct.conceptual': '概念组合', 'acct.micro_live': '微实盘账户',
+      'acct.conceptual': '模拟账户', 'acct.micro_live': 'Agentic 账户',
       'acct.src.conceptual': '本地账本', 'acct.src.micro_live': 'Robinhood 对账后',
       'acct.asOf': '账本截至 {d} · 按 {p} 定价',
       'acct.opening': '初始配额', 'acct.flows': '已登记出入金',
@@ -907,7 +907,7 @@ window.I18N = (function () {
       'home.noResult': '无结果',
 
       'pf.title': '资产', 'pf.totalAs': '总权益，截至 {d}',
-      'pf.totalMixed': '这是概念资金与真实资金相加的结果，截至 {d}。'
+      'pf.totalMixed': '这是模拟资金与真实资金相加的结果，截至 {d}。'
                        + '请用下面每个账户各自的历史高点来判断，不要用这个合计数。',
       'pf.allocation': '资金桶分配', 'pf.ofTotal': '占总额 {p}',
       'pf.cash': '现金', 'pf.positionsValue': '持仓市值', 'pf.sleeve': '细分 · {k}',
@@ -983,7 +983,7 @@ window.I18N = (function () {
       'rs.trgManual': '手动', 'rs.trgScheduled': '定时',
       'rs.trgEvent': '事件驱动', 'rs.trgReanalysis': '重新分析',
       'rs.hintMicro': '真金执行关闭时研究照常运行。产出的提案仍然要等你决定。',
-      'rs.hintConceptual': '概念仓，没有对应的交易场所，产出的任何东西都到不了券商。',
+      'rs.hintConceptual': '模拟仓，没有对应的交易场所，产出的任何东西都到不了券商。',
       'rs.starting': '正在启动…',
       'rs.startFailed': '无法启动运行 —— {err}',
       'rs.writesOff': '<strong>写入已关闭。</strong>把 <span class="mono">CT_API.writesEnabled</span> 设为 true 才能真正发起运行。',

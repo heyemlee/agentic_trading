@@ -18,12 +18,12 @@ from .service.shapes import PortfolioAccount
 
 
 def _account(service: Service) -> PortfolioAccount:
-    """The conceptual paper account: the thing under study. Real money is not evaluated here."""
+    """The Demo paper account: the thing under study. Real money is not evaluated here."""
     portfolio = service.portfolio()
     account = portfolio.accounts.get("conceptual")
     if account is None:
         raise evaluation.EvaluationError(
-            "the conceptual account could not be read: " + "; ".join(
+            "the Demo account could not be read: " + "; ".join(
                 f"{k}: {v}" for k, v in portfolio.errors.items()))
     return account
 

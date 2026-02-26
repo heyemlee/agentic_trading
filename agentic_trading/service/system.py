@@ -229,7 +229,7 @@ class SystemMixin:
         portfolio = self.portfolio()
         account = portfolio.accounts.get("conceptual")
         if account is None:
-            raise ServiceError("the conceptual account could not be read")
+            raise ServiceError("the Demo account could not be read")
         return evaluation.snapshot(
             self.state_db(profiles), profiles, on=on or portfolio.as_of,
             equity_usd=account.equity_usd, net_deposits_usd=account.net_deposits_usd)

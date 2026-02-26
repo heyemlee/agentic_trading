@@ -93,8 +93,8 @@ def fetch_snapshot(profiles, broker_factory=ObservationBroker) -> dict:
     result = {"fetched_at": now(), "source": "Robinhood official MCP", "accounts": [],
               "candidates": [], "errors": [], "coverage": "stocks_and_etfs",
               "coverage_note": "Equity positions only; options, crypto and other assets are not "
-                               "analysed. The Agentic account is not observed: it is the Micro-Live "
-                               "bucket this system manages, shown from its reconciled ledger."}
+                               "analysed. The Agentic Account is not observed here: it is the account "
+                               "this system manages, shown from its reconciled ledger."}
     candidates: dict[str, dict] = {}
 
     def add(symbol, source):

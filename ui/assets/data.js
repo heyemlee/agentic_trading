@@ -71,7 +71,7 @@ window.CT = (function () {
     accounts: {
       conceptual: {
         buckets: ["core", "sandbox"], is_real_money: false, venue: null,
-        source: "local conceptual ledger", as_of: "2026-09-02", priced_for: "2026-09-02",
+        source: "local demo ledger", as_of: "2026-09-02", priced_for: "2026-09-02",
         equity_usd: 3000.0, cash_usd: 3000.0, positions_value_usd: 0.0,
         net_deposits_usd: 3000.0, opening_allocation_usd: 3000.0, recorded_flows_usd: 0.0,
         net_deposits_basis: "configured allocation plus recorded deposits and withdrawals",
@@ -259,7 +259,7 @@ window.CT = (function () {
         { id: "HR02", name: "drawdown ladder (micro_live)", passed: true, detail: "micro_live ladder level NORMAL" },
         { id: "HR03", name: "market regime", passed: true, detail: "regime NORMAL: SPY above its 200-day average; VIX 15.2" },
         { id: "HR15", name: "strategy policy", passed: true, detail: "sandbox strategy 'long_only_diversified' carries no special gate" },
-        { id: "HR17", name: "micro-live master switch", passed: true, detail: "real-money execution is enabled for the Micro-Live bucket" },
+        { id: "HR17", name: "micro-live master switch", passed: true, detail: "real-money execution is enabled for the Agentic bucket" },
         { id: "HR06", name: "sizing", passed: true, detail: "$35.00 toward a 35.0% target of the micro_live allocation" },
         { id: "HR07", name: "bucket funding", passed: true, detail: "micro_live cash $100.00 vs order $35.00; the other bucket is never a funding source" },
         { id: "HR08", name: "position cap", passed: true, detail: "post-trade 35.0% vs cap 40.0%" },

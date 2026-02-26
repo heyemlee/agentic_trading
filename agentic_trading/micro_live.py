@@ -299,7 +299,7 @@ def bucket_is_executable(profiles: Profiles, bucket: str, broker_name: str) -> t
     """
     if broker_name == "robinhood" and bucket != BUCKET:
         return False, (f"the {bucket} bucket has no real-money venue; only {BUCKET} executes at Robinhood. "
-                       "Core and Sandbox remain conceptual until you decide otherwise.")
+                       "Core and Sandbox remain Demo buckets until you decide otherwise.")
     if broker_name != "robinhood" and bucket == BUCKET:
         return False, f"the {BUCKET} bucket is real money and only executes at Robinhood, not {broker_name}"
     return True, f"{bucket} may execute at {broker_name}"

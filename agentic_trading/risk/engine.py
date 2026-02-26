@@ -203,7 +203,7 @@ class HardRiskEngine:
             micro_cfg = self.p.risk.get("micro_live_execution") or self.p.risk.get("micro_live") or {}
             live_on = bool(micro_cfg.get("enabled", False))
             rule("HR17", "micro-live master switch", live_on,
-                 "real-money execution is enabled for the Micro-Live bucket" if live_on
+                 "real-money execution is enabled for the Agentic bucket" if live_on
                  else "micro_live_execution.enabled is false: real money is disabled")
             if not live_on:
                 fail_closed.append("micro-live execution disabled")
@@ -753,7 +753,7 @@ class HardRiskEngine:
         if "core" not in snap.buckets:
             micro = ladders.micro_live
             if micro is not None and micro.level != "NORMAL":
-                out.append(f"Micro-Live ladder at {micro.level} ({micro.drawdown_pct:+.1f}% from its high-water "
+                out.append(f"Agentic ladder at {micro.level} ({micro.drawdown_pct:+.1f}% from its high-water "
                            "mark): no new opens; review the positions and escalate rather than adding risk.")
             return out
         lvl = effective_core_level(ladders)

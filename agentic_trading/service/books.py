@@ -111,7 +111,7 @@ class BooksMixin:
                 buckets=sorted(views),
                 is_real_money=real,
                 venue=venue,
-                source="robinhood account, reconciled" if real else "local conceptual ledger",
+                source="robinhood account, reconciled" if real else "local demo ledger",
                 as_of=snap.as_of,
                 priced_for=snap.trade_date,
                 equity_usd=equity,
