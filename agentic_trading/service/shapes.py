@@ -79,6 +79,10 @@ class MicroLive(BaseModel):
     blocking: list[str] = Field(default_factory=list)
     permissions: dict[str, bool] = Field(default_factory=dict)
     execution_mode: str
+    #: When the venue was last asked about the account. The configuration gates in ``checks``
+    #: are evaluated on every request; the account and the venue gates are as of this moment,
+    #: which the service keeps within a couple of minutes while the status is being read.
+    checked_at: str | None = None
 
 
 class PortfolioPosition(BaseModel):
@@ -176,6 +180,9 @@ class Portfolio(BaseModel):
     accounts: dict[str, PortfolioAccount] = Field(default_factory=dict)
     errors: dict[str, str] = Field(default_factory=dict)
     combined: PortfolioCombined
+    #: When the books were read and priced. ``as_of`` is the session they were priced for; this
+    #: is the moment the reading was taken, which the console judges freshness by.
+    checked_at: str | None = None
 
 
 class ProposalFreshness(BaseModel):

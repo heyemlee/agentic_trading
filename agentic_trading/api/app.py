@@ -101,7 +101,19 @@ async def lifespan(app):
                 logger.exception("external heartbeat failed")
             await asyncio.sleep(max(60, minutes * 60))
 
-    tasks = [asyncio.create_task(reconcile_loop()), asyncio.create_task(heartbeat_loop())]
+    async def refresh_loop():
+        """Renews the kept readings the console polls -- regime, venue account, portfolio -- so
+        a poll finds them computed. Separate from reconcile_loop, whose fifteen seconds recover
+        orders and must not wait behind a venue handshake or a portfolio being priced."""
+        while True:
+            try:
+                await asyncio.to_thread(_service.refresh_kept_readings)
+            except Exception:
+                logger.exception("renewing the kept readings failed")
+            await asyncio.sleep(15)
+
+    tasks = [asyncio.create_task(reconcile_loop()), asyncio.create_task(heartbeat_loop()),
+             asyncio.create_task(refresh_loop())]
     try:
         yield
     finally:
@@ -451,7 +463,8 @@ def resume(request: Request) -> dict[str, Any]:
 # ----------------------------------------------------------------- portfolio and risk
 @app.get("/portfolio", tags=["portfolio"], summary="Every bucket, its cash, positions and sleeves")
 def portfolio() -> Portfolio:
-    return _ok(_service.portfolio)
+    # Kept between polls and renewed by refresh_loop; checked_at says when it was read.
+    return _ok(_service.kept_portfolio)
 
 
 class PortfolioConfirm(BaseModel):

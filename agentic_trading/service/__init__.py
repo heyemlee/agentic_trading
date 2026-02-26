@@ -28,7 +28,7 @@ from ..env import load_env
 from ..execution import ExecutionResult, needs_reconciliation, reconcile_proposal, revalidate
 from ..execution import execute as execute_proposal
 from ..micro_live import BUCKET as MICRO_BUCKET
-from ..micro_live import run_preflight
+from ..micro_live import VenueReading, preflight_from, read_venue
 from ..portfolio import PortfolioError, load_portfolio
 from ..profile import ProfileError, Profiles, load_profiles
 from ..proposals import (
@@ -43,6 +43,7 @@ from ..proposals import (
 from ..research_jobs import ResearchJobManager
 from ..state_db import StateDB
 from ..storage import file_lock
+from .kept import Kept
 from .shapes import (
     AdvisorConversation,
     AdvisorDecision,
@@ -108,11 +109,28 @@ class Service:
     Between calls it keeps at most one venue session, and only for reads that record nothing
     when the venue fails them (see :meth:`_read_venue`). An order, and the reconciliation of
     one, opens a session of its own every time.
+
+    It also keeps the results of the three reads a console polls that are costly to repeat --
+    the market regime, the venue's account, the priced portfolio -- each with the inputs it was
+    computed from (see kept.py). The readings compute through methods looked up when they run.
     """
 
     def __init__(self, config_dir: str | Path = "config"):
         self.config_dir = Path(config_dir)
         self._venue_reads = ReadSession()
+        # Daily bars: renewed every quarter hour, and a failed assessment every two minutes.
+        self._regime_reading = Kept(
+            lambda: self._read_regime(), key=lambda: self._regime_inputs(),
+            refresh_after=lambda reading: 900.0 if reading[0].available else 120.0,
+            serve_for=lambda reading: 1800.0 if reading[0].available else 300.0)
+        # The account moves with a trade or a transfer; a minute old while someone is looking.
+        self._venue_reading = Kept(
+            lambda: self._read_venue_account(), key=lambda: self._venue_inputs(),
+            refresh_after=60.0, serve_for=120.0, watch_for=300.0)
+        # Recomputed at once when a ledger is written; otherwise prices move once a session.
+        self._portfolio_reading = Kept(
+            lambda: self.portfolio(), key=lambda: self._portfolio_inputs(),
+            refresh_after=240.0, serve_for=480.0, watch_for=600.0)
 
     # ---------------------------------------------------------------- profiles
     def profiles(self) -> Profiles:
@@ -166,6 +184,78 @@ class Service:
 
         return self._venue_reads.read(robinhood.session_key(profiles),
                                       lambda: robinhood.RobinhoodBroker(profiles), read)
+
+    # ---------------------------------------------------------------- kept readings
+    def refresh_kept_readings(self) -> dict[str, bool]:
+        """Renew whichever kept readings are due; the regime first, since the portfolio uses it.
+
+        Called by the API's refresh loop, off the request path. A reading that fails is logged
+        and the others still run; it keeps its last result, which requests judge by its age.
+        """
+        refreshed: dict[str, bool] = {}
+        for name, reading in (("regime", self._regime_reading), ("venue", self._venue_reading),
+                              ("portfolio", self._portfolio_reading)):
+            try:
+                refreshed[name] = reading.refresh()
+            except Exception:
+                logger.exception("renewing the kept %s reading failed", name)
+                refreshed[name] = False
+        return refreshed
+
+    def kept_portfolio(self) -> Portfolio:
+        """The portfolio as the console reads it, kept between polls (see kept.py).
+
+        Computed again as soon as a ledger is written, the configuration changes or the session
+        rolls over, and otherwise renewed every few minutes while it is being read. Use
+        :meth:`portfolio` where the books must be read and priced now.
+        """
+        return self._portfolio_reading.get()
+
+    def _regime_inputs(self) -> object:
+        profiles = self.profiles()
+        return _last_session(), json.dumps(profiles.risk.get("market_regime") or {},
+                                           sort_keys=True, default=str)
+
+    def _read_regime(self) -> tuple[Any, str]:
+        from ..risk import assess_regime
+        from ..risk.regime import RegimeResult
+
+        profiles = self.profiles()
+        checked_at = utcnow().isoformat()
+        try:
+            return assess_regime(profiles, _last_session()), checked_at
+        except Exception as exc:  # noqa: BLE001 - unknown, never guessed
+            return RegimeResult("UNKNOWN", False, str(exc)), checked_at
+
+    def _venue_inputs(self) -> object:
+        from ..broker import robinhood
+
+        return robinhood.session_key(self.profiles())
+
+    def _read_venue_account(self) -> VenueReading:
+        profiles = self.profiles()
+        checked_at = utcnow().isoformat()
+        try:
+            return self._read_venue(profiles, lambda broker: read_venue(broker, checked_at))
+        except SessionUnavailable as exc:  # not connected is a normal state, not a crash
+            return VenueReading(checked_at=checked_at, connected=False, connect_error=str(exc))
+
+    def _portfolio_inputs(self) -> object:
+        """Everything the priced portfolio is computed from that can change within a session.
+
+        A ledger lives in the state database, where every write moves its revision; one not
+        yet migrated is still a file. The drawdown ladders are not here: computing the portfolio
+        writes them, and they follow from the ledgers and prices that are.
+        """
+        profiles = self.profiles()
+        ps = profiles.risk.get("portfolio_state") or {}
+        micro = profiles.risk.get("micro_live_execution") or {}
+        ledgers = []
+        for value in (ps.get("file", "state/portfolio.yaml"),
+                      micro.get("ledger_file", "state/micro_live_portfolio.yaml")):
+            path = profiles.project_dir / str(value)
+            ledgers.append((str(value), StateDB(path).document_revision(path), _file_stamp(path)))
+        return _last_session(), _directory_stamp(profiles.config_dir), tuple(ledgers)
 
     def release_idle_venue_session(self) -> bool:
         """Close the kept venue session if nobody has read through it lately."""
@@ -301,12 +391,16 @@ class Service:
 
         profiles = self.profiles()
         trade_date = _last_session()
+        checked_at = utcnow().isoformat()
+        # Only the snapshot's text uses the regime, and this discards the text.
+        regime, _ = self._regime_reading.get()
         buckets_out: dict[str, PortfolioBucket] = {}
         accounts_out: dict[str, PortfolioAccount] = {}
         errors: dict[str, str] = {}
         for account, sample, buckets, real, venue, ladder_key in self.ACCOUNTS:
             try:
-                snap, ladders, _regime, _text = portfolio_context(profiles, trade_date, sample)
+                snap, ladders, _regime, _text = portfolio_context(profiles, trade_date, sample,
+                                                                  regime=regime)
             except (PortfolioError, ServiceError, ProfileError) as exc:
                 # One unreadable book must not take the other down with it: the reason is
                 # reported beside whatever was readable, and `combined.complete` says so.
@@ -379,6 +473,7 @@ class Service:
                 # compared against any single account's high-water mark.
                 mixes_real_and_conceptual=len({a.is_real_money for a in accounts_out.values()}) > 1,
             ),
+            checked_at=checked_at,
         )
 
     def ledger_check(self) -> dict[str, Any]:
@@ -405,7 +500,7 @@ class Service:
 
     def risk_state(self) -> dict[str, Any]:
         """Drawdown ladders and the market regime, in display form."""
-        from ..risk import assess_regime, load_ladder_states
+        from ..risk import load_ladder_states
 
         try:
             profiles = self.profiles()
@@ -422,37 +517,35 @@ class Service:
                 out.update({k: v for k, v in data.items() if k in ("total", "core", "sandbox")})
             elif data.get("micro_live"):
                 out["micro_live"] = data["micro_live"]
-        try:
-            regime = assess_regime(profiles, _last_session())
-            out["regime"] = regime.as_dict()
-        except Exception as exc:  # noqa: BLE001
-            out["regime"] = {"level": "UNKNOWN", "available": False, "detail": str(exc)}
+        # Kept between polls: the notification pass reads this every fifteen seconds and three
+        # screens poll it, and assessing the regime asks the data vendor (see kept.py).
+        regime, checked_at = self._regime_reading.get()
+        out["regime"] = {**regime.as_dict(), "checked_at": checked_at}
         return out
 
     # ---------------------------------------------------------------- micro-live
     def micro_live(self) -> MicroLive:
-        """Real-money workflow status, the preflight gates, and the capital boundary."""
+        """Real-money workflow status, the preflight gates, and the capital boundary.
+
+        The venue's answer is a kept reading, at most a couple of minutes old while the status
+        is being read; the configuration gates and the open proposal are read on every call.
+        Execution never relies on this: it runs preflight again in the session it orders in.
+        """
         profiles = self.profiles()
         micro = profiles.risk.get("micro_live_execution") or {}
         enabled = self._micro_enabled(profiles)
-        connected, connect_error = False, None
-        try:
-            # Preflight reads the account and records nothing, so it may share the kept session.
-            preflight = self._read_venue(profiles, lambda broker: run_preflight(profiles, broker))
-            connected = True
-        except SessionUnavailable as exc:  # not connected is a normal state, not a crash
-            connect_error = str(exc)
-            preflight = run_preflight(profiles, None)
+        reading = self._venue_reading.get()
+        preflight = preflight_from(profiles, reading)
         open_proposal = next((p for p in self._store(profiles).open_proposals(profiles)
                               if p.bucket == MICRO_BUCKET), None)
-        status = micro_live_status(enabled=enabled, connected=connected,
+        status = micro_live_status(enabled=enabled, connected=reading.connected,
                                    preflight_ready=preflight.ready, open_proposal=open_proposal,
                                    profiles=profiles)
         return MicroLive(
             status=status,
             enabled=enabled,
-            connected=connected,
-            connect_error=connect_error,
+            connected=reading.connected,
+            connect_error=reading.connect_error,
             capital_boundary_usd=float(micro.get("max_capital_usd", 100)),
             account=MicroLiveAccount(**preflight.account) if preflight.account else None,
             preflight_ready=preflight.ready,
@@ -461,6 +554,7 @@ class Service:
             blocking=[c.check_id for c in preflight.failures],
             permissions=dict(micro.get("permissions") or {}),
             execution_mode=str(micro.get("execution_mode", "human_approval")),
+            checked_at=reading.checked_at,
         )
 
     # ---------------------------------------------------------------- proposals
@@ -2028,6 +2122,24 @@ def _jsonable(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------- helpers
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def _directory_stamp(directory: Path) -> tuple[tuple[str, int, int], ...]:
+    """Every file under a directory, by name, modification time and size: any edit moves it."""
+    stamps = []
+    for path in sorted(Path(directory).rglob("*")):
+        stamp = _file_stamp(path) if path.is_file() else None
+        if stamp is not None:
+            stamps.append((str(path.relative_to(directory)), *stamp))
+    return tuple(stamps)
+
+
 def _close(broker: Any) -> None:
     if hasattr(broker, "close"):
         try:

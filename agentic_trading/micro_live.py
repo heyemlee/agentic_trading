@@ -6,10 +6,17 @@ live configuration and live broker state, and every one must pass. A single fail
 real-money execution.
 
 Nothing here places an order or moves money.
+
+Execution runs preflight inside the session it places an order through, against the venue as
+it is at that moment. The console's micro-live status runs the same checks against a
+:class:`VenueReading` kept for a minute or two (see service/kept.py), so a screen that polls it
+does not reach Robinhood on every poll; the configuration gates are still evaluated as the
+configuration is now, and the reading says when the venue was asked.
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,6 +47,64 @@ class Preflight:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class VenueReading:
+    """Everything preflight's venue gates read, as the venue answered it at ``checked_at``."""
+
+    checked_at: str
+    connected: bool
+    connect_error: str | None = None
+    account: Any = None
+    agentic_account: dict[str, Any] | None = None
+    #: What reading the account raised, raised again wherever preflight reads the account.
+    account_error: BaseException | None = None
+    tools: dict[str, str] = field(default_factory=dict)
+
+
+def read_venue(broker: Any, checked_at: str) -> VenueReading:
+    """Ask the venue, once, what preflight's venue gates need. Records nothing."""
+    try:
+        account = broker.get_account()
+        agentic = broker.agentic_account() if hasattr(broker, "agentic_account") else {}
+        error = None
+    except Exception as exc:  # noqa: BLE001 - kept, and raised where preflight reads the account
+        account, agentic, error = None, None, exc
+    return VenueReading(checked_at=checked_at, connected=True, account=account,
+                        agentic_account=agentic, account_error=error,
+                        tools=dict(getattr(broker, "tools", {}) or {}))
+
+
+class _AnsweredFrom:
+    """A broker that answers preflight from a reading, and reads the market clock as it is now."""
+
+    def __init__(self, reading: VenueReading) -> None:
+        self._reading = reading
+        self.tools = dict(reading.tools)
+
+    def get_account(self):
+        if self._reading.account_error is not None:
+            # A copy, so a reading served to many requests does not collect their tracebacks.
+            raise copy.copy(self._reading.account_error)
+        return self._reading.account
+
+    def agentic_account(self) -> dict[str, Any]:
+        return dict(self._reading.agentic_account or {})
+
+    def get_clock(self):
+        from .broker.robinhood import market_clock
+
+        return market_clock()
+
+    def poll_order(self, *_args: Any, **_kwargs: Any):
+        # Preflight only asks whether the capability exists; a reading can follow no order.
+        raise NotImplementedError("a venue reading cannot follow an order")
+
+
+def preflight_from(profiles: Profiles, reading: VenueReading) -> Preflight:
+    """Preflight against the configuration as it is now and the venue as ``reading`` found it."""
+    return run_preflight(profiles, _AnsweredFrom(reading) if reading.connected else None)
 
 
 def _research_runtime_is_broker_free(profiles: Profiles) -> tuple[bool, str]:

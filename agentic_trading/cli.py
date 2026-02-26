@@ -75,12 +75,15 @@ def _today() -> str:
     return datetime.now(tz=ZoneInfo("America/New_York")).date().isoformat()
 
 
-def portfolio_context(profiles: Profiles, trade_date: str,
-                      bucket: str = "core") -> tuple[Snapshot, LadderStates, object, str]:
+def portfolio_context(profiles: Profiles, trade_date: str, bucket: str = "core", *,
+                      regime=None) -> tuple[Snapshot, LadderStates, object, str]:
     """Load the ledger that owns this bucket, price it, evaluate the ladders and the regime.
 
     Each portfolio is separate: the conceptual core/sandbox book, and the real-money Micro-Live
     account. They never share a cash reconciliation or a drawdown high-water mark.
+
+    ``regime``, when given, is used instead of assessing it again for this trade date: the
+    console's portfolio discards the regime, and assessing it asks the data vendor.
     """
     from .micro_live import BUCKET as MICRO_BUCKET
 
@@ -106,7 +109,8 @@ def portfolio_context(profiles: Profiles, trade_date: str,
                          snap.buckets["sandbox"].equity if "sandbox" in snap.buckets else None,
                          micro_live_equity=micro_equity)
         save_ladder_states(ladder_path, ladders)
-    regime = assess_regime(profiles, trade_date)
+    if regime is None:
+        regime = assess_regime(profiles, trade_date)
     governing = ladders.governing(bucket)
     text = render_snapshot(snap, {"total": {"level": governing.level, "drawdown_pct": governing.drawdown_pct}},
                            regime.as_dict())

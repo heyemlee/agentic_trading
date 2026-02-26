@@ -264,6 +264,29 @@ async def _prime_refresh_endpoint(auth, storage: FileTokenStorage, httpx2, serve
     auth.context.auth_server_url = str(metadata.issuer)
 
 
+def market_clock() -> Clock:
+    """Market session from the NYSE exchange calendar.
+
+    Robinhood's MCP exposes no market-clock tool, so the session comes from
+    ``exchange_calendars`` (XNYS), which carries real holidays, half days and session
+    times. Nothing here is hand-maintained. If the calendar itself cannot be loaded the
+    session is reported closed, because an unknown session must never permit an order.
+    """
+    import pandas as pd
+
+    now = pd.Timestamp.now(tz="UTC")
+    try:
+        cal = _nyse_calendar()
+        is_open = bool(cal.is_open_on_minute(now, ignore_breaks=True))
+        next_open = cal.next_open(now).to_pydatetime() if not is_open else None
+        next_close = cal.next_close(now).to_pydatetime() if is_open else None
+    except Exception as exc:  # noqa: BLE001 - fail closed: no calendar means no trading
+        logger.warning("exchange calendar unavailable, reporting the market closed: %s", exc)
+        return Clock(is_open=False, timestamp=now.to_pydatetime())
+    return Clock(is_open=is_open, timestamp=now.to_pydatetime(),
+                 next_open=next_open, next_close=next_close)
+
+
 def session_key(profiles) -> str:
     """Everything a RobinhoodBroker is built from, as one comparable value.
 
@@ -575,26 +598,7 @@ class RobinhoodBroker:
         return [self._order(r) for r in rows if isinstance(r, dict) and _first(r, "id", "order_id")]
 
     def get_clock(self) -> Clock:
-        """Market session from the NYSE exchange calendar.
-
-        Robinhood's MCP exposes no market-clock tool, so the session comes from
-        ``exchange_calendars`` (XNYS), which carries real holidays, half days and session
-        times. Nothing here is hand-maintained. If the calendar itself cannot be loaded the
-        session is reported closed, because an unknown session must never permit an order.
-        """
-        import pandas as pd
-
-        now = pd.Timestamp.now(tz="UTC")
-        try:
-            cal = _nyse_calendar()
-            is_open = bool(cal.is_open_on_minute(now, ignore_breaks=True))
-            next_open = cal.next_open(now).to_pydatetime() if not is_open else None
-            next_close = cal.next_close(now).to_pydatetime() if is_open else None
-        except Exception as exc:  # noqa: BLE001 - fail closed: no calendar means no trading
-            logger.warning("exchange calendar unavailable, reporting the market closed: %s", exc)
-            return Clock(is_open=False, timestamp=now.to_pydatetime())
-        return Clock(is_open=is_open, timestamp=now.to_pydatetime(),
-                     next_open=next_open, next_close=next_close)
+        return market_clock()
 
     # ------------------------------------------------------------------ orders
     def review_order(self, request: OrderRequest) -> dict[str, Any]:

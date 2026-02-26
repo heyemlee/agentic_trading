@@ -209,6 +209,29 @@ class StateDB:
             if owned:
                 conn.close()
 
+    def document_revision(self, namespace):
+        """How many times a document has been written, or None if it never has been.
+
+        Cheap enough to ask on every poll, which is what it is for: a result computed from a
+        document is out of date exactly when this number has moved since.
+        """
+        conn = self.current() or self._read()
+        if conn is None:
+            return None
+        owned = self.current() is None
+        try:
+            for key in self.source_keys(namespace):
+                row = conn.execute("SELECT revision FROM documents WHERE namespace=?",
+                                   (key,)).fetchone()
+                if row:
+                    return int(row[0])
+            return None
+        except sqlite3.OperationalError:
+            return None
+        finally:
+            if owned:
+                conn.close()
+
     def write_document(self, namespace, payload, conn=None):
         conn = conn or self.current()
         if conn is None:

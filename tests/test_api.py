@@ -854,3 +854,79 @@ def test_a_write_to_the_bare_origin_is_refused_rather_than_redirected(console_au
     anonymous = TestClient(app, base_url="https://testserver", follow_redirects=False)
     assert anonymous.post("/", json={}).status_code in (401, 403)
     anonymous.close()
+
+
+# ---------------------------------------------------------------- readings kept between polls
+def test_the_regime_is_assessed_once_for_everything_that_polls_it(sandbox_service, monkeypatch):
+    """/health, /risk, the notification pass and the schedule all read the market regime, and
+    every assessment asks the data vendor: once a poll, from four places, every few seconds."""
+    from agentic_trading import risk
+    from agentic_trading.risk.regime import RegimeResult
+
+    assessed = []
+    monkeypatch.setattr(risk, "assess_regime", lambda profiles, day: assessed.append(day)
+                        or RegimeResult("NORMAL", True, "SPY above its 200-day average"))
+    for _ in range(3):
+        sandbox_service.health()
+        sandbox_service.risk_state()
+    regime = sandbox_service.risk_state()["regime"]
+    assert len(assessed) == 1
+    assert regime["level"] == "NORMAL" and regime["checked_at"]
+
+    # A new session is a new assessment, at once.
+    monkeypatch.setattr("agentic_trading.service._last_session", lambda: "2031-01-02")
+    assert sandbox_service.risk_state()["regime"]["checked_at"]
+    assert assessed == [assessed[0], "2031-01-02"]
+
+
+def test_the_console_portfolio_is_kept_until_something_it_was_read_from_changes(
+        sandbox_service, monkeypatch):
+    """/portfolio priced every holding, looked each one up and rewrote the drawdown ladders on
+    every poll. It is read once and kept -- and read again the moment a ledger is written, the
+    configuration is edited or the session rolls over, never answered from before that."""
+    import os
+
+    from agentic_trading import cli
+    from agentic_trading.portfolio import load_portfolio, migrate_portfolio
+
+    books = []
+    original = cli.portfolio_context
+    monkeypatch.setattr(cli, "portfolio_context",
+                        lambda *args, **kwargs: books.append(args[2]) or original(*args, **kwargs))
+    assert sandbox_service.refresh_kept_readings()["portfolio"] is False   # nobody is reading it
+
+    first = sandbox_service.kept_portfolio()
+    assert first.checked_at and len(books) == 2                    # both books, once
+    assert sandbox_service.kept_portfolio().checked_at == first.checked_at
+    assert len(books) == 2
+
+    profiles = sandbox_service.profiles()
+    ledger = profiles.project_dir / "state" / "portfolio.yaml"
+    migrate_portfolio(ledger)                                      # a ledger written to the database
+    sandbox_service.kept_portfolio()
+    assert len(books) == 4
+    state = load_portfolio(ledger)
+    StateDB(ledger).write_document(ledger, state.model_dump(mode="json"))
+    sandbox_service.kept_portfolio()
+    assert len(books) == 6
+
+    config = profiles.config_dir / "risk_profile.yaml"
+    stamp = config.stat().st_mtime_ns + 1_000_000_000
+    os.utime(config, ns=(stamp, stamp))                           # the configuration edited
+    sandbox_service.kept_portfolio()
+    assert len(books) == 8
+
+    monkeypatch.setattr("agentic_trading.service._last_session", lambda: "2031-01-02")
+    sandbox_service.kept_portfolio()                               # the session rolled over
+    assert len(books) == 10
+
+
+def test_get_portfolio_is_answered_from_the_kept_reading(auth_client, sandbox_service, monkeypatch):
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    computed = []
+    original = sandbox_service.portfolio
+    monkeypatch.setattr(sandbox_service, "portfolio", lambda: computed.append(1) or original())
+    bodies = [auth_client.get("/portfolio").json() for _ in range(3)]
+    assert len(computed) == 1
+    assert bodies[0]["checked_at"]
+    assert all(body["checked_at"] == bodies[0]["checked_at"] for body in bodies)

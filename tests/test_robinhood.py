@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -920,7 +921,8 @@ def test_the_session_is_renewed_exactly_when_a_new_one_would_refresh_the_token(p
 
 def test_micro_live_status_is_read_through_one_kept_session(profiles_with_state, tmp_path, monkeypatch):
     """Every screen showing the real-money account polls /micro-live. Each poll used to open a
-    Robinhood session and close it again, three to thirteen seconds apiece."""
+    Robinhood session and close it again, three to thirteen seconds apiece. Now a poll is
+    answered from a reading of the account, and the reading is renewed through a kept session."""
     from agentic_trading.broker import robinhood
     from agentic_trading.proposals import ProposalStore
     from agentic_trading.service import Service
@@ -942,6 +944,14 @@ def test_micro_live_status_is_read_through_one_kept_session(profiles_with_state,
     first, second = service.micro_live(), service.micro_live()
     assert first.connected and second.connected
     assert first.account.equity == second.account.equity == 100.0
+    assert second.checked_at == first.checked_at
+    assert len(opened) == 1
+    assert [name for name, _ in fake.calls].count("get_portfolio") == 1
+
+    # Once the reading is due it is renewed, through the session that is already open.
+    later = time.monotonic() + 61
+    monkeypatch.setattr(service._venue_reading, "_clock", lambda: later)
+    assert service._venue_reading.refresh() is True
     assert len(opened) == 1
     assert [name for name, _ in fake.calls].count("get_portfolio") == 2
 
@@ -999,3 +1009,63 @@ def test_probe_prints_a_read_tools_answer_verbatim_and_refuses_anything_that_act
     assert robinhood_cli.main(["probe", "get_accounts", "--args", "[1]", *config]) == 2
     assert robinhood_cli.main(["probe", *config]) == 2
     assert fake.calls == [("get_equity_news", {"symbols": ["AAPL"]})]
+
+
+def _kept_micro_live(profiles, tmp_path, monkeypatch, fake):
+    from agentic_trading.broker import robinhood
+    from agentic_trading.proposals import ProposalStore
+    from agentic_trading.service import Service
+
+    opened = []
+
+    def connect(p):
+        opened.append(True)
+        return make_broker(p, fake, enabled=p.risk["micro_live_execution"]["enabled"])
+
+    monkeypatch.setattr(robinhood, "RobinhoodBroker", connect)
+    service = Service()
+    monkeypatch.setattr(service, "profiles", lambda: profiles)
+    monkeypatch.setattr(service, "_store", lambda _: ProposalStore(tmp_path / "proposals.json"))
+    return service, opened
+
+
+def test_only_the_venues_answer_is_kept_and_the_configuration_gates_stay_live(
+        profiles_with_state, tmp_path, monkeypatch):
+    """Accepting the documented risk defaults shows on the next poll, not a reading later."""
+    profiles = profiles_with_state
+    profiles.risk["micro_live_execution"]["enabled"] = True
+    profiles.risk_cfg("buckets", "core", "position_limits_pct_of_core", "individual_stock")
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO})
+    service, opened = _kept_micro_live(profiles, tmp_path, monkeypatch, fake)
+
+    profiles.accept_defaults = False
+    before = service.micro_live()
+    assert "PF13" in before.blocking and before.preflight_ready is False
+    profiles.accept_defaults = True
+    after = service.micro_live()
+    assert "PF13" not in after.blocking
+    assert after.checked_at == before.checked_at
+    assert len(opened) == 1 and [n for n, _ in fake.calls].count("get_portfolio") == 1
+
+
+def test_an_account_the_venue_would_not_read_is_reported_from_the_reading(
+        profiles_with_state, tmp_path, monkeypatch):
+    profiles = profiles_with_state
+    profiles.risk["micro_live_execution"]["enabled"] = True
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS}, error_tools={"get_portfolio"})
+    service, _opened = _kept_micro_live(profiles, tmp_path, monkeypatch, fake)
+
+    def depth(tb):
+        return 0 if tb is None else 1 + depth(tb.tb_next)
+
+    service.micro_live()
+    kept = service._venue_reading.get().account_error
+    frames = depth(kept.__traceback__)
+    for _ in range(3):
+        status = service.micro_live()
+        gate = next(c for c in status.checks if c.id == "PF01")
+        assert status.connected and status.account is None
+        assert gate.passed is False and "returned an error" in gate.detail
+    assert [n for n, _ in fake.calls].count("get_portfolio") == 1
+    # Raised from a copy each time: the kept error served to every poll gathers no tracebacks.
+    assert depth(kept.__traceback__) == frames

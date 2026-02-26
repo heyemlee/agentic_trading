@@ -171,6 +171,11 @@ than hand-writing types.
 `DISABLED` is the current and default state. It is not an error: it means the master switch for
 real money is off.
 
+`checked_at` is when the venue was last asked about the account. The API keeps that answer
+between polls and renews it every minute while the status is being read; the configuration
+gates in `checks` are evaluated on every request. Execution never relies on it: an approval
+runs preflight again in the session it places the order through.
+
 ### ProposalStatus
 
 | Value | Meaning | Actions to offer |
@@ -241,6 +246,10 @@ should lead with.** Each carries its own `equity_usd`, `net_deposits_usd`,
 
 `combined`, with `equity_usd`, `complete` and `mixes_real_and_conceptual`.
 
+`checked_at` is when the books were read and priced. The API keeps this reading between polls: a
+ledger written, the configuration edited or a new session is read again at once, and otherwise
+the reading is renewed every four minutes while someone is reading it.
+
 Two rules follow from the shape:
 
 - **Never compare a combined total against one account's high-water mark.** The paper book and
@@ -264,7 +273,8 @@ HARD_HALT → EMERGENCY`; Micro-Live uses `NORMAL → WARNING → HALT`.
 
 `regime` carries a deterministic market read: `LOW_RISK`, `NORMAL`, `ELEVATED_RISK`,
 `HIGH_RISK` or `UNKNOWN`, with the index and volatility figures behind it. `UNKNOWN` blocks new
-positions.
+positions. `regime.checked_at` is when it was assessed: every quarter hour, every two minutes
+while the data is unavailable, and at once for a new session.
 
 Inside a proposal, `hard_risk.rules[]` lists every rule with `id`, `name`, `passed` and
 `detail`. Showing the failed ones verbatim is the most useful thing the UI can do; the details
