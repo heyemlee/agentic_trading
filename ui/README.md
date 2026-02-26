@@ -106,8 +106,12 @@ Each screen declares what it reads:
 C.live(['health', 'portfolio', 'risk'], render);
 ```
 
-Each resource has its own success time and error. A failure or a timestamp older
-than twice its polling interval marks that resource unavailable/stale. The page
+Each resource has its own success time and error. A failure, or data older than
+its source allows, marks that resource unavailable/stale. A source allows three
+polls unless it sets `staleAfter` in `assets/api.js` — assistant 5 min, orders
+90s, micro-live 3 min, portfolio 10 min — and a reading the API stamps with
+`checked_at` (portfolio, micro-live) is aged from that stamp, moved onto the
+API's clock by its `Date` header, not from when the poll came back. The page
 waits for its initial data, then can display last-known values with this warning.
 One healthy endpoint cannot clear another endpoint's error. A ledger that has
 gone unconfirmed still answers, with its buckets emptied and the reason in

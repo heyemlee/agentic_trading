@@ -515,8 +515,58 @@ test('one successful endpoint cannot hide another failure or enable approval', a
   assert.equal(c.CT_API.state.online, false);
   assert.equal(c.CT_API.canAct(['health', 'portfolio']), false);
   assert.equal(Object.keys(c.CT.portfolio.buckets).length, 0);
-  c.CT_API.state.resources.health.lastOkAt = Date.now() - 61000;
+  const health = c.CT_API.state.resources.health;
+  health.lastOkAt = health.dataAt = Date.now() - 89000;
+  assert.equal(c.CT_API.isLive('health'), true, 'three thirty-second polls');
+  health.lastOkAt = health.dataAt = Date.now() - 91000;
   assert.equal(c.CT_API.isLive('health'), false);
+});
+
+const dated = (data, serverNow = Date.now()) => ({ ...response(data),
+  headers: { get: name => name === 'date' ? new Date(serverNow).toUTCString() : null } });
+const iso = ms => new Date(ms).toISOString().replace(/\.(\d{3})Z$/, '.$1456+00:00');
+
+test('a reading the API kept is judged by when the API read it, not when the poll came back', async () => {
+  /* /portfolio is kept by the API for up to eight minutes and renewed every four. A poll that
+     came back a second ago can carry a reading nine minutes old, and the console has to say so
+     rather than call it current. The stamp carries microseconds, as Python writes it. */
+  const c = context();
+  let checked = Date.now() - 9 * 60000;
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'csrf' })
+    : dated({ buckets: {}, accounts: {}, errors: {}, combined: {}, checked_at: iso(checked) });
+  c.run('api.js'); c.CT_API.start(['portfolio']); await flush();
+  assert.equal(c.CT_API.isLive('portfolio'), true, 'nine minutes is within the ten allowed');
+
+  checked = Date.now() - 11 * 60000;
+  await c.CT_API.readOnce('portfolio');
+  assert.equal(c.CT_API.isLive('portfolio'), false, 'eleven minutes is not, however fresh the poll');
+  assert.equal(c.CT_API.canAct(['portfolio']), false);
+});
+
+test('the age of a stamped reading is taken on the API clock, not a phone that runs fast', async () => {
+  const c = context();
+  const serverNow = Date.now() - 5 * 60000;            // this device is five minutes ahead
+  c.fetch = async url => url === '/auth/session' ? dated({ authenticated: true, csrf_token: 'csrf' }, serverNow)
+    : dated({ status: 'READY', connected: true, checks: [], checked_at: iso(serverNow - 30000) }, serverNow);
+  c.run('api.js'); c.CT_API.start(['microLive']); await flush();
+  const item = c.CT_API.state.resources.microLive;
+  assert.ok(Math.abs(Date.now() - item.dataAt - 30000) < 2000, 'thirty seconds old, not five and a half minutes');
+  assert.equal(c.CT_API.isLive('microLive'), true);
+});
+
+test('one slow answer does not put the assistant out of date', async () => {
+  /* The assistant polls every five seconds. Judged at two polls, a single read that took more
+     than ten seconds -- one Robinhood handshake elsewhere in the API was enough -- showed the
+     assistant as expired. */
+  const c = context();
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'csrf' })
+    : response({ notes: {}, jobs: [], decisions: [], snapshot: {} });
+  c.run('api.js'); c.CT_API.start(['advisor']); await flush();
+  const advisor = c.CT_API.state.resources.advisor;
+  advisor.lastOkAt = advisor.dataAt = Date.now() - 20000;
+  assert.equal(c.CT_API.isLive('advisor'), true);
+  advisor.lastOkAt = advisor.dataAt = Date.now() - 301000;
+  assert.equal(c.CT_API.isLive('advisor'), false, 'five minutes without a reading is an outage');
 });
 
 test('late proposal detail never attaches to a different queue item', async () => {
@@ -769,11 +819,13 @@ const dictionary = () => {
 test('the polling cadence stays within its budget, because two of these reads call a venue', () => {
   /* On 2026-09-15 this table was quickened across the board — micro-live, portfolio, risk and
      research from 60s to 10-15s, proposals from 15s to 5s — to make the console feel live. The
-     effect was the opposite. /micro-live opens a fresh Robinhood OAuth/MCP session on every
-     call, and /orders does the same whenever micro-live execution is enabled; each handshake
-     runs for four to eight seconds and delays every other read while it does. At 15s the API
-     was handshaking almost continuously, and a tab change waited seconds for a SQLite read
-     that costs 26 ms on its own. Nothing failed, because nothing here was watching.
+     effect was the opposite. /micro-live then opened a fresh Robinhood OAuth/MCP session on
+     every call, and /orders did the same whenever micro-live execution was enabled; each
+     handshake ran for four to eight seconds and delayed every other read while it did. At 15s
+     the API was handshaking almost continuously, and a tab change waited seconds for a SQLite
+     read that costs 26 ms on its own. Nothing failed, because nothing here was watching. The
+     API now keeps its venue session and its costliest readings between polls, which makes a
+     poll cheap; it does not make a quicker table free.
 
      So these are pinned to FRONTEND_HANDOFF.md §15 and to what ui/README.md tells the reader.
      Quickening one is a decision about the whole console: change the budget, this test and the
@@ -790,9 +842,15 @@ test('the polling cadence stays within its budget, because two of these reads ca
   };
   assert.deepEqual(found, budget);
 
-  // The two that reach a venue are the reason the budget exists; neither may be quickened.
-  assert.ok(found.microLive >= 60000, '/micro-live opens a broker session on every call');
-  assert.ok(found.orders >= 10000, '/orders opens a broker session while real money is enabled');
+  // /micro-live reads the venue whenever its kept reading is due; it may not be quickened.
+  assert.ok(found.microLive >= 60000, '/micro-live renews its venue reading through the poll');
+
+  // A threshold shorter than the API's own serving window plus a poll would call a reading the
+  // API is right to serve out of date (service/__init__.py, the Kept readings in Service).
+  const stale = Object.fromEntries([...src.matchAll(/^\s{4}(\w+): \{[^}]*?staleAfter: (\d+)/gm)]
+    .map(m => [m[1], Number(m[2])]));
+  assert.ok(stale.portfolio >= 480000 + found.portfolio, 'portfolio is served for up to eight minutes');
+  assert.ok(stale.microLive >= 90000 + found.microLive, 'micro-live is served for up to ninety seconds');
 });
 
 test('every key a page asks for is defined, in both languages', () => {

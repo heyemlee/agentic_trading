@@ -367,7 +367,7 @@
             escapeHtml(t('pf.confirmLedger')) + '</button></div>'
           : '') +
         '</div><time>' +
-        escapeHtml(item.lastOkAt ? new Date(item.lastOkAt).toLocaleTimeString() : '—') + '</time></div>';
+        escapeHtml(item.lastOkAt ? new Date(item.dataAt || item.lastOkAt).toLocaleTimeString() : '—') + '</time></div>';
     }).join(''));
   }
 

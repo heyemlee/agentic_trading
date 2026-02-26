@@ -124,9 +124,11 @@ class Service:
             refresh_after=lambda reading: 900.0 if reading[0].available else 120.0,
             serve_for=lambda reading: 1800.0 if reading[0].available else 300.0)
         # The account moves with a trade or a transfer; a minute old while someone is looking.
+        # Served for ninety seconds at most, so a poll a minute later is inside the console's
+        # three-minute threshold for it (SOURCES in ui/assets/api.js).
         self._venue_reading = Kept(
             lambda: self._read_venue_account(), key=lambda: self._venue_inputs(),
-            refresh_after=60.0, serve_for=120.0, watch_for=300.0)
+            refresh_after=60.0, serve_for=90.0, watch_for=300.0)
         # Recomputed at once when a ledger is written; otherwise prices move once a session.
         self._portfolio_reading = Kept(
             lambda: self.portfolio(), key=lambda: self._portfolio_inputs(),

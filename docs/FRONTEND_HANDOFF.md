@@ -411,14 +411,26 @@ contract when the two disagree.
 Poll. There is no websocket and none is needed for a single-user system where the fastest thing
 that moves is a quote.
 
-| Data | Suggested interval |
-|---|---|
-| `/health` | 30s |
-| `/proposals` while one is open | 15s (freshness is a countdown) |
-| `/portfolio`, `/risk` | 60s |
-| `/research/{run_key}` during a run | 5s |
-| `/research/jobs` | 10s; use it to resume an active run after page reload |
-| `/orders` when an order is open | 10s (a local read; it opens no venue session) |
+| Data | Suggested interval | Out of date after |
+|---|---|---|
+| `/health` | 30s | 90s |
+| `/proposals` while one is open | 15s (freshness is a countdown) | 45s |
+| `/portfolio` | 60s | 10 min from `checked_at` |
+| `/micro-live` | 60s | 3 min from `checked_at` |
+| `/risk` | 60s | 3 min |
+| `/advisor` | 5s while a conversation is open | 5 min |
+| `/research/{run_key}` during a run | 5s | 30s |
+| `/research/jobs` | 10s; use it to resume an active run after page reload | 30s |
+| `/orders` when an order is open | 10s (a local read; it opens no venue session) | 90s |
+
+A poll is only how often a screen asks. Whether what it holds is current is a separate question,
+answered by age: three polls unless the table says otherwise, and for a reading the API stamps
+with `checked_at`, from that stamp rather than from when the poll came back. The API keeps
+`/portfolio` and `/micro-live` between polls, renewing them every four minutes and every minute
+while they are being read and serving them for at most eight minutes and ninety seconds, so a
+poll that answers at once can carry a reading minutes old; the thresholds allow for that and for
+one failed poll. Move the stamp onto the API's clock with the response's `Date` header before
+taking its age. Never enable an approval on data that is out of date.
 
 Recompute `freshness.age_minutes` client-side between polls so a countdown stays smooth. Always
 call `/proposals/{id}/revalidate` immediately before showing an approve button on a proposal

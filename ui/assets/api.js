@@ -18,9 +18,19 @@ window.CT_API = (function () {
      this table was quickened to 5-15s across the board; the console then spent nearly all of
      its time handshaking, and a tab change sat on a skeleton for seconds waiting for a SQLite
      read that takes 26 ms on its own. Quickening a read here is therefore a decision about the
-     whole console, not about one screen. */
+     whole console, not about one screen.
+
+     `ms` is only how often a screen asks. How old a source's data may be before the console
+     calls it out of date, and will not act on it, is `staleAfter`: three polls unless a source
+     says otherwise. It used to be two polls, measured from when the last poll came back, so one
+     slow answer on the five-second assistant poll put "expired" on the screen. Where the API
+     stamps a reading with checked_at, age is measured from that instead, because the API keeps
+     /portfolio and /micro-live between polls (service/kept.py): portfolio is renewed every four
+     minutes and served for at most eight, micro-live every minute and served for at most one
+     and a half. Their thresholds are that plus a poll, with room for one poll that fails. */
   const SOURCES = {
-    advisor: { path: () => '/advisor', ms: 5000 },
+    // Chat progress wants the short poll; the reading itself is a local SQLite read.
+    advisor: { path: () => '/advisor', ms: 5000, staleAfter: 300000 },
     health: { path: () => '/health', ms: 30000 },
     schedule: { path: () => '/system/schedule', ms: 60000 },
     operations: { path: () => '/system/operations', ms: 60000 },
@@ -29,11 +39,11 @@ window.CT_API = (function () {
     authSessions: { path: () => '/auth/sessions', ms: 60000 },
     config: { path: () => '/config', ms: 60000 },
     evaluation: { path: () => '/evaluation', ms: 300000 },
-    portfolio: { path: () => '/portfolio', ms: 60000 },
+    portfolio: { path: () => '/portfolio', ms: 60000, staleAfter: 600000 },
     risk: { path: () => '/risk', ms: 60000 },
-    microLive: { path: () => '/micro-live', ms: 60000 },
+    microLive: { path: () => '/micro-live', ms: 60000, staleAfter: 180000 },
     proposals: { path: () => '/proposals', ms: 15000 },
-    orders: { path: () => '/orders', ms: 10000 },
+    orders: { path: () => '/orders', ms: 10000, staleAfter: 90000 },
     research: { path: () => '/research?limit=20', ms: 60000 },
     // The team and the analyst selection come from config/ and change about never,
     // so this is read once a session rather than polled like live state.
@@ -59,11 +69,30 @@ window.CT_API = (function () {
   const inFlight = new Map();
   let sessionRequest = null, authEpoch = 0;
 
+  const staleAfter = src => src.staleAfter || Math.max(src.ms * 3, 30000);
+  /* Live while the data is younger than its source allows: aged from when the API read it
+     (dataAt) where the API says, from when it arrived otherwise. */
   function isLive(key) {
     if (demo) return false;
     if (!key) return wanted.every(k => !SOURCES[k].path() || isLive(k));
     const item = state.resources[key];
-    return !!(item && !item.error && item.lastOkAt && Date.now() - item.lastOkAt <= SOURCES[key].ms * 2);
+    if (!item || item.error || !item.lastOkAt) return false;
+    return Date.now() - (item.dataAt || item.lastOkAt) <= staleAfter(SOURCES[key]);
+  }
+  /* How far this device's clock runs ahead of the API's, from the Date header of the latest
+     answer. A time the API stamped is moved onto this clock before its age is taken; a phone a
+     few minutes fast would otherwise see every reading as that much older than it is. */
+  let clockSkew = 0;
+  function noteServerClock(res) {
+    const stamp = Date.parse(res.headers && typeof res.headers.get === 'function' ? res.headers.get('date') || '' : '');
+    if (Number.isFinite(stamp)) clockSkew = Date.now() - stamp;
+  }
+  /* checked_at as this device's clock would have read it, never later than its arrival.
+     Python writes microseconds, which not every browser's Date.parse accepts: cut to three. */
+  function dataTime(data, arrived) {
+    if (!data || Array.isArray(data) || typeof data.checked_at !== 'string') return arrived;
+    const stamp = Date.parse(data.checked_at.replace(/(\.\d{3})\d+/, '$1'));
+    return Number.isFinite(stamp) ? Math.min(stamp + clockSkew, arrived) : arrived;
   }
   let connectionSignature = '';
   function announce(changed = false) {
@@ -93,6 +122,7 @@ window.CT_API = (function () {
     try {
       const res = await fetch(BASE + path, { ...options, credentials: 'same-origin', cache: 'no-store',
         signal: ctrl.signal, headers: { Accept: 'application/json', ...(options.headers || {}) } });
+      noteServerClock(res);
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 401) unauthorized();
@@ -149,8 +179,9 @@ window.CT_API = (function () {
           throw new Error(String(payloadError));
         }
         window.CT[key] = data;
-        state.resources[key] = { lastOkAt: Date.now(), error: null, path };
-        state.lastOkAt = Date.now();
+        const arrived = Date.now();
+        state.resources[key] = { lastOkAt: arrived, dataAt: dataTime(data, arrived), error: null, path };
+        state.lastOkAt = arrived;
         if (key === 'proposals') {
           const current = data.find(p => p.proposal_id === pickedProposal) || data[0];
           const detail = window.CT.proposalDetail;
