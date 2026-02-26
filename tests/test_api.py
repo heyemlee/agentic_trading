@@ -886,8 +886,14 @@ def test_the_console_portfolio_is_kept_until_something_it_was_read_from_changes(
     configuration is edited or the session rolls over, never answered from before that."""
     import os
 
-    from agentic_trading import cli
+    from agentic_trading import cli, risk
     from agentic_trading.portfolio import load_portfolio, migrate_portfolio
+    from agentic_trading.risk.regime import RegimeResult
+
+    # The sandbox simulates prices, but the regime the portfolio carries asks the data vendor for
+    # SPY, which the offline suite refuses (tests/conftest.py).
+    monkeypatch.setattr(risk, "assess_regime", lambda profiles, day: RegimeResult(
+        "NORMAL", True, "SPY above its 200-day average"))
 
     books = []
     original = cli.portfolio_context
