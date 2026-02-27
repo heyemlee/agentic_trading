@@ -251,7 +251,7 @@ def answer(profiles, context, message, history, language="zh", llm=None):
         "Robinhood accounts, previous conversation and existing research decisions. Reply in "
         + ("Simplified Chinese" if language == "zh" else "English") + ". "
         + UNTRUSTED_CONTENT_NOTICE + " "
-        "Account observations are read-only and distinct from conceptual core/"
+        "Account observations are read-only and distinct from the Demo core/"
         "sandbox buckets. Do not apply a $100 experiment's sizing limits to other accounts. "
         "You cannot trade, approve orders, change settings or start a task yourself. For a request "
         "to research a symbol, include it in research_candidates; the UI offers the existing research "
@@ -303,7 +303,7 @@ def read_only_research(profiles, job, snapshot, notes):
         raise ValueError("Read-only reviews currently support stocks and ETFs.")
     context = json.dumps({"scope": "advisory", "read_only": True,
                           "execution_boundary": "No sizing or orders. These observed accounts are not "
-                          "the conceptual core/sandbox buckets or the $100 live experiment.",
+                          "the Demo core/sandbox buckets or the $100 live experiment.",
                           "observed_account": account,
                           "all_accounts": snapshot["accounts"], "fetched_at": snapshot["fetched_at"],
                           "profile": profile_context(profiles, notes)}, ensure_ascii=False)
