@@ -221,6 +221,47 @@ test('research detail stays bound to the opened record while new data arrives', 
   assert.equal(c.element('decision-sheet').open, true);
 });
 
+test('personal report research stays read-only and preserves its account', async () => {
+  const sent = [];
+  const c = advisorPage(async (url, body) => { sent.push({ url, body }); return {}; });
+  c.CT.advisor.decisions = [{ run_id: 'personal-run', ticker: 'AAPL', account_id: '1234567890abcdef1234',
+    bucket: 'advisory', policy: { proposal: {} } }];
+  c.render();
+  c.document.dispatchEvent({ type: 'click', target: { closest: selector => selector === '[data-decision]'
+    ? { dataset: { decision: 'personal-run' } } : null } });
+  const html = c.element('decision-detail').innerHTML;
+  assert.ok(!html.includes('research.html?ticker='));
+  assert.match(html, /data-research="AAPL" data-account="1234567890abcdef1234"/);
+  assert.equal(sent.length, 0, 'opening a report does not start research');
+  c.document.dispatchEvent({ type: 'click', target: { closest: selector => selector === '[data-research], [data-cancel]'
+    ? { dataset: { research: 'AAPL', account: '1234567890abcdef1234' } } : null } });
+  await flush();
+  assert.equal(sent.length, 1); assert.equal(sent[0].url, '/advisor/jobs');
+  assert.equal(sent[0].body.kind, 'analysis');
+  assert.equal(sent[0].body.account_id, '1234567890abcdef1234');
+});
+
+test('research confidence uses each recorded threshold and preserves missing scores', () => {
+  const c = context(true); c.run('console.js');
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { render(); };
+  c.element('[data-od-id="confidence-chart"]').before = () => {};
+  c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
+  c.CT_API = { activeRun: null, watchRun: () => {}, readOnce: async () => {} };
+  c.CT.research = [
+    { run_id: 'threshold', bucket: 'micro_live', ticker: 'VTI', confidence: 70, applicable_floor: 80 },
+    { run_id: 'legacy', bucket: 'micro_live', ticker: 'BND', confidence: 40 },
+    { run_id: 'missing', bucket: 'micro_live', ticker: 'VT', confidence: null, applicable_floor: null },
+  ];
+  c.run('pages/research.js');
+  const html = c.element('conf-chart').innerHTML;
+  assert.match(html, /left:80%/); assert.ok(!html.includes('left:50%'));
+  assert.equal((html.match(/meter-fill is-warn/g) || []).length, 1);
+  assert.equal((html.match(/meter-track/g) || []).length, 2, 'a missing score has no zero-width meter');
+  assert.match(html, /rs.floorUnavailable/);
+  assert.ok(!c.element('panel-runs-all').innerHTML.includes('null'));
+});
+
 test('glass sheets restore focus without clearing an unsaved personal draft', async () => {
   const c = advisorPage(async () => ({}));
   let focused = false;
@@ -604,7 +645,10 @@ test('all generic text and attribute renderers escape untrusted HTML', () => {
 function approvalPage() {
   const c = context(true); c.run('console.js'); c.run('approval-intent.js');
   c.CT.proposalDetail = { ...c.CT.proposalDetail, proposal_id: 'A', version: 'a'.repeat(64),
-    ticker: 'VTI', status: 'WAITING_FOR_APPROVAL', is_real_money: false, sell_quantity: null };
+    ticker: 'VTI', status: 'WAITING_FOR_APPROVAL', is_real_money: false, sell_quantity: null,
+    authority_version: 'authority-a', authority_changed: null };
+  c.CT.authority = { version: 'authority-a', preflight: { ready: true, stale: false },
+    actions: { BUY: { human_approval: { permitted: true, blocked_by: [] } } } };
   c.CT.health.paused = false; c.CT.health.market.is_open = true;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
@@ -636,10 +680,116 @@ test('double-click sends one explicit versioned approval and pending is not a co
   await c.element('approve-submit').events.click();
   assert.equal(posted, 1); assert.equal(sent.url, '/proposals/A/approve');
   assert.equal(sent.body.confirm, true); assert.equal(sent.body.version, 'a'.repeat(64));
+  assert.equal(sent.body.authority_version, 'authority-a');
+  assert.equal(sent.body.acknowledge_authority_change, false);
   assert.match(sent.body.idempotency_key, /^[0-9a-f-]{36}$/);
   resolve({ status: 'SUBMITTED', message: 'pending' }); await first;
   assert.ok(c.element('result-slot').innerHTML.includes('Submitted'));
   assert.ok(!c.element('result-slot').innerHTML.includes('card-real'));
+});
+
+test('authority changes invalidate a checked approval even if the proposal terms stay identical', async () => {
+  const c = approvalPage(); let posted = 0;
+  c.CT_API.post = async () => { posted++; };
+  c.element('btn-approve').events.click();
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  c.CT.authority.version = 'authority-b'; c.render();
+  assert.equal(c.element('approve-confirm').checked, false);
+  assert.equal(c.element('approve-submit').disabled, true);
+  assert.equal(c.element('btn-approve').disabled, true, 'the proposal detail still describes the previous authority');
+  c.CT.authority.version = 'authority-a'; c.render();
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  await c.element('approve-submit').events.click();
+  assert.equal(posted, 0, 'returning to the original version does not restore a discarded confirmation');
+});
+
+test('loosened and unknown authority require a separate acknowledgement bound to the shown version', async () => {
+  for (const classification of ['loosened', 'mixed', 'unknown']) {
+    const c = approvalPage(); let sent;
+    c.CT_API.post = async (url, body) => { sent = body; return { status: 'SUBMITTED' }; };
+    c.CT.proposalDetail.authority_version = classification === 'unknown' ? null : 'research-version';
+    c.CT.proposalDetail.authority_changed = { from: c.CT.proposalDetail.authority_version, to: 'authority-a',
+      classification, paths: ['buckets.micro_live.autonomy.open.enabled'], detail: '<script>untrusted</script>' };
+    c.render(); c.element('btn-approve').events.click();
+    assert.equal(c.element('approve-authority-ack-row').hidden, false);
+    assert.match(c.element('approve-authority-summary').textContent, /buckets.micro_live.autonomy.open.enabled/);
+    assert.equal(c.element('approve-authority-summary').innerHTML, '', 'API text is assigned as text, never HTML');
+    c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+    assert.equal(c.element('approve-submit').disabled, true);
+    await c.element('approve-submit').events.click(); assert.equal(sent, undefined);
+    c.element('approve-authority-confirm').checked = true; c.element('approve-authority-confirm').events.change();
+    assert.equal(c.element('approve-submit').disabled, false);
+    await c.element('approve-submit').events.click();
+    assert.equal(sent.authority_version, 'authority-a');
+    assert.equal(sent.acknowledge_authority_change, true);
+  }
+});
+
+test('tightened authority shows the change without asking for a loosening acknowledgement', () => {
+  const c = approvalPage();
+  c.CT.proposalDetail.authority_version = 'research-version';
+  c.CT.proposalDetail.authority_changed = { from: 'research-version', to: 'authority-a', classification: 'tightened', paths: [] };
+  c.render(); c.element('btn-approve').events.click();
+  assert.equal(c.element('approve-authority-change').hidden, false);
+  assert.equal(c.element('approve-authority-ack-row').hidden, true);
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  assert.equal(c.element('approve-submit').disabled, false);
+});
+
+test('missing, stale, or blocked authority cannot enable live approval', () => {
+  const c = approvalPage();
+  c.CT.proposalDetail.is_real_money = true;
+  c.CT.health.micro_live_enabled = true; c.CT.microLive.preflight_ready = true;
+  c.render(); assert.equal(c.element('btn-approve').disabled, false);
+  c.CT.authority.actions.BUY.human_approval.permitted = false;
+  c.render(); assert.equal(c.element('btn-approve').disabled, true);
+  c.CT.authority.actions.BUY.human_approval.permitted = true;
+  c.CT.authority.preflight.stale = true;
+  c.render(); assert.equal(c.element('btn-approve').disabled, true, 'a fresh response cannot renew a stale preflight');
+  c.CT.authority.preflight.stale = false;
+  c.CT_API.canAct = keys => !keys.includes('authority');
+  c.render(); assert.equal(c.element('btn-approve').disabled, true);
+  c.CT_API.canAct = () => true; c.CT.authority = null;
+  c.render(); assert.equal(c.element('btn-approve').disabled, true);
+});
+
+test('a 409 refreshes authority and proposal without replaying, then requires a new explicit review', async () => {
+  const c = approvalPage(); const reads = [], sent = [];
+  c.CT_API.post = async (url, body) => {
+    sent.push(body);
+    if (sent.length === 1) throw Object.assign(new Error('authority changed; review'), { status: 409 });
+    return { status: 'SUBMITTED' };
+  };
+  c.CT_API.readOnce = async key => {
+    reads.push(key);
+    if (key === 'authority') c.CT.authority.version = 'authority-b';
+    if (key === 'proposalDetail') c.CT.proposalDetail.authority_changed = {
+      from: 'authority-a', to: 'authority-b', classification: 'loosened', paths: ['limit'] };
+  };
+  c.element('btn-approve').events.click(); c.element('approve-confirm').checked = true;
+  await c.element('approve-submit').events.click();
+  assert.deepEqual(reads, ['authority', 'proposals', 'proposalDetail']);
+  assert.equal(sent.length, 1);
+  assert.match(c.element('result-slot').innerHTML, /ap.reviewAgain/);
+  assert.equal(c.element('btn-approve').disabled, false);
+  c.element('btn-approve').events.click();
+  assert.equal(c.element('approve-authority-confirm').checked, false);
+  c.element('approve-confirm').checked = true; c.element('approve-authority-confirm').checked = true;
+  await c.element('approve-submit').events.click();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].authority_version, 'authority-b');
+  assert.equal(sent[1].acknowledge_authority_change, true);
+  assert.notEqual(sent[0].idempotency_key, sent[1].idempotency_key);
+});
+
+test('leaving the approval page discards both confirmation checkboxes', async () => {
+  const c = approvalPage(); let posted = 0; c.CT_API.post = async () => { posted++; };
+  c.element('btn-approve').events.click(); c.element('approve-confirm').checked = true;
+  c.element('approve-authority-confirm').checked = true;
+  c.document.dispatchEvent({ type: 'ct:leave' });
+  assert.equal(c.element('approve-confirm').checked, false);
+  assert.equal(c.element('approve-authority-confirm').checked, false);
+  await c.element('approve-submit').events.click(); assert.equal(posted, 0);
 });
 
 /* The console hides the conceptual book behind one switch in console.js. Flipping the
@@ -835,7 +985,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
     .map(m => [m[1], Number(m[2])]));
   const budget = {
     advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
-    notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, evaluation: 300000,
+    notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
     research: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,

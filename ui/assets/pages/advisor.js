@@ -81,7 +81,7 @@ window.Console.page('advisor', function (document) {
   const status = text => { el('advisor-status').textContent = text; };
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
   function researchButton(symbol, account) {
-    return '<button class="btn btn-secondary btn-sm" data-research="' + h(symbol) + '"' +
+    return '<button type="button" class="btn btn-secondary btn-sm" data-research="' + h(symbol) + '"' +
       (account ? ' data-account="' + h(account) + '"' : '') + '>' + t('ai.research') + '</button>';
   }
   function paintMessages() {
@@ -145,8 +145,7 @@ window.Console.page('advisor', function (document) {
         '</p><p>' + h(p.investment_thesis || '') + '</p><dl>' + detail('ai.entry', p.entry_logic) +
         detail('ai.exit', p.exit_logic) + detail('ai.risks', [...(p.primary_risks || []), ...(p.missing_information || [])].join('\n')) +
         '</dl><div class="advisor-actions"><a class="btn btn-secondary btn-sm" href="research.html?run=' + encodeURIComponent(d.run_id) +
-        '">' + t('ai.fullReport') + '</a><a class="btn btn-secondary btn-sm" href="research.html?ticker=' + encodeURIComponent(d.ticker) +
-        '">' + t('ai.formal') + '</a></div>');
+        '">' + t('ai.fullReport') + '</a>' + researchButton(d.ticker, d.account_id) + '</div>');
       return '<button class="research-tile" data-decision="' + h(d.run_id) + '" aria-haspopup="dialog"><span class="ticker-orb" aria-hidden="true">' + h(d.ticker) +
         '</span><span class="utility-copy"><strong>' + h(d.ticker) + '</strong><span>' + h(scope) + ' · ' + h(d.trade_date) +
         '</span></span><span class="action-badge">' + h(C.code(d.action)) + '</span><span class="ux-chevron"></span></button>';
@@ -265,6 +264,7 @@ window.Console.page('advisor', function (document) {
     const button = e.target.closest?.('[data-research], [data-cancel]');
     if (!button || button.disabled) return;
     if (button.dataset.research) {
+      if (el('decision-sheet').open) C.closeSheet('decision-sheet');
       await send('analysis', { ticker: button.dataset.research, account_id: button.dataset.account || null });
     } else {
       button.disabled = true;

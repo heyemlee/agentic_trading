@@ -179,6 +179,15 @@
     <h2 id="approve-dialog-title">—</h2>
     <p id="approve-dialog-terms" class="body-sm"></p>
     <p id="approve-dialog-warning" class="body-sm" role="alert"></p>
+    <section id="approve-authority-change" hidden aria-labelledby="approve-authority-title" style="margin-top:16px;">
+      <h3 id="approve-authority-title" data-i18n="ap.authorityChanged">—</h3>
+      <p id="approve-authority-summary" class="body-sm" style="white-space:pre-wrap;overflow-wrap:anywhere;"></p>
+      <a href="settings.html" class="body-sm" data-i18n="ap.viewAuthority">—</a>
+      <label id="approve-authority-ack-row" class="row row-top body-sm" style="margin-top:12px;gap:10px;" hidden>
+        <input type="checkbox" id="approve-authority-confirm" style="margin-top:4px;width:18px;height:18px;flex:none;" />
+        <span data-i18n="ap.authorityAck">—</span>
+      </label>
+    </section>
     <div class="field" style="margin-top:20px;">
       <label for="approve-note" data-i18n="ap.note">Note</label>
       <textarea class="textarea" id="approve-note" data-i18n-ph="ap.notePh" placeholder=""></textarea>

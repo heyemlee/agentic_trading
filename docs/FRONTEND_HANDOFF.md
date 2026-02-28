@@ -132,6 +132,14 @@ for a product-level refusal and 500 for an unexpected fault.
 
 ### Write
 
+The approval screen captures the proposal and current authority versions together. Its detail's
+`authority_changed.to` (or `authority_version` when unchanged) must match the authority reading.
+Loosened, mixed and unknown changes require a separate unchecked acknowledgement. A changed or
+unreadable authority invalidates an open confirmation. A 409 refreshes the authority and proposal
+for another explicit review; it never retries the write. Transport failures still require checking
+the order state. Ship this UI together with the backend authority checks, so older proposals can
+be reviewed and acknowledged.
+
 | Method | Path | Body | Effect |
 |---|---|---|---|
 | POST | `/research` | `{ticker, bucket, instrument_type, trade_date, trigger}` | enqueues a durable run; an identical active request returns its existing `run_key` |
@@ -415,6 +423,7 @@ that moves is a quote.
 | Data | Suggested interval | Out of date after |
 |---|---|---|
 | `/health` | 30s | 90s |
+| `/config/authority` on Approvals | 30s (local state and kept readings only) | 90s from `checked_at` |
 | `/proposals` while one is open | 15s (freshness is a countdown) | 45s |
 | `/portfolio` | 60s | 10 min from `checked_at` |
 | `/micro-live` | 60s | 3 min from `checked_at` |

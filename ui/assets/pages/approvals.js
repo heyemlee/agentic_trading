@@ -2,11 +2,16 @@ window.Console.page('approvals', function (document) {
   const C = window.Console, D = C.D;
   C.mount('approvals');
   C.wireTabs();
-  let intent = null, inFlight = false, uncertain = false;
-  const critical = () => ['proposals', 'proposalDetail', 'health', ...(D.proposalDetail?.is_real_money ? ['microLive'] : [])];
+  let intent = null, inFlight = false, uncertain = false, authorityAcknowledgementRequired = false;
+  const critical = () => ['proposals', 'proposalDetail', 'health', 'authority', ...(D.proposalDetail?.is_real_money ? ['microLive'] : [])];
+  const authorityReady = () => window.ApprovalIntent.authorityMatches(D.proposalDetail, D.authority) &&
+    (!D.proposalDetail.is_real_money || D.authority.preflight?.ready === true && D.authority.preflight?.stale === false);
   const canApprove = () => CT_API.canAct(critical()) && D.proposalDetail?.status === 'WAITING_FOR_APPROVAL' &&
+    authorityReady() &&
     !D.health.paused && (D.health.market || {}).is_open === true &&
-    (!D.proposalDetail.is_real_money || D.health.micro_live_enabled === true && D.microLive.preflight_ready === true);
+    (!D.proposalDetail.is_real_money || D.health.micro_live_enabled === true && D.microLive.preflight_ready === true &&
+      D.authority.actions?.[D.proposalDetail.action]?.human_approval?.permitted === true);
+  const matches = () => window.ApprovalIntent.matches(intent, D.proposalDetail, D.authority);
 
   C.setHTML(document.getElementById('banner-icon'), C.ICON.lock);
 
@@ -42,8 +47,10 @@ window.Console.page('approvals', function (document) {
      replaces it in place, so nothing here may capture it in a closure. */
   function renderDetail() {
     const p = D.proposalDetail;
-    if (intent && (!window.ApprovalIntent.matches(intent, p) || !canApprove())) {
+    if (intent && (!matches() || !canApprove())) {
+      intent = null;
       confirmBox.checked = false;
+      authorityConfirm.checked = false;
       submitBtn.disabled = true;
       document.getElementById('approve-dialog-warning').textContent =
         C.t('ap.changedReview');
@@ -92,6 +99,8 @@ window.Console.page('approvals', function (document) {
     if (why) {
       const blocked = p.is_real_money ? ((D.microLive || {}).blocking || []) : [];
       why.textContent = [
+        !CT_API.canAct(['authority']) || !authorityReady() ? C.t('ap.authorityUnavailable') : null,
+        ...(p.is_real_money ? (D.authority?.actions?.[p.action]?.human_approval?.blocked_by || []).map(x => x.detail) : []),
         (D.health.market || {}).is_open ? null : C.t('home.marketClosed'),
         blocked.length ? C.t('home.blocking', { ids: blocked.join(', ') }) : null,
       ].filter(Boolean).join(' · ');
@@ -200,10 +209,30 @@ window.Console.page('approvals', function (document) {
   });
 
   const confirmBox = document.getElementById('approve-confirm');
+  const authorityConfirm = document.getElementById('approve-authority-confirm');
   const submitBtn = document.getElementById('approve-submit');
+  const classifications = { tightened: 'ap.authorityTightened', loosened: 'ap.authorityLoosened',
+    mixed: 'ap.authorityMixed', unrelated: 'ap.authorityUnrelated', unknown: 'ap.authorityUnknown' };
+  function changeSummary(proposal) {
+    const change = proposal.authority_changed;
+    if (!change) return '';
+    return [C.t(classifications[change.classification] || 'ap.authorityUnknown'),
+      C.t('ap.authorityVersions', { from: change.from || C.t('ap.authorityUnrecorded'), to: change.to }),
+      change.at ? C.dateTime(change.at) : null,
+      ...(change.paths || []), change.detail,
+      proposal.authority_changed_during_research ? C.t('ap.authorityDuringResearch') : null,
+    ].filter(Boolean).join('\n');
+  }
+  const canSubmit = () => confirmBox.checked && canApprove() && matches() &&
+    (!authorityAcknowledgementRequired || authorityConfirm.checked) && !inFlight && !uncertain;
   approveBtn.addEventListener('click', () => {
     if (!canApprove() || inFlight || uncertain) return;
-    intent = window.ApprovalIntent.capture(D.proposalDetail, crypto.randomUUID());
+    intent = window.ApprovalIntent.capture(D.proposalDetail, crypto.randomUUID(), D.authority);
+    authorityAcknowledgementRequired = window.ApprovalIntent.needsAcknowledgement(D.proposalDetail);
+    authorityConfirm.checked = false;
+    document.getElementById('approve-authority-change').hidden = !D.proposalDetail.authority_changed;
+    document.getElementById('approve-authority-ack-row').hidden = !authorityAcknowledgementRequired;
+    document.getElementById('approve-authority-summary').textContent = changeSummary(D.proposalDetail);
     confirmBox.checked = false; submitBtn.disabled = true;
     document.getElementById('approve-note').value = '';
     document.getElementById('approve-dialog-warning').textContent = '';
@@ -215,12 +244,11 @@ window.Console.page('approvals', function (document) {
       ' · ' + intent.proposal_id;
     C.openSheet('approve-dialog');
   });
-  confirmBox.addEventListener('change', () => {
-    submitBtn.disabled = !confirmBox.checked || !canApprove() || !window.ApprovalIntent.matches(intent, D.proposalDetail);
-  });
+  confirmBox.addEventListener('change', () => { submitBtn.disabled = !canSubmit(); });
+  authorityConfirm.addEventListener('change', () => { submitBtn.disabled = !canSubmit(); });
   document.getElementById('approve-cancel').addEventListener('click', () => { intent = null; C.closeSheet('approve-dialog'); });
   submitBtn.addEventListener('click', async () => {
-    if (!confirmBox.checked || !canApprove() || inFlight || !window.ApprovalIntent.matches(intent, D.proposalDetail)) return;
+    if (!canSubmit()) return;
     const approved = intent;
     inFlight = true; submitBtn.disabled = true; approveBtn.disabled = true;
     C.closeSheet('approve-dialog');
@@ -229,6 +257,7 @@ window.Console.page('approvals', function (document) {
     try {
       const res = await CT_API.post('/proposals/' + encodeURIComponent(proposal_id) + '/approve', {
         ...terms, note: document.getElementById('approve-note').value.trim() || null, confirm: true,
+        acknowledge_authority_change: authorityAcknowledgementRequired && authorityConfirm.checked,
       });
       if (res.blocked) { blockedPanel('ap.verbApprove'); return; }
       resultPanel(res);
@@ -236,6 +265,19 @@ window.Console.page('approvals', function (document) {
       await CT_API.readOnce('proposals');
       await CT_API.readOnce('proposalDetail');
     } catch (error) {
+      if (error.status === 409) {
+        // A conflict requires another review, never a replay of the rejected request.
+        // Keep this attempt bound to its proposal while the reads are in flight.
+        intent = null; confirmBox.checked = false; authorityConfirm.checked = false;
+        await CT_API.readOnce('authority');
+        await CT_API.readOnce('proposals');
+        await CT_API.readOnce('proposalDetail');
+        const current = D.proposalDetail;
+        panel(C.t('ap.reviewAgain'), 'quiet', error.message,
+          [C.t('ap.reviewAgainBody'), ...(current?.proposal_id === proposal_id && current.authority_changed
+            ? [changeSummary(current)] : [])]);
+        return;
+      }
       /* Refused before it reached the service: nothing to reconcile, so say so plainly rather
          than lock approval behind "check the order state" for an order that cannot exist. */
       if (error.notSent) { errPanel('ap.verbApprove', error); return; }
@@ -291,5 +333,9 @@ window.Console.page('approvals', function (document) {
   });
 
   /* Live writes require a verified session; demo never calls the API. */
-  C.live(['proposals', 'proposalDetail', 'health', 'microLive'], renderDetail);
+  // Leaving closes the sheet; coming back always requires a fresh explicit confirmation.
+  document.addEventListener('ct:leave', () => {
+    intent = null; confirmBox.checked = false; authorityConfirm.checked = false; submitBtn.disabled = true;
+  });
+  C.live(['proposals', 'proposalDetail', 'health', 'microLive', 'authority'], renderDetail);
 });

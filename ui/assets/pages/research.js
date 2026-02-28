@@ -14,29 +14,33 @@ window.Console.page('research', function (document) {
   function render() {
     paintScope();
 
-    const FLOOR = 50;
-
     /* Runs on a hidden bucket leave the charts and the lists. The record is
        untouched: `ct-evaluate report` still counts every one of them. */
     const runs = (D.research || []).filter((r) => C.showsBucket(r.bucket));
 
     /* ── confidence bars — filled encoding, real values only ─────────── */
     C.setHTML(document.getElementById('conf-chart'), '<div class="stack stack-4">' +
-      runs.map((r) =>
-        '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '">' +
+      runs.map((r) => {
+        const confidence = Number.isFinite(r.confidence) ? r.confidence : null;
+        const floor = Number.isFinite(r.applicable_floor) && r.applicable_floor >= 0 && r.applicable_floor <= 100
+          ? r.applicable_floor : null;
+        return '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '">' +
           '<div class="row-between" style="margin-bottom:6px;">' +
             '<span class="body-sm">' + C.escapeHtml(r.ticker) + ' · ' + C.escapeHtml(C.bucket(r.bucket)) +
               ' <span class="body-muted">' + C.dateOnly(r.trade_date) + '</span></span>' +
-            '<span class="body-sm num">' + C.escapeHtml(r.confidence) + '</span>' +
+            '<span class="body-sm num">' + C.escapeHtml(confidence ?? '—') + '</span>' +
           '</div>' +
-          '<div style="position:relative;">' +
+          (confidence == null ? '' : '<div style="position:relative;">' +
             '<div class="meter-track" style="height:10px;">' +
-              '<div class="meter-fill' + (r.confidence < FLOOR ? ' is-warn' : ' is-accent') +
-              '" style="width:' + Math.max(0, Math.min(100, Number(r.confidence) || 0)) + '%"></div></div>' +
-            '<span style="position:absolute;top:-3px;bottom:-3px;left:' + FLOOR +
-              '%;width:2px;background:var(--fg);" aria-hidden="true"></span>' +
-          '</div>' +
-        '</div>').join('') + '</div>');
+              '<div class="meter-fill' + (floor != null && confidence < floor ? ' is-warn' : ' is-accent') +
+              '" style="width:' + Math.max(0, Math.min(100, confidence)) + '%"></div></div>' +
+            (floor == null ? '' : '<span style="position:absolute;top:-3px;bottom:-3px;left:' + floor +
+              '%;width:2px;background:var(--fg);" aria-hidden="true"></span>') +
+          '</div>') +
+          '<p class="body-sm body-muted" style="margin-top:6px;">' +
+            C.escapeHtml(floor == null ? C.t('rs.floorUnavailable') : C.t('rs.applicableFloor', { n: floor })) + '</p>' +
+        '</div>';
+      }).join('') + '</div>');
 
     /* ── run list ────────────────────────────────────────────────────── */
     function runList(rows) {
@@ -52,7 +56,7 @@ window.Console.page('research', function (document) {
         sub: (r.final_action ? C.code(r.final_action) : C.t('ac.incomplete')) + ' · ' +
              C.code(r.portfolio_manager_rating) + ' · ' +
              C.t('rs.traceCalls', { n: r.llm_calls }) + ' · ' + C.clock(r.elapsed_seconds),
-        value: String(r.confidence),
+        value: r.confidence == null ? '—' : String(r.confidence),
         note: C.dateOnly(r.trade_date),
       })).join('') + '</div>';
     }
@@ -79,7 +83,7 @@ window.Console.page('research', function (document) {
         '<div class="kv-row"><dt>' + C.t('rs.hardRiskVerdict') + '</dt><dd>' +
           C.escapeHtml((last.hard_risk_verdict || '—')) + '</dd></div>' +
         '<div class="kv-row"><dt>' + C.t('rs.strength') + '</dt><dd>' +
-          C.escapeHtml(last.confidence) + ' / 100</dd></div>' +
+          (last.confidence == null ? '—' : C.escapeHtml(last.confidence) + ' / 100') + '</dd></div>' +
         '<div class="kv-row"><dt>' + C.t('rs.callsElapsed') + '</dt><dd>' +
           C.escapeHtml(last.llm_calls) + ' · ' + C.clock(last.elapsed_seconds) + '</dd></div>' +
         '<div class="kv-row"><dt>' + C.t('rs.proposal') + '</dt><dd>' +

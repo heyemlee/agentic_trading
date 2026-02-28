@@ -94,10 +94,15 @@ synthetic APIs. It needs Playwright and Chrome (or `CT_BROWSER_CHANNEL`); it sta
 static server and never calls the deployed API. The dependency-free regression cases remain
 in `tests/frontend.test.cjs` and run through `deploy/checks.sh`.
 
+`node tools/check_approval_ui.cjs` checks the mobile approval dialog against synthetic API
+responses, including a version conflict and an explicit second confirmation. It also starts
+only a static server; all API requests are intercepted. Set `CT_UI_CAPTURE_DIR` to save a screenshot.
+
 ## Live data
 
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals
-15s, health 30s, portfolio/risk/research/micro-live 60s. No websocket; the
+15s, health and authority 30s, portfolio/risk/research/micro-live 60s. Authority is
+read only on pages that use it and opens no venue session. No websocket; the
 backend offers none and none is needed.
 
 Each screen declares what it reads:

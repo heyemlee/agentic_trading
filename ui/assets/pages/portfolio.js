@@ -228,7 +228,7 @@ window.Console.page('portfolio', function (document) {
         ? '<div class="list list-inset" style="margin-top:16px;">' + b.positions.map((pos) =>
             C.listRow({
               title: pos.symbol, sub: pos.classification || '',
-              value: C.usd(pos.market_value),
+              value: C.usd(pos.market_value_usd),
               note: pos.quantity + ' @ ' + C.usd(pos.price) + ' · ' + C.pct(pos.unrealized_pct),
             })).join('') + '</div>'
         : '<div class="empty" style="margin-top:16px;" data-od-id="empty-' + key + '">' +
