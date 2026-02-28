@@ -114,6 +114,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/system/schedule` | next scheduled research, the last run, and why a run was skipped |
 | GET | `/system/operations` | background activity heartbeats, free disk, retention windows |
 | GET | `/system/notifications` | notification channel, what is enabled, delivery record |
+| GET | `/attention` | what still needs a person, computed from unresolved state on every call: `items[]` in the order to take them (`priority` 1 first, then `severity`), each with a stable `id`, a closed `kind`, `requires_person`, the account it concerns, `since`, a `link` as `{page, params}` and the `actions` a screen may offer; `top` is the first item or `null`; `readable: false` with `unreadable[]` means a source could not be read, and a screen must then say it cannot confirm rather than "nothing to do". Never derived from what was sent or from the journal |
 | GET | `/config/authority` | what may happen to the real-money account, from every rule that decides it: per action (`BUY`, `ADD`, `REDUCE`, `SELL`) the mode, what blocks a person and what blocks code, the limits; pending changes; the authority `version` and its `history`. Computed without the venue: `preflight` is the reading `/micro-live` keeps, or `ready: null` with `stale: true` |
 | GET | `/auth/sessions` | devices signed in: opaque id, device label, created/last-used/expiry |
 | GET | `/evaluation` | the forward record against a passive benchmark, including what it did not do |
@@ -149,6 +150,7 @@ be reviewed and acknowledged.
 | POST | `/portfolio/confirm` | `{ledger?, dry_run?}` | runs the ledger check and renews `as_of` where it agrees |
 | POST | `/portfolio/cashflow` | `{bucket, amount_usd, kind, date?, reason?}` | records funding (`deposit`/`withdrawal`, never return) or `income`/`fee` (return) against a bucket |
 | POST | `/research/{run_key}/cancel` | `{reason?}` | stops a queued or running job; 409 if it already finished |
+| POST | `/research/{run_key}/opened` | `{}` | records that the finished run's result was shown to the person (`opened_at`), which is what retires a finished-task item on `/attention`; idempotent; 409 while the run is not finished. Deliberately a write of its own: reading the run, which the console polls, never marks anything |
 | POST | `/auth/sessions/{session_id}/revoke` | none | signs one device out; 404 if it is already gone |
 | POST | `/auth/sessions/revoke-others` | none | signs out every device except this one |
 | POST | `/system/pause` | `{reason?}` | kill switch on |

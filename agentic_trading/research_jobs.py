@@ -56,6 +56,9 @@ class ResearchJobStore:
             # The authority the run was submitted under; a proposal born under a different
             # one says so (see autonomy.effective_authority).
             "authority_version": authority_version,
+            # When the person was shown the result (service.mark_opened); the "finished" item on
+            # Home stands until then. Never set by a read, which the console polls.
+            "opened_at": None,
         }
         if task:
             job["task"] = task

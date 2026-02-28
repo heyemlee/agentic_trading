@@ -513,6 +513,32 @@ def test_the_authority_is_published_and_the_config_overview_carries_it(
     assert {"authority_version", "acknowledge_authority_change"} <= set(approve)
 
 
+def test_attention_and_the_opened_mark_are_published(auth_client, monkeypatch, sandbox_service):
+    """Home reads the to-do list from here, and says "seen" through a write of its own."""
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    monkeypatch.setattr(sandbox_service, "_broker_connect_error", lambda: None)
+    response = auth_client.get("/attention")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert {"checked_at", "readable", "unreadable", "top", "items", "summary", "context"} <= set(body)
+    assert body["readable"] is True
+
+    manager = sandbox_service._research_manager(sandbox_service.profiles())
+    manager.create(run_key="advisor_seen", ticker="ASSISTANT", bucket="advisory",
+                   trade_date="2026-09-17", instrument_type="auto", trigger="manual",
+                   task={"kind": "portfolio_review", "account_id": None, "language": "zh"})
+    # Not finished: nothing to have seen yet.
+    early = auth_client.post("/research/advisor_seen/opened", json={})
+    assert early.status_code == 409, early.text
+    manager.store.update("advisor_seen", {"state": "COMPLETE", "finished_at": "2026-09-18T20:00:00+00:00"})
+    first = auth_client.post("/research/advisor_seen/opened", json={})
+    assert first.status_code == 200 and first.json()["opened_at"], first.text
+    again = auth_client.post("/research/advisor_seen/opened", json={})
+    assert again.json()["opened_at"] == first.json()["opened_at"]
+    # A read never marks anything.
+    assert auth_client.get("/research/advisor_seen").json()["opened_at"] == first.json()["opened_at"]
+
+
 def test_openapi_schema_is_published_for_frontend_generation(auth_client):
     client = auth_client
     schema = client.get("/openapi.json").json()

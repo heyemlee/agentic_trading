@@ -11,6 +11,7 @@ from typing import Any, ClassVar
 
 from .. import agent_roster, autonomy
 from ..micro_live import BUCKET as MICRO_BUCKET
+from ..proposals import utcnow
 from .base import _last_session
 from .errors import ServiceConflict, ServiceError
 
@@ -90,6 +91,31 @@ class ResearchMixin:
         queued = len(self._research_manager(profiles).store.list(states=("QUEUED", "RUNNING")))
         self.record_activity("research_dispatch", f"{queued} job(s) active", profiles=profiles)
         return result
+
+    def mark_opened(self, run_key: str) -> dict[str, Any]:
+        """Record that a finished run's result was shown to the person. Idempotent.
+
+        A write of its own rather than a side effect of reading the run: the console polls a
+        run every few seconds while its page is open, and a read that counted as "seen" would
+        clear the finished-task item on Home before anyone had looked at the result. The
+        console calls this once the result is actually on screen, under the same same-origin
+        and CSRF rules as every other write.
+        """
+        from ..research_jobs import TERMINAL_STATES
+
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", run_key):
+            raise ServiceError(f"invalid research run {run_key!r}")
+        manager = self._research_manager(self.profiles())
+        job = manager.store.get(run_key)
+        if job is None:
+            raise ServiceError(f"no research run {run_key!r}")
+        if job["state"] not in TERMINAL_STATES:
+            raise ServiceConflict(f"research run {run_key} is still {job['state']}; nothing to open yet")
+        if job.get("opened_at"):
+            return job
+        updated = manager.store.update(run_key, {"opened_at": utcnow().isoformat()},
+                                       expected_states=TERMINAL_STATES)
+        return updated or manager.store.get(run_key) or job
 
     def cancel_research(self, run_key: str, reason: str = "cancelled from the console") -> dict[str, Any]:
         """Stop a queued or running research job on request.

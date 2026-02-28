@@ -442,6 +442,12 @@ def schedule_status() -> dict[str, Any]:
     return _ok(_service.schedule_status)
 
 
+@app.get("/attention", tags=["system"],
+         summary="What still needs a person, computed from unresolved state and never from what was sent")
+def attention() -> dict[str, Any]:
+    return _ok(_service.attention)
+
+
 class PauseRequest(BaseModel):
     # Unknown fields are refused like every other write model here: a misspelt field was
     # silently ignored. The reason is written whole into the halt file, so it is bounded.
@@ -666,6 +672,12 @@ class CancelRequest(BaseModel):
 def cancel_research(run_key: str, body: CancelRequest | None = None) -> dict[str, Any]:
     return _ok(_service.cancel_research, run_key,
                (body.reason if body and body.reason else "cancelled from the console"))
+
+
+@app.post("/research/{run_key}/opened", tags=["research"],
+          summary="The finished run's result was shown to the person; idempotent, never a side effect of a read")
+def research_opened(run_key: str) -> dict[str, Any]:
+    return _ok(_service.mark_opened, run_key)
 
 
 @app.get("/research/{run_key}", tags=["research"], summary="Progress of one research run")
