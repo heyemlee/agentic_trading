@@ -26,7 +26,7 @@ CALENDAR = "event_calendar.yaml"
 
 
 @pytest.fixture
-def sandbox(tmp_path):
+def sandbox(tmp_path, offline_market_reads):
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"

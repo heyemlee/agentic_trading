@@ -101,6 +101,8 @@ def test_missing_data_is_not_a_zero_balance_and_foreign_rows_are_rejected(profil
 
 @pytest.fixture
 def assistant_service(request, monkeypatch):
+    # start_advisor() anchors every request to the last session through service.assistant's own
+    # binding of _last_session; sandbox_service answers that probe offline (offline_market_reads).
     service = request.getfixturevalue("sandbox_service")
     monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
     service.state_db().write_meta(SNAPSHOT, snapshot())

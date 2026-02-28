@@ -125,6 +125,33 @@ def config_dir():
 
 
 @pytest.fixture
+def offline_market_reads(monkeypatch):
+    """What a Service reads from the data vendor on its own, answered without the vendor.
+
+    Two reads sit behind almost every service call, not only the ones that price something:
+    the session the service anchors to (`service.base._last_session`, which asks yfinance for
+    SPY until it finds a session with a usable bar) and the market regime (`risk.assess_regime`,
+    SPY and VIX). Both go through upstream's `load_ohlcv`, whose cache is `~/.tradingagents/cache`,
+    shared with the deployment and named by the day. A test that reached either was offline
+    only on a day production had already fetched the bar; on any other day `no_network_guard`
+    failed it at teardown, and which test failed was whichever reached the vendor first.
+
+    The session stub is the probe, not `_last_session`: `service.assistant`, `research` and
+    `books` each bind `from .base import _last_session` by name, so patching the name in base
+    reaches none of them, which is how the assistant tests stayed flaky while test_api.py
+    patched exactly that. Every session is taken as published, so the anchor is the calendar's
+    last close, which is what the vendor answers on an ordinary day. The regime is the simulated
+    NORMAL one the execution scenarios use. A test about either patches it again itself.
+    """
+    from agentic_trading import risk
+    from agentic_trading.risk_scenarios import regime
+    from agentic_trading.service import base
+
+    monkeypatch.setattr(base, "_session_has_data", lambda session: True)
+    monkeypatch.setattr(risk, "assess_regime", lambda *_args, **_kwargs: regime("NORMAL"))
+
+
+@pytest.fixture
 def real_audit_guard():
     """Offline tests must never land a fake CLI call in the real runs/llm_calls.jsonl.
 

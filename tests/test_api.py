@@ -49,8 +49,12 @@ from tests.conftest import ROOT, copy_example_ledger
 
 
 @pytest.fixture
-def sandbox_service(tmp_path):
-    """A Service whose every state path points at a temp directory."""
+def sandbox_service(tmp_path, offline_market_reads):
+    """A Service whose every state path points at a temp directory.
+
+    Its session and market regime are answered offline as well: see `offline_market_reads`
+    in tests/conftest.py. A test about either patches it again itself.
+    """
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
     state = tmp_path / "state"
