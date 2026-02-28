@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from . import autonomy
 from .broker import make_broker
 from .env import load_env
 from .evidence import collect_evidence, foreign_bucket_mentions
@@ -156,7 +157,8 @@ def _final(result, proposal: Proposal) -> dict:
 
 
 def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instrument_type: str,
-            runs_dir: Path, debug: bool, *, run_id: str | None = None) -> int:
+            runs_dir: Path, debug: bool, *, run_id: str | None = None,
+            authority_version_at_submit: str | None = None) -> int:
     reset_usage_log()
     started = time.time()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -166,6 +168,12 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     analysts = profiles.analysts_for(instrument_type)
     run_id = run_id or f"{trade_date}_{ticker.upper().replace('/', '-')}_{uuid.uuid4().hex[:8]}"
     run_dir = runs_dir / run_id
+    # The authority this research is made under: the version its job was submitted with, or,
+    # for a run started by hand, the version now. A proposal carries this one, not the version
+    # at the moment it is written, so an authority that moved while the research ran is seen
+    # as a change by the approval and never as "nothing moved" by the autonomous loop.
+    store = _store(profiles)
+    research_authority = authority_version_at_submit or autonomy.note_version(profiles, store.db)
     _print(f"[{ticker}] {instrument_type} | bucket={bucket} | analysts={analysts} | run={run_id}")
     progress_path = str(run_dir / "progress.jsonl")
     # Written before the portfolio snapshot, so a run that fails closed before any model call
@@ -228,16 +236,24 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         portfolio={"snapshot_text": portfolio_text, "as_of": snap.as_of, "total_equity": snap.total_equity},
     )
     proposal = None
+    authority_now = autonomy.note_version(profiles, store.db)
+    authority_moved = authority_now != research_authority
+    record["authority"] = {"research": research_authority, "proposal": authority_now,
+                           "changed_during_research": authority_moved}
     if result.verdict == "APPROVE":
-        store = _store(profiles)
         proposal = new_proposal(
+            authority_version=research_authority,
+            authority_changed_during_research=authority_moved,
             run_id=run_id, ticker=ticker, bucket=bucket, action=result.final_action,
             strategy=proposal_obj.strategy, instrument_type=instrument_type,
             limit_class=proposal_obj.cls.limit_class, size_hint=policy.size_hint,
             confidence=policy.confidence, notional_usd=result.proposed_notional_usd,
             sell_quantity=result.proposed_quantity,
             target_weight_pct=result.target_weight_pct_of_allocation, trade_date=trade_date,
-            requires_human_approval=result.requires_human_approval,
+            # An authority that moved while the research ran is not weighed here: the proposal
+            # goes to a person, who sees the change (ProposalDetail.authority_changed) and
+            # acknowledges it if it loosened. Code never treats it as "nothing moved".
+            requires_human_approval=result.requires_human_approval or authority_moved,
             reference_price=proposal_obj.evidence.get("price") or _reference_price(snap, ticker, trade_date),
             reference_price_date=proposal_obj.evidence.get("price_date", trade_date), ladder_level_at_proposal=ladders.governing(bucket).level,
             regime_at_proposal=regime.level, portfolio_equity_at_proposal=snap.total_equity,
@@ -246,6 +262,10 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
             data_quality=(policy.proposal or {}).get("data_quality"),
             evidence=proposal_obj.evidence, missing_information=proposal_obj.missing_information,
         )
+        if authority_moved:
+            proposal.note("authority_changed_during_research",
+                          f"researched under authority {research_authority}, written under "
+                          f"{authority_now}; a person decides this one")
         store.save(proposal)
         record["proposal_id"] = proposal.proposal_id
         record["proposal"] = proposal.as_dict()

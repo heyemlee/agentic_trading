@@ -85,14 +85,17 @@ class ApprovalsMixin:
                 max_price_drift_pct=rules.get("max_price_drift_pct")),
             reference_price=p.reference_price,
             run_id=p.run_id,
+            authority_version=p.authority_version,
         )
 
     def proposal(self, proposal_id: str) -> ProposalDetail:
         """Full detail: the reasoning, the risk rules, and the world the proposal was born into."""
         profiles = self.profiles()
-        p = self._store(profiles).get(proposal_id)
+        store = self._store(profiles)
+        p = store.get(proposal_id)
         if p is None:
             raise ServiceError(f"no proposal {proposal_id!r}")
+        current_authority = autonomy.note_version(profiles, store.db)
         research, hard_risk = None, None
         record = _find_record(profiles, p.run_id)
         if record:
@@ -128,6 +131,9 @@ class ApprovalsMixin:
             ),
             research=research,
             hard_risk=hard_risk,
+            authority_changed=autonomy.authority_change(
+                autonomy.version_history(store.db), p.authority_version, current_authority),
+            authority_changed_during_research=p.authority_changed_during_research,
         )
 
     # ---------------------------------------------------------------- actions
@@ -159,7 +165,8 @@ class ApprovalsMixin:
 
     def approve(self, proposal_id: str, note: str | None = None, *, identity: str | None = None,
                 version: str | None = None, request_id: str | None = None,
-                terms: dict[str, Any] | None = None) -> dict[str, Any]:
+                terms: dict[str, Any] | None = None, authority_version: str | None = None,
+                acknowledge_authority_change: bool = False) -> dict[str, Any]:
         """Approve a specific idea once, under the verified caller's identity."""
         profiles = self.profiles()
         store = self._store(profiles)
@@ -176,6 +183,11 @@ class ApprovalsMixin:
                 p = self._approvable(store, proposal_id, **checks)
                 if p.approval_request_id == request_id and p.approval_response is not None:
                     return p.approval_response
+            # The authority of the moment, against what the screen showed and what the proposal
+            # was made under. Refused here, before the venue is opened: there is nothing to
+            # record about an approval that never became one.
+            current_authority, authority_changed = self._authority_check(
+                profiles, store, p, authority_version, acknowledge_authority_change)
             # The venue is reached before the approval is recorded. Opening it can fail -- an
             # expired token, the venue down, real money switched off -- and an approval saved
             # ahead of that was left APPROVED with no order and no response: a retry under a
@@ -201,7 +213,9 @@ class ApprovalsMixin:
                         # approval's answer, and the answer is what gets returned below.
                         p.approval_response = None
                         p.note("approved", note or "explicit approval through the console",
-                               identity=identity, version=version, request_id=request_id, terms=terms)
+                               identity=identity, version=version, request_id=request_id, terms=terms,
+                               authority_version=current_authority,
+                               authority_changed=authority_changed)
                         store.save(p)
                 try:
                     result = execute_proposal(profiles, p, broker, store)
@@ -220,10 +234,39 @@ class ApprovalsMixin:
                     "order": result.order, "error": result.error,
                     "reasons": (result.revalidation or {}).get("reasons", []),
                     "message": _approval_message(status, result),
+                    "authority_changed": authority_changed,
                 }
                 p.approval_response = response
                 store.save(p)
                 return response
+
+    @staticmethod
+    def _authority_check(profiles: Profiles, store: ProposalStore, p: Proposal,
+                         offered: str | None, acknowledged: bool) -> tuple[str, dict[str, Any] | None]:
+        """The authority version now, and how it moved since the proposal was made.
+
+        Two refusals, both before the venue is opened. A screen that showed an older authority
+        is sent back to reload, exactly as one that showed an older proposal is. A proposal made
+        under an authority that has since loosened -- or moved in a way the record cannot
+        classify, which includes a proposal that predates the record -- needs the person to say
+        they looked. A tightened authority needs nothing more: execution reads the current
+        limits, so the tighter ones are the ones that apply.
+        """
+        if acknowledged and offered is None:
+            # An acknowledgement is of a particular change. Without the version it was made
+            # against, a change that landed while the person was reading would be covered by it.
+            raise ServiceError("acknowledging an authority change requires the authority_version "
+                               "it was acknowledged against")
+        current = autonomy.note_version(profiles, store.db)
+        if offered is not None and offered != current:
+            raise ServiceConflict("authority changed since the screen loaded; reload and review")
+        change = autonomy.authority_change(autonomy.version_history(store.db),
+                                           p.authority_version, current)
+        if (change is not None and change["classification"] in autonomy.NEEDS_ACKNOWLEDGEMENT
+                and not acknowledged):
+            raise ServiceConflict(f"authority {change['classification']} since this proposal was "
+                                  "made; review the change and acknowledge it")
+        return current, change
 
     @staticmethod
     def _approvable(store: ProposalStore, proposal_id: str, *, initial: Proposal,
@@ -314,10 +357,20 @@ class ApprovalsMixin:
         if not candidates:
             return report
 
+        # The authority of this moment. A proposal born under any other one -- tightened since,
+        # loosened since, or never recorded -- waits for a person; code does not weigh the
+        # difference, it only acts where nothing has moved.
+        current_authority = autonomy.note_version(profiles, store.db)
         ledger = load_portfolio(profiles.project_dir / str(
             (profiles.risk.get("micro_live_execution") or {}).get(
                 "ledger_file", "state/micro_live_portfolio.yaml")))
         for proposal in candidates:
+            if proposal.authority_version != current_authority:
+                born_under = proposal.authority_version or "no recorded version"
+                reason = (f"authority changed since research (proposal under {born_under}, "
+                          f"now {current_authority})")
+                report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [reason]})
+                continue
             held = ledger.position(proposal.ticker, MICRO_BUCKET)
             decision = autonomy.permits(
                 profiles, bucket=MICRO_BUCKET, action=proposal.action,
@@ -339,7 +392,8 @@ class ApprovalsMixin:
                     version=proposal.version(), request_id=uuid.uuid4().hex,
                     terms={"ticker": proposal.ticker, "bucket": proposal.bucket,
                            "action": proposal.action, "notional_usd": proposal.notional_usd,
-                           "sell_quantity": proposal.sell_quantity})
+                           "sell_quantity": proposal.sell_quantity},
+                    authority_version=current_authority)
             except ServiceConflict as exc:
                 # A person reached the same proposal first, or it moved underneath us. The
                 # approval protocol resolved the race; there is nothing to repair.
@@ -436,8 +490,7 @@ class ApprovalsMixin:
               identity: str | None = None) -> dict[str, Any]:
         """Engage the kill switch. Research continues; no order can be submitted."""
         profiles = self.profiles()
-        halt = profiles.project_dir / str(
-            profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
+        halt = autonomy.halt_file(profiles)
         halt.parent.mkdir(parents=True, exist_ok=True)
         halt.write_text(f"{utcnow().isoformat()} {reason}\n", encoding="utf-8")
         # The halt file is deleted on resume, so without this the pause leaves no trace at all.
@@ -447,8 +500,7 @@ class ApprovalsMixin:
 
     def resume(self, identity: str | None = None) -> dict[str, Any]:
         profiles = self.profiles()
-        halt = profiles.project_dir / str(
-            profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
+        halt = autonomy.halt_file(profiles)
         halt.unlink(missing_ok=True)
         self._journal(profiles, kind="system_resumed", actor=identity or "console")
         return {"paused": False, "status": SystemStatus.READY}

@@ -71,11 +71,45 @@ class ConfigurationMixin:
             "cooling_hours": cc.COOLING_HOURS,
             "pending": [cc.public(r) for r in records if r["status"] == cc.PENDING],
             "recent": [cc.public(r) for r in reversed(records) if r["status"] != cc.PENDING][:20],
+            # Kept one round for the console that reads it; `authority` is the whole answer.
             "autonomy": {"armed": autonomy.is_armed(profiles, MICRO_BUCKET),
                          "withdrawn": downgrade.tripped, "reason": downgrade.reason,
                          "at": downgrade.at},
+            "authority": self.effective_authority(),
             "launchd_managed": bool(os.environ.get("CT_RELEASE_DIR")),
         }
+
+    def effective_authority(self) -> dict[str, Any]:
+        """What may happen to the real-money account, from every rule that decides it.
+
+        One deterministic object (see :func:`autonomy.effective_authority`) for the settings
+        screen, the risk screen, the autonomous loop and an approval to read alike. Opens no
+        venue session: the preflight block is answered from the reading ``/micro-live`` keeps,
+        and says so when there is none or it has aged past its window.
+        """
+        from .. import config_changes as cc
+        from ..micro_live import preflight_from, run_preflight
+
+        try:
+            profiles = self.profiles()
+        except ServiceError as exc:
+            # The same three-field shape /health answers with when the config will not load.
+            return {"checked_at": utcnow().isoformat(), "status": "CONFIG_ERROR", "detail": str(exc)}
+        store = self._store(profiles)
+        inputs = autonomy.authority_inputs(profiles, store.db)
+        version = autonomy.version_of(inputs)
+        history = autonomy.record_version(store.db, inputs, version)
+        reading, stale = self._venue_reading.peek()
+        preflight = (preflight_from(profiles, reading) if reading is not None
+                     else run_preflight(profiles, None))
+        ladder = self.risk_state().get(MICRO_BUCKET) or {}
+        pending = [cc.public(r) for r in cc.records(store.db) if r["status"] == cc.PENDING]
+        authority = autonomy.effective_authority(
+            profiles, inputs=inputs, version=version, history=history, proposals=store.all(),
+            preflight=preflight, preflight_stale=stale, pending_changes=pending,
+            ladder_halted=bool(ladder.get("manual_reset_required")))
+        authority["preflight"]["checked_at"] = reading.checked_at if reading is not None else None
+        return authority
 
     def config_section(self, file: str, key: str) -> dict[str, Any]:
         from .. import config_changes as cc

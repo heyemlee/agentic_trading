@@ -114,6 +114,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/system/schedule` | next scheduled research, the last run, and why a run was skipped |
 | GET | `/system/operations` | background activity heartbeats, free disk, retention windows |
 | GET | `/system/notifications` | notification channel, what is enabled, delivery record |
+| GET | `/config/authority` | what may happen to the real-money account, from every rule that decides it: per action (`BUY`, `ADD`, `REDUCE`, `SELL`) the mode, what blocks a person and what blocks code, the limits; pending changes; the authority `version` and its `history`. Computed without the venue: `preflight` is the reading `/micro-live` keeps, or `ready: null` with `stale: true` |
 | GET | `/auth/sessions` | devices signed in: opaque id, device label, created/last-used/expiry |
 | GET | `/evaluation` | the forward record against a passive benchmark, including what it did not do |
 | GET | `/activity?kind=&subject=&cursor=&limit=` | the audit journal, newest first, with `next_cursor` |
@@ -134,7 +135,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | Method | Path | Body | Effect |
 |---|---|---|---|
 | POST | `/research` | `{ticker, bucket, instrument_type, trade_date, trigger}` | enqueues a durable run; an identical active request returns its existing `run_key` |
-| POST | `/proposals/{id}/approve` | `{note?, confirm}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute |
+| POST | `/proposals/{id}/approve` | `{confirm, version, idempotency_key, ticker, bucket, action, notional_usd, sell_quantity?, note?, authority_version?, acknowledge_authority_change?}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute. `authority_version` is the version `/config/authority` showed; one that has moved is refused with 409 like a moved proposal `version`. A proposal made under an authority that has since loosened, or moved in a way the record cannot classify (including one made before the record existed), is refused with 409 until `acknowledge_authority_change: true`; the response and `GET /proposals/{id}` carry `authority_changed` |
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |
 | POST | `/portfolio/confirm` | `{ledger?, dry_run?}` | runs the ledger check and renews `as_of` where it agrees |

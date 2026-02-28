@@ -36,6 +36,18 @@ def offline_market(monkeypatch):
                         lambda *args: snapshot_from_broker(*args, identity_lookup=identity_lookup))
 
 
+#: The authority version of the moment, pinned: these tests are about execution and recovery,
+#: and the scenario proposals predate the authority record (tests/test_authority.py holds the rule).
+AUTHORITY = 'authority-pinned-for-recovery-tests'
+
+
+@pytest.fixture(autouse=True)
+def pinned_authority(monkeypatch):
+    from agentic_trading import autonomy
+
+    monkeypatch.setattr(autonomy, 'note_version', lambda *_: AUTHORITY)
+
+
 def setup(tmp_path, fill_mode='full'):
     profiles, p, broker, ledger = _std(tmp_path, broker_kwargs={'cash': 3000, 'fill_mode': fill_mode})
     store = ProposalStore(tmp_path / 'proposals.json')
@@ -299,9 +311,12 @@ def service_for(profiles, store, broker, monkeypatch):
 
 
 def approve_arguments(p):
+    # The scenario proposals predate the authority record, so an approval has to say the
+    # person looked at that, against the version they looked at (see pinned_authority).
     return {'identity': 'verified-owner', 'version': p.version(), 'request_id': str(uuid4()), 'terms': {
         'ticker': p.ticker, 'bucket': p.bucket, 'action': p.action,
-        'notional_usd': p.notional_usd, 'sell_quantity': p.sell_quantity}}
+        'notional_usd': p.notional_usd, 'sell_quantity': p.sell_quantity},
+        'authority_version': AUTHORITY, 'acknowledge_authority_change': True}
 
 
 def test_approval_version_terms_identity_and_retries(tmp_path, monkeypatch):

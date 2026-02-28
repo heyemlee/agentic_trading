@@ -68,6 +68,18 @@ class Kept[T]:
                 return result.value
             return self._take(key).value
 
+    def peek(self) -> tuple[T | None, bool]:
+        """The kept result without computing one: ``(value, stale)``.
+
+        For a reader that must never pay for the read itself, such as the authority object
+        polled from Home. ``stale`` is true when there is no result, its inputs moved, or it is
+        older than ``serve_for``; the value is still handed back so the reader can say how old.
+        """
+        result = self._result
+        if result is None:
+            return None, True
+        return result.value, not self._usable(result, self._key(), self._serve_for)
+
     def refresh(self) -> bool:
         """Recompute if the result is due and somebody is reading it. Never waits for a
         computation already under way, and raises what ``compute`` raised, keeping the old

@@ -18,6 +18,9 @@ from agentic_trading.service import Service, ServiceConflict
 from agentic_trading.service.shapes import MarketStatus
 
 MICRO = "micro_live"
+#: The authority version of the moment, held constant: what is under test is the pass, and a
+#: proposal born under the same authority is the ordinary case. One test below moves it.
+AUTHORITY = "authority-under-test"
 
 
 @pytest.fixture
@@ -41,6 +44,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_store", lambda _: store)
     monkeypatch.setattr(service, "_broker", lambda *_: broker)
     monkeypatch.setattr(service, "market_status", lambda: MarketStatus(is_open=True))
+    monkeypatch.setattr(autonomy, "note_version", lambda *_: AUTHORITY)
     return service, profiles, store
 
 
@@ -52,7 +56,23 @@ def reduction(**over):
     p.requires_human_approval = False
     p.sell_quantity = 0.1
     p.status = PROPOSED
+    p.authority_version = AUTHORITY
     return p
+
+
+@pytest.mark.parametrize("born_under", ["an-earlier-authority", None])
+def test_a_proposal_born_under_another_authority_waits_for_a_person(setup, monkeypatch, born_under):
+    """Tightened since the research, loosened since, or never recorded: code does not weigh
+    which, it only acts where nothing has moved. The proposal stays in the queue for a person."""
+    service, _, store = setup
+    p = reduction()
+    p.authority_version = born_under
+    store.save(p)
+    monkeypatch.setattr(service, "_broker", lambda *_: pytest.fail("no venue session for a declined proposal"))
+    report = service.autonomous_reductions()
+    assert report["approved"] == [] and len(report["declined"]) == 1
+    assert "authority changed since research" in report["declined"][0]["reasons"][0]
+    assert store.get(p.proposal_id).status == PROPOSED
 
 
 def test_a_closed_market_costs_nothing_and_opens_nothing(setup, monkeypatch):

@@ -147,6 +147,10 @@ class Proposal:
     approval_request_id: str | None = None
     approved_version: str | None = None
     approval_response: dict[str, Any] | None = None
+    # The authority (autonomy.effective_authority) this idea was born under. An approval
+    # compares it with the authority of the moment; None means it predates the record.
+    authority_version: str | None = None
+    authority_changed_during_research: bool = False
     history: list[dict[str, Any]] = field(default_factory=list)
     _revision: int = field(default=0, repr=False, compare=False)
 

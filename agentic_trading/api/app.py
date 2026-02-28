@@ -527,6 +527,12 @@ def config_overview() -> dict[str, Any]:
     return _ok(_service.config_overview)
 
 
+@app.get("/config/authority", tags=["configuration"],
+         summary="What may happen to the real-money account, from every rule that decides it")
+def config_authority() -> dict[str, Any]:
+    return _ok(_service.effective_authority)
+
+
 @app.get("/config/section", tags=["configuration"], summary="One top-level section's text")
 def config_section(file: Annotated[str, Query(max_length=40)],
                    key: Annotated[str, Query(max_length=80)]) -> dict[str, Any]:
@@ -708,6 +714,13 @@ class ApproveRequest(BaseModel):
     action: Literal["BUY", "ADD", "SELL", "REDUCE"]
     notional_usd: float = Field(gt=0, allow_inf_nan=False)
     sell_quantity: float | None = Field(None, gt=0, allow_inf_nan=False)
+    # The authority version the screen showed (GET /config/authority). Optional until the
+    # console sends it; when sent, a version that has moved is refused like a moved proposal.
+    authority_version: str | None = Field(None, min_length=1, max_length=32)
+    # Required true when the authority loosened, or moved in a way the record cannot classify,
+    # since the proposal was made: the person says they looked at what changed. It must come
+    # with authority_version, the version the change was acknowledged against.
+    acknowledge_authority_change: bool = False
 
 
 @app.post("/proposals/{proposal_id}/approve", tags=["proposals"],
@@ -718,7 +731,9 @@ def approve(proposal_id: str, body: ApproveRequest, request: Request) -> dict[st
     return _ok(_service.approve, proposal_id, body.note,
                identity=request.state.identity, version=body.version,
                request_id=str(body.idempotency_key),
-               terms=body.model_dump(include={"ticker", "bucket", "action", "notional_usd", "sell_quantity"}))
+               terms=body.model_dump(include={"ticker", "bucket", "action", "notional_usd", "sell_quantity"}),
+               authority_version=body.authority_version,
+               acknowledge_authority_change=body.acknowledge_authority_change)
 
 
 class RejectRequest(BaseModel):

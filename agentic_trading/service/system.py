@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .. import autonomy
 from ..env import load_env
 from ..profile import Profiles
 from ..proposals import utcnow
@@ -40,8 +41,7 @@ class SystemMixin:
             return Health(status=SystemStatus.CONFIG_ERROR, detail=str(exc),
                           checked_at=utcnow().isoformat())
 
-        halt_file = profiles.project_dir / str(
-            profiles.risk_cfg("execution_policy", "kill_switch", "halt_file", default="state/HALT"))
+        halt_file = autonomy.halt_file(profiles)
         paused = halt_file.exists() or bool(
             profiles.risk_cfg("execution_policy", "kill_switch", "trading_halted", default=False))
 

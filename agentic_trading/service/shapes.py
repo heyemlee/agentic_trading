@@ -234,6 +234,9 @@ class ProposalSummary(BaseModel):
     freshness: ProposalFreshness
     reference_price: float | None = None
     run_id: str | None = None
+    #: The authority version the proposal was made under (``GET /config/authority``); None on
+    #: a proposal that predates the record, which an approval then asks a person to acknowledge.
+    authority_version: str | None = None
 
 
 class ProposalWorld(BaseModel):
@@ -329,6 +332,10 @@ class ProposalDetail(ProposalSummary):
     world_at_proposal: ProposalWorld
     research: ProposalResearch | None = None
     hard_risk: HardRiskView | None = None
+    #: How the authority moved since the proposal was made: None when it did not. The autonomy
+    #: module's own serialisation, passed through whole (from, to, at, paths, classification).
+    authority_changed: dict[str, Any] | None = None
+    authority_changed_during_research: bool = False
 
 
 class Fill(BaseModel):

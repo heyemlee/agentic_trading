@@ -489,6 +489,30 @@ def test_a_sandbox_never_inherits_an_armed_deployment(tmp_path):
     assert "robinhood:\n  enabled: true" in text          # only the one switch is touched
 
 
+def test_the_authority_is_published_and_the_config_overview_carries_it(
+        auth_client, monkeypatch, sandbox_service):
+    """One object for the settings, risk and home screens, computed without the venue."""
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    response = auth_client.get("/config/authority")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert {"checked_at", "version", "history", "actions", "limits", "pending_changes",
+            "preflight", "consistency"} <= set(body)
+    assert set(body["actions"]) == {"BUY", "ADD", "REDUCE", "SELL"}
+    # Real money is off in the sandbox copy (see disarm), which stops a person as much as code.
+    buy = body["actions"]["BUY"]
+    assert buy["mode"] == "blocked" and buy["human_approval"]["permitted"] is False
+    assert "real_money_disabled" in {b["code"] for b in buy["human_approval"]["blocked_by"]}
+    # No venue was asked: the preflight block says so instead of pretending a reading.
+    assert body["preflight"]["checked_at"] is None and body["preflight"]["stale"] is True
+    overview = auth_client.get("/config").json()
+    assert overview["authority"]["version"] == body["version"]
+    assert "autonomy" in overview                       # kept one round for the console
+    schema = auth_client.get("/openapi.json").json()
+    approve = schema["components"]["schemas"]["ApproveRequest"]["properties"]
+    assert {"authority_version", "acknowledge_authority_change"} <= set(approve)
+
+
 def test_openapi_schema_is_published_for_frontend_generation(auth_client):
     client = auth_client
     schema = client.get("/openapi.json").json()

@@ -9,7 +9,7 @@ from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .. import agent_roster
+from .. import agent_roster, autonomy
 from ..micro_live import BUCKET as MICRO_BUCKET
 from .base import _last_session
 from .errors import ServiceConflict, ServiceError
@@ -46,6 +46,9 @@ class ResearchMixin:
         job, created = manager.create(
             run_key=run_key, ticker=ticker, bucket=bucket, trade_date=date,
             instrument_type=instrument_type, trigger=trigger,
+            # The authority the run is submitted under. A proposal born under a different
+            # one is marked, and a tightened one sends it to a person (autonomous_reductions).
+            authority_version=autonomy.note_version(profiles, manager.store.db),
         )
         manager.dispatch()
         current = manager.store.get(job["run_key"]) or job

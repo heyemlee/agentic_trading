@@ -37,13 +37,19 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     monkeypatch.setattr("agentic_trading.graph.build_tradingagents_config",
                         lambda p, runs_dir=None: _cfg(p, tmp_path))
 
-    code = cli.run_one(profiles, "VTI", risk_scenarios.TRADE_DATE, "core", "etf", tmp_path / "runs", debug=False)
+    # Submitted under an authority the record does not hold, as a job that outlived a
+    # configuration change would be: the run keeps that version as the one it researched under.
+    code = cli.run_one(profiles, "VTI", risk_scenarios.TRADE_DATE, "core", "etf", tmp_path / "runs",
+                       debug=False, authority_version_at_submit="authority-at-submission")
     assert code == 0
 
     records = list((tmp_path / "runs").glob("*/decision_record.json"))
     assert len(records) == 1
     rec = json.loads(records[0].read_text())
     assert rec["orders_placed"] is False and rec["final_recommendation"]["executable"] is False
+    assert rec["authority"]["research"] == "authority-at-submission"
+    assert rec["authority"]["proposal"] not in (None, "authority-at-submission")
+    assert rec["authority"]["changed_during_research"] is True
     assert rec["hard_risk"]["verdict"] in ("APPROVE", "REJECT", "NO_ACTION")
     assert rec["hard_risk"]["ladder"]["effective_level_for_bucket"] == "NORMAL"
     assert rec["hard_risk"]["regime"]["level"] == "NORMAL"

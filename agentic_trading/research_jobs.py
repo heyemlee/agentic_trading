@@ -36,7 +36,8 @@ class ResearchJobStore:
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
                instrument_type: str, trigger: str, log_path: Path,
                timeout_seconds: int, max_attempts: int,
-               task: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
+               task: dict[str, Any] | None = None,
+               authority_version: str | None = None) -> tuple[dict[str, Any], bool]:
         dedupe = f"{trade_date}:{ticker.upper()}:{bucket}:{instrument_type}"
         if task:
             # A conversation is serial; independent conversations and account reviews are not.
@@ -52,6 +53,9 @@ class ResearchJobStore:
             "max_attempts": max_attempts, "timeout_seconds": timeout_seconds,
             "log": str(log_path), "exit_code": None, "error": None,
             "limit_recoveries": 0, "proposal_created": False, "proposal_id": None,
+            # The authority the run was submitted under; a proposal born under a different
+            # one says so (see autonomy.effective_authority).
+            "authority_version": authority_version,
         }
         if task:
             job["task"] = task
@@ -145,14 +149,15 @@ class ResearchJobManager:
 
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
                instrument_type: str, trigger: str,
-               task: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
+               task: dict[str, Any] | None = None,
+               authority_version: str | None = None) -> tuple[dict[str, Any], bool]:
         log_dir = self.project_dir / "runs" / "api"
         log_dir.mkdir(parents=True, exist_ok=True)
         return self.store.create(
             run_key=run_key, ticker=ticker, bucket=bucket, trade_date=trade_date,
             instrument_type=instrument_type, trigger=trigger, log_path=log_dir / f"{run_key}.log",
             timeout_seconds=self.timeout_seconds, max_attempts=self.max_attempts,
-            task=task,
+            task=task, authority_version=authority_version,
         )
 
     def dispatch(self) -> list[str]:
