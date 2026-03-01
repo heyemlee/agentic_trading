@@ -539,6 +539,23 @@ def test_attention_and_the_opened_mark_are_published(auth_client, monkeypatch, s
     assert auth_client.get("/research/advisor_seen").json()["opened_at"] == first.json()["opened_at"]
 
 
+def test_the_evaluation_answers_by_scope_and_never_500s_without_a_study(
+        auth_client, monkeypatch, sandbox_service):
+    """No study is declared in the sandbox: every scope still answers, and says so."""
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    for scope, label in (("demo", "Demo"), ("agentic", "Agentic")):
+        response = auth_client.get(f"/evaluation?scope={scope}")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["scope"] == scope and body["state"] == "NOT_STARTED" and body["readable"] is False
+        assert body["account"]["account_label"] == label and body["strategy"]["return_pct"] is None
+    assert auth_client.get("/evaluation").json()["scope"] == "demo"          # the study that exists
+    quality = auth_client.get("/evaluation?scope=route_quality")
+    assert quality.status_code == 200 and quality.json()["scope"] == "route_quality"
+    assert isinstance(quality.json()["routes"], list)
+    assert auth_client.get("/evaluation?scope=live").status_code == 422     # not a scope
+
+
 def test_openapi_schema_is_published_for_frontend_generation(auth_client):
     client = auth_client
     schema = client.get("/openapi.json").json()

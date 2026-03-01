@@ -28,6 +28,7 @@ import hashlib
 import json
 import statistics
 from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Any
 
 STUDY = "evaluation_study"
@@ -36,9 +37,50 @@ MAX_SNAPSHOTS = 2000
 #: An arbitrary starting unit count. Only ratios of unit value are ever reported.
 STARTING_UNITS = 1000.0
 
+#: One study per scope, and the buckets each scope counts. The paper book and the real-money
+#: account are separate samples: they hold different money, under different rules, over
+#: different periods, and a figure that mixed them would describe neither. Rows recorded before
+#: a bucket was written down belong to the paper book, which was the only study there was.
+SCOPES: dict[str, tuple[str, ...]] = {"demo": ("core", "sandbox"), "agentic": ("micro_live",)}
+DEFAULT_SCOPE = "demo"
+ACCOUNTS: dict[str, dict[str, Any]] = {
+    "demo": {"scope": "demo", "account_id": "conceptual", "account_label": "Demo", "is_real_money": False},
+    "agentic": {"scope": "agentic", "account_id": "micro_live", "account_label": "Agentic",
+                "is_real_money": True},
+}
+#: A snapshot this many sessions behind the calendar is a record nobody is keeping up.
+STALE_AFTER_SESSIONS = 2
+
 
 class EvaluationError(RuntimeError):
     """The study cannot be started, advanced or reported on as asked."""
+
+
+def scope_keys(scope: str) -> tuple[str, str]:
+    """The state documents a scope's study and snapshots live in.
+
+    The paper book keeps the keys from before scopes existed, so a study already running
+    there goes on being the same study rather than starting over under a new name.
+    """
+    if scope not in SCOPES:
+        raise EvaluationError(f"unknown evaluation scope {scope!r}; one of {', '.join(SCOPES)}")
+    if scope == DEFAULT_SCOPE:
+        return STUDY, SNAPSHOTS
+    return f"{STUDY}:{scope}", f"{SNAPSHOTS}:{scope}"
+
+
+def in_scope(row: dict[str, Any], scope: str) -> bool:
+    """Whether a research, job, proposal or fill row belongs to a scope's sample."""
+    bucket = row.get("bucket")
+    if scope == DEFAULT_SCOPE:
+        return bucket is None or bucket in SCOPES[scope]
+    return bucket in SCOPES[scope]
+
+
+def running(db, scope: str) -> bool:
+    study_key, _ = scope_keys(scope)
+    study = db.read_meta(study_key, None)
+    return bool(study) and study.get("state") == "RUNNING"
 
 
 def settings(profiles) -> dict[str, Any]:
@@ -78,10 +120,11 @@ def _price(symbol: str, as_of: str) -> tuple[float, str]:
 
 
 def start(db, profiles, *, on: str, equity_usd: float, net_deposits_usd: float,
-          note: str = "") -> dict[str, Any]:
+          note: str = "", scope: str = DEFAULT_SCOPE) -> dict[str, Any]:
     """Declare a study. Refuses to replace a running one without an explicit stop."""
     cfg = settings(profiles)
-    existing = db.read_meta(STUDY, None)
+    study_key, snapshots_key = scope_keys(scope)
+    existing = db.read_meta(study_key, None)
     if existing and existing.get("state") == "RUNNING":
         raise EvaluationError(
             f"study {existing['study_id']} has been running since {existing['started_on']}; "
@@ -102,7 +145,9 @@ def start(db, profiles, *, on: str, equity_usd: float, net_deposits_usd: float,
         prices[symbol] = {"price": price, "as_of": priced_on}
 
     study = {
-        "study_id": f"{on}-{hashlib.sha256(on.encode()).hexdigest()[:6]}",
+        "study_id": f"{on}-{hashlib.sha256(f'{scope}:{on}'.encode()).hexdigest()[:6]}",
+        "scope": scope,
+        "buckets": list(SCOPES[scope]),
         "state": "RUNNING",
         "started_on": on,
         "started_at": datetime.now(UTC).isoformat(),
@@ -119,18 +164,19 @@ def start(db, profiles, *, on: str, equity_usd: float, net_deposits_usd: float,
         "benchmark_holdings": holdings,
         "opening_prices": prices,
     }
-    db.write_meta(STUDY, study)
-    db.write_meta(SNAPSHOTS, {"snapshots": []})
+    db.write_meta(study_key, study)
+    db.write_meta(snapshots_key, {"snapshots": []})
     return study
 
 
-def stop(db, reason: str) -> dict[str, Any]:
-    study = db.read_meta(STUDY, None)
+def stop(db, reason: str, scope: str = DEFAULT_SCOPE) -> dict[str, Any]:
+    study_key, _ = scope_keys(scope)
+    study = db.read_meta(study_key, None)
     if not study:
         raise EvaluationError("no study has been started")
     study.update({"state": "STOPPED", "stopped_at": datetime.now(UTC).isoformat(),
                   "stop_reason": reason})
-    db.write_meta(STUDY, study)
+    db.write_meta(study_key, study)
     return study
 
 
@@ -149,13 +195,14 @@ def _advance(units: float, equity: float, flow: float) -> tuple[float, float]:
 
 
 def snapshot(db, profiles, *, on: str, equity_usd: float,
-             net_deposits_usd: float) -> dict[str, Any]:
+             net_deposits_usd: float, scope: str = DEFAULT_SCOPE) -> dict[str, Any]:
     """Mark both sides to market for one day. Idempotent per date."""
-    study = db.read_meta(STUDY, None)
+    study_key, snapshots_key = scope_keys(scope)
+    study = db.read_meta(study_key, None)
     if not study or study.get("state") != "RUNNING":
-        raise EvaluationError("no study is running; start one first")
+        raise EvaluationError(f"no {scope} study is running; start one first")
 
-    record = db.read_meta(SNAPSHOTS, {"snapshots": []}) or {"snapshots": []}
+    record = db.read_meta(snapshots_key, {"snapshots": []}) or {"snapshots": []}
     series = [row for row in record.get("snapshots", []) if row["date"] != on]
     previous = max(series, key=lambda row: row["date"]) if series else None
 
@@ -202,9 +249,9 @@ def snapshot(db, profiles, *, on: str, equity_usd: float,
     series.append(row)
     series.sort(key=lambda item: item["date"])
     record["snapshots"] = series[-MAX_SNAPSHOTS:]
-    db.write_meta(SNAPSHOTS, record)
+    db.write_meta(snapshots_key, record)
     study["benchmark_holdings"] = holdings
-    db.write_meta(STUDY, study)
+    db.write_meta(study_key, study)
     return {**row, "recorded": True}
 
 
@@ -229,11 +276,13 @@ def _decisions(research: list[dict[str, Any]], jobs: list[dict[str, Any]],
     """Every outcome, including the ones that produced nothing.
 
     A record of trades alone would describe only the occasions this system chose to act, which
-    is a biased sample of its own judgement.
+    is a biased sample of its own judgement. The caller narrows the rows to one scope's
+    buckets; personal-account observations are refused here as well, whoever calls, because
+    they were never part of any declared study.
     """
-    # Personal-account observations are outside the declared paper/live study.
-    runs = [row for row in research if str(row.get("trade_date") or "") >= since
-            and row.get("bucket") != "advisory"]
+    research = [row for row in research if row.get("bucket") != "advisory"]
+    jobs = [row for row in jobs if row.get("bucket") != "advisory"]
+    runs = [row for row in research if str(row.get("trade_date") or "") >= since]
     actions: dict[str, int] = {}
     incomplete_data = 0
     for row in runs:
@@ -243,8 +292,6 @@ def _decisions(research: list[dict[str, Any]], jobs: list[dict[str, Any]],
             incomplete_data += 1
     states: dict[str, int] = {}
     for job in jobs:
-        if job.get("bucket") == "advisory":
-            continue
         if str(job.get("created_at") or "") >= since:
             states[job["state"]] = 1 + states.get(job["state"], 0)
     statuses: dict[str, int] = {}
@@ -302,13 +349,75 @@ def _execution(fills: list[dict[str, Any]], proposals: list[dict[str, Any]],
     }
 
 
-def report(db, profiles, *, research, jobs, proposals, fills) -> dict[str, Any]:
+def _sample(series: list[dict[str, Any]], started_on: str | None,
+            today: str | None = None) -> dict[str, Any]:
+    """How continuous the record is: where sessions went unmarked, and whether it is current.
+
+    Gaps and staleness are counted in exchange sessions, from the calendar, so a weekend or a
+    holiday is not a gap. Without the calendar both answers are unknown, and say so.
+    """
+    dates = [row["date"] for row in series]
+    out: dict[str, Any] = {"started_on": started_on, "last_snapshot_on": dates[-1] if dates else None,
+                           "days_recorded": len(dates), "gaps": [], "stale": None, "basis": "sessions"}
+    try:
+        import exchange_calendars
+
+        calendar = exchange_calendars.get_calendar("XNYS")
+    except Exception as exc:  # noqa: BLE001 - no calendar, no claim about continuity
+        out["basis"] = f"unknown: exchange calendar unavailable ({type(exc).__name__})"
+        return out
+    for earlier, later in pairwise(dates):
+        missing = len(calendar.sessions_in_range(earlier, later)) - 2
+        if missing > 0:
+            out["gaps"].append({"from": earlier, "to": later, "missing_sessions": missing,
+                                "reason": "no snapshot"})
+    if dates:
+        today = today or datetime.now(UTC).date().isoformat()
+        behind = max(0, len(calendar.sessions_in_range(dates[-1], today)) - 1)
+        out["stale"] = behind > STALE_AFTER_SESSIONS
+        out["sessions_behind"] = behind
+    return out
+
+
+def _not_started(scope: str, *, research, jobs, proposals, fills, profiles) -> dict[str, Any]:
+    """The answer when no study was declared: the record's counts, and no performance at all."""
+    cfg = settings(profiles)
+    weights = {str(k).upper(): float(v) for k, v in (cfg.get("benchmark") or {}).items()}
+    total = sum(weights.values()) or 1.0
+    return {
+        "scope": scope, "account": dict(ACCOUNTS[scope]), "buckets": list(SCOPES[scope]),
+        "study_id": None, "state": "NOT_STARTED", "started_on": None, "declared": None,
+        "days_recorded": 0, "config_drifted": False,
+        "frozen_fingerprint": None, "current_fingerprint": fingerprint(profiles)["sha256"],
+        "strategy": {"return_pct": None, "max_drawdown_pct": None, "equity_usd": None,
+                     "net_deposits_usd": None},
+        "benchmark": {"weights_pct": {k: round(v / total * 100, 2) for k, v in weights.items()},
+                      "return_pct": None, "max_drawdown_pct": None, "equity_usd": None},
+        "strategy_minus_benchmark_pct_points": None,
+        "decisions": _decisions(research, jobs, proposals, ""),
+        "execution": _execution(fills, proposals, 0.0),
+        "stop_rules_triggered": [],
+        "sample": _sample([], None),
+        "readable": False, "conclusive": False,
+        "caveat": (f"no {ACCOUNTS[scope]['account_label']} study has been declared; decisions are "
+                   "counted from the record, performance is not"),
+    }
+
+
+def report(db, profiles, *, research, jobs, proposals, fills,
+           scope: str = DEFAULT_SCOPE, today: str | None = None) -> dict[str, Any]:
     """The whole record: what it decided, what it cost, and how it compares. Never a summary
-    of the good days."""
-    study = db.read_meta(STUDY, None)
+    of the good days, and never a figure that mixes the paper book with the real account."""
+    study_key, snapshots_key = scope_keys(scope)
+    research = [row for row in research if in_scope(row, scope)]
+    jobs = [row for row in jobs if in_scope(row, scope)]
+    proposals = [row for row in proposals if in_scope(row, scope)]
+    fills = [row for row in fills if in_scope(row, scope)]
+    study = db.read_meta(study_key, None)
     if not study:
-        raise EvaluationError("no study has been started; run 'ct-evaluate start'")
-    series = (db.read_meta(SNAPSHOTS, {"snapshots": []}) or {}).get("snapshots", [])
+        return _not_started(scope, research=research, jobs=jobs, proposals=proposals, fills=fills,
+                            profiles=profiles)
+    series = (db.read_meta(snapshots_key, {"snapshots": []}) or {}).get("snapshots", [])
     days = len(series)
     declared = study["declared"]
 
@@ -332,6 +441,9 @@ def report(db, profiles, *, research, jobs, proposals, fills) -> dict[str, Any]:
 
     enough = days >= int(declared.get("minimum_days_for_judgement", 180))
     return {
+        "scope": scope,
+        "account": dict(ACCOUNTS[scope]),
+        "buckets": list(SCOPES[scope]),
         "study_id": study["study_id"],
         "state": study["state"],
         "started_on": study["started_on"],
@@ -357,6 +469,7 @@ def report(db, profiles, *, research, jobs, proposals, fills) -> dict[str, Any]:
         "execution": _execution(fills, proposals,
                                 sum(equities) / len(equities) if equities else 0.0),
         "stop_rules_triggered": triggered,
+        "sample": _sample(series, study["started_on"], today),
         # Stated on every report, so a short sample cannot be read as a verdict.
         "readable": days >= int(declared.get("observation_days", 30)),
         "conclusive": enough,
@@ -369,4 +482,93 @@ def report(db, profiles, *, research, jobs, proposals, fills) -> dict[str, Any]:
                "from one market period.")
             + (" Configuration changed during the study, so the sample is not homogeneous."
                if any(row.get("config_drifted") for row in series) else "")),
+    }
+
+
+def route_of(row: dict[str, Any]) -> str:
+    """Which research route a record or job ran on.
+
+    A record that names its route is believed; until records carry one, the personal
+    assistant's runs are the ones with a task or the advisory bucket, and everything else is
+    the TradingAgents graph.
+    """
+    route = row.get("route")
+    if isinstance(route, dict) and route.get("name"):
+        return str(route["name"])
+    if row.get("task") or row.get("bucket") == "advisory":
+        return "assistant"
+    return "tradingagents"
+
+
+def route_quality(research: list[dict[str, Any]], jobs: list[dict[str, Any]], *,
+                  now: datetime | None = None) -> dict[str, Any]:
+    """What the record alone can say about each research route, and what it cannot.
+
+    Timing, model calls, failures and the evidence check are read from the jobs and records.
+    Fact accuracy, format compliance and the amount of human editing come from the fixed-case
+    review the plan describes, and stay null until it has run: null means not evaluated, never
+    zero, and a route is never ranked on a number nobody measured.
+    """
+    routes: dict[str, dict[str, Any]] = {}
+
+    def entry(name: str) -> dict[str, Any]:
+        return routes.setdefault(name, {"route": name, "runs": 0, "complete": 0, "failed": 0,
+                                        "timed_out": 0, "limit_hits": 0,
+                                        "_elapsed": [], "_calls": 0, "_evidence": []})
+
+    since: str | None = None
+
+    def earliest(stamp: Any) -> None:
+        nonlocal since
+        day = str(stamp or "")[:10]
+        if day and (since is None or day < since):
+            since = day
+
+    for job in jobs:
+        row = entry(route_of(job))
+        row["runs"] += 1
+        state = job.get("state")
+        if state == "COMPLETE":
+            row["complete"] += 1
+        elif state == "FAILED":
+            row["failed"] += 1
+        elif state == "TIMED_OUT":
+            row["timed_out"] += 1
+        if state == "CLAUDE_LIMIT_REACHED" or int(job.get("limit_recoveries") or 0) > 0:
+            row["limit_hits"] += 1
+        earliest(job.get("created_at"))
+    for record in research:
+        name = route_of(record)
+        row = entry(name)
+        if record.get("elapsed_seconds") is not None:
+            row["_elapsed"].append(float(record["elapsed_seconds"]))
+        row["_calls"] += int(record.get("llm_calls") or 0)
+        if name == "tradingagents":
+            row["_evidence"].append(record.get("data_quality") == "good"
+                                    and not record.get("missing_information"))
+        earliest(record.get("created_at") or record.get("trade_date"))
+
+    out = []
+    for name in sorted(routes):
+        row = routes[name]
+        elapsed, calls, evidence = row.pop("_elapsed"), row.pop("_calls"), row.pop("_evidence")
+        out.append({
+            **row,
+            "median_elapsed_seconds": round(statistics.median(elapsed), 1) if elapsed else None,
+            "llm_calls_total": calls,
+            "format_pass_rate_pct": None,
+            "evidence_check_pass_rate_pct": (round(sum(evidence) / len(evidence) * 100, 1)
+                                             if evidence else None),
+            "fact_accuracy_pct": None,
+            "human_edit_rate_pct": None,
+            "evaluated": {"timing": bool(elapsed), "calls": calls > 0, "failures": row["runs"] > 0,
+                          "format": False, "evidence": bool(evidence), "facts": False, "edits": False},
+        })
+    return {
+        "scope": "route_quality",
+        "checked_at": (now or datetime.now(UTC)).isoformat(),
+        "since": since,
+        "routes": out,
+        "note": ("fact accuracy and human edits come from the fixed-case review (plan section 4); "
+                 "null means not evaluated, not zero"),
     }

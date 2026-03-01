@@ -432,8 +432,8 @@ def operations() -> dict[str, Any]:
 
 @app.get("/evaluation", tags=["system"],
          summary="The forward record against a passive benchmark, including what it did not do")
-def evaluation_report() -> dict[str, Any]:
-    return _ok(_service.evaluation_report)
+def evaluation_report(scope: Literal["demo", "agentic", "route_quality"] = "demo") -> dict[str, Any]:
+    return _ok(_service.evaluation_report, scope)
 
 
 @app.get("/system/schedule", tags=["system"],

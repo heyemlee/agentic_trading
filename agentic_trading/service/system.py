@@ -203,36 +203,57 @@ class SystemMixin:
         return events.query(db, kinds=kinds, subject=subject, cursor=cursor, limit=limit)
 
     # ---------------------------------------------------------------- evaluation
-    def evaluation_report(self) -> dict[str, Any]:
-        """The forward record, assembled from the sources that already hold it.
+    def evaluation_report(self, scope: str = "demo") -> dict[str, Any]:
+        """The forward record for one account's study, assembled from the sources that hold it.
 
         Nothing is duplicated into a separate ledger of its own: the decisions, jobs, proposals
         and fills are read where they live, so the report cannot drift away from what happened.
+        ``scope`` picks the sample: the paper book (``demo``, the study that already exists),
+        the real-money account (``agentic``), or what the record says about each research route
+        (``route_quality``, which measures no return at all). A scope with no declared study
+        answers ``state: NOT_STARTED`` with the record's counts and no performance, never 500.
+        """
+        from .. import evaluation
+
+        research = self.research_history(limit=500)
+        jobs = self.research_jobs(limit=500)
+        if scope == "route_quality":
+            return evaluation.route_quality(research, jobs)
+        if scope not in evaluation.SCOPES:
+            raise ServiceError(f"unknown evaluation scope {scope!r}; one of "
+                               f"{', '.join((*evaluation.SCOPES, 'route_quality'))}")
+        profiles = self.profiles()
+        return evaluation.report(
+            self.state_db(profiles), profiles, research=research, jobs=jobs,
+            # The study reads rows, not the response shape: dumping here keeps the evaluation
+            # module free of a model that exists for the console.
+            proposals=[p.model_dump() for p in self.proposals(include_closed=True)],
+            fills=[f.model_dump() for f in self.orders(limit=200).fills], scope=scope)
+
+    def evaluation_snapshot(self, on: str | None = None, scope: str | None = None) -> dict[str, Any]:
+        """Mark a study to market for one session. Called daily by the maintenance job.
+
+        Without a scope, every study that is running is marked from its own account, and the
+        result is keyed by scope; with one, that study alone, as ``ct-evaluate snapshot`` asks.
         """
         from .. import evaluation
 
         profiles = self.profiles()
-        return evaluation.report(
-            self.state_db(profiles), profiles,
-            research=self.research_history(limit=500),
-            jobs=self.research_jobs(limit=500),
-            # The study reads rows, not the response shape: dumping here keeps the evaluation
-            # module free of a model that exists for the console.
-            proposals=[p.model_dump() for p in self.proposals(include_closed=True)],
-            fills=[f.model_dump() for f in self.orders(limit=200).fills])
-
-    def evaluation_snapshot(self, on: str | None = None) -> dict[str, Any]:
-        """Mark the study to market for one session. Called daily by the maintenance job."""
-        from .. import evaluation
-
-        profiles = self.profiles()
+        db = self.state_db(profiles)
+        scopes = [scope] if scope else [name for name in evaluation.SCOPES if evaluation.running(db, name)]
+        if not scopes:
+            raise ServiceError("no study is running; start one with ct-evaluate start")
         portfolio = self.portfolio()
-        account = portfolio.accounts.get("conceptual")
-        if account is None:
-            raise ServiceError("the Demo account could not be read")
-        return evaluation.snapshot(
-            self.state_db(profiles), profiles, on=on or portfolio.as_of,
-            equity_usd=account.equity_usd, net_deposits_usd=account.net_deposits_usd)
+        marked: dict[str, Any] = {}
+        for name in scopes:
+            who = evaluation.ACCOUNTS[name]
+            account = portfolio.accounts.get(who["account_id"])
+            if account is None:
+                raise ServiceError(f"the {who['account_label']} account could not be read")
+            marked[name] = evaluation.snapshot(
+                db, profiles, on=on or portfolio.as_of, equity_usd=account.equity_usd,
+                net_deposits_usd=account.net_deposits_usd, scope=name)
+        return marked[scope] if scope else marked
 
     # ---------------------------------------------------------------- schedule
     def schedule_status(self) -> dict[str, Any]:

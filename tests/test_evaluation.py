@@ -193,3 +193,106 @@ def test_marking_the_same_day_twice_does_not_double_count_it(study):
     report = evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[])
     assert report["days_recorded"] == 1
     assert report["strategy"]["equity_usd"] == 3100.0      # the later mark wins
+
+
+# ------------------------------------------------------------------ scopes
+def test_each_scope_counts_its_own_buckets_and_an_unlabelled_row_is_the_paper_books(study):
+    """The paper book and the real account are different samples. A row written before buckets
+    were recorded belongs to the paper book, which was the only study there was."""
+    db, profiles, prices = study
+    mark(db, profiles, prices, on="2026-09-02", equity=3000.0, deposits=3000.0, vti=100.0, bnd=50.0)
+    research = [
+        {"trade_date": "2026-09-02", "final_action": "NO_TRADE", "bucket": "core"},
+        {"trade_date": "2026-09-02", "final_action": "REDUCE", "bucket": "micro_live"},
+        {"trade_date": "2026-09-02", "final_action": "BUY"},                       # unlabelled
+        {"trade_date": "2026-09-02", "final_action": "HOLD", "bucket": "advisory"},  # personal: nobody's
+    ]
+    fills = [{"proposal_id": "a", "quantity": 1.0, "price": 100.0, "bucket": "micro_live"},
+             {"proposal_id": "b", "quantity": 2.0, "price": 100.0, "bucket": "core"}]
+
+    demo = evaluation.report(db, profiles, research=research, jobs=[], proposals=[], fills=fills)
+    assert demo["scope"] == "demo" and demo["buckets"] == ["core", "sandbox"]
+    assert demo["account"]["account_label"] == "Demo" and demo["account"]["is_real_money"] is False
+    assert demo["decisions"]["run_outcomes"] == {"NO_TRADE": 1, "BUY": 1}
+    assert demo["execution"]["fills"] == 1 and demo["execution"]["traded_usd"] == 200.0
+
+    agentic = evaluation.report(db, profiles, research=research, jobs=[], proposals=[], fills=fills,
+                                scope="agentic")
+    assert agentic["state"] == "NOT_STARTED" and agentic["readable"] is False
+    assert agentic["decisions"]["run_outcomes"] == {"REDUCE": 1}
+    assert agentic["execution"]["fills"] == 1 and agentic["execution"]["traded_usd"] == 100.0
+    assert agentic["strategy"]["return_pct"] is None and agentic["benchmark"]["return_pct"] is None
+    assert agentic["account"]["account_label"] == "Agentic" and "not been declared" not in agentic["caveat"]
+    assert "no Agentic study has been declared" in agentic["caveat"]
+
+    with pytest.raises(evaluation.EvaluationError, match="unknown evaluation scope"):
+        evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[], scope="live")
+
+
+def test_an_agentic_study_keeps_its_own_record_beside_the_paper_books(study):
+    db, profiles, prices = study
+    evaluation.start(db, profiles, on="2026-09-01", equity_usd=100.0, net_deposits_usd=100.0,
+                     scope="agentic")
+    prices["VTI"]["2026-09-02"], prices["BND"]["2026-09-02"] = 110.0, 50.0
+    evaluation.snapshot(db, profiles, on="2026-09-02", equity_usd=100.0, net_deposits_usd=100.0,
+                        scope="agentic")
+
+    demo = evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[])
+    agentic = evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[], scope="agentic")
+    assert demo["days_recorded"] == 0 and agentic["days_recorded"] == 1
+    assert demo["study_id"] != agentic["study_id"]
+    assert agentic["state"] == "RUNNING" and agentic["strategy"]["equity_usd"] == 100.0
+    assert evaluation.running(db, "demo") and evaluation.running(db, "agentic")
+    # Stopping one leaves the other running.
+    evaluation.stop(db, "enough", scope="agentic")
+    assert evaluation.running(db, "demo") and not evaluation.running(db, "agentic")
+
+
+def test_the_sample_says_where_sessions_went_unmarked_and_when_it_fell_behind(study):
+    """Counted in exchange sessions: 2026-09-07 is Labor Day, and a weekend is not a gap."""
+    db, profiles, prices = study
+    mark(db, profiles, prices, on="2026-09-02", equity=3000.0, deposits=3000.0, vti=100.0, bnd=50.0)
+    mark(db, profiles, prices, on="2026-09-08", equity=3000.0, deposits=3000.0, vti=100.0, bnd=50.0)
+
+    sample = evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[],
+                               today="2026-09-08")["sample"]
+    assert sample["started_on"] == "2026-09-01" and sample["last_snapshot_on"] == "2026-09-08"
+    assert sample["days_recorded"] == 2 and sample["basis"] == "sessions"
+    assert sample["gaps"] == [{"from": "2026-09-02", "to": "2026-09-08", "missing_sessions": 2,
+                               "reason": "no snapshot"}]
+    assert sample["stale"] is False and sample["sessions_behind"] == 0
+
+    late = evaluation.report(db, profiles, research=[], jobs=[], proposals=[], fills=[],
+                             today="2026-09-18")["sample"]
+    assert late["stale"] is True and late["sessions_behind"] == 8
+
+
+def test_route_quality_reports_only_what_the_record_can_measure():
+    research = [
+        {"bucket": "core", "elapsed_seconds": 1800, "llm_calls": 20, "data_quality": "good",
+         "missing_information": 0, "created_at": "2026-09-02T10:00:00+00:00"},
+        {"bucket": "core", "elapsed_seconds": 1900, "llm_calls": 22, "data_quality": "partial",
+         "missing_information": 2, "created_at": "2026-09-03T10:00:00+00:00"},
+        {"bucket": "advisory", "elapsed_seconds": 60, "llm_calls": 1, "created_at": "2026-09-03T11:00:00+00:00"},
+    ]
+    jobs = [
+        {"state": "COMPLETE", "created_at": "2026-09-02T10:00:00+00:00"},
+        {"state": "TIMED_OUT", "created_at": "2026-09-03T10:00:00+00:00"},
+        {"state": "CLAUDE_LIMIT_REACHED", "created_at": "2026-09-03T12:00:00+00:00", "limit_recoveries": 1},
+        {"state": "COMPLETE", "created_at": "2026-09-03T11:00:00+00:00", "task": {"kind": "analysis"}},
+    ]
+    report = evaluation.route_quality(research, jobs)
+    by = {row["route"]: row for row in report["routes"]}
+    graph = by["tradingagents"]
+    assert graph["runs"] == 3 and graph["complete"] == 1 and graph["timed_out"] == 1 and graph["limit_hits"] == 1
+    assert graph["median_elapsed_seconds"] == 1850.0 and graph["llm_calls_total"] == 42
+    assert graph["evidence_check_pass_rate_pct"] == 50.0
+    assert graph["fact_accuracy_pct"] is None and graph["human_edit_rate_pct"] is None
+    assert graph["evaluated"] == {"timing": True, "calls": True, "failures": True, "format": False,
+                                  "evidence": True, "facts": False, "edits": False}
+    assistant = by["assistant"]
+    assert assistant["runs"] == 1 and assistant["evidence_check_pass_rate_pct"] is None
+    assert assistant["evaluated"]["evidence"] is False
+    assert report["since"] == "2026-09-02" and "null means not evaluated" in report["note"]
+    # A record that names its route is believed over the bucket rule.
+    assert evaluation.route_of({"bucket": "advisory", "route": {"name": "skill:thesis-tracker"}}) == "skill:thesis-tracker"
