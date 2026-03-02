@@ -24,7 +24,7 @@ window.Console.page('approvals', function (document) {
   function renderQueue(current) {
     const waiting = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL');
     const wrap = document.getElementById('queue-wrap');
-    wrap.hidden = waiting.length < 2;
+    wrap.hidden = waiting.length === 0 || (waiting.length === 1 && current?.proposal_id === waiting[0].proposal_id);
     if (wrap.hidden) return;
     C.setHTML(document.getElementById('queue-list'), waiting.map((x) =>
       '<button class="option-row" type="button" role="radio" data-proposal="' +
@@ -65,6 +65,9 @@ window.Console.page('approvals', function (document) {
       document.getElementById('live-conditions').hidden = true;
       set('queue-count', C.t('common.open', { n: C.openCount() }));
       renderQueue(null);
+      C.setHTML(empty, new URLSearchParams(location.search).has('proposal')
+        ? '<p class="empty-title">' + C.t('ap.linkUnavailable') + '</p>'
+        : '<p class="empty-title">' + C.t('ap.empty') + '</p><p>' + C.t('ap.emptyBody') + '</p>');
       return;
     }
     renderQueue(p);
@@ -338,4 +341,13 @@ window.Console.page('approvals', function (document) {
     intent = null; confirmBox.checked = false; authorityConfirm.checked = false; submitBtn.disabled = true;
   });
   C.live(['proposals', 'proposalDetail', 'health', 'microLive', 'authority'], renderDetail);
+  let entryURL;
+  function routeEntry() {
+    if (entryURL === location.href) return;
+    entryURL = location.href;
+    const proposal = new URLSearchParams(location.search).get('proposal');
+    CT_API.selectProposal(proposal || null, { includeClosed: !!proposal });
+  }
+  document.addEventListener('ct:route', routeEntry);
+  routeEntry();
 });

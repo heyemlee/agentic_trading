@@ -41,6 +41,17 @@ window.Console.page('advisor', function (document) {
   const painted = new Map();
   const paint = (id, html) => { if (painted.get(id) !== html) { el(id).innerHTML = html; painted.set(id, html); } };
   let decisionDetails = new Map();
+  let shownDecision = null, shownDecisionJob = null, decisionReadAttempted = false;
+  async function markDecisionRead() {
+    const runId = shownDecision, job = shownDecisionJob;
+    if (!runId || decisionReadAttempted || job?.run_key !== runId || job.state !== 'COMPLETE' || job.opened_at ||
+        document.hidden || !el('decision-sheet').open || el('decision-sheet').classList.contains('is-closing') || !A.writesEnabled || window.CT_DEMO) return;
+    decisionReadAttempted = true;
+    try { await A.markOpened(runId); }
+    catch (error) {
+      if (shownDecision === runId && !document.hidden) status(t('rs.openedFailed', { err: error.message }));
+    }
+  }
   C.mount('advisor');
 
   /* Monoline SVG, never a typographic character: ◎ ◷ ＋ come from three
@@ -258,8 +269,19 @@ window.Console.page('advisor', function (document) {
     }
     const decision = e.target.closest?.('[data-decision]');
     if (decision) {
-      el('decision-detail').innerHTML = decisionDetails.get(decision.dataset.decision) || '';
-      C.openSheet('decision-sheet'); return;
+      const runId = decision.dataset.decision;
+      const content = decisionDetails.get(runId);
+      if (!content) return;
+      shownDecision = runId; shownDecisionJob = null; decisionReadAttempted = false;
+      el('decision-detail').innerHTML = content;
+      C.openSheet('decision-sheet');
+      if (!window.CT_DEMO) {
+        try {
+          const job = await A.fetchJSON('/research/' + encodeURIComponent(runId));
+          if (shownDecision === runId) { shownDecisionJob = job; markDecisionRead(); }
+        } catch (_) { /* A historical report can outlive its queue entry; keep it readable. */ }
+      }
+      return;
     }
     const button = e.target.closest?.('[data-research], [data-cancel]');
     if (!button || button.disabled) return;
@@ -277,8 +299,11 @@ window.Console.page('advisor', function (document) {
     }
   });
   document.addEventListener('ct:lang', paintMessages);
+  document.addEventListener('visibilitychange', markDecisionRead);
+  document.addEventListener('ct:leave', () => { shownDecision = null; shownDecisionJob = null; });
   document.addEventListener('ct:auth', e => {
     if (e.detail?.clearDrafts || (e.detail?.authenticated && session && session.state.owner !== e.detail.username)) {
+      shownDecision = null; shownDecisionJob = null;
       session?.clear(); session = null; notesDirty = false; notesLoaded = false;
       conversation = 'default'; pendingRequest = null; shownMessages = []; conversationSignature = '';
       conversationLoading = false; conversationEpoch++;

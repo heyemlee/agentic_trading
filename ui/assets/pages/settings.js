@@ -314,7 +314,7 @@ window.Console.page('settings', function (document) {
     section.hidden = !list.length;
     $('pending-count').textContent = String(list.length);
     C.setHTML($('pending-list'), list.map((change) =>
-      '<div class="list-row" data-od-id="pending-' + C.escapeHtml(change.id) + '"><span class="list-main">' +
+      '<div class="list-row" id="pending-' + C.escapeHtml(change.id) + '" data-od-id="pending-' + C.escapeHtml(change.id) + '"><span class="list-main">' +
       '<span class="list-title">' + C.escapeHtml(describe(change)) + '</span>' +
       '<span class="list-sub">' + C.escapeHtml(C.t('cf.appliesAt', { at: fmtAt(change.apply_after), who: change.requested_by })) + '</span></span>' +
       '<span class="list-side"><button class="btn btn-secondary btn-sm" type="button" data-cancel="' + C.escapeHtml(change.id) + '">' +
@@ -337,7 +337,7 @@ window.Console.page('settings', function (document) {
     $('recent-empty').hidden = list.length > 0;
     C.setHTML($('recent-list'), list.map((change) => {
       const tone = change.status === 'applied' ? 'chip-accent' : change.status === 'failed' ? 'chip-danger' : '';
-      return '<div class="list-row"><span class="list-main"><span class="list-title">' + C.escapeHtml(describe(change)) +
+      return '<div class="list-row" id="recent-' + C.escapeHtml(change.id) + '"><span class="list-main"><span class="list-title">' + C.escapeHtml(describe(change)) +
         ' <span class="chip ' + tone + '">' + C.escapeHtml(change.status) + '</span></span>' +
         '<span class="list-sub">' + C.escapeHtml(fmtAt(change.applied_at || change.requested_at) + ' · ' + change.requested_by +
         (change.error ? ' · ' + change.error : '') + ((change.outcome || {}).git ? ' · ' + change.outcome.git : '')) +
@@ -385,6 +385,16 @@ window.Console.page('settings', function (document) {
   });
 
   /* ─── render ─────────────────────────────────────────────────────── */
+  let focusedChange = null;
+  function focusChange() {
+    const change = new URLSearchParams(location.search).get('change');
+    if (!change || focusedChange === change) return;
+    const data = cfg();
+    const prefix = (data?.pending || []).some(x => x.id === change) ? 'pending-'
+      : (data?.recent || []).some(x => x.id === change) ? 'recent-' : null;
+    const row = prefix && $(prefix + change);
+    if (row && !document.hidden) { row.scrollIntoView?.({ block: 'center' }); focusedChange = change; }
+  }
   function render() {
     const data = cfg();
     if (!data) return;
@@ -396,9 +406,11 @@ window.Console.page('settings', function (document) {
     paintPending(data.pending || []);
     paintRecent(data.recent || []);
     paintFiles(data.files || []);
+    focusChange();
     if (!data.launchd_managed && !$('sc-launchd').textContent) $('sc-launchd').textContent = C.t('cf.launchdUnmanaged');
   }
 
   document.addEventListener('ct:auth', render);
+  document.addEventListener('ct:route', () => { focusedChange = null; focusChange(); });
   C.live(['config'], render);
 });

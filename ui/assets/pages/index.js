@@ -109,7 +109,8 @@ window.Console.page('index', function (document) {
     if (!window.CT_DEMO && CT_API.activeRun !== (job?.run_key || null)) CT_API.watchRun(job?.run_key || null);
     const run = D.researchRun || job;
     $('agent-link').href = 'lab.html' + (run?.run_key ? '?run=' + encodeURIComponent(run.run_key) : '');
-    const waiting = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
+    const attention = C.attentionState();
+    const waiting = attention.known && attention.items.find(x => x.kind === 'proposal_waiting' && x.requires_person);
     const last = visibleRuns()[0];
     const dot = $('agent-dot');
     let live = false, state, note;
@@ -120,8 +121,7 @@ window.Console.page('index', function (document) {
       note = C.t('agent.studyingNote');
     } else if (waiting) {
       state = C.t('agent.waiting');
-      note = C.code(waiting.action) + ' ' + C.usd(waiting.notional_usd) + ' · ' +
-             waiting.ticker + ' · ' + C.bucket(waiting.bucket);
+      note = waiting.title;
     } else if (C.isPaused()) {
       state = C.t('agent.paused');
       note = C.t('agent.pausedNote');
@@ -160,23 +160,34 @@ window.Console.page('index', function (document) {
     money.className = 'chip' + (on ? ' chip-accent' : '');
   }
 
-  /* ── the one thing that may need you ─────────────────────────────── */
-  function renderProposal() {
-    const p = (D.proposals || []).filter((x) => x.status === 'WAITING_FOR_APPROVAL')[0];
-    if (!p) {
-      const failures = Object.values(D.portfolio.errors || {});
-      C.setHTML($('needs-you-slot'), failures.length
-        ? '<a class="btn btn-secondary" href="portfolio.html#ledger-notice">' + C.t('home.reviewLedger') + '</a>'
-        : (D.health.warnings || []).length ? ''
-        : '<p class="body-sm body-muted" data-od-id="empty-queue">' + C.t('home.emptyQueue') + '</p>');
-      return;
-    }
-    $('needs-you-slot').innerHTML =
-      '<a class="card' + (p.is_real_money ? ' card-real' : '') + ' home-approval" href="approvals.html" data-od-id="proposal-card">' +
-        '<span class="eyebrow">' + C.t('home.waitingOnYou') + ' · ' + C.openCount() + '</span>' +
-        '<strong>' + C.escapeHtml(C.code(p.action)) + ' ' + C.usd(p.notional_usd) + ' · ' + C.escapeHtml(p.ticker) + '</strong>' +
-        '<span class="body-sm">' + (p.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.bucket(p.bucket) + '</span>' +
-        '<span class="body-sm linkish">' + C.t('home.reviewCta') + '</span></a>';
+  /* Current conditions come from the same collector as notifications. A successful
+     poll with incomplete sources is still unknown, and old cached items are labelled. */
+  function renderAttention() {
+    const { data, items, known } = C.attentionState();
+    const h = C.escapeHtml;
+    const card = item => {
+      // Until the Assistant has a result deep link, open the exact finished review here.
+      const link = item.kind === 'personal_task_done' && item.link?.page === 'advisor' && item.subject
+        ? { page: 'research', params: { run: item.subject } } : item.link;
+      const href = C.taskLink(link);
+      const kindKey = 'at.kind.' + item.kind;
+      const label = C.t(kindKey) === kindKey ? C.t('at.item') : C.t(kindKey);
+      return '<article class="card home-attention-item" data-attention-id="' + h(item.id) + '">' +
+        '<p class="eyebrow">' + h(label) + ' · ' + C.t(item.requires_person ? 'at.person' : 'at.information') + '</p>' +
+        '<h3>' + h(item.title) + '</h3>' +
+        (item.detail ? '<p class="body-sm">' + h(item.detail) + '</p>' : '') +
+        '<p class="body-sm body-muted">' + h([item.account_label, item.since ? C.dateTime(item.since) : null].filter(Boolean).join(' · ')) + '</p>' +
+        (href ? '<a class="btn btn-secondary btn-sm" href="' + h(href) + '">' + C.t('at.open') + '</a>' : '') + '</article>';
+    };
+    const expanded = $('attention-rest')?.open;
+    C.setHTML($('needs-you-slot'),
+      '<h2 style="margin-bottom:12px;">' + C.t('at.title') + '</h2>' +
+      (!known ? '<div class="banner" role="status"><p>' + C.t('at.unknown') + ' ' + C.t('at.partial') +
+        '</p></div>' + (data?.unreadable?.length ? '<p class="body-sm body-muted">' + h(data.unreadable.join('; ')) + '</p>' : '') : '') +
+      (items.length ? card(items[0]) + (items.length > 1 ? '<details id="attention-rest" class="home-notices" style="margin-top:12px;">' +
+        '<summary>' + C.t('at.more', { n: items.length - 1 }) + '</summary><div class="stack stack-3">' + items.slice(1).map(card).join('') +
+        '</div></details>' : '') : known ? '<p class="body-sm body-muted" data-od-id="empty-queue">' + C.t('at.clear') + '</p>' : ''));
+    if ($('attention-rest')) $('attention-rest').open = !!expanded;
   }
 
   /* ── latest ──────────────────────────────────────────────────────── */
@@ -236,8 +247,8 @@ window.Console.page('index', function (document) {
       renderAgent();
       renderEquity();
       renderChips();
-      renderProposal();
+      renderAttention();
       renderLatest();
       renderNotices();
-    }, ['microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
+    }, ['attention', 'microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
 });

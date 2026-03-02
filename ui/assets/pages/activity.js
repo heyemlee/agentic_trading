@@ -11,16 +11,19 @@ window.Console.page('activity', function (document) {
   function renderOrders() {
 
     const o = D.orders;
-    C.setHTML(document.getElementById('tracked-body'), (o.tracked_orders || []).map(x => C.listRow({
+    const subject = new URLSearchParams(routeSearch).get('subject');
+    const tracked = (o.tracked_orders || []).filter(x => !subject || x.proposal_id === subject);
+    const fills = (o.fills || []).filter(x => !subject || x.proposal_id === subject);
+    C.setHTML(document.getElementById('tracked-body'), tracked.map(x => C.listRow({
       title: x.symbol + ' · ' + C.code(x.status),
       sub: x.proposal_id + ' · ' + (x.reconciliation_error || (x.reconciled_at ? C.dateTime(x.reconciled_at) : 'Awaiting synchronization / 等待同步')),
       value: (x.filled_quantity || 0) + ' shares filled',
       note: C.bucket(x.bucket) + ' · ' + (x.venue_status || '—'),
     })).join('') || '<p class="body-sm">No tracked orders / 暂无订单记录</p>');
-    document.getElementById('fill-count').textContent = C.t('ac.recorded', { n: o.fills.length });
+    document.getElementById('fill-count').textContent = C.t('ac.recorded', { n: fills.length });
 
-    C.setHTML(document.getElementById('fills-body'), o.fills.length
-      ? '<div class="list">' + o.fills.map((f) => C.listRow({
+    C.setHTML(document.getElementById('fills-body'), fills.length
+      ? '<div class="list">' + fills.map((f) => C.listRow({
           title: f.symbol + ' · ' + f.side,
           sub: C.dateTime(f.at) + ' · ' + C.bucket(f.bucket),
           value: C.usd(f.notional),
@@ -49,38 +52,44 @@ window.Console.page('activity', function (document) {
   let group = 'all';
   let rows = [];
   let cursor = null;
-  let loading = false;
+  let loading = false, requestEpoch = 0;
+  let routeSearch = location.search;
 
   function query(reset) {
     if (reset) { rows = []; cursor = null; }
-    const kinds = GROUPS[group].map((k) => 'kind=' + encodeURIComponent(k)).join('&');
+    const route = new URLSearchParams(routeSearch);
+    const kinds = (route.getAll('kind').length ? route.getAll('kind') : GROUPS[group]).map((k) => 'kind=' + encodeURIComponent(k)).join('&');
     return '/activity?limit=25' + (kinds ? '&' + kinds : '') +
-           (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+           (route.get('subject') ? '&subject=' + encodeURIComponent(route.get('subject')) : '') +
+           (cursor || route.get('cursor') ? '&cursor=' + encodeURIComponent(cursor || route.get('cursor')) : '');
   }
 
   async function load(reset) {
-    if (loading) return;
+    if (loading && !reset) return;
+    const epoch = ++requestEpoch;
     loading = true;
     const more = document.getElementById('audit-more');
     more.disabled = true;
     try {
       const page = await CT_API.fetchJSON(query(reset));
+      if (epoch !== requestEpoch) return;
       rows = reset ? page.events : rows.concat(page.events);
       cursor = page.next_cursor;
       paint();
     } catch (err) {
+      if (epoch !== requestEpoch) return;
       document.getElementById('audit-note').textContent =
         C.t('ac.auditFailed', { err: err.message });
     } finally {
-      loading = false;
-      more.disabled = false;
+      if (epoch === requestEpoch) { loading = false; more.disabled = false; }
     }
   }
 
   function paint() {
     const list = document.getElementById('audit-list');
     const more = document.getElementById('audit-more');
-    document.getElementById('audit-scope').textContent = C.t('ac.entries', { n: rows.length });
+    const subject = new URLSearchParams(routeSearch).get('subject');
+    document.getElementById('audit-scope').textContent = C.t('ac.entries', { n: rows.length }) + (subject ? ' · ' + subject : '');
     list.innerHTML = rows.length ? rows.map((e) => {
       const detail = e.detail || {};
       const parts = [e.subject, detail.ticker, detail.action,
@@ -108,6 +117,7 @@ window.Console.page('activity', function (document) {
     document.getElementById('audit-filters').querySelectorAll('[data-group]').forEach((chip) => {
       chip.addEventListener('click', () => {
         group = chip.getAttribute('data-group');
+        const route = new URLSearchParams(routeSearch); route.delete('kind'); route.delete('cursor'); routeSearch = route.toString();
         renderFilters();
         load(true);
       });
@@ -126,4 +136,10 @@ window.Console.page('activity', function (document) {
     load(true);
   }
   document.addEventListener('ct:lang', () => { renderFilters(); paint(); });
+  document.addEventListener('ct:route', () => {
+    if (routeSearch === location.search) return;
+    routeSearch = location.search;
+    renderOrders();
+    if (!window.CT_DEMO) load(true);
+  });
 });

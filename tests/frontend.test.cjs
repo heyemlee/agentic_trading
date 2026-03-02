@@ -652,7 +652,7 @@ function approvalPage() {
   c.CT.health.paused = false; c.CT.health.market.is_open = true;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
-  c.CT_API = { canAct: () => true, readOnce: async () => {}, post: async () => ({ status: 'SUBMITTED', message: 'pending' }) };
+  c.CT_API = { canAct: () => true, readOnce: async () => {}, selectProposal: () => {}, post: async () => ({ status: 'SUBMITTED', message: 'pending' }) };
   c.run('pages/approvals.js');
   return c;
 }
@@ -810,6 +810,220 @@ function homePage(portfolio, showConceptual = false) {
   c.run('pages/index.js');
   return c;
 }
+
+function attentionPayload(items = [], readable = true) {
+  return { checked_at: new Date().toISOString(), readable, unreadable: readable ? [] : ['ledger: unavailable'],
+    items, top: items[0] || null, summary: { total: items.length, requires_person: items.filter(x => x.requires_person).length }, context: {} };
+}
+function attentionItem(overrides = {}) {
+  return { id: 'waiting:A', kind: 'proposal_waiting', severity: 'high', priority: 3, requires_person: true,
+    title: 'Review VTI', detail: 'Current proposal', scope: 'agentic', account_label: 'Agentic', subject: 'A',
+    since: '2026-09-18T20:00:00Z', link: { page: 'approvals', params: { proposal: 'A' } }, ...overrides };
+}
+
+test('home only claims no attention when the collector is readable and current', () => {
+  const c = homePage(); c.CT_DEMO = false;
+  c.CT_API.watchRun = () => {};
+  c.CT.attention = attentionPayload(); c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /at.clear/);
+  c.CT.attention = attentionPayload([], false); c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/);
+  assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
+  c.CT.attention = attentionPayload(); c.CT_API.isLive = () => false; c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/);
+  c.CT.attention = null; c.render();
+  assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
+});
+
+test('home preserves collector priority, displays partial items, and removes resolved items', () => {
+  const c = homePage();
+  const critical = attentionItem({ id: 'critical', kind: 'order_unknown', title: 'Unknown <script>', priority: 1,
+    link: { page: 'activity', params: { subject: 'order A&1' } } });
+  c.CT.attention = attentionPayload([critical, attentionItem()], false); c.render();
+  const html = c.element('needs-you-slot').innerHTML;
+  assert.match(html, /Unknown &lt;script&gt;/); assert.match(html, /activity.html\?subject=order\+A%261/);
+  assert.ok(html.indexOf('data-attention-id="critical"') < html.indexOf('waiting:A'));
+  assert.match(html, /at.more 1/); assert.match(html, /at.unknown/);
+  c.element('attention-rest').open = true; c.render(); assert.equal(c.element('attention-rest').open, true);
+  c.CT.attention = attentionPayload([attentionItem()]); c.render();
+  assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /Unknown/);
+  c.CT.attention = attentionPayload(); c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /at.clear/);
+});
+
+test('task links only allow known pages and parameter keys, encoding every value', () => {
+  const c = context(); c.run('console.js');
+  assert.equal(c.Console.taskLink({ page: '//evil.test', params: {} }), null);
+  assert.equal(c.Console.taskLink({ page: '__proto__', params: {} }), null);
+  assert.equal(c.Console.taskLink({ page: 'research', params: { href: 'javascript:alert(1)' } }), null);
+  assert.equal(c.Console.taskLink({ page: 'research', params: { run: 'A&scope=agentic' } }), 'research.html?run=A%26scope%3Dagentic');
+  const home = homePage();
+  home.CT.attention = attentionPayload([attentionItem({ kind: 'personal_task_done', subject: 'review-A',
+    link: { page: 'advisor', params: { scope: 'personal' } } })]); home.render();
+  assert.match(home.element('needs-you-slot').innerHTML, /research.html\?run=review-A/);
+});
+
+test('More only offers approvals for collector items requiring a proposal decision', () => {
+  const c = context(true); c.run('console.js'); c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { authenticated: true, state: {}, isLive: () => true };
+  c.run('pages/more.js');
+  c.CT.attention = attentionPayload([attentionItem({ kind: 'config_change_pending', requires_person: false })]); c.render();
+  assert.equal(c.element('more-approvals').hidden, true);
+  c.CT.attention = attentionPayload([attentionItem()]); c.render();
+  assert.equal(c.element('more-approvals').hidden, false);
+  assert.match(c.element('more-approvals').href, /approvals.html\?proposal=A/);
+  c.CT.attention.readable = false; c.render();
+  assert.equal(c.element('more-attention-copy').textContent, 'at.unknown');
+});
+
+test('reading or polling a finished run never marks it opened; explicit receipts deduplicate with CSRF', async () => {
+  const c = context(); const writes = [];
+  c.fetch = async (url, options) => {
+    if (url === '/auth/session') return response({ authenticated: true, csrf_token: 'test-token' });
+    if (options.method === 'POST') { writes.push({ url, options }); return response({ run_key: 'done', opened_at: new Date().toISOString() }); }
+    if (url === '/attention') return response(attentionPayload());
+    return response({ run_key: 'done', state: 'COMPLETE' });
+  };
+  c.run('api.js'); c.CT_API.start(['researchRun']); c.CT_API.watchRun('done'); await flush();
+  await c.CT_API.readOnce('researchRun'); assert.equal(writes.length, 0);
+  await Promise.all([c.CT_API.markOpened('done'), c.CT_API.markOpened('done')]);
+  await c.CT_API.markOpened('done');
+  assert.equal(writes.length, 1); assert.equal(writes[0].url, '/research/done/opened');
+  assert.equal(writes[0].options.headers['X-CSRF-Token'], 'test-token');
+  c.document.hidden = true; await c.CT_API.markOpened('hidden'); assert.equal(writes.length, 1);
+});
+
+function researchPage(fetchJSON) {
+  const c = context(); c.run('console.js');
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.element('[data-od-id="confidence-chart"]').before = () => {};
+  c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
+  c.opened = [];
+  c.CT_API = { activeRun: null, writesEnabled: true, watchRun: () => {}, readOnce: async () => {}, fetchJSON,
+    markOpened: async key => { c.opened.push(key); return { opened_at: 'now' }; } };
+  c.run('pages/research.js');
+  c.openReport = run => c.document.dispatchEvent({ type: 'click', preventDefault() {}, target: {
+    closest: selector => selector === '[data-trace]' ? { getAttribute: () => run } : null } });
+  return c;
+}
+
+test('a displayed report marks only its finished job, and shows failures before marking them', async () => {
+  for (const state of ['COMPLETE', 'FAILED', 'RUNNING']) {
+    const c = researchPage(async url => url.endsWith('/trace')
+      ? { run_id: 'one', final_action: state === 'COMPLETE' ? 'HOLD' : null, steps: [] }
+      : { run_key: 'one', state, error: state === 'FAILED' ? 'feed unavailable' : null });
+    c.openReport('one'); await flush();
+    assert.deepEqual(c.opened, state === 'RUNNING' ? [] : ['one']);
+    if (state === 'FAILED') assert.match(c.element('trace-steps').innerHTML, /feed unavailable/);
+    c.document.dispatchEvent({ type: 'ct:data' }); await flush();
+    assert.equal(c.opened.length, state === 'RUNNING' ? 0 : 1);
+  }
+});
+
+test('missing results and mismatched report ids remain unread', async () => {
+  for (const trace of [{ run_id: 'one', steps: [] }, { run_id: 'other', final_action: 'SELL', steps: [] }]) {
+    const c = researchPage(async url => url.endsWith('/trace') ? trace : { run_key: 'one', state: 'COMPLETE' });
+    c.openReport('one'); await flush();
+    assert.deepEqual(c.opened, []); assert.match(c.element('trace-steps').innerHTML, /rs.resultMissing/);
+  }
+});
+
+test('late report responses cannot replace a newer report or consume its notification', async () => {
+  const pending = new Map();
+  const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
+  c.openReport('one'); c.openReport('two');
+  pending.get('/research/two/trace')({ run_id: 'two', final_action: 'HOLD', steps: [] });
+  pending.get('/research/two')({ run_key: 'two', state: 'COMPLETE' }); await flush();
+  pending.get('/research/one/trace')({ run_id: 'one', final_action: 'SELL', steps: [] });
+  pending.get('/research/one')({ run_key: 'one', state: 'COMPLETE' }); await flush();
+  assert.deepEqual(c.opened, ['two']); assert.match(c.element('trace-head').innerHTML, /two/);
+  assert.doesNotMatch(c.element('trace-head').innerHTML, /SELL/);
+});
+
+test('hidden and closed report sheets do not mark results before they are displayed', async () => {
+  for (const close of [false, true]) {
+    const pending = new Map(); const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
+    c.openReport('one'); c.document.hidden = true;
+    if (close) c.element('trace-sheet').open = false;
+    pending.get('/research/one/trace')({ run_id: 'one', final_action: 'HOLD', steps: [] });
+    pending.get('/research/one')({ run_key: 'one', state: 'COMPLETE' }); await flush();
+    assert.deepEqual(c.opened, []);
+    c.document.hidden = false; c.document.dispatchEvent({ type: 'visibilitychange' }); await flush();
+    assert.deepEqual(c.opened, close ? [] : ['one']);
+  }
+});
+
+test('failed read receipts remain visible and are only retried explicitly', async () => {
+  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'one', final_action: 'HOLD', steps: [] }
+    : { run_key: 'one', state: 'COMPLETE' });
+  let attempts = 0;
+  c.CT_API.markOpened = async () => { attempts++; throw new Error('offline'); };
+  c.openReport('one'); await flush();
+  assert.equal(attempts, 1); assert.match(c.element('trace-read-status').textContent, /offline/);
+  c.document.dispatchEvent({ type: 'visibilitychange' }); c.document.dispatchEvent({ type: 'ct:data' }); await flush();
+  assert.equal(attempts, 1);
+  c.element('trace-read-retry').events.click(); await flush(); assert.equal(attempts, 2);
+});
+
+test('an expired proposal deep link is read directly without falling back to an unrelated queue item', async () => {
+  const c = context(); c.CT.proposals = [{ proposal_id: 'active', version: 'v' }];
+  c.fetch = async url => url === '/proposals' ? response(c.CT.proposals)
+    : response({ proposal_id: 'expired', version: 'old', status: 'STALE' });
+  c.run('api.js'); c.CT_API.selectProposal('expired', { includeClosed: true }); await flush();
+  assert.equal(c.CT.proposalDetail.proposal_id, 'expired');
+  await c.CT_API.readOnce('proposals'); assert.equal(c.CT.proposalDetail.proposal_id, 'expired');
+  c.fetch = async () => response({ detail: 'not found' }, 400);
+  c.CT_API.selectProposal('missing', { includeClosed: true }); await flush();
+  assert.equal(c.CT.proposalDetail, null);
+  assert.equal(c.CT_API.SOURCES.proposalDetail.path(), '/proposals/missing');
+});
+
+test('a linked waiting proposal is invalidated when its queue version changes or it leaves the queue', async () => {
+  for (const updated of [[{ proposal_id: 'A', version: 'new' }], []]) {
+    const c = context(); c.CT.proposals = [{ proposal_id: 'A', version: 'old' }];
+    c.fetch = async url => url === '/proposals' ? response(updated)
+      : response({ proposal_id: 'A', version: 'old', status: 'WAITING_FOR_APPROVAL' });
+    c.run('api.js'); c.CT_API.selectProposal('A', { includeClosed: true }); await flush();
+    assert.equal(c.CT.proposalDetail.proposal_id, 'A');
+    await c.CT_API.readOnce('proposals');
+    assert.equal(c.CT.proposalDetail, null);
+    assert.equal(c.CT_API.isLive('proposalDetail'), false);
+  }
+});
+
+test('Activity deep links filter orders and audit records and discard an older subject response', async () => {
+  const c = context(); c.run('console.js'); c.Console.mount = c.Console.wireTabs = () => {};
+  c.location.search = '?subject=A'; const pending = new Map();
+  c.CT.orders = { fills: [], tracked_orders: [{ proposal_id: 'A', symbol: 'VTI' }, { proposal_id: 'B', symbol: 'BND' }] };
+  c.CT_API = { fetchJSON: url => new Promise(resolve => pending.set(url, resolve)) };
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.run('pages/activity.js');
+  assert.match(c.element('tracked-body').innerHTML, /VTI/); assert.doesNotMatch(c.element('tracked-body').innerHTML, /BND/);
+  c.location.search = '?subject=B'; c.document.dispatchEvent({ type: 'ct:route' });
+  pending.get('/activity?limit=25&subject=B')({ events: [{ id: 2, subject: 'B', kind: 'test', description: 'new subject' }], next_cursor: null });
+  await flush();
+  pending.get('/activity?limit=25&subject=A')({ events: [{ id: 1, subject: 'A', kind: 'test', description: 'old subject' }], next_cursor: null });
+  await flush();
+  assert.match(c.element('audit-list').innerHTML, /new subject/); assert.doesNotMatch(c.element('audit-list').innerHTML, /old subject/);
+  assert.match(c.element('tracked-body').innerHTML, /BND/); assert.doesNotMatch(c.element('tracked-body').innerHTML, /VTI/);
+});
+
+test('Assistant marks a completed decision only while its result sheet remains visible', async () => {
+  for (const leave of [false, true]) {
+    let finish; const opened = [];
+    const c = advisorPage(async () => ({}), { fetchJSON: url => url.startsWith('/research/')
+      ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({ messages: [] }) });
+    c.CT_API.markOpened = async key => { opened.push(key); };
+    c.CT.advisor.decisions = [{ run_id: 'personal', ticker: 'VTI', action: 'HOLD', bucket: 'advisory', policy: { proposal: {} } }]; c.render();
+    c.document.dispatchEvent({ type: 'click', target: { closest: selector => selector === '[data-decision]'
+      ? { dataset: { decision: 'personal' } } : null } });
+    if (leave) c.document.dispatchEvent({ type: 'ct:leave' });
+    finish({ run_key: 'personal', state: 'COMPLETE' }); await flush();
+    assert.deepEqual(opened, leave ? [] : ['personal']);
+  }
+});
 
 test('the headline equity is one account, never the real and paper books added together', () => {
   const c = homePage();
@@ -985,7 +1199,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
     .map(m => [m[1], Number(m[2])]));
   const budget = {
     advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
-    notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, evaluation: 300000,
+    notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, attention: 30000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
     research: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,
@@ -1355,7 +1569,7 @@ test('home follows active research and clears stale account details when the led
   c.CT.proposals = []; c.render();
   assert.equal(c.CT_API.activeRun, null);
   assert.equal(c.element('hwm-delta').textContent, '—');
-  assert.match(c.element('needs-you-slot').innerHTML, /portfolio.html#ledger-notice/);
+  assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/, 'only the attention collector decides what needs action');
 });
 
 function loadingPage(fetch) {

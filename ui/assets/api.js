@@ -6,6 +6,7 @@ window.CT_API = (function () {
   const TIMEOUT_MS = 15000;
   let activeRun = null;
   let pickedProposal = null;
+  let linkedProposal = null;
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
@@ -39,6 +40,7 @@ window.CT_API = (function () {
     authSessions: { path: () => '/auth/sessions', ms: 60000 },
     config: { path: () => '/config', ms: 60000 },
     authority: { path: () => '/config/authority', ms: 30000 },
+    attention: { path: () => '/attention', ms: 30000 },
     evaluation: { path: () => '/evaluation', ms: 300000 },
     portfolio: { path: () => '/portfolio', ms: 60000, staleAfter: 600000 },
     risk: { path: () => '/risk', ms: 60000 },
@@ -54,6 +56,7 @@ window.CT_API = (function () {
     proposalDetail: {
       ms: 15000,
       path: () => {
+        if (linkedProposal) return '/proposals/' + encodeURIComponent(linkedProposal);
         /* The reader's pick wins for as long as it is still open. Once it
            closes — approved, declined, expired — it drops off this list and
            the queue falls back to the first, so the page is never blank while
@@ -68,6 +71,7 @@ window.CT_API = (function () {
     resources: {}, live: {}, lastOkAt: null, lastError: null };
   const timers = [];
   const inFlight = new Map();
+  const opened = new Set(), opening = new Map();
   let sessionRequest = null, authEpoch = 0;
 
   const staleAfter = src => src.staleAfter || Math.max(src.ms * 3, 30000);
@@ -109,6 +113,7 @@ window.CT_API = (function () {
   }
   function unauthorized(clearDrafts = true) {
     authEpoch++;
+    opened.clear(); opening.clear();
     state.authChecked = true; state.authPending = false; state.authError = null;
     if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
     auth = { authenticated: false, csrf_token: null };
@@ -158,7 +163,8 @@ window.CT_API = (function () {
         if (epoch !== authEpoch || src.path() !== path) return;
         if (key === 'proposalDetail') {
           const current = (window.CT.proposals || []).find(p => p.proposal_id === data.proposal_id);
-          if (!current || data.proposal_id !== current.proposal_id || data.version !== current.version) {
+          if (linkedProposal ? data.proposal_id !== linkedProposal || (current && data.version !== current.version)
+            : !current || data.proposal_id !== current.proposal_id || data.version !== current.version) {
             throw new Error('Proposal changed while its detail was loading. Refreshing the queue.');
           }
         }
@@ -184,9 +190,12 @@ window.CT_API = (function () {
         state.resources[key] = { lastOkAt: arrived, dataAt: dataTime(data, arrived), error: null, path };
         state.lastOkAt = arrived;
         if (key === 'proposals') {
-          const current = data.find(p => p.proposal_id === pickedProposal) || data[0];
+          const current = linkedProposal ? data.find(p => p.proposal_id === linkedProposal)
+            : data.find(p => p.proposal_id === pickedProposal) || data[0];
           const detail = window.CT.proposalDetail;
-          if (!current || detail && (detail.proposal_id !== current.proposal_id || detail.version !== current.version)) {
+          const changed = detail && current && (detail.proposal_id !== current.proposal_id || detail.version !== current.version);
+          const removed = !current && (!linkedProposal || detail?.status === 'WAITING_FOR_APPROVAL');
+          if (changed || removed) {
             window.CT.proposalDetail = null;
             state.resources.proposalDetail = { lastOkAt: null, error: 'proposal detail needs refresh' };
           }
@@ -292,10 +301,33 @@ window.CT_API = (function () {
     if (path === '/auth/logout') { unauthorized(); announce(); }
     return result;
   }
+  // Called by result views after display, never by readOnce or a polling callback.
+  // Deduplication is in memory for this authenticated session; failed writes are not queued.
+  async function markOpened(runKey) {
+    if (demo || document.hidden || !auth.authenticated || state.authPending) return { blocked: true };
+    if (!/^[A-Za-z0-9._-]+$/.test(runKey || '')) throw new Error('Invalid research run.');
+    if (opened.has(runKey)) return { opened: true };
+    if (opening.has(runKey)) return opening.get(runKey);
+    const epoch = authEpoch;
+    const request = (async () => {
+      const result = await post('/research/' + encodeURIComponent(runKey) + '/opened', {});
+      if (result.run_key !== runKey || !result.opened_at) throw new Error(window.I18N.t('rs.openedNotSaved'));
+      if (epoch === authEpoch) {
+        opened.add(runKey);
+        await readOnce('attention');
+      }
+      return result;
+    })();
+    opening.set(runKey, request);
+    try { return await request; }
+    finally { if (opening.get(runKey) === request) opening.delete(runKey); }
+  }
   /* Which of several waiting proposals is on screen. Mirrors watchRun: the
      source path reads it, so changing it re-points the same polled resource. */
-  function selectProposal(proposalId) {
-    if (proposalId === pickedProposal) return pickedProposal;
+  function selectProposal(proposalId, { includeClosed = false } = {}) {
+    const link = includeClosed ? proposalId : null;
+    if (proposalId === pickedProposal && linkedProposal === link) return pickedProposal;
+    linkedProposal = link;
     pickedProposal = proposalId || null;
     /* Clearing the detail first avoids showing the old proposal's terms under
        the new one's heading while the read is in flight. Demo has no read to
@@ -313,7 +345,7 @@ window.CT_API = (function () {
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, isLive, refresh: reconnect,
+  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
     get activeRun() { return activeRun; },
     get pickedProposal() { return pickedProposal; },
     get writesEnabled() { return !demo && !state.authPending && auth.authenticated === true; },

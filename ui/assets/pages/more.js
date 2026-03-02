@@ -9,6 +9,13 @@ window.Console.page('more', function (document) {
   });
 
   function render() {
+    const attention = C.attentionState();
+    const approvals = attention.items.filter(x => x.requires_person && ['proposal_waiting', 'proposal_stale'].includes(x.kind));
+    document.getElementById('more-attention-copy').textContent = !attention.known ? C.t('at.unknown')
+      : attention.items.length ? C.t('at.count', { n: attention.items.length }) : C.t('at.clear');
+    document.getElementById('more-approvals').hidden = !approvals.length;
+    document.getElementById('more-approvals').href = C.taskLink(approvals[0]?.link) || 'approvals.html';
+    document.getElementById('more-approvals-copy').textContent = attention.known ? C.t('at.approvals', { n: approvals.length }) : C.t('at.unknown');
     const status = C.systemStatus();
     document.getElementById('more-status-dot').className = 'dot ' +
       (status === 'READY' ? 'dot-ok' : (status === 'PAUSED' ? 'dot-warn' : 'dot-bad'));
@@ -71,5 +78,5 @@ window.Console.page('more', function (document) {
     }
   });
   document.addEventListener('ct:auth', render);
-  C.live([], render);
+  C.live([], render, ['attention']);
 });

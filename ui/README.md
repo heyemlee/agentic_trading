@@ -101,9 +101,21 @@ only a static server; all API requests are intercepted. Set `CT_UI_CAPTURE_DIR` 
 ## Live data
 
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals
-15s, health and authority 30s, portfolio/risk/research/micro-live 60s. Authority is
+15s, health/authority/attention 30s, portfolio/risk/research/micro-live 60s. Authority is
 read only on pages that use it and opens no venue session. No websocket; the
 backend offers none and none is needed.
+
+Home and More read current attention from `/attention`, preserving server priority. Missing,
+stale or partially readable results say "cannot confirm", never "nothing to do". Links retain
+the referenced proposal, activity subject, configuration change or research run. A finished
+report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
+a visible sheet; polling never marks it. Failed receipts offer an explicit retry and are not
+queued. A successful receipt refreshes attention. Until Assistant supports a specific review
+deep link, a finished portfolio review opens its exact run in the Research result sheet.
+
+`node tools/check_attention_ui.cjs` exercises the mobile attention-to-result flow with a static
+server and intercepted API responses. Like the approval check, it needs Playwright and Chrome
+and accepts `CT_UI_CAPTURE_DIR` for screenshots.
 
 Each screen declares what it reads:
 

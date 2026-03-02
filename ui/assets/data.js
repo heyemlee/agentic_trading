@@ -13,7 +13,7 @@ window.CT = (function () {
     health: {status: "UNKNOWN", paused: null, market: {}, warnings: []},
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
     schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
-    config: null, authority: null,
+    config: null, authority: null, attention: null,
     evaluation: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,

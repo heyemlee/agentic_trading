@@ -808,6 +808,8 @@ html { background: #f6f8f6; scroll-padding-bottom: 120px; }
 body { min-height: 100dvh; background: linear-gradient(160deg, #f3f8f0 0, #fff 420px); padding-bottom: calc(var(--tabbar-h) + 12px + env(safe-area-inset-bottom, 0px)); }
 button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 [hidden] { display: none !important; }
+.home-attention-item { display: grid; gap: 10px; overflow-wrap: anywhere; }
+.home-attention-item .btn { justify-self: start; }
 .topnav { background: rgba(250,252,249,.86); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); border: 0; padding-top: env(safe-area-inset-top, 0px); }
 .topnav-inner { min-height: 62px; }
 .brand { font-size: 20px; }

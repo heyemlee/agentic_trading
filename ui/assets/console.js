@@ -746,6 +746,29 @@
       sheetOrigins.get(id)?.focus?.(); sheetOrigins.delete(id);
     }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
   }
+  const LINK_PARAMS = {
+    index: ['scope'], portfolio: ['scope', 'account', 'ticker'],
+    advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'ticker', 'task_type'],
+    lab: ['run'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
+    settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'],
+    system: [], profile: [], notifications: [], more: [],
+  };
+  function taskLink(link) {
+    if (!link || !Object.hasOwn(LINK_PARAMS, link.page) || !link.params || typeof link.params !== 'object' || Array.isArray(link.params)) return null;
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(link.params)) {
+      if (!LINK_PARAMS[link.page].includes(key) || typeof value !== 'string' || value.length > 256) return null;
+      params.set(key, value);
+    }
+    if (window.CT_DEMO) params.set('demo', '1');
+    return link.page + '.html' + (params.size ? '?' + params : '');
+  }
+  function attentionState() {
+    const data = D.attention;
+    const fresh = window.CT_DEMO || window.CT_API?.isLive('attention');
+    return { data, items: Array.isArray(data?.items) ? data.items : [],
+      known: !!(fresh && data?.readable === true && Array.isArray(data.items)) };
+  }
   window.Console = {
     page: (name, init) => window.CT_NAV ? CT_NAV.register(name, init) : init(document),
     D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
@@ -755,6 +778,6 @@
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,
     setHTML, mount, wireTabs, live, loading, paintConnection, paintFoot, tickValue, openSheet, closeSheet, noticeCard,
-    confirmLedger,
+    confirmLedger, taskLink, attentionState,
   };
 })();

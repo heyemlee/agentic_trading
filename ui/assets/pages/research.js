@@ -121,6 +121,31 @@ window.Console.page('research', function (document) {
      The pipeline writes one report per agent under runs/<id>/reports. The
      endpoint returns them in order, so a run reads as a sequence of steps. */
   const traceSheet = document.getElementById('trace-sheet');
+  let traceEpoch = 0, traceReading = null;
+  const traceVisible = () => !document.hidden && traceSheet.open && !traceSheet.classList.contains('is-closing');
+  async function saveRead() {
+    const reading = traceReading;
+    if (!reading?.shown || reading.attempted || !traceVisible() || !CT_API.writesEnabled || window.CT_DEMO) return;
+    const job = reading.job;
+    if (!job || job.opened_at || !['COMPLETE', 'FAILED', 'TIMED_OUT', 'CLAUDE_LIMIT_REACHED', 'CANCELLED'].includes(job.state)) return;
+    reading.attempted = true;
+    try {
+      await CT_API.markOpened(reading.runId);
+      if (traceReading !== reading) return;
+      document.getElementById('trace-read-status').hidden = true;
+      document.getElementById('trace-read-retry').hidden = true;
+    } catch (error) {
+      if (traceReading !== reading || !traceVisible()) return;
+      const status = document.getElementById('trace-read-status');
+      status.textContent = C.t('rs.openedFailed', { err: error.message }); status.hidden = false;
+      document.getElementById('trace-read-retry').hidden = false;
+    }
+  }
+  document.getElementById('trace-read-retry').addEventListener('click', () => {
+    if (traceReading) traceReading.attempted = false;
+    document.getElementById('trace-read-retry').hidden = true;
+    saveRead();
+  });
   document.getElementById('trace-close').addEventListener('click', () => C.closeSheet('trace-sheet'));
   /* backdrop click and Esc are handled once, in the shared chrome */
   document.addEventListener('click', (e) => {
@@ -131,25 +156,35 @@ window.Console.page('research', function (document) {
   });
 
   async function openTrace(runId) {
+    const epoch = ++traceEpoch;
+    traceReading = null;
+    document.getElementById('trace-read-status').hidden = true;
+    document.getElementById('trace-read-retry').hidden = true;
     const head = document.getElementById('trace-head');
     const list = document.getElementById('trace-steps');
     head.innerHTML = '<p class="agent-state">' + C.escapeHtml(runId) + '</p>';
     list.innerHTML = '<p class="body-sm body-muted" style="padding-top:12px;">' + C.t('rs.traceLoading') + '</p>';
     C.openSheet('trace-sheet');
 
-    let t;
-    try {
-      t = await CT_API.fetchJSON('/research/' + encodeURIComponent(runId) + '/trace');
-    } catch (err) {
-      list.innerHTML = '<div class="banner" style="margin-top:12px;"><p>' +
-        C.t('rs.traceFailed', { err: C.escapeHtml(err.message) }) + '</p></div>';
-      return;
-    }
-
+    const [trace, job] = await Promise.allSettled([
+      CT_API.fetchJSON('/research/' + encodeURIComponent(runId) + '/trace'),
+      CT_API.fetchJSON('/research/' + encodeURIComponent(runId)),
+    ]);
+    if (epoch !== traceEpoch) return;
+    const validTrace = trace.status === 'fulfilled' && trace.value.run_id === runId;
+    const validJob = job.status === 'fulfilled' && job.value.run_key === runId;
+    traceReading = { runId, t: validTrace ? trace.value : {}, job: validJob ? job.value : null,
+      failed: !validTrace && !validJob, attempted: false, shown: false };
+    renderTrace();
+  }
+  function renderTrace() {
+    if (!traceReading || !traceVisible()) return;
+    const { t, job, runId } = traceReading;
+    const head = document.getElementById('trace-head'), list = document.getElementById('trace-steps');
     const usage = t.llm_usage || {};
     head.innerHTML =
       '<p class="agent-state">' + C.escapeHtml(t.ticker || runId) + ' · ' +
-        (t.final_action ? C.escapeHtml(C.code(t.final_action)) : C.t('home.noResult')) + '</p>' +
+        (t.final_action ? C.escapeHtml(C.code(t.final_action)) : job ? C.escapeHtml(C.code(job.state)) : C.t('home.noResult')) + '</p>' +
       '<p class="agent-note">' + [
         t.bucket ? C.bucket(t.bucket) : null,
         t.trade_date ? C.dateOnly(t.trade_date) : null,
@@ -160,7 +195,7 @@ window.Console.page('research', function (document) {
       ].filter(Boolean).map(C.escapeHtml).join(' · ') + '</p>';
 
     let group = null;
-    list.innerHTML = (t.steps || []).map((st, i) => {
+    const steps = (t.steps || []).map((st, i) => {
       const gl = C.t('tg.' + st.group) === 'tg.' + st.group ? st.group_label : C.t('tg.' + st.group);
       const gh = gl !== group
         ? (group = gl, '<p class="trace-group">' + C.escapeHtml(group) + '</p>')
@@ -175,7 +210,21 @@ window.Console.page('research', function (document) {
         '</button>' +
         '<div class="trace-body md" id="trace-body-' + i + '" hidden>' + C.md(st.markdown || '') +
           (st.truncated ? '<p class="body-sm body-muted">' + C.t('rs.truncated') + '</p>' : '') + '</div>';
-    }).join('') || '<p class="body-sm body-muted" style="padding-top:12px;">' + C.t('rs.traceEmpty') + '</p>';
+    }).join('');
+    const failed = job && ['FAILED', 'TIMED_OUT', 'CLAUDE_LIMIT_REACHED', 'CANCELLED'].includes(job.state);
+    const result = job?.assistant_result;
+    const review = result?.review;
+    const reviewHtml = review ? '<p class="body-sm">' + C.escapeHtml([review.account_label,
+      review.snapshot_at ? C.dateTime(review.snapshot_at) : null, review.analysed_at ? C.dateTime(review.analysed_at) : null].filter(Boolean).join(' · ')) + '</p>' +
+      (review.priorities || []).map(item => '<article class="card"><h3>' + C.escapeHtml(item.symbol) + '</h3><p>' +
+        C.escapeHtml(item.recommendation) + '</p><p>' + C.escapeHtml(item.rationale) + '</p><p class="body-sm">' +
+        C.escapeHtml((item.missing || []).join('; ')) + '</p></article>').join('') +
+      '<p class="body-sm">' + C.escapeHtml((review.limitations || []).join('; ')) + '</p>' : '';
+    const answer = result?.answer ? '<div class="md">' + C.md(result.answer) + '</div>' : '';
+    const failure = failed ? '<p class="body-sm">' + C.escapeHtml(job.error || C.code(job.state)) + '</p>' : '';
+    list.innerHTML = failure + reviewHtml + answer + steps || '<p class="body-sm body-muted" style="padding-top:12px;">' +
+      C.t(job && ['QUEUED', 'RUNNING'].includes(job.state) ? 'rs.jobRunning' : 'rs.resultMissing') + '</p>';
+    traceReading.shown = !!(failure || reviewHtml || answer || steps || t.final_action);
 
     list.querySelectorAll('.trace-step').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -185,7 +234,14 @@ window.Console.page('research', function (document) {
         body.hidden = open;
       });
     });
+    saveRead();
   }
+  document.addEventListener('visibilitychange', renderTrace);
+  document.addEventListener('ct:auth', e => {
+    if (e.detail?.clearDrafts) { traceEpoch++; traceReading = null; }
+    else if (CT_API.writesEnabled) saveRead();
+  });
+  document.addEventListener('ct:leave', () => { traceEpoch++; traceReading = null; entryURL = null; });
 
   const progress = document.getElementById('run-progress');
 
