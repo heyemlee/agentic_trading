@@ -37,7 +37,8 @@ class ResearchJobStore:
                instrument_type: str, trigger: str, log_path: Path,
                timeout_seconds: int, max_attempts: int,
                task: dict[str, Any] | None = None,
-               authority_version: str | None = None) -> tuple[dict[str, Any], bool]:
+               authority_version: str | None = None, purpose: str | None = None,
+               request_id: str | None = None) -> tuple[dict[str, Any], bool]:
         dedupe = f"{trade_date}:{ticker.upper()}:{bucket}:{instrument_type}"
         if task:
             # A conversation is serial; independent conversations and account reviews are not.
@@ -59,6 +60,10 @@ class ResearchJobStore:
             # When the person was shown the result (service.mark_opened); the "finished" item on
             # Home stands until then. Never set by a read, which the console polls.
             "opened_at": None,
+            # Why the run was asked for (review_holding | candidate | exit_review), and the
+            # console's own idempotency key for it, when it gave one.
+            "purpose": purpose,
+            "request_id": request_id,
         }
         if task:
             job["task"] = task
@@ -153,14 +158,15 @@ class ResearchJobManager:
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
                instrument_type: str, trigger: str,
                task: dict[str, Any] | None = None,
-               authority_version: str | None = None) -> tuple[dict[str, Any], bool]:
+               authority_version: str | None = None, purpose: str | None = None,
+               request_id: str | None = None) -> tuple[dict[str, Any], bool]:
         log_dir = self.project_dir / "runs" / "api"
         log_dir.mkdir(parents=True, exist_ok=True)
         return self.store.create(
             run_key=run_key, ticker=ticker, bucket=bucket, trade_date=trade_date,
             instrument_type=instrument_type, trigger=trigger, log_path=log_dir / f"{run_key}.log",
             timeout_seconds=self.timeout_seconds, max_attempts=self.max_attempts,
-            task=task, authority_version=authority_version,
+            task=task, authority_version=authority_version, purpose=purpose, request_id=request_id,
         )
 
     def dispatch(self) -> list[str]:

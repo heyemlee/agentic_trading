@@ -641,17 +641,28 @@ class ResearchRequest(BaseModel):
     instrument_type: Literal["auto", "etf", "stock", "crypto"] = "auto"
     trade_date: str | None = Field(None, description="yyyy-mm-dd. Defaults to the last completed session.")
     trigger: Literal["manual", "scheduled", "event", "reanalysis"] = "manual"
+    # The account the console is looking at; refused when it does not hold the bucket.
+    scope: Literal["agentic", "demo"] | None = None
+    # The console's idempotency key: a repeated tap returns the run it already started.
+    request_id: UUID | None = None
+    # Why the run is asked for. The two that speak of a holding are refused for a symbol the
+    # book does not hold, rather than researched as if it did.
+    purpose: Literal["review_holding", "candidate", "exit_review"] | None = None
 
 
 @app.post("/research", tags=["research"], summary="Start a research run in the background")
 def start_research(body: ResearchRequest) -> dict[str, Any]:
     return _ok(_service.start_research, body.ticker, bucket=body.bucket,
-               instrument_type=body.instrument_type, trade_date=body.trade_date, trigger=body.trigger)
+               instrument_type=body.instrument_type, trade_date=body.trade_date, trigger=body.trigger,
+               scope=body.scope, request_id=str(body.request_id) if body.request_id else None,
+               purpose=body.purpose)
 
 
 @app.get("/research/jobs", tags=["research"], summary="Persistent research queue, newest first")
-def research_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50) -> list[dict[str, Any]]:
-    return _ok(_service.research_jobs, limit)
+def research_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50,
+                  scope: Literal["agentic", "demo", "personal", "unspecified"] | None = None,
+                  account_id: Annotated[str | None, Query(max_length=40)] = None) -> list[dict[str, Any]]:
+    return _ok(_service.research_jobs, limit, scope=scope, account_id=account_id)
 
 
 # Declared before /research/{run_key} so the literal path wins the match, exactly as
@@ -693,8 +704,13 @@ def research_trace(run_id: str,
 
 
 @app.get("/research", tags=["research"], summary="Completed decision records, newest first")
-def research_history(limit: Annotated[int, Query(ge=1, le=100)] = 20) -> list[dict[str, Any]]:
-    return _ok(_service.research_history, limit)
+def research_history(limit: Annotated[int, Query(ge=1, le=100)] = 20,
+                     scope: Literal["agentic", "demo", "personal", "unspecified"] | None = None,
+                     account_id: Annotated[str | None, Query(max_length=40)] = None,
+                     task_type: Literal["full_research", "analysis", "portfolio_review"] | None = None,
+                     include_all_personal: bool = False) -> list[dict[str, Any]]:
+    return _ok(_service.research_history, limit, scope=scope, account_id=account_id,
+               task_type=task_type, include_all_personal=include_all_personal)
 
 
 # ----------------------------------------------------------------- proposals

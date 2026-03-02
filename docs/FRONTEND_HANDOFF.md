@@ -126,8 +126,8 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/proposals?include_closed=` | proposal list with product status and freshness |
 | GET | `/proposals/{id}` | full proposal: research, bull/bear, Hard Risk rules, history |
 | GET | `/proposals/{id}/revalidate` | dry-run of the approval check; changes nothing |
-| GET | `/research?limit=` | completed decision records, newest first |
-| GET | `/research/jobs?limit=` | persistent queue, including queued/running/failed jobs |
+| GET | `/research?scope=&account_id=&task_type=&include_all_personal=&limit=` | completed decision records, newest first, each bound to the account it is about: `scope` (`agentic`, `demo`, `personal`, or `unspecified` for a record that predates buckets), `account_scope_kind` (`single`, `all_personal`, `unknown`), `account_id`, `account_ids`, `account_label`, `task_type`, `purpose`, `route` (`name`, `inferred`, versions, models), `authority_version`; what the facts are as of (`snapshot_as_of`, `prices_as_of`, `sources_retrieved_at_max`; `facts_as_of` stays `null` until sources carry their own event time), `evidence`, `limitations`, `counter_evidence` (600 chars, `counter_evidence_truncated`; the full bear case is in the trace), `superseded_by` (a newer record of the same kind about the same thing; chat and lightweight checks never supersede a full analysis), `applicable_floor` (the confidence a run in that scope needs to open; `null` for personal research). `account_id` narrows to that account's own records; `include_all_personal=true` adds the all-accounts reviews that covered it |
+| GET | `/research/jobs?scope=&account_id=&limit=` | persistent queue, including queued/running/failed jobs, each with the same `scope`/account/`task_type`/`route` binding, `purpose`, `request_id`, `authority_version`, `opened_at` and `cancellable` |
 | GET | `/research/{run_key}` | one run's progress |
 | GET | `/orders?limit=` | recorded fills and tracked orders, from the local record |
 
@@ -143,7 +143,7 @@ be reviewed and acknowledged.
 
 | Method | Path | Body | Effect |
 |---|---|---|---|
-| POST | `/research` | `{ticker, bucket, instrument_type, trade_date, trigger}` | enqueues a durable run; an identical active request returns its existing `run_key` |
+| POST | `/research` | `{ticker, bucket, instrument_type?, trade_date?, trigger?, scope?, request_id?, purpose?}` | enqueues a durable run; an identical active request returns its existing `run_key`. `scope` (`agentic` or `demo`) must hold `bucket` or the request is refused (400). `request_id` (UUID) makes a repeated tap return the run it already started (`deduplicated: true`) and a different request under the same id a 409. `purpose` is `review_holding`, `candidate` or `exit_review`; the two that speak of a holding are refused (400) for a symbol the book does not hold |
 | POST | `/proposals/{id}/approve` | `{confirm, version, idempotency_key, ticker, bucket, action, notional_usd, sell_quantity?, note?, authority_version?, acknowledge_authority_change?}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute. `authority_version` is the version `/config/authority` showed; one that has moved is refused with 409 like a moved proposal `version`. A proposal made under an authority that has since loosened, or moved in a way the record cannot classify (including one made before the record existed), is refused with 409 until `acknowledge_authority_change: true`; the response and `GET /proposals/{id}` carry `authority_changed` |
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |

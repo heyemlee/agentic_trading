@@ -488,15 +488,17 @@ def report(db, profiles, *, research, jobs, proposals, fills,
 def route_of(row: dict[str, Any]) -> str:
     """Which research route a record or job ran on.
 
-    A record that names its route is believed; until records carry one, the personal
-    assistant's runs are the ones with a task or the advisory bucket, and everything else is
-    the TradingAgents graph.
+    A record that names its route is believed. Before records carried one, every run of a
+    trading bucket and every personal ``analysis`` went through the TradingAgents graph, and
+    every other personal task (a chat, a shortlist, a refresh) through the assistant's single
+    call; that is what the code did, so it is what is stated.
     """
     route = row.get("route")
     if isinstance(route, dict) and route.get("name"):
         return str(route["name"])
+    task_kind = (row.get("task") or {}).get("kind") or row.get("task_kind")
     if row.get("task") or row.get("bucket") == "advisory":
-        return "assistant"
+        return "tradingagents" if task_kind == "analysis" else "assistant"
     return "tradingagents"
 
 

@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
                 profiles, job["ticker"], job["trade_date"], job["bucket"],
                 job["instrument_type"], profiles.project_dir / "runs", False,
                 run_id=args.run_key, authority_version_at_submit=job.get("authority_version"),
+                purpose=job.get("purpose"),
             )
         record_path = profiles.project_dir / "runs" / args.run_key / "decision_record.json"
         record = {}

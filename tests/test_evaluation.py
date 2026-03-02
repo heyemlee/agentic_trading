@@ -279,7 +279,7 @@ def test_route_quality_reports_only_what_the_record_can_measure():
         {"state": "COMPLETE", "created_at": "2026-09-02T10:00:00+00:00"},
         {"state": "TIMED_OUT", "created_at": "2026-09-03T10:00:00+00:00"},
         {"state": "CLAUDE_LIMIT_REACHED", "created_at": "2026-09-03T12:00:00+00:00", "limit_recoveries": 1},
-        {"state": "COMPLETE", "created_at": "2026-09-03T11:00:00+00:00", "task": {"kind": "analysis"}},
+        {"state": "COMPLETE", "created_at": "2026-09-03T11:00:00+00:00", "task": {"kind": "chat"}},
     ]
     report = evaluation.route_quality(research, jobs)
     by = {row["route"]: row for row in report["routes"]}
@@ -294,5 +294,9 @@ def test_route_quality_reports_only_what_the_record_can_measure():
     assert assistant["runs"] == 1 and assistant["evidence_check_pass_rate_pct"] is None
     assert assistant["evaluated"]["evidence"] is False
     assert report["since"] == "2026-09-02" and "null means not evaluated" in report["note"]
-    # A record that names its route is believed over the bucket rule.
+    # A record that names its route is believed over the bucket rule; without one, a personal
+    # analysis ran the graph and a chat ran the assistant, which is what the code did.
     assert evaluation.route_of({"bucket": "advisory", "route": {"name": "skill:thesis-tracker"}}) == "skill:thesis-tracker"
+    assert evaluation.route_of({"bucket": "advisory", "task_kind": "analysis"}) == "tradingagents"
+    assert evaluation.route_of({"task": {"kind": "analysis"}}) == "tradingagents"
+    assert evaluation.route_of({"task": {"kind": "shortlist"}}) == "assistant"

@@ -158,7 +158,7 @@ def _final(result, proposal: Proposal) -> dict:
 
 def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instrument_type: str,
             runs_dir: Path, debug: bool, *, run_id: str | None = None,
-            authority_version_at_submit: str | None = None) -> int:
+            authority_version_at_submit: str | None = None, purpose: str | None = None) -> int:
     reset_usage_log()
     started = time.time()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -240,6 +240,10 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     authority_moved = authority_now != research_authority
     record["authority"] = {"research": research_authority, "proposal": authority_now,
                            "changed_during_research": authority_moved}
+    # Named in the record rather than inferred from it later: which route produced this, and
+    # why it was asked for. A future skill route writes its own name and version here.
+    record["route"] = {"name": "tradingagents", "skill_version": None}
+    record["purpose"] = purpose
     if result.verdict == "APPROVE":
         proposal = new_proposal(
             authority_version=research_authority,

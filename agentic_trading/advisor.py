@@ -392,6 +392,18 @@ def run_task(profiles, job):
                 allowed = {c["symbol"] for c in context["snapshot"]["candidates"]}
                 record["assistant_result"]["research_candidates"] = [
                     c for c in record["assistant_result"]["research_candidates"] if c["symbol"].upper() in allowed]
+        # Bound to an account scope by the server, from the task, never from the model: a
+        # single observed account, or explicitly all of them as the snapshot listed them at
+        # the time. A later reader tells this apart from a record that never said.
+        account_id = task.get("account_id")
+        record["account_id"] = account_id
+        record["account_scope_kind"] = "single" if account_id else "all_personal"
+        record["account_ids"] = ([] if account_id else
+                                 [a["id"] for a in snapshot.get("accounts") or [] if a.get("id")])
+        # Which route produced it: the read-only analysis runs the TradingAgents graph; the
+        # conversation and the refresh are the assistant's own single call.
+        record["route"] = {"name": "tradingagents" if task["kind"] == "analysis" else "assistant",
+                           "skill_version": None}
         record["elapsed_seconds"] = round(time.monotonic() - started, 1)
         write_record(profiles.project_dir / "runs" / job["run_key"] / "decision_record.json", record)
         return 0
