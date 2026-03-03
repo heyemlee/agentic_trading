@@ -119,3 +119,13 @@ body.chat-view { height: var(--app-height,100dvh); min-height: 0; overflow: hidd
 .chat-view #chat-form + p { font-size: 11px; line-height: 1.3; margin-top: 6px; }
 .chat-view .utility-section { display: none; }
 @media (max-height: 600px) { .chat-view #resource-status, .chat-view .pagehead, .chat-view #panel-chat > .advisor-actions, .chat-view #chat-form + p { display: none; } }
+
+/* Account scope and optional review must remain reachable on short screens. */
+.assistant-scope-controls { display: flex; gap: 12px; align-items: end; margin-top: 12px; }
+.assistant-scope-controls .field { flex: 1; min-width: 0; }
+.assistant-scope-controls select { width: 100%; }
+.chat-view #content { overflow-y: auto; }
+.chat-view #content > section:last-child { min-height: 380px; flex-shrink: 0; }
+.chat-view #review-panel, .chat-view #agentic-records-panel { flex-shrink: 0; padding-block: 8px; }
+@media (max-height: 600px) { .chat-view .pagehead { display: block; } }
+.chat-view .pagehead #assistant-account-status { display: block; }

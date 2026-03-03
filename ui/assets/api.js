@@ -8,6 +8,14 @@ window.CT_API = (function () {
   let pickedProposal = null;
   let linkedProposal = null;
   let evaluationScope = demo ? 'demo' : 'agentic';
+  let assistantFilter = { scope: 'personal', account: '' };
+  const assistantPath = () => '/advisor?scope=' + assistantFilter.scope +
+    (assistantFilter.account ? '&account_id=' + encodeURIComponent(assistantFilter.account) : '');
+  function matchesAssistant(data) {
+    const f = assistantFilter;
+    return data?.scope === f.scope && data.account_scope_kind === (f.scope === 'agentic' || f.account ? 'single' : 'all_personal') &&
+      (data.account_id || '') === (f.scope === 'agentic' ? 'micro_live' : f.account);
+  }
   let researchFilter = { scope: demo ? 'demo' : 'agentic', account: '', task_type: '', include_all_personal: false };
   function researchPath(jobs = false) {
     const query = new URLSearchParams({ limit: '100', scope: researchFilter.scope });
@@ -47,6 +55,7 @@ window.CT_API = (function () {
   const SOURCES = {
     // Chat progress wants the short poll; the reading itself is a local SQLite read.
     advisor: { path: () => '/advisor', ms: 5000, staleAfter: 300000 },
+    assistant: { path: assistantPath, ms: 5000, staleAfter: 300000 },
     health: { path: () => '/health', ms: 30000 },
     schedule: { path: () => '/system/schedule', ms: 60000 },
     operations: { path: () => '/system/operations', ms: 60000 },
@@ -133,6 +142,7 @@ window.CT_API = (function () {
     authEpoch++;
     opened.clear(); opening.clear();
     window.CT.researchHistory = []; window.CT.researchQueue = []; window.CT.accounts = null;
+    window.CT.assistant = null;
     state.authChecked = true; state.authPending = false; state.authError = null;
     if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
     auth = { authenticated: false, csrf_token: null };
@@ -183,6 +193,7 @@ window.CT_API = (function () {
         if (key === 'evaluation' && data.scope !== evaluationScope) {
           throw new Error(window.I18N.t('evl.scopeMismatch'));
         }
+        if (key === 'assistant' && !matchesAssistant(data)) throw new Error(window.I18N.t('ai.scopeMismatch'));
         if (['researchHistory', 'researchQueue'].includes(key) && !Array.isArray(data)) {
           throw new Error(window.I18N.t('rs.recordsInvalid'));
         }
@@ -331,6 +342,20 @@ window.CT_API = (function () {
     return result;
   }
   // Clear the previous account before starting a scoped read. Late responses are rejected above.
+  function selectAssistant(filter) {
+    if (!['personal', 'agentic'].includes(filter.scope)) return false;
+    const next = { scope: filter.scope, account: filter.scope === 'personal' ? String(filter.account || '') : '' };
+    if (JSON.stringify(next) === JSON.stringify(assistantFilter) && state.resources.assistant) return true;
+    assistantFilter = next;
+    window.CT.assistant = demo ? { scope: next.scope, account_scope_kind: next.scope === 'agentic' || next.account ? 'single' : 'all_personal',
+      account_id: next.scope === 'agentic' ? 'micro_live' : next.account || null, account_label: next.scope === 'agentic' ? 'Agentic' : '',
+      jobs: [], decisions: [], conversation_summaries: [], latest_review: null } : null;
+    state.resources.assistant = { lastOkAt: null, error: null };
+    announce(true);
+    if (!demo) readOnce('assistant');
+    return true;
+  }
+  // Clear the previous account before starting a scoped read. Late responses are rejected above.
   function selectResearch(filter) {
     if (!['agentic', 'demo', 'personal', 'unspecified'].includes(filter.scope)) return false;
     const next = { scope: filter.scope, account: filter.scope === 'personal' ? String(filter.account || '') : '',
@@ -401,7 +426,7 @@ window.CT_API = (function () {
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, selectProposal, selectEvaluation, selectResearch, matchesResearch, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
+  return { BASE, SOURCES, state, watchRun, selectProposal, selectEvaluation, selectResearch, matchesResearch, selectAssistant, matchesAssistant, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
     get evaluationScope() { return evaluationScope; },
     get activeRun() { return activeRun; },
     get pickedProposal() { return pickedProposal; },

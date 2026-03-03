@@ -219,3 +219,20 @@ render verbatim; only the plain-language gloss beside them switches.
 every neutral is a `color-mix()` of them. `--danger` is a local choice, not a
 brand value. Pure green never carries text (1.9:1 on white) — green text uses
 `--green-ink`.
+
+
+Assistant uses `assistant` (5s, stale after 5 minutes) for
+`/advisor?scope=personal|agentic&account_id=…`, plus `accounts` (60s). The existing
+unfiltered `advisor` resource remains for Portfolio and Context. Switching accounts clears
+scoped evidence immediately and rejects delayed responses. Chat history is checked against
+its server binding; drafts, selected conversations and explicit retry IDs are stored per
+account in tab storage. Switching or reloading never submits a request.
+
+Personal context notes remain shared across personal accounts. Agentic hides personal tools
+and only submits explanation chats. Portfolio review is an explicit personal action, bound
+to the selected account scope. Snapshot refresh does not rerun it; an old review keeps its
+snapshot/analysis times and stale warning. The completed result is marked opened only after
+its detail sheet is visible, using the independent idempotent `/opened` write.
+
+`node tools/check_assistant_ui.cjs` verifies account switching, retained drafts, Agentic chat,
+explicit review and opened receipts with synthetic APIs, including phone layout.

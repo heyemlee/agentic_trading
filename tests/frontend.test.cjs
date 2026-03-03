@@ -62,10 +62,15 @@ function advisorPage(post, options = {}) {
   c.run('advisor-session.js');
   c.Console.mount = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
-  c.CT.advisor = { notes: { text: 'Saved plan', revision: 1 }, jobs: [], decisions: [],
+  c.location.search = options.search || '';
+  c.CT.advisor = { scope: 'personal', account_scope_kind: 'all_personal', account_id: null, notes: { text: 'Saved plan', revision: 1 }, jobs: [], decisions: [],
     snapshot: { accounts: [], candidates: [{ symbol: 'VTI', sources: ['watchlists:<script>'] }] } };
-  c.CT_API = { writesEnabled: true, authenticated: true, username: options.owner || 'owner', post, readOnce: async () => {},
-    fetchJSON: options.fetchJSON || (async () => ({ messages: [] })) };
+  Object.defineProperty(c.CT, 'assistant', { get: () => c.CT.advisor });
+  c.CT.accounts = { accounts: ['aaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbb'].map(account_id => ({ scope: 'personal', account_scope_kind: 'single', account_id })) };
+  c.CT_API = { isLive: () => true, matchesAssistant: () => true, selectAssistant: f => {
+    Object.assign(c.CT.advisor, { scope: f.scope, account_scope_kind: f.scope === 'agentic' || f.account ? 'single' : 'all_personal', account_id: f.scope === 'agentic' ? 'micro_live' : f.account || null });
+  }, writesEnabled: true, authenticated: true, username: options.owner || 'owner', post, readOnce: async () => {},
+    fetchJSON: options.fetchJSON || (async url => ({ conversation_id: url.split('/').at(-1), messages: [] })) };
   c.run('pages/advisor.js');
   return c;
 }
@@ -1389,7 +1394,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
   const found = Object.fromEntries([...src.matchAll(/^\s{4}(\w+): \{[^}]*?ms: (\d+)/gm)]
     .map(m => [m[1], Number(m[2])]));
   const budget = {
-    advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
+    advisor: 5000, assistant: 5000, health: 30000, schedule: 60000, operations: 60000,
     notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, attention: 30000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
     research: 60000, researchHistory: 60000, researchQueue: 10000, accounts: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
@@ -2193,4 +2198,85 @@ test('withdrawing a cooling change posts its cancel and nothing else', async () 
   c.element('pending-list').events.click({ target: { closest: () => button } });
   await flush();
   assert.equal(JSON.stringify(c.posted), JSON.stringify([{ url: '/config/changes/demo1/cancel', body: {} }]));
+});
+
+test('assistant account switches retain independent drafts and reject a late conversation', async () => {
+  let late; const sent = [];
+  const c = advisorPage(async (_, body) => { sent.push(body); return {}; }, { fetchJSON: url =>
+    url.endsWith('/default') ? new Promise(resolve => { late = resolve; }) : Promise.resolve({ conversation_id: url.split('/').at(-1), messages: [] }) });
+  c.element('chat-input').value = 'All accounts draft'; c.element('chat-input').events.input();
+  const switchTo = search => { c.location.search = search; c.document.dispatchEvent({ type: 'ct:route' }); };
+  switchTo('?scope=personal&account=aaaaaaaaaaaaaaaaaaaa'); await flush();
+  assert.equal(c.element('chat-input').value, '');
+  c.element('chat-input').value = 'Account A draft'; c.element('chat-input').events.input();
+  late({ conversation_id: 'default', scope: 'personal', account_scope_kind: 'all_personal', messages: [{ role: 'assistant', content: 'Wrong account secret' }] }); await flush();
+  assert.doesNotMatch(c.element('chat-messages').innerHTML, /Wrong account secret/);
+  switchTo('?scope=personal&account=bbbbbbbbbbbbbbbbbbbb'); await flush();
+  assert.equal(c.element('chat-input').value, '');
+  switchTo('?scope=personal&account=aaaaaaaaaaaaaaaaaaaa'); await flush();
+  assert.equal(c.element('chat-input').value, 'Account A draft');
+  c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(sent[0].scope, 'personal'); assert.equal(sent[0].account_id, 'aaaaaaaaaaaaaaaaaaaa');
+  assert.notEqual(sent[0].conversation_id, 'default');
+  switchTo('?scope=personal');
+  assert.equal(c.element('chat-input').value, 'All accounts draft');
+});
+
+test('a mismatched conversation cannot show messages or accept another send', async () => {
+  const sent = [];
+  const c = advisorPage(async (_, body) => { sent.push(body); }, { search: '?scope=personal&account=aaaaaaaaaaaaaaaaaaaa&conversation=wrong',
+    fetchJSON: async () => ({ conversation_id: 'wrong', scope: 'personal', account_scope_kind: 'single', account_id: 'bbbbbbbbbbbbbbbbbbbb', messages: [{ content: 'Private B' }] }) });
+  await flush(); assert.equal(c.element('chat-send').disabled, true);
+  assert.doesNotMatch(c.element('chat-messages').innerHTML, /Private B/);
+  c.element('chat-input').value = 'Question'; c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(sent.length, 0); assert.match(c.element('advisor-status').textContent, /ai.conversationMismatch/);
+});
+
+test('Agentic submits only chats, hides personal context, and preserves rejected drafts', async () => {
+  const sent = [];
+  const c = advisorPage(async (url, body) => { sent.push({ url, body }); const e = Error('Changed account'); e.status = 409; throw e; }, { search: '?scope=agentic' });
+  await flush(); assert.equal(c.element('review-panel').hidden, true); assert.equal(c.element('view-discover').hidden, true);
+  assert.equal(c.element('personal-notes').value, ''); assert.equal(c.element('notes-preview').textContent, '');
+  c.element('shortlist').events.click(); c.element('review-start').events.click(); c.element('save-notes').events.click();
+  c.element('symbol-input').value = 'VTI'; c.element('symbol-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(sent.length, 0);
+  c.element('chat-input').value = 'Explain the research'; c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
+  assert.equal(sent.length, 1); assert.equal(sent[0].body.scope, 'agentic'); assert.equal(sent[0].body.account_id, null);
+  assert.equal(c.element('chat-input').value, 'Explain the research'); assert.match(c.element('advisor-status').textContent, /ai.conflict/);
+  c.render(); await flush(); assert.equal(sent.length, 1, 'polling must not retry a rejected write');
+});
+
+test('portfolio review needs an explicit start and receipt waits for the visible complete result', async () => {
+  const sent = [], opened = [];
+  const c = advisorPage(async (_, body) => { sent.push(body); return {}; }, { search: '?scope=personal&account=aaaaaaaaaaaaaaaaaaaa',
+    fetchJSON: async url => url.startsWith('/research/') ? { run_key: 'review-a', state: 'COMPLETE' } : { conversation_id: url.split('/').at(-1), messages: [] } });
+  c.CT_API.markOpened = async key => { opened.push(key); };
+  c.CT.advisor.latest_review = { run_key: 'review-a', account_label: 'A', stale: true,
+    snapshot_at: '2026-09-17', analysed_at: '2026-09-18', priorities: [{ symbol: 'VTI', rationale: '<script>test</script>', citations: [] }] };
+  c.render(); await flush(); assert.equal(sent.length, 0); assert.equal(opened.length, 0);
+  assert.match(c.element('review-stale').textContent, /ai.reviewStale/);
+  await c.element('review-open').events.click(); await flush();
+  assert.deepEqual(opened, ['review-a']); assert.match(c.element('decision-detail').innerHTML, /&lt;script&gt;/);
+  c.render(); await flush(); assert.equal(opened.length, 1);
+  c.element('review-start').events.click(); await flush();
+  assert.equal(sent.length, 1); assert.equal(sent[0].kind, 'portfolio_review'); assert.equal(sent[0].account_id, 'aaaaaaaaaaaaaaaaaaaa');
+});
+
+test('scoped assistant resource rejects old and mismatched data without repointing Portfolio', async () => {
+  const c = context(), calls = []; let release;
+  c.fetch = async url => {
+    calls.push(url);
+    if (url === '/advisor?scope=personal') return new Promise(resolve => { release = resolve; });
+    if (url === '/advisor?scope=agentic') return response({ scope: 'agentic', account_scope_kind: 'single', account_id: 'micro_live', jobs: [] });
+    if (url.startsWith('/advisor?')) return response({ scope: 'personal', account_scope_kind: 'single', account_id: 'bbbbbbbbbbbbbbbbbbbb' });
+    return response({ notes: { text: 'Portfolio source' } });
+  };
+  c.run('api.js'); c.CT_API.selectAssistant({ scope: 'personal' }); await flush();
+  c.CT_API.selectAssistant({ scope: 'agentic' }); assert.equal(c.CT.assistant, null);
+  release(response({ scope: 'personal', account_scope_kind: 'all_personal', account_id: null })); await flush();
+  assert.equal(c.CT.assistant.scope, 'agentic');
+  c.CT_API.selectAssistant({ scope: 'personal', account: 'aaaaaaaaaaaaaaaaaaaa' }); await flush();
+  assert.equal(c.CT.assistant, null); assert.match(c.CT_API.state.resources.assistant.error, /ai.scopeMismatch/);
+  await c.CT_API.readOnce('advisor'); assert.equal(c.CT.advisor.notes.text, 'Portfolio source');
+  assert.ok(calls.includes('/advisor'));
 });

@@ -44,7 +44,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  '/proposals': [],
  '/orders': {fills:[],open_orders:[],tracked_orders:[]},
  '/advisor': {stale:false,snapshot:{accounts:[],candidates:[]},jobs:[],decisions:[],conversations:[],notes:{text:'',revision:0}},
- '/advisor/conversations/default':{messages:[]},
+ '/advisor/conversations/default':{conversation_id:'default',messages:[]},
  '/research/jobs':[], '/research':[],
  };
  const fixtureContext = { URLSearchParams, window: { location: { search: '?demo=1' } } };
@@ -56,6 +56,8 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  }
  const apiPayload = url => url.pathname === '/evaluation'
    ? fixtureContext.window.CT.evaluationExamples[url.searchParams.get('scope') || 'demo']
+   : url.pathname === '/advisor' && url.searchParams.has('scope')
+     ? { ...payload['/advisor'], scope: 'personal', account_scope_kind: 'all_personal', account_id: null, conversation_summaries: [] }
    : payload[url.pathname] || {};
  let delay=1800, denied=false;
  await page.route('**/*', async route=>{

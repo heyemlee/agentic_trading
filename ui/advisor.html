@@ -18,14 +18,24 @@
 <main id="content" hidden data-i18n-title="ai.title">
   <section class="section pagehead"><div class="container">
     <h1 data-i18n="ai.title">投资助手</h1>
-    <p class="body-muted" data-i18n="ai.intro">从你的持仓和计划出发，讨论下一步。</p>
+    <p class="body-muted" id="assistant-intro">从你的持仓和计划出发，讨论下一步。</p>
+    <div class="assistant-scope-controls"><div class="field"><label for="assistant-account" data-i18n="ai.account">Account scope</label><select id="assistant-account" class="select"></select></div>
+    <a id="assistant-switch" class="btn btn-secondary btn-sm" data-i18n="ai.switchAccount">Switch account</a></div>
+    <p id="assistant-scope-note" class="body-sm" style="margin-top:12px;"></p>
+    <p id="assistant-coverage" class="body-sm body-muted"></p>
+    <p id="assistant-account-status" class="body-sm body-muted" role="status"></p>
     <div class="assistant-shortcuts" role="tablist" aria-label="Assistant">
       <button class="btn btn-secondary btn-sm" id="view-chat" role="tab" aria-selected="true" aria-controls="panel-chat" data-i18n="app.chat">聊天</button>
       <button class="btn btn-secondary btn-sm" id="view-discover" role="tab" aria-selected="false" aria-controls="panel-discover" tabindex="-1" data-i18n="app.discover">选股</button>
     </div>
-    <a class="body-sm linkish" href="research.html" data-i18n="nav.hint.research">完整研究与 Agent 报告</a>
+    <a class="body-sm linkish" id="assistant-research-link" href="research.html" data-i18n="nav.hint.research">完整研究与 Agent 报告</a>
     <p id="advisor-status" class="body-sm" role="status" aria-live="polite"></p>
   </div></section>
+  <section class="section" style="padding-top:0;" id="review-panel"><div class="container"><details class="card app-disclosure"><summary data-i18n="ai.portfolioReview">Portfolio review</summary><p id="review-summary" class="body-sm body-muted"></p>
+    <p id="review-stale" class="body-sm" role="status"></p>
+    <div class="advisor-actions"><button id="review-start" class="btn btn-secondary btn-sm" data-i18n="ai.reviewStart">Review this portfolio</button><button id="review-open" class="btn btn-secondary btn-sm" data-i18n="ai.reviewOpen" hidden>View review</button></div>
+  </details></div></section>
+  <section class="section" id="agentic-records-panel" hidden><div class="container"><details class="card app-disclosure"><summary data-i18n="rs.runs">Research</summary><div id="agentic-records"></div></details></div></section>
   <section class="section" style="padding-top:0"><div class="container advisor-layout">
     <div class="stack stack-4">
       <div class="card" id="panel-chat" role="tabpanel" aria-labelledby="view-chat">
@@ -47,7 +57,7 @@
           <textarea id="chat-input" class="form-input" rows="2" maxlength="4000" data-i18n-ph="ai.message" required></textarea>
           <button id="chat-send" class="btn btn-green" type="submit" data-i18n="ai.send">发送</button>
         </form>
-        <p class="body-sm body-muted" data-i18n="ai.chatNote">回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。</p>
+        <p class="body-sm body-muted" id="assistant-chat-note">回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。</p>
       </div>
     </div>
     <div class="stack stack-4">

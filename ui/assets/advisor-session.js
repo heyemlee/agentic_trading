@@ -2,15 +2,16 @@
 (function () {
   'use strict';
   const KEY = 'ct.advisor.session.v1';
-  const validId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
+  const validId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
   const short = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
-  function open(owner) {
-    const fresh = () => ({ owner, selected: 'default', entries: Object.create(null), note: null });
+  function open(owner, binding = 'personal:all') {
+    const fresh = () => ({ owner, selected: binding === 'personal:all' ? 'default' : crypto.randomUUID(), entries: Object.create(null), note: null });
     let state = fresh();
     try {
-      const saved = JSON.parse(window.sessionStorage.getItem(KEY));
+      const envelope = JSON.parse(window.sessionStorage.getItem(KEY));
+      const saved = binding === 'personal:all' ? envelope : envelope?.owner === owner ? envelope.scopes?.[binding] : null;
       if (saved?.owner === owner && Date.now() - saved.updatedAt < 86400000) {
-        state.selected = validId(saved.selected) ? saved.selected : 'default';
+        state.selected = validId(saved.selected) ? saved.selected : state.selected;
         for (const [id, entry] of Object.entries(saved.entries || {})) {
           if (!validId(id) || !entry || typeof entry !== 'object') continue;
           state.entries[id] = { draft: short(entry.draft, 4000), title: short(entry.title, 90) };
@@ -28,7 +29,13 @@
       try {
         const content = JSON.stringify(state);
         if (content !== last) {
-          window.sessionStorage.setItem(KEY, JSON.stringify({ ...state, updatedAt: Date.now() }));
+          let old = null;
+          try { old = JSON.parse(window.sessionStorage.getItem(KEY) || 'null'); } catch (_) {}
+          const envelope = old?.owner === owner ? old : { owner, scopes: {} };
+          const saved = { ...state, updatedAt: Date.now() };
+          window.sessionStorage.setItem(KEY, JSON.stringify(binding === 'personal:all'
+            ? { ...saved, scopes: envelope.scopes || {} }
+            : { ...envelope, scopes: { ...envelope.scopes, [binding]: saved } }));
           last = content;
         }
         return true;
