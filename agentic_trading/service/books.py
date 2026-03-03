@@ -143,6 +143,48 @@ class BooksMixin:
             checked_at=checked_at,
         )
 
+    def account_scopes(self) -> dict[str, Any]:
+        """The account scopes a screen may bind to, for the switcher and for checking a deep link.
+
+        Composed from the readings the console already holds -- the kept portfolio for the
+        real-money account, the saved snapshot for the personal ones -- so it opens no venue
+        session. The Demo book is not offered: it is history, not a place to look at money.
+        """
+        from ..advisor import SNAPSHOT, age
+
+        profiles = self.profiles()
+        accounts: list[dict[str, Any]] = []
+        errors: dict[str, str] = {}
+        portfolio = self.kept_portfolio()
+        agentic = portfolio.accounts.get(MICRO_BUCKET)
+        if agentic is not None:
+            accounts.append({"scope": "agentic", "account_scope_kind": "single", "account_id": MICRO_BUCKET,
+                             "account_ids": [], "account_label": "Agentic", "is_real_money": True,
+                             "venue": agentic.venue, "source": "ledger, reconciled",
+                             "as_of": agentic.as_of, "complete": True})
+        else:
+            errors["agentic"] = portfolio.errors.get(MICRO_BUCKET, "the Agentic account could not be read")
+        snapshot = self.state_db(profiles).read_meta(SNAPSHOT, {}) or {}
+        members = [a for a in snapshot.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
+        for account in members:
+            accounts.append({"scope": "personal", "account_scope_kind": "single", "account_id": account["id"],
+                             "account_ids": [], "account_label": account.get("label"), "is_real_money": True,
+                             "venue": "robinhood", "source": "observed snapshot",
+                             "as_of": snapshot.get("fetched_at"), "complete": bool(account.get("complete"))})
+        if members:
+            accounts.append({"scope": "personal", "account_scope_kind": "all_personal", "account_id": None,
+                             "account_ids": [a["id"] for a in members], "account_label": "all personal accounts",
+                             "is_real_money": True, "venue": "robinhood", "source": "observed snapshot",
+                             "as_of": snapshot.get("fetched_at"),
+                             "complete": all(bool(a.get("complete")) for a in members)})
+        return {
+            "checked_at": utcnow().isoformat(),
+            "accounts": accounts,
+            "errors": errors,
+            "personal_snapshot": {"fetched_at": snapshot.get("fetched_at"), "stale": age(snapshot) > 300,
+                                  "errors": list(snapshot.get("errors") or [])},
+        }
+
     def ledger_check(self) -> dict[str, Any]:
         """The last ledger check's report, whoever ran it: the daily job, the CLI or the console.
 

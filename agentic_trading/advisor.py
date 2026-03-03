@@ -12,7 +12,7 @@ import math
 import re
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
@@ -246,10 +246,18 @@ def answer(profiles, context, message, history, language="zh", llm=None):
         config_dir=str(profiles.config_dir), role="personal_assistant",
         tool_names=["get_verified_market_snapshot", "get_news", "get_fundamentals", "get_indicators"],
     )
+    agentic = (context or {}).get("scope") == "agentic"
     system = (
-        "You are the user's personal investment assistant. Use the supplied profile, observed "
-        "Robinhood accounts, previous conversation and existing research decisions. Reply in "
-        + ("Simplified Chinese" if language == "zh" else "English") + ". "
+        ("You are explaining the Agentic account: the real-money account this system manages. "
+         "Use only the supplied recorded research, proposals, orders and the effective authority; "
+         "there is no personal account in view and you must not speak of one. You explain what was "
+         "decided, what was refused and why, and what the authority allows; you cannot start "
+         "research, trade, approve, or change candidates, configuration or authority, and you never "
+         "suggest that a conversation could. "
+         if agentic else
+         "You are the user's personal investment assistant. Use the supplied profile, observed "
+         "Robinhood accounts, previous conversation and existing research decisions. ")
+        + "Reply in " + ("Simplified Chinese" if language == "zh" else "English") + ". "
         + UNTRUSTED_CONTENT_NOTICE + " "
         "Account observations are read-only and distinct from the Demo core/"
         "sandbox buckets. Do not apply a $100 experiment's sizing limits to other accounts. "
@@ -279,6 +287,70 @@ def answer(profiles, context, message, history, language="zh", llm=None):
     reply.research_candidates = [c for c in reply.research_candidates
                                  if SYMBOL.fullmatch(c.symbol.upper())]
     return reply.model_dump()
+
+
+RECOMMENDATIONS = ("hold", "consider_change", "wait_for_evidence", "needs_full_research")
+
+
+class ReviewCitation(BaseModel):
+    kind: Literal["run", "snapshot", "profile"]
+    run_id: str | None = None
+    as_of: str | None = None
+
+
+class ReviewPriority(BaseModel):
+    symbol: str
+    recommendation: Literal["hold", "consider_change", "wait_for_evidence", "needs_full_research"]
+    rationale: str = Field(max_length=1200)
+    citations: list[ReviewCitation] = Field(default_factory=list, max_length=6)
+    missing: list[str] = Field(default_factory=list, max_length=6)
+
+
+class PortfolioReview(BaseModel):
+    """At most three things worth the person's attention, each saying what it rests on."""
+
+    priorities: list[ReviewPriority] = Field(default_factory=list, max_length=3)
+    limitations: list[str] = Field(default_factory=list, max_length=8)
+
+
+def review_portfolio(profiles, context, language="zh", llm=None):
+    """One structured pass over the observed holdings, reusing what is already known.
+
+    The review reuses the snapshot, the confirmed profile and the research that is still
+    valid; it starts no research of its own and produces no order. Its four recommendations
+    are advice about attention, not actions, and ``consider_change`` says which way only in
+    its rationale. What it could not know goes in ``missing`` and ``limitations``, never into
+    a confident-sounding line.
+    """
+    llm = llm or ClaudeCodeChatModel(
+        model=profiles.tradingagents.quick_think_llm, effort=profiles.llm.quick_effort,
+        timeout_seconds=min(profiles.llm.timeout_seconds, 300), max_turns=8,
+        claude_bin=profiles.llm.claude_bin,
+        work_dir=str(profiles.project_dir / "runs" / ".advisor_workdir"),
+        config_dir=str(profiles.config_dir), role="personal_assistant",
+        tool_names=["get_verified_market_snapshot", "get_news", "get_fundamentals", "get_indicators"],
+    )
+    system = (
+        "You review the user's observed Robinhood holdings and name at most three priorities: "
+        "which holdings deserve attention now and why. Reply in "
+        + ("Simplified Chinese" if language == "zh" else "English") + ". "
+        + UNTRUSTED_CONTENT_NOTICE + " "
+        "Use the supplied snapshot, the confirmed profile and the existing research decisions; cite "
+        "them by run id and date. Each priority carries one of four recommendations: hold, "
+        "consider_change (say the direction and the reason in the rationale), wait_for_evidence, or "
+        "needs_full_research. These are advice about attention, never orders. Do not invent target "
+        "prices, cost bases, tax lots or personal goals; put what you would need under missing. "
+        "Any TODO/unresolved profile field and its recommended_default is an unconfirmed suggestion, "
+        "not a personal fact. Prefer fewer priorities over weak ones; an empty list is a valid answer "
+        "when nothing needs attention.\n" + profiles.mandate_context()
+    )
+    messages = [{"role": "system", "content": system},
+                {"role": "user", "content": "Observed context:\n" + json.dumps(context, ensure_ascii=False)},
+                {"role": "user", "content": "Review these holdings now."}]
+    review = llm.with_structured_output(PortfolioReview).invoke(messages)
+    out = review.model_dump()
+    out["priorities"] = [p for p in out["priorities"] if SYMBOL.fullmatch(str(p["symbol"]).upper())][:3]
+    return out
 
 
 def read_only_research(profiles, job, snapshot, notes):
@@ -355,34 +427,80 @@ def run_task(profiles, job):
     service = Service(profiles.config_dir)
     db = service.state_db(profiles)
     task = job["task"]
+    scope = task.get("scope", "personal")
+    account_id = task.get("account_id")
     started = time.monotonic()
     try:
         snapshot = db.read_meta(SNAPSHOT, {}) or {}
-        if task["kind"] == "refresh" or age(snapshot) > 300:
+        # The Agentic conversation never reads the personal accounts, not even the saved copy.
+        if scope != "agentic" and (task["kind"] == "refresh" or age(snapshot) > 300):
             try:
                 snapshot = fetch_snapshot(profiles)
                 db.write_meta(SNAPSHOT, snapshot)
             except BrokerError:
-                if task["kind"] in ("refresh", "analysis"):
+                if task["kind"] in ("refresh", "analysis", "portfolio_review"):
                     raise
                 snapshot = {**snapshot, "stale": True, "errors": [
                     *snapshot.get("errors", []), "Robinhood refresh unavailable; saved data may be stale."]}
         record = {"run_id": job["run_key"], "ticker": job["ticker"], "bucket": "advisory",
                   "created_at": now(), "trade_date": job["trade_date"], "orders_placed": False,
-                  "advisory": True, "task_kind": task["kind"]}
+                  "advisory": True, "task_kind": task["kind"], "scope": scope}
         notes = (db.read_meta(NOTES, {}) or {}).get("text", "")
+        # What the model may be told, by the rules the plan set out. A single account sees its
+        # own observations and its own records; the all-accounts view sees every account,
+        # each labelled; the Agentic view sees the real-money account's records and authority
+        # and nothing personal. Records that never said which account they were about are
+        # shown in a list but are never put in front of a model.
+        if scope == "agentic":
+            authority = service.effective_authority()
+            context = {"scope": "agentic", "account": {"scope": "agentic", "account_id": "micro_live",
+                                                       "account_label": "Agentic"},
+                       "profile": profile_context(profiles, notes),
+                       "research": [d.model_dump() for d in service.advisor_decisions(
+                           limit=40, scope="agentic", include_unknown=False)],
+                       "authority": {k: authority.get(k) for k in (
+                           "version", "checked_at", "stage", "real_money_enabled", "execution_mode",
+                           "kill_switch", "withdrawn", "actions", "pending_changes", "consistency")},
+                       "proposals": [p.model_dump() for p in service.proposals(include_closed=True)[:20]]}
+            scoped_snapshot = {}
+        else:
+            scoped_snapshot = dict(snapshot)
+            if account_id:
+                scoped_snapshot["accounts"] = [a for a in snapshot.get("accounts") or []
+                                               if a.get("id") == account_id]
+                scoped_snapshot["account_scope"] = "one observed account; other accounts are not in view"
+            context = {"scope": "personal",
+                       "account": {"scope": "personal", "account_scope_kind": task.get("account_scope_kind"),
+                                   "account_id": account_id, "account_ids": task.get("account_ids") or []},
+                       "profile": profile_context(profiles, notes), "snapshot": scoped_snapshot,
+                       # The model is handed rows, not the console's shape.
+                       "research": [d.model_dump() for d in service.advisor_decisions(
+                           limit=40, scope="personal", account_id=account_id, include_unknown=False)]}
         if task["kind"] == "refresh":
             record["assistant_result"] = {"answer": "Robinhood data refreshed.", "snapshot": snapshot}
         elif task["kind"] == "analysis":
             record = read_only_research(profiles, job, snapshot, notes)
+            record["scope"] = scope
+        elif task["kind"] == "portfolio_review":
+            review = review_portfolio(profiles, context, task.get("language", "zh"))
+            review.update(scope="personal", account_scope_kind=task.get("account_scope_kind"),
+                          account_id=account_id, account_ids=task.get("account_ids") or [],
+                          account_label=next((a.get("label") for a in snapshot.get("accounts") or []
+                                              if a.get("id") == account_id), None) if account_id
+                          else "all personal accounts",
+                          snapshot_at=snapshot.get("fetched_at"), analysed_at=now(),
+                          route={"name": "assistant", "package_version": None,
+                                 "models": {"quick": profiles.tradingagents.quick_think_llm}})
+            record["assistant_result"] = {
+                "answer": (f"{len(review['priorities'])} priorit"
+                           f"{'y' if len(review['priorities']) == 1 else 'ies'}; "
+                           f"{len(review['limitations'])} limitation(s)"),
+                "review": review}
         else:
-            context = {"profile": profile_context(profiles, notes), "snapshot": snapshot,
-                       # The model is handed rows, not the console's shape.
-                       "research": [d.model_dump() for d in service.advisor_decisions(limit=40)],
-                       "risk": service.risk_state()}
             # Bound the shortlist, explicitly stating coverage. Never silently call it all-market.
-            context["snapshot"] = {**snapshot, "candidates": snapshot.get("candidates", [])[:40],
-                                   "candidate_coverage": "first 40 from saved sources and profile ETFs"}
+            if scope != "agentic":
+                context["snapshot"] = {**scoped_snapshot, "candidates": snapshot.get("candidates", [])[:40],
+                                       "candidate_coverage": "first 40 from saved sources and profile ETFs"}
             history = service.advisor_conversation(task.get("conversation_id", "default"))
             messages = [{"role": m.role, "content": m.content} for m in history.messages
                         if m.run_key != job["run_key"]]
@@ -395,13 +513,12 @@ def run_task(profiles, job):
         # Bound to an account scope by the server, from the task, never from the model: a
         # single observed account, or explicitly all of them as the snapshot listed them at
         # the time. A later reader tells this apart from a record that never said.
-        account_id = task.get("account_id")
         record["account_id"] = account_id
-        record["account_scope_kind"] = "single" if account_id else "all_personal"
-        record["account_ids"] = ([] if account_id else
-                                 [a["id"] for a in snapshot.get("accounts") or [] if a.get("id")])
+        record["account_scope_kind"] = task.get("account_scope_kind") or ("single" if account_id else "all_personal")
+        record["account_ids"] = list(task.get("account_ids") or (
+            [] if account_id else [a["id"] for a in snapshot.get("accounts") or [] if a.get("id")]))
         # Which route produced it: the read-only analysis runs the TradingAgents graph; the
-        # conversation and the refresh are the assistant's own single call.
+        # conversation, the review and the refresh are the assistant's own single call.
         record["route"] = {"name": "tradingagents" if task["kind"] == "analysis" else "assistant",
                            "skill_version": None}
         record["elapsed_seconds"] = round(time.monotonic() - started, 1)

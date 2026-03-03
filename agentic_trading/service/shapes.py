@@ -588,10 +588,21 @@ class AdvisorDecision(BaseModel):
     policy: dict[str, Any] | None = None
     advisory: bool = False
     proposal_id: str | None = None
+    #: The account scope the record is bound to, read from the record (see service/research.py).
+    scope: str | None = None
+    account_scope_kind: str | None = None
+    account_label: str | None = None
+    task_type: str | None = None
+    superseded_by: str | None = None
 
 
 class AdvisorState(BaseModel):
-    """Everything the assistant screen renders from one poll."""
+    """Everything the assistant screen renders from one poll.
+
+    ``coverage`` and ``conversations`` keep their original types for the console that reads
+    them; ``coverage_info`` and ``conversation_summaries`` carry the structured form beside them
+    until the console has moved over.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -602,6 +613,17 @@ class AdvisorState(BaseModel):
     conversations: list[str] = Field(default_factory=list)
     decisions: list[AdvisorDecision] = Field(default_factory=list)
     coverage: str
+    #: Which account scope this state was read for. The server decides what belongs to it.
+    scope: str = "personal"
+    account_scope_kind: str = "all_personal"
+    account_id: str | None = None
+    account_ids: list[str] = Field(default_factory=list)
+    account_label: str | None = None
+    #: The most recent portfolio review for this scope, or None when none was ever asked for.
+    #: The review's own serialisation, passed through whole.
+    latest_review: dict[str, Any] | None = None
+    coverage_info: dict[str, Any] | None = None
+    conversation_summaries: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AdvisorMessage(BaseModel):
@@ -617,9 +639,17 @@ class AdvisorMessage(BaseModel):
 
 
 class AdvisorConversation(BaseModel):
-    """One conversation, most recent turns last."""
+    """One conversation, most recent turns last, and the account scope it is bound to.
+
+    A conversation is bound on its first message and never re-bound: the binding is what keeps
+    one account's history out of another's context. A conversation from before bindings
+    existed reports ``account_scope_kind: "unknown"`` until its next personal message.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     conversation_id: str
     messages: list[AdvisorMessage] = Field(default_factory=list)
+    scope: str | None = None
+    account_scope_kind: str | None = None
+    account_id: str | None = None

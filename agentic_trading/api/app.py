@@ -600,13 +600,16 @@ def micro_live() -> MicroLive:
 # ----------------------------------------------------------------- research
 class AdvisorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["refresh", "chat", "shortlist", "analysis"]
+    kind: Literal["refresh", "chat", "shortlist", "analysis", "portfolio_review"]
     request_id: str
     message: str = Field("", max_length=4000)
     conversation_id: str = Field("default", max_length=64)
     ticker: str = Field("", max_length=20)
     account_id: str | None = None
     language: Literal["zh", "en"] = "zh"
+    # Which account the conversation is about. The server binds the task and the conversation
+    # to it; agentic admits chat only, and a personal account must be one the snapshot holds.
+    scope: Literal["personal", "agentic"] = "personal"
 
 
 class AdvisorNotes(BaseModel):
@@ -616,8 +619,15 @@ class AdvisorNotes(BaseModel):
 
 
 @app.get("/advisor", tags=["assistant"])
-def advisor_state() -> AdvisorState:
-    return _ok(_service.advisor_state)
+def advisor_state(scope: Literal["personal", "agentic"] = "personal",
+                  account_id: Annotated[str | None, Query(max_length=40)] = None) -> AdvisorState:
+    return _ok(_service.advisor_state, scope, account_id)
+
+
+@app.get("/accounts", tags=["assistant"],
+         summary="The account scopes a screen may bind to; opens no venue session")
+def account_scopes() -> dict[str, Any]:
+    return _ok(_service.account_scopes)
 
 
 @app.get("/advisor/conversations/{conversation_id}", tags=["assistant"])
