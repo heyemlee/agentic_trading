@@ -811,6 +811,96 @@ function homePage(portfolio, showConceptual = false) {
   return c;
 }
 
+function evaluationPage(report, scope = report.scope) {
+  const c = context(); c.run('console.js'); c.location.search = '?scope=' + scope;
+  c.CT.evaluation = report;
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { state: { resources: { evaluation: {} } }, selectEvaluation: () => {}, isLive: () => true };
+  c.run('pages/evaluation.js'); return c;
+}
+
+test('evaluation keeps NOT_STARTED counts but hides performance and unstarted integrity claims', () => {
+  const c = evaluationPage({ scope: 'agentic', state: 'NOT_STARTED', days_recorded: 0, declared: null,
+    decisions: { research_runs: 17 }, execution: { fills: 3, traded_usd: 500 } });
+  assert.equal(c.element('ev-state').textContent, 'evl.notStarted');
+  assert.equal(c.element('ev-performance').hidden, true);
+  assert.equal(c.element('ev-integrity-section').hidden, true);
+  assert.equal(c.element('ev-not-started').hidden, false);
+  assert.match(c.element('ev-decisions').innerHTML, /17/);
+  assert.match(c.element('ev-decisions').innerHTML, /evl.fills 3/);
+  assert.equal(c.element('evaluation-empty').hidden, true);
+});
+
+test('evaluation uses session gaps and stale state without treating a long incomplete sample as conclusive', () => {
+  const c = evaluationPage({ scope: 'demo', state: 'RUNNING', days_recorded: 200, conclusive: true,
+    sample: { basis: 'sessions', last_snapshot_on: '2026-09-10', stale: true, sessions_behind: 6,
+      gaps: [{ from: '2026-09-01', to: '2026-09-05', missing_sessions: 2, reason: '<missing>' }] } });
+  assert.equal(c.element('ev-sample-status').textContent, 'evl.sampleStale');
+  assert.match(c.element('ev-sample-detail').textContent, /2026-09-10 6/);
+  assert.match(c.element('ev-gaps').innerHTML, /evl.missingSessions 2/);
+  assert.match(c.element('ev-gaps').innerHTML, /&lt;missing&gt;/);
+  assert.equal(c.element('ev-interpretation').textContent, 'evl.incompleteSample');
+  c.CT.evaluation.sample = { basis: 'unknown: calendar unavailable', stale: null, gaps: [] }; c.render();
+  assert.equal(c.element('ev-sample-status').textContent, 'evl.sampleUnknown');
+});
+
+test('route quality distinguishes measured zero from unmeasured values and never displays returns', () => {
+  const c = evaluationPage({ scope: 'route_quality', routes: [{ route: 'assistant<script>', runs: 2, complete: 2,
+    failed: 0, timed_out: 0, limit_hits: 0, llm_calls_total: 0, fact_accuracy_pct: null, human_edit_rate_pct: null,
+    format_pass_rate_pct: 80, evidence_check_pass_rate_pct: 0,
+    evaluated: { failures: true, calls: false, evidence: true, format: false, facts: false, edits: false } }] });
+  assert.equal(c.element('evaluation-report').hidden, true);
+  assert.equal(c.element('evaluation-routes').hidden, false);
+  const html = c.element('ev-routes').innerHTML;
+  assert.match(html, /assistant&lt;script&gt;/);
+  assert.match(html, /0\.00%/);
+  assert.ok((html.match(/evl.notEvaluated/g) || []).length >= 5);
+  assert.doesNotMatch(html, /80\.00%/);
+  c.CT.evaluation.routes = []; c.render(); assert.match(c.element('ev-routes').innerHTML, /evl.noRoutes/);
+});
+
+test('evaluation hides mismatched reports, labels cached reports, and keeps scope navigation during failures', () => {
+  const c = evaluationPage({ scope: 'demo', state: 'RUNNING' }, 'agentic');
+  assert.equal(c.element('evaluation-report').hidden, true);
+  assert.match(c.element('evaluation-scopes').innerHTML, /scope=route_quality/);
+  c.CT_API.state.resources.evaluation.error = 'offline'; c.render();
+  assert.equal(c.element('evaluation-error').textContent, 'offline');
+  c.CT.evaluation = { scope: 'agentic', state: 'RUNNING' }; c.CT_API.isLive = () => false; c.render();
+  assert.equal(c.element('evaluation-status').hidden, false);
+  assert.match(c.element('evaluation-status').textContent, /evl.cached.*offline/);
+  c.location.search = '?scope=route_quality'; c.document.dispatchEvent(new c.CustomEvent('ct:route', {}));
+  assert.equal(c.element('evaluation-report').hidden, true);
+  assert.equal(c.element('ev-scope-note').textContent, 'evl.scopeNote.route_quality');
+});
+
+test('scope switching clears the previous report and discards late success and failure responses', async () => {
+  for (const fail of [false, true]) {
+    const c = context(), pending = new Map();
+    c.fetch = url => new Promise(resolve => pending.set(url, resolve));
+    c.run('api.js'); c.CT.evaluation = { scope: 'agentic', strategy: { equity_usd: 123 } };
+    c.CT_API.selectEvaluation('demo');
+    assert.equal(c.CT.evaluation, null);
+    c.CT_API.selectEvaluation('route_quality');
+    pending.get('/evaluation?scope=demo')(fail ? response({ detail: 'old failure' }, 500) : response({ scope: 'demo' }));
+    await flush(); assert.equal(c.CT.evaluation, null);
+    assert.notEqual(c.CT_API.state.resources.evaluation.error, 'old failure');
+    pending.get('/evaluation?scope=route_quality')(response({ scope: 'route_quality', routes: [] }));
+    await flush(); assert.equal(c.CT.evaluation.scope, 'route_quality');
+    assert.equal(c.CT_API.selectEvaluation('personal'), false);
+  }
+});
+
+test('evaluation rejects an incorrectly scoped server payload and demo uses distinct fixtures without requests', async () => {
+  const c = context(); c.fetch = async () => response({ scope: 'demo' }); c.run('api.js');
+  await c.CT_API.readOnce('evaluation');
+  assert.equal(c.CT.evaluation, null); assert.equal(c.CT_API.isLive('evaluation'), false);
+  const demo = context(true); demo.run('api.js');
+  for (const scope of ['agentic', 'route_quality', 'demo']) {
+    demo.CT_API.selectEvaluation(scope); assert.equal(demo.CT.evaluation.scope, scope);
+  }
+});
+
 function attentionPayload(items = [], readable = true) {
   return { checked_at: new Date().toISOString(), readable, unreadable: readable ? [] : ['ledger: unavailable'],
     items, top: items[0] || null, summary: { total: items.length, requires_person: items.filter(x => x.requires_person).length }, context: {} };

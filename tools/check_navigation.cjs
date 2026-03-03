@@ -16,7 +16,7 @@ files = ConsoleFiles(ui)
 print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_text(), name)
                   for name in ('index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
                                'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab', 'settings')}))
-`], {cwd: root, encoding:'utf8'}));
+`], {cwd: root, encoding:'utf8', maxBuffer: 8 * 1024 * 1024}));
 (async () => {
  const server = http.createServer(async (req, res) => {
    const file = path.resolve(root, '.' + new URL(req.url, 'http://localhost').pathname);
@@ -54,6 +54,9 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    authSessions:'/auth/sessions', pushDevices:'/notifications/devices', evaluation:'/evaluation', activity:'/activity'})) {
    payload[endpoint] = fixtureContext.window.CT[key];
  }
+ const apiPayload = url => url.pathname === '/evaluation'
+   ? fixtureContext.window.CT.evaluationExamples[url.searchParams.get('scope') || 'demo']
+   : payload[url.pathname] || {};
  let delay=1800, denied=false;
  await page.route('**/*', async route=>{
   const url = new URL(route.request().url());
@@ -64,7 +67,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
   if(url.pathname==='/favicon.ico') return route.fulfill({status:204});
   calls.push({path:url.pathname,method:route.request().method()});
   await new Promise(r=>setTimeout(r,delay));
-  await route.fulfill({status:denied?401:200,contentType:'application/json',body:JSON.stringify(denied?{detail:'login required'}:payload[url.pathname]||{})});
+  await route.fulfill({status:denied?401:200,contentType:'application/json',body:JSON.stringify(denied?{detail:'login required'}:apiPayload(url))});
  });
  await page.goto(origin + '/ui/index.html', {waitUntil:'domcontentloaded'});
  await page.waitForFunction(()=>window.CT_NAV && !document.getElementById('content').hidden);
@@ -215,7 +218,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    if (url.pathname.startsWith('/ui/')) return route.continue();
    if (url.pathname === '/favicon.ico') return route.fulfill({status:204});
    if (!recover) return route.abort('failed');
-   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(payload[url.pathname] || {})});
+   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(apiPayload(url))});
  });
  await failing.goto(origin + '/ui/index.html');
  await failing.waitForSelector('#startup-actions:not([hidden])');
@@ -235,7 +238,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    const url = new URL(route.request().url());
    if (url.pathname.startsWith('/ui/')) return route.continue();
    if (directDelay) await new Promise(resolve => setTimeout(resolve, directDelay));
-   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(payload[url.pathname] || {})});
+   return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(apiPayload(url))});
  });
  await direct.goto(origin + '/ui/risk.html');
  await direct.waitForSelector('#startup', {state:'detached'});

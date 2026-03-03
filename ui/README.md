@@ -117,6 +117,18 @@ deep link, a finished portfolio review opens its exact run in the Research resul
 server and intercepted API responses. Like the approval check, it needs Playwright and Chrome
 and accepts `CT_UI_CAPTURE_DIR` for screenshots.
 
+Evaluation requests an explicit `scope`: Agentic (the live default), Demo, or research-route
+quality. Switching scopes clears the previous report and rejects responses for another scope.
+Each scope keeps the existing five-minute read interval. `NOT_STARTED` shows record counts
+without performance; sample gaps and staleness use the server's exchange-session calculation.
+Route metrics render `null` or `evaluated: false` as "Not evaluated", and do not rank routes.
+The scope is preserved in the URL and browser history. Demo previews use separate synthetic
+fixtures for each scope and make no requests.
+
+`node tools/check_evaluation_ui.cjs` checks these three scopes on a phone viewport, including
+history navigation and a delayed response arriving after another scope is selected. It uses
+the same offline browser setup and screenshot option as the other browser checks.
+
 Each screen declares what it reads:
 
 ```js

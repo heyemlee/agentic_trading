@@ -7,6 +7,7 @@ window.CT_API = (function () {
   let activeRun = null;
   let pickedProposal = null;
   let linkedProposal = null;
+  let evaluationScope = demo ? 'demo' : 'agentic';
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
@@ -41,7 +42,7 @@ window.CT_API = (function () {
     config: { path: () => '/config', ms: 60000 },
     authority: { path: () => '/config/authority', ms: 30000 },
     attention: { path: () => '/attention', ms: 30000 },
-    evaluation: { path: () => '/evaluation', ms: 300000 },
+    evaluation: { path: () => '/evaluation?scope=' + evaluationScope, ms: 300000 },
     portfolio: { path: () => '/portfolio', ms: 60000, staleAfter: 600000 },
     risk: { path: () => '/risk', ms: 60000 },
     microLive: { path: () => '/micro-live', ms: 60000, staleAfter: 180000 },
@@ -161,6 +162,9 @@ window.CT_API = (function () {
         const data = await fetchJSON(path);
         // Never attach a late detail response to a newly selected proposal/run.
         if (epoch !== authEpoch || src.path() !== path) return;
+        if (key === 'evaluation' && data.scope !== evaluationScope) {
+          throw new Error(window.I18N.t('evl.scopeMismatch'));
+        }
         if (key === 'proposalDetail') {
           const current = (window.CT.proposals || []).find(p => p.proposal_id === data.proposal_id);
           if (linkedProposal ? data.proposal_id !== linkedProposal || (current && data.version !== current.version)
@@ -202,7 +206,7 @@ window.CT_API = (function () {
           if (wanted.includes('proposalDetail')) Promise.resolve().then(() => readOnce('proposalDetail'));
         }
       } catch (error) {
-        if (epoch !== authEpoch) return;
+        if (epoch !== authEpoch || src.path() !== path) return;
         state.resources[key] = { ...(state.resources[key] || {}), error: error.message };
         state.lastError = error.message;
       } finally { announce(previous !== JSON.stringify(window.CT[key])); }
@@ -301,6 +305,17 @@ window.CT_API = (function () {
     if (path === '/auth/logout') { unauthorized(); announce(); }
     return result;
   }
+  // Clear the previous account before starting a scoped read. Late responses are rejected above.
+  function selectEvaluation(scope) {
+    if (!['demo', 'agentic', 'route_quality'].includes(scope)) return false;
+    if (evaluationScope === scope && window.CT.evaluation?.scope === scope) return true;
+    evaluationScope = scope;
+    window.CT.evaluation = demo ? window.CT.evaluationExamples?.[scope] || null : null;
+    state.resources.evaluation = { lastOkAt: null, error: null };
+    announce(true);
+    if (!demo) readOnce('evaluation');
+    return true;
+  }
   // Called by result views after display, never by readOnce or a polling callback.
   // Deduplication is in memory for this authenticated session; failed writes are not queued.
   async function markOpened(runKey) {
@@ -345,7 +360,8 @@ window.CT_API = (function () {
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, selectProposal, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
+  return { BASE, SOURCES, state, watchRun, selectProposal, selectEvaluation, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
+    get evaluationScope() { return evaluationScope; },
     get activeRun() { return activeRun; },
     get pickedProposal() { return pickedProposal; },
     get writesEnabled() { return !demo && !state.authPending && auth.authenticated === true; },

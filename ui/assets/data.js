@@ -377,6 +377,7 @@ window.CT = (function () {
   };
 
   const evaluation = {
+    scope: 'demo', sample: { basis: 'sessions', last_snapshot_on: '2026-09-01', days_recorded: 1, gaps: [], stale: false, sessions_behind: 0 },
     study_id: "demo-forward-record", state: "RUNNING", started_on: "2026-09-01",
     days_recorded: 1, config_drifted: false, readable: false, conclusive: false,
     declared: {
@@ -393,6 +394,17 @@ window.CT = (function () {
       slippage_bps: { count: 0, median: null }, commission_usd: 0 },
     stop_rules_triggered: [],
     caveat: "1 day(s) recorded. This is a record of what happened, not evidence about the strategy: 180 days were declared as the minimum before it can support a judgement.",
+  };
+
+  const evaluationExamples = {
+    demo: evaluation,
+    agentic: { scope: 'agentic', state: 'NOT_STARTED', days_recorded: 0, declared: null,
+      strategy: {}, benchmark: {}, decisions: { research_runs: 0, llm_calls: 0 }, execution: { fills: 0, traded_usd: 0 } },
+    route_quality: { scope: 'route_quality', checked_at: '2026-09-04T20:32:01+00:00', since: '2026-09-01',
+      routes: [{ route: 'tradingagents', runs: 3, complete: 2, failed: 0, timed_out: 1, limit_hits: 0,
+        median_elapsed_seconds: 1800, llm_calls_total: 42, evidence_check_pass_rate_pct: 50,
+        format_pass_rate_pct: null, fact_accuracy_pct: null, human_edit_rate_pct: null,
+        evaluated: { timing: true, calls: true, failures: true, evidence: true, format: false, facts: false, edits: false } }] },
   };
 
   const authSessions = {
@@ -748,7 +760,7 @@ window.CT = (function () {
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs: [], orders,
-    schedule, operations, notifications, evaluation, labRoster, labTrace,
+    schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity, config,
   };
 })();
