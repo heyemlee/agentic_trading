@@ -247,7 +247,8 @@ test('research confidence uses each recorded threshold and preserves missing sco
   c.Console.live = (keys, render) => { render(); };
   c.element('[data-od-id="confidence-chart"]').before = () => {};
   c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
-  c.CT_API = { activeRun: null, watchRun: () => {}, readOnce: async () => {} };
+  c.CT_API = { activeRun: null, watchRun: () => {}, readOnce: async () => {}, state: { resources: {} },
+    isLive: () => true, matchesResearch: () => true, selectResearch: () => { c.CT.researchHistory = c.CT.research; } };
   c.CT.research = [
     { run_id: 'threshold', bucket: 'micro_live', ticker: 'VTI', confidence: 70, applicable_floor: 80 },
     { run_id: 'legacy', bucket: 'micro_live', ticker: 'BND', confidence: 40 },
@@ -984,20 +985,120 @@ test('reading or polling a finished run never marks it opened; explicit receipts
   c.document.hidden = true; await c.CT_API.markOpened('hidden'); assert.equal(writes.length, 1);
 });
 
-function researchPage(fetchJSON) {
+function researchPage(fetchJSON, options = {}) {
   const c = context(); c.run('console.js');
+  if (options.search) c.location.search = options.search;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
   c.element('[data-od-id="confidence-chart"]').before = () => {};
   c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
   c.opened = [];
   c.CT_API = { activeRun: null, writesEnabled: true, watchRun: () => {}, readOnce: async () => {}, fetchJSON,
+    state: { resources: { researchHistory: { lastOkAt: Date.now() } } }, isLive: () => true,
+    matchesResearch: () => true, selectResearch: () => {},
     markOpened: async key => { c.opened.push(key); return { opened_at: 'now' }; } };
   c.run('pages/research.js');
   c.openReport = run => c.document.dispatchEvent({ type: 'click', preventDefault() {}, target: {
     closest: selector => selector === '[data-trace]' ? { getAttribute: () => run } : null } });
   return c;
 }
+
+test('research filters isolate unknown, other-account and all-account records unless explicitly included', () => {
+  const c = context(true); c.run('api.js');
+  const own = { scope: 'personal', account_scope_kind: 'single', account_id: 'A', task_type: 'analysis' };
+  const all = { scope: 'personal', account_scope_kind: 'all_personal', account_ids: ['A', 'B'], task_type: 'portfolio_review' };
+  c.CT_API.selectResearch({ scope: 'personal', account: 'A' });
+  assert.equal(c.CT_API.matchesResearch(own), true);
+  assert.equal(c.CT_API.matchesResearch({ ...own, account_id: 'B' }), false);
+  assert.equal(c.CT_API.matchesResearch({ ...own, account_scope_kind: 'unknown' }), false);
+  assert.equal(c.CT_API.matchesResearch(all), false);
+  c.CT_API.selectResearch({ scope: 'personal', account: 'A', include_all_personal: true });
+  assert.equal(c.CT_API.matchesResearch(all), true);
+  c.CT_API.selectResearch({ scope: 'personal', account: 'A', include_all_personal: true, task_type: 'analysis' });
+  assert.equal(c.CT_API.matchesResearch(all), false);
+  assert.equal(c.CT_API.matchesResearch(all, false), true);
+  assert.equal(c.CT_API.matchesResearch({ ...own, scope: 'unspecified' }), false);
+});
+
+test('scoped research requests discard old account responses without changing shared home and lab resources', async () => {
+  const c = context(); const pending = new Map(); c.fetch = url => new Promise(resolve => pending.set(url, resolve));
+  c.run('api.js'); c.CT.research = [{ run_id: 'home' }]; c.CT.researchJobs = [{ run_key: 'lab' }];
+  c.CT_API.selectResearch({ scope: 'personal', account: 'A' });
+  const first = [...pending.keys()];
+  c.CT_API.selectResearch({ scope: 'personal', account: 'B', task_type: 'analysis' });
+  first.forEach(path => pending.get(path)(response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'A', task_type: 'analysis' }])));
+  await flush(); assert.equal(c.CT.researchHistory.length, 0); assert.equal(c.CT.researchQueue.length, 0);
+  const current = [...pending.keys()].filter(path => path.includes('account_id=B'));
+  assert.equal(current.length, 2); assert.ok(current.some(path => path.includes('task_type=analysis')));
+  assert.ok(current.find(path => path.includes('/jobs')).includes('task_type=') === false);
+  current.forEach(path => pending.get(path)(response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'B', task_type: 'analysis' }])));
+  await flush(); assert.equal(c.CT.researchHistory[0].account_id, 'B');
+  assert.equal(c.CT.research[0].run_id, 'home'); assert.equal(c.CT.researchJobs[0].run_key, 'lab');
+});
+
+test('research rejects a server response for the wrong account rather than reporting an empty success', async () => {
+  const c = context(); c.fetch = async () => response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'B' }]);
+  c.run('api.js'); c.CT_API.selectResearch({ scope: 'personal', account: 'A' }); await flush();
+  assert.equal(c.CT.researchHistory.length, 0); assert.equal(c.CT_API.isLive('researchHistory'), false);
+  assert.equal(c.CT_API.state.resources.researchHistory.error, 'rs.recordsInvalid');
+});
+
+test('research exposes provenance, unknown fact time and supersession without promoting an old result', async () => {
+  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'old', final_action: 'HOLD', steps: [] }
+    : { run_key: 'old', state: 'COMPLETE' });
+  const old = { run_id: 'old', ticker: 'OLD', scope: 'agentic', account_label: 'Agentic', account_scope_kind: 'single',
+    task_type: 'full_research', route: { name: 'tradingagents', inferred: true, models: { quick: 'model-A' } },
+    sources_retrieved_at_max: '2026-09-18T20:00:00Z', facts_as_of: null, counter_evidence: '<script>bad</script>',
+    counter_evidence_truncated: true, superseded_by: 'new', limitations: { missing_information: ['cash flow'] } };
+  c.CT.researchHistory = [old, { ...old, run_id: 'new', ticker: 'NEW', superseded_by: null }]; c.render();
+  const html = c.element('panel-runs-all').innerHTML;
+  assert.match(html, /rs.inferred/); assert.match(html, /model-A/); assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /NaN|undefined/);
+  assert.match(html, /rs.meta.facts<\/dt><dd[^>]*>rs.unknown/); assert.match(html, /data-trace="new"/);
+  assert.match(c.element('recent-card').innerHTML, /NEW/); assert.doesNotMatch(c.element('recent-card').innerHTML, /OLD/);
+  c.openReport('old'); await flush(); const displayed = c.element('trace-record').innerHTML;
+  c.CT.researchHistory = []; c.render(); assert.equal(c.element('trace-record').innerHTML, displayed);
+});
+
+test('personal, unknown and account-only links cannot start trading research', async () => {
+  for (const search of ['?scope=personal', '?scope=unspecified', '?scope=invalid', '?account=A']) {
+    const c = researchPage(async () => ({}), { search }); let posts = 0;
+    c.CT_API.post = async () => { posts++; return {}; };
+    assert.equal(c.element('[data-od-id="start-run"]').hidden, true);
+    await c.element('run-form').events.submit({ preventDefault() {} }); assert.equal(posts, 0);
+  }
+});
+
+test('research submissions bind scope and purpose and reuse the request id after an uncertain failure', async () => {
+  const c = researchPage(async () => ({}), { search: '?scope=demo' }); const sent = [];
+  c.element('f-ticker').value = 'vti'; c.element('f-purpose').value = 'review_holding';
+  c.CT_API.post = async (path, body) => { sent.push({ ...body }); if (sent.length === 1) throw new Error('network'); return { run_key: 'new' }; };
+  await c.element('run-form').events.submit({ preventDefault() {} });
+  await c.element('run-form').events.submit({ preventDefault() {} });
+  assert.equal(sent.length, 2); assert.equal(sent[0].scope, 'demo'); assert.equal(sent[0].bucket, 'core');
+  assert.equal(sent[0].purpose, 'review_holding'); assert.equal(sent[0].ticker, 'VTI');
+  assert.match(sent[0].request_id, /^[0-9a-f-]{36}$/); assert.equal(sent[0].request_id, sent[1].request_id);
+  await c.element('run-form').events.submit({ preventDefault() {} }); assert.notEqual(sent[1].request_id, sent[2].request_id);
+});
+
+test('changing research scope closes the report and ignores its late response without marking it read', async () => {
+  const pending = new Map(); const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
+  c.openReport('old'); c.location.search = '?scope=personal'; c.location.href = 'https://console.test/ui/research.html?scope=personal';
+  c.document.dispatchEvent({ type: 'ct:route' });
+  pending.get('/research/old/trace')({ run_id: 'old', final_action: 'SELL', steps: [] });
+  pending.get('/research/old')({ run_key: 'old', state: 'COMPLETE' }); await flush();
+  assert.equal(c.element('trace-sheet').open, false); assert.deepEqual(c.opened, []);
+  assert.doesNotMatch(c.element('trace-steps').innerHTML, /SELL/);
+});
+
+test('an account-bound report deep link refuses another account result without consuming its notice', async () => {
+  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'wrong', final_action: 'SELL', steps: [] }
+    : { run_key: 'wrong', scope: 'personal', account_id: 'B', state: 'COMPLETE' }, { search: '?scope=personal&account=A' });
+  c.CT_API.matchesResearch = row => row?.scope === 'personal' && row.account_id === 'A';
+  c.openReport('wrong'); await flush();
+  assert.match(c.element('trace-steps').innerHTML, /rs.reportOutside/); assert.deepEqual(c.opened, []);
+  assert.doesNotMatch(c.element('trace-steps').innerHTML, /SELL/);
+});
 
 test('a displayed report marks only its finished job, and shows failures before marking them', async () => {
   for (const state of ['COMPLETE', 'FAILED', 'RUNNING']) {
@@ -1291,7 +1392,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
     advisor: 5000, health: 30000, schedule: 60000, operations: 60000,
     notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, attention: 30000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
-    research: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
+    research: 60000, researchHistory: 60000, researchQueue: 10000, accounts: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,
   };
   assert.deepEqual(found, budget);

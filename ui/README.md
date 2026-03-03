@@ -129,6 +129,29 @@ fixtures for each scope and make no requests.
 history navigation and a delayed response arriving after another scope is selected. It uses
 the same offline browser setup and screenshot option as the other browser checks.
 
+Research history has its own scoped resources: `researchHistory` reads `/research` every 60s,
+and `researchQueue` reads `/research/jobs` every 10s. They replace the unfiltered resources on
+that page, so Home and Lab keep their existing reads. `/accounts` supplies account labels every
+60s from kept readings without opening a venue session. Its errors or stale personal snapshot
+are shown; historical account labels remain available for reading old records.
+
+History requests bind `scope`, `account_id`, `task_type` and explicit `include_all_personal`.
+Unknown account bindings are never included in a single-account view, and the default excludes
+all-account reviews. Old responses cannot replace a newly selected scope. A filtered view shows
+at most 100 records, not the complete archive. The queue API includes covering all-account jobs;
+the page applies the same explicit inclusion choice before displaying or following them.
+
+Record details distinguish retrieved time from fact time, show inferred route provenance,
+versions/models, missing evidence, a truncated counter-evidence excerpt, and a link to a
+superseding record. Opening a report freezes its record details until it is reopened; changing
+scope closes it and prevents a late response from marking it read. Personal and unassigned
+views have no trading-research form. Strategy requests include the selected scope and purpose,
+with a request UUID reused for an explicit retry of an unchanged request after network failure.
+
+`node tools/check_research_ui.cjs` checks account and task filtering, explicit all-account
+inclusion, report provenance and supersession, scoped submissions, and delayed responses on a
+phone viewport using synthetic APIs. It accepts the same browser and screenshot options above.
+
 Each screen declares what it reads:
 
 ```js

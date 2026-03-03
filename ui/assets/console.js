@@ -748,7 +748,7 @@
   }
   const LINK_PARAMS = {
     index: ['scope'], portfolio: ['scope', 'account', 'ticker'],
-    advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'ticker', 'task_type'],
+    advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'ticker', 'task_type', 'include_all_personal'],
     lab: ['run'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
     settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'],
     system: [], profile: [], notifications: [], more: [],

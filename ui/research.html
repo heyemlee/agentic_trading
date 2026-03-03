@@ -20,6 +20,16 @@
   <section class="section pagehead" data-od-id="pagehead">
     <div class="container">
       <h1 data-i18n="rs.title">Research</h1>
+      <nav id="research-scopes" class="row row-wrap" style="gap:8px;margin-block:16px;"></nav>
+      <p id="research-scope-note" class="body-sm body-muted"></p>
+      <div class="grid-2" style="margin-top:16px;">
+        <div class="field" id="research-account-field"><label for="research-account" data-i18n="rs.recordAccount">Account in loaded records</label><select class="select" id="research-account"></select></div>
+        <div class="field"><label for="research-task" data-i18n="rs.recordType">Research type</label><select class="select" id="research-task"><option value="" data-i18n="common.all">All</option><option value="full_research" data-i18n="rs.type.full_research">Strategy research</option><option value="analysis" data-i18n="rs.type.analysis">Personal analysis</option><option value="portfolio_review" data-i18n="rs.type.portfolio_review">Portfolio review</option></select></div>
+      </div>
+      <label id="research-all-label" class="body-sm"><input type="checkbox" id="research-all" /> <span data-i18n="rs.includeAll">Include reviews covering this account across all personal accounts</span></label>
+      <p id="research-account-status" class="body-sm body-muted" role="status"></p>
+      <a class="btn btn-secondary btn-sm" id="research-apply" style="margin-block:12px;" data-i18n="rs.applyFilter">Apply filters</a>
+      <p id="research-record-status" class="body-sm" role="status"></p>
       <a class="btn btn-secondary btn-sm" href="lab.html" data-i18n="home.viewProcess">View process</a>
     </div>
   </section>
@@ -41,6 +51,7 @@
   <section class="section" data-od-id="run-history">
     <div class="container">
       <div class="section-head"><h2 data-i18n="rs.runs">Runs</h2></div>
+      <div id="research-jobs" class="list"></div>
       <div class="tabs" data-tabs role="tablist" aria-label="Filter runs">
           <button class="tab" role="tab" id="tab-runs-all"      aria-controls="panel-runs-all"      aria-selected="true" data-i18n="common.all">All</button>
           <button class="tab" role="tab" id="tab-runs-notrade"  aria-controls="panel-runs-notrade"  aria-selected="false" data-i18n="rs.noTrade">No trade</button>
@@ -90,6 +101,10 @@
               </select>
             </div>
             <div class="field">
+              <label for="f-purpose" data-i18n="rs.purpose">Research purpose</label>
+              <select class="select" id="f-purpose"><option value="candidate" data-i18n="rs.purpose.candidate">Candidate</option><option value="review_holding" data-i18n="rs.purpose.review_holding">Review holding</option><option value="exit_review" data-i18n="rs.purpose.exit_review">Exit review</option></select>
+            </div>
+            <div class="field">
               <label for="f-date" data-i18n="rs.tradeDate">Trade date</label>
               <input class="input" id="f-date" type="date" />
             </div>
@@ -121,6 +136,7 @@
     <div class="sheet-grip" aria-hidden="true"></div>
     <div class="sheet-scroll">
       <div class="trace-head" id="trace-head"></div>
+      <div id="trace-record"></div>
       <p class="body-sm" id="trace-read-status" role="status" hidden></p>
       <button type="button" class="btn btn-secondary btn-sm" id="trace-read-retry" data-i18n="rs.openedRetry" hidden>Save read receipt</button>
       <div id="trace-steps"></div>

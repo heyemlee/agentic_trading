@@ -16,7 +16,7 @@ window.CT = (function () {
     config: null, authority: null, attention: null,
     evaluation: null,
     activity: null,
-    proposals: [], proposalDetail: null, research: [], researchJobs: [], researchRun: null,
+    proposals: [], proposalDetail: null, research: [], researchJobs: [], researchHistory: [], researchQueue: [], researchRun: null,
     labRoster: null, labTrace: {},
     orders: {fills: [], tracked_orders: []}
   };
@@ -756,6 +756,9 @@ window.CT = (function () {
   };
 
   const orders = { fills: [], tracked_orders: [] };
+  research.forEach(row => Object.assign(row, { scope: row.bucket === 'micro_live' ? 'agentic' : 'demo',
+    account_scope_kind: 'single', account_id: row.bucket === 'micro_live' ? 'micro_live' : 'conceptual',
+    account_label: row.bucket === 'micro_live' ? 'Agentic' : 'Demo', task_type: 'full_research' }));
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,

@@ -8,6 +8,20 @@ window.CT_API = (function () {
   let pickedProposal = null;
   let linkedProposal = null;
   let evaluationScope = demo ? 'demo' : 'agentic';
+  let researchFilter = { scope: demo ? 'demo' : 'agentic', account: '', task_type: '', include_all_personal: false };
+  function researchPath(jobs = false) {
+    const query = new URLSearchParams({ limit: '100', scope: researchFilter.scope });
+    if (researchFilter.account) query.set('account_id', researchFilter.account);
+    if (!jobs && researchFilter.task_type) query.set('task_type', researchFilter.task_type);
+    if (!jobs && researchFilter.include_all_personal) query.set('include_all_personal', 'true');
+    return '/research' + (jobs ? '/jobs' : '') + '?' + query;
+  }
+  function matchesResearch(row, checkTask = true) {
+    const f = researchFilter;
+    if (!row || row.scope !== f.scope || (checkTask && f.task_type && row.task_type !== f.task_type)) return false;
+    return !f.account || row.account_scope_kind === 'single' && row.account_id === f.account ||
+      f.include_all_personal && row.account_scope_kind === 'all_personal' && (row.account_ids || []).includes(f.account);
+  }
   let wanted = [];
   let auth = { authenticated: false, csrf_token: null };
   /* The polling cadence is FRONTEND_HANDOFF.md §15, and these numbers are a budget, not a
@@ -42,6 +56,7 @@ window.CT_API = (function () {
     config: { path: () => '/config', ms: 60000 },
     authority: { path: () => '/config/authority', ms: 30000 },
     attention: { path: () => '/attention', ms: 30000 },
+    accounts: { path: () => '/accounts', ms: 60000 },
     evaluation: { path: () => '/evaluation?scope=' + evaluationScope, ms: 300000 },
     portfolio: { path: () => '/portfolio', ms: 60000, staleAfter: 600000 },
     risk: { path: () => '/risk', ms: 60000 },
@@ -49,6 +64,8 @@ window.CT_API = (function () {
     proposals: { path: () => '/proposals', ms: 15000 },
     orders: { path: () => '/orders', ms: 10000, staleAfter: 90000 },
     research: { path: () => '/research?limit=20', ms: 60000 },
+    researchHistory: { path: () => researchPath(), ms: 60000 },
+    researchQueue: { path: () => researchPath(true), ms: 10000 },
     // The team and the analyst selection come from config/ and change about never,
     // so this is read once a session rather than polled like live state.
     labRoster: { path: () => '/research/roster', ms: 900000 },
@@ -115,6 +132,7 @@ window.CT_API = (function () {
   function unauthorized(clearDrafts = true) {
     authEpoch++;
     opened.clear(); opening.clear();
+    window.CT.researchHistory = []; window.CT.researchQueue = []; window.CT.accounts = null;
     state.authChecked = true; state.authPending = false; state.authError = null;
     if (clearDrafts) { try { window.sessionStorage.removeItem('ct.advisor.session.v1'); } catch (_) {} }
     auth = { authenticated: false, csrf_token: null };
@@ -165,6 +183,13 @@ window.CT_API = (function () {
         if (key === 'evaluation' && data.scope !== evaluationScope) {
           throw new Error(window.I18N.t('evl.scopeMismatch'));
         }
+        if (['researchHistory', 'researchQueue'].includes(key) && !Array.isArray(data)) {
+          throw new Error(window.I18N.t('rs.recordsInvalid'));
+        }
+        if (key === 'researchHistory' && data.some(row => !matchesResearch(row)) ||
+            key === 'researchQueue' && data.some(row => row.scope !== researchFilter.scope)) {
+          throw new Error(window.I18N.t('rs.recordsInvalid'));
+        }
         if (key === 'proposalDetail') {
           const current = (window.CT.proposals || []).find(p => p.proposal_id === data.proposal_id);
           if (linkedProposal ? data.proposal_id !== linkedProposal || (current && data.version !== current.version)
@@ -181,7 +206,7 @@ window.CT_API = (function () {
              reason, never a zero. Throwing it away instead leaves the reader on a blank
              screen that cannot say why or offer the way out. It stays marked incomplete,
              so canAct() still refuses and nothing may be approved against it. */
-          const partial = key === 'portfolio' && !!data.buckets && !!data.accounts;
+          const partial = key === 'portfolio' && !!data.buckets && !!data.accounts || key === 'accounts' && Array.isArray(data.accounts);
           if (partial) {
             window.CT[key] = data;
             state.resources[key] = { ...(state.resources[key] || {}), receivedAt: Date.now(), error: String(payloadError), path };
@@ -306,6 +331,22 @@ window.CT_API = (function () {
     return result;
   }
   // Clear the previous account before starting a scoped read. Late responses are rejected above.
+  function selectResearch(filter) {
+    if (!['agentic', 'demo', 'personal', 'unspecified'].includes(filter.scope)) return false;
+    const next = { scope: filter.scope, account: filter.scope === 'personal' ? String(filter.account || '') : '',
+      task_type: ['full_research', 'analysis', 'portfolio_review'].includes(filter.task_type) ? filter.task_type : '',
+      include_all_personal: filter.scope === 'personal' && filter.include_all_personal === true };
+    if (JSON.stringify(next) === JSON.stringify(researchFilter) && state.resources.researchHistory) return true;
+    researchFilter = next;
+    for (const key of ['researchHistory', 'researchQueue']) {
+      window.CT[key] = demo ? (key === 'researchHistory' ? window.CT.research : window.CT.researchJobs || []).filter(row => matchesResearch(row, key === 'researchHistory')) : [];
+      state.resources[key] = { lastOkAt: null, error: null };
+    }
+    announce(true);
+    if (!demo) { readOnce('researchHistory'); readOnce('researchQueue'); }
+    return true;
+  }
+  // Clear the previous account before starting a scoped read. Late responses are rejected above.
   function selectEvaluation(scope) {
     if (!['demo', 'agentic', 'route_quality'].includes(scope)) return false;
     if (evaluationScope === scope && window.CT.evaluation?.scope === scope) return true;
@@ -360,7 +401,7 @@ window.CT_API = (function () {
     if (activeRun) readOnce('researchRun');
     return activeRun;
   }
-  return { BASE, SOURCES, state, watchRun, selectProposal, selectEvaluation, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
+  return { BASE, SOURCES, state, watchRun, selectProposal, selectEvaluation, selectResearch, matchesResearch, fetchJSON, readOnce, start, stop, post, markOpened, isLive, refresh: reconnect,
     get evaluationScope() { return evaluationScope; },
     get activeRun() { return activeRun; },
     get pickedProposal() { return pickedProposal; },
