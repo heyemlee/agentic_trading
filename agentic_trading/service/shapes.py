@@ -653,3 +653,326 @@ class AdvisorConversation(BaseModel):
     scope: str | None = None
     account_scope_kind: str | None = None
     account_id: str | None = None
+
+
+# ---------------------------------------------------------------------------- authority
+class AuthorityBlock(BaseModel):
+    """One reason an action is blocked, as a stable code the console localises plus the text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    detail: str
+
+
+class AuthoritySide(BaseModel):
+    """Whether one side -- code, or a person -- may take an action, and what stops it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    permitted: bool
+    blocked_by: list[AuthorityBlock] = Field(default_factory=list)
+
+
+class AuthorityAction(BaseModel):
+    """One of BUY, ADD, REDUCE, SELL: its mode, both sides, and the limits that bound it.
+
+    ``limits`` stays an open map: it is the configuration's own vocabulary per action, and
+    naming its keys here would be a second copy of risk_profile.yaml.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str
+    autonomous: AuthoritySide
+    human_approval: AuthoritySide
+    limits: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuthorityPreflight(BaseModel):
+    """The preflight block as the authority answers it, from a kept reading or from none."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool | None = None
+    blocking: list[str] = Field(default_factory=list)
+    checked_at: str | None = None
+    stale: bool = True
+
+
+class Authority(BaseModel):
+    """What may happen to the real-money account, from every rule that decides it.
+
+    Degraded shape first: a configuration that will not load answers ``checked_at``,
+    ``status`` and ``detail`` and nothing else, so everything below the first line is
+    optional. ``history``, ``limits`` and ``consistency`` are the autonomy module's own
+    serialisations, passed through whole.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked_at: str
+    status: str | None = None
+    detail: str | None = None
+    version: str | None = None
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    config_revisions: dict[str, str | None] = Field(default_factory=dict)
+    account: dict[str, Any] | None = None
+    stage: int | None = None
+    stage_allows: list[str] = Field(default_factory=list)
+    real_money_enabled: bool | None = None
+    execution_mode: str | None = None
+    kill_switch: dict[str, Any] | None = None
+    withdrawn: dict[str, Any] | None = None
+    actions: dict[str, AuthorityAction] = Field(default_factory=dict)
+    limits: dict[str, Any] = Field(default_factory=dict)
+    pending_changes: list[dict[str, Any]] = Field(default_factory=list)
+    preflight: AuthorityPreflight | None = None
+    consistency: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------- attention
+class AttentionItem(BaseModel):
+    """One unresolved state that needs a person, as Home lists it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    severity: str
+    priority: int
+    requires_person: bool
+    scope: str
+    account_scope_kind: str
+    account_id: str | None = None
+    account_ids: list[str] = Field(default_factory=list)
+    account_label: str | None = None
+    subject: str | None = None
+    title: str
+    detail: str = ""
+    since: str | None = None
+    link: dict[str, Any] = Field(default_factory=dict)
+    actions: list[str] = Field(default_factory=list)
+
+
+class AttentionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    requires_person: int
+    by_severity: dict[str, int] = Field(default_factory=dict)
+
+
+class Attention(BaseModel):
+    """What still needs a person, and whether every source behind that answer was readable.
+
+    ``items`` is empty rather than absent when nothing needs doing, and ``readable`` is what
+    tells that apart from "could not look": a screen shows "nothing to do" only when it is true.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked_at: str
+    readable: bool
+    unreadable: list[str] = Field(default_factory=list)
+    top: AttentionItem | None = None
+    items: list[AttentionItem] = Field(default_factory=list)
+    summary: AttentionSummary
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------- account scopes
+class AccountScope(BaseModel):
+    """One account scope a screen may bind to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str
+    account_scope_kind: str
+    account_id: str | None = None
+    account_ids: list[str] = Field(default_factory=list)
+    account_label: str | None = None
+    is_real_money: bool
+    venue: str | None = None
+    source: str
+    as_of: str | None = None
+    complete: bool
+
+
+class PersonalSnapshotStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fetched_at: str | None = None
+    stale: bool = True
+    errors: list[str] = Field(default_factory=list)
+
+
+class AccountScopes(BaseModel):
+    """The switcher's list. Empty of personal entries until a snapshot has been taken, and
+    without the Agentic entry when its ledger could not be read, which ``errors`` then says."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked_at: str
+    accounts: list[AccountScope] = Field(default_factory=list)
+    errors: dict[str, str] = Field(default_factory=dict)
+    personal_snapshot: PersonalSnapshotStatus = Field(default_factory=PersonalSnapshotStatus)
+
+
+# ---------------------------------------------------------------------------- research
+class ResearchRoute(BaseModel):
+    """Which route produced a record or will run a job, and the versions behind it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    inferred: bool = False
+    package_version: str | None = None
+    upstream_commit: str | None = None
+    skill_version: str | None = None
+    models: dict[str, str | None] = Field(default_factory=dict)
+
+
+class ResearchJob(BaseModel):
+    """A job as the queue lists it: the stored row plus the binding a screen reads it by.
+
+    The stored keys are the job store's own (research_jobs.py); a job written by an older
+    version lacks the newer ones, so every one added since the store first shipped is optional.
+    ``task`` is the assistant's task document, passed through whole.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_key: str
+    dedupe_key: str | None = None
+    ticker: str
+    bucket: str
+    trade_date: str | None = None
+    instrument_type: str | None = None
+    trigger: str | None = None
+    state: str
+    created_at: str
+    updated_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    deadline_at: str | None = None
+    pid: int | None = None
+    attempts: int = 0
+    max_attempts: int | None = None
+    timeout_seconds: int | None = None
+    log: str | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    limit_recoveries: int = 0
+    proposal_created: bool = False
+    proposal_id: str | None = None
+    task: dict[str, Any] | None = None
+    authority_version: str | None = None
+    opened_at: str | None = None
+    purpose: str | None = None
+    request_id: str | None = None
+    scope: str
+    account_scope_kind: str
+    account_id: str | None = None
+    account_ids: list[str] = Field(default_factory=list)
+    account_label: str | None = None
+    task_type: str
+    route: ResearchRoute
+    cancellable: bool
+    #: Only on the answer to POST /research: whether an identical active request was returned.
+    deduplicated: bool | None = None
+
+
+class ResearchRecord(BaseModel):
+    """A decision record as the research list shows it, bound to the account it is about.
+
+    Everything is optional because the row is projected out of a record on disk written by
+    whatever version of the pipeline produced it; ``evidence``, ``limitations`` and ``route``
+    are the projection's own blocks and are typed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str | None = None
+    ticker: str | None = None
+    bucket: str | None = None
+    trade_date: str | None = None
+    created_at: str | None = None
+    instrument_type: str | None = None
+    portfolio_manager_rating: str | None = None
+    policy_action: str | None = None
+    confidence: int | None = None
+    data_quality: str | None = None
+    missing_information: int = 0
+    hard_risk_verdict: str | None = None
+    final_action: str | None = None
+    proposal_id: str | None = None
+    llm_calls: int | None = None
+    elapsed_seconds: float | None = None
+    scope: str
+    account_scope_kind: str
+    account_id: str | None = None
+    account_ids: list[str] = Field(default_factory=list)
+    account_label: str | None = None
+    task_type: str
+    purpose: str | None = None
+    route: ResearchRoute
+    authority_version: str | None = None
+    snapshot_as_of: str | None = None
+    prices_as_of: str | None = None
+    sources_retrieved_at_max: str | None = None
+    facts_as_of: str | None = None
+    facts_as_of_basis: str = "unknown"
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    limitations: dict[str, Any] = Field(default_factory=dict)
+    counter_evidence: str | None = None
+    counter_evidence_truncated: bool = False
+    changes_since_previous: dict[str, Any] | None = None
+    refers_to_run_id: str | None = None
+    superseded_by: str | None = None
+    applicable_floor: int | None = None
+
+
+# ---------------------------------------------------------------------------- evaluation
+class Evaluation(BaseModel):
+    """The forward record for one scope, or its NOT_STARTED shape.
+
+    The performance blocks are the evaluation module's own serialisations and stay open maps;
+    every figure inside them is None rather than zero when no study was declared.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str
+    account: dict[str, Any]
+    buckets: list[str]
+    study_id: str | None = None
+    state: str
+    started_on: str | None = None
+    declared: dict[str, Any] | None = None
+    days_recorded: int = 0
+    config_drifted: bool = False
+    frozen_fingerprint: str | None = None
+    current_fingerprint: str | None = None
+    strategy: dict[str, Any] = Field(default_factory=dict)
+    benchmark: dict[str, Any] = Field(default_factory=dict)
+    strategy_minus_benchmark_pct_points: float | None = None
+    decisions: dict[str, Any] = Field(default_factory=dict)
+    execution: dict[str, Any] = Field(default_factory=dict)
+    stop_rules_triggered: list[str] = Field(default_factory=list)
+    sample: dict[str, Any] = Field(default_factory=dict)
+    readable: bool
+    conclusive: bool
+    caveat: str
+
+
+class RouteQuality(BaseModel):
+    """What the record can measure about each research route; null means not evaluated."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str
+    checked_at: str
+    since: str | None = None
+    routes: list[dict[str, Any]] = Field(default_factory=list)
+    note: str

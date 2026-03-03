@@ -192,17 +192,17 @@ class ResearchMixin:
 
         if not re.fullmatch(r"[A-Za-z0-9._-]+", run_key):
             raise ServiceError(f"invalid research run {run_key!r}")
-        manager = self._research_manager(self.profiles())
+        profiles = self.profiles()
+        manager = self._research_manager(profiles)
         job = manager.store.get(run_key)
         if job is None:
             raise ServiceError(f"no research run {run_key!r}")
         if job["state"] not in TERMINAL_STATES:
             raise ServiceConflict(f"research run {run_key} is still {job['state']}; nothing to open yet")
-        if job.get("opened_at"):
-            return job
-        updated = manager.store.update(run_key, {"opened_at": utcnow().isoformat()},
-                                       expected_states=TERMINAL_STATES)
-        return updated or manager.store.get(run_key) or job
+        if not job.get("opened_at"):
+            job = manager.store.update(run_key, {"opened_at": utcnow().isoformat()},
+                                       expected_states=TERMINAL_STATES) or manager.store.get(run_key) or job
+        return self._describe_job(job, profiles)
 
     def cancel_research(self, run_key: str, reason: str = "cancelled from the console") -> dict[str, Any]:
         """Stop a queued or running research job on request.

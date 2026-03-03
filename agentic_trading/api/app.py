@@ -36,9 +36,13 @@ from starlette.datastructures import Headers
 from ..env import load_env
 from ..service import Service, ServiceConflict, ServiceError
 from ..service.shapes import (
+    AccountScopes,
     AdvisorConversation,
     AdvisorState,
+    Attention,
+    Authority,
     ClaudeStatus,
+    Evaluation,
     Health,
     MarketStatus,
     MicroLive,
@@ -47,6 +51,9 @@ from ..service.shapes import (
     Portfolio,
     ProposalDetail,
     ProposalSummary,
+    ResearchJob,
+    ResearchRecord,
+    RouteQuality,
 )
 from ..state_db import StateConflict
 from .auth import COOKIE, SESSION_SECONDS, ConsoleAuth
@@ -432,7 +439,7 @@ def operations() -> dict[str, Any]:
 
 @app.get("/evaluation", tags=["system"],
          summary="The forward record against a passive benchmark, including what it did not do")
-def evaluation_report(scope: Literal["demo", "agentic", "route_quality"] = "demo") -> dict[str, Any]:
+def evaluation_report(scope: Literal["demo", "agentic", "route_quality"] = "demo") -> Evaluation | RouteQuality:
     return _ok(_service.evaluation_report, scope)
 
 
@@ -444,7 +451,7 @@ def schedule_status() -> dict[str, Any]:
 
 @app.get("/attention", tags=["system"],
          summary="What still needs a person, computed from unresolved state and never from what was sent")
-def attention() -> dict[str, Any]:
+def attention() -> Attention:
     return _ok(_service.attention)
 
 
@@ -535,7 +542,7 @@ def config_overview() -> dict[str, Any]:
 
 @app.get("/config/authority", tags=["configuration"],
          summary="What may happen to the real-money account, from every rule that decides it")
-def config_authority() -> dict[str, Any]:
+def config_authority() -> Authority:
     return _ok(_service.effective_authority)
 
 
@@ -626,7 +633,7 @@ def advisor_state(scope: Literal["personal", "agentic"] = "personal",
 
 @app.get("/accounts", tags=["assistant"],
          summary="The account scopes a screen may bind to; opens no venue session")
-def account_scopes() -> dict[str, Any]:
+def account_scopes() -> AccountScopes:
     return _ok(_service.account_scopes)
 
 
@@ -661,7 +668,7 @@ class ResearchRequest(BaseModel):
 
 
 @app.post("/research", tags=["research"], summary="Start a research run in the background")
-def start_research(body: ResearchRequest) -> dict[str, Any]:
+def start_research(body: ResearchRequest) -> ResearchJob:
     return _ok(_service.start_research, body.ticker, bucket=body.bucket,
                instrument_type=body.instrument_type, trade_date=body.trade_date, trigger=body.trigger,
                scope=body.scope, request_id=str(body.request_id) if body.request_id else None,
@@ -671,7 +678,7 @@ def start_research(body: ResearchRequest) -> dict[str, Any]:
 @app.get("/research/jobs", tags=["research"], summary="Persistent research queue, newest first")
 def research_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50,
                   scope: Literal["agentic", "demo", "personal", "unspecified"] | None = None,
-                  account_id: Annotated[str | None, Query(max_length=40)] = None) -> list[dict[str, Any]]:
+                  account_id: Annotated[str | None, Query(max_length=40)] = None) -> list[ResearchJob]:
     return _ok(_service.research_jobs, limit, scope=scope, account_id=account_id)
 
 
@@ -697,7 +704,7 @@ def cancel_research(run_key: str, body: CancelRequest | None = None) -> dict[str
 
 @app.post("/research/{run_key}/opened", tags=["research"],
           summary="The finished run's result was shown to the person; idempotent, never a side effect of a read")
-def research_opened(run_key: str) -> dict[str, Any]:
+def research_opened(run_key: str) -> ResearchJob:
     return _ok(_service.mark_opened, run_key)
 
 
@@ -718,7 +725,7 @@ def research_history(limit: Annotated[int, Query(ge=1, le=100)] = 20,
                      scope: Literal["agentic", "demo", "personal", "unspecified"] | None = None,
                      account_id: Annotated[str | None, Query(max_length=40)] = None,
                      task_type: Literal["full_research", "analysis", "portfolio_review"] | None = None,
-                     include_all_personal: bool = False) -> list[dict[str, Any]]:
+                     include_all_personal: bool = False) -> list[ResearchRecord]:
     return _ok(_service.research_history, limit, scope=scope, account_id=account_id,
                task_type=task_type, include_all_personal=include_all_personal)
 

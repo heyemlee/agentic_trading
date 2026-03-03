@@ -22,6 +22,7 @@ from agentic_trading.proposals import (
     ProposalStore,
     utcnow,
 )
+from agentic_trading.research_jobs import ResearchJobManager
 from agentic_trading.service import Service, ServiceError
 from agentic_trading.service.shapes import (
     Fill,
@@ -554,6 +555,45 @@ def test_the_evaluation_answers_by_scope_and_never_500s_without_a_study(
     assert quality.status_code == 200 and quality.json()["scope"] == "route_quality"
     assert isinstance(quality.json()["routes"], list)
     assert auth_client.get("/evaluation?scope=live").status_code == 422     # not a scope
+
+
+def test_the_new_reads_answer_through_their_declared_models(auth_client, monkeypatch, sandbox_service):
+    """Every endpoint the upgrade added declares a response model with extra="forbid": a field the
+    service grew and the model did not is a 500 here, before a release, not a value that silently
+    never reaches the screen. The sandbox is the degraded world -- no venue, no study, no snapshot
+    -- which is the shape those models had to fit first."""
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    monkeypatch.setattr(sandbox_service, "_broker_connect_error", lambda: None)
+    monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
+    runs = sandbox_service.profiles().project_dir / "runs"
+    (runs / "old_run").mkdir(parents=True)
+    (runs / "old_run" / "decision_record.json").write_text(json.dumps({
+        "run_id": "old_run", "ticker": "VTI", "trade_date": "2026-09-10",
+        "policy": {"final_action": "NO_TRADE"}, "final_recommendation": {"action": "NO_TRADE"}}))
+
+    started = auth_client.post("/research", json={"ticker": "VTI", "bucket": "core", "scope": "demo",
+                                                  "purpose": "candidate",
+                                                  "request_id": "6f1d3c2e-2b4a-4f0e-9c1d-0a1b2c3d4e5f"})
+    assert started.status_code == 200, started.text
+    assert started.json()["scope"] == "demo" and started.json()["deduplicated"] is False
+    for path, key in (("/config/authority", "version"), ("/attention", "readable"),
+                      ("/accounts", "accounts"), ("/research/jobs", None), ("/research", None),
+                      ("/research?scope=unspecified", None), ("/evaluation?scope=demo", "state"),
+                      ("/evaluation?scope=agentic", "state"), ("/evaluation?scope=route_quality", "routes")):
+        response = auth_client.get(path)
+        assert response.status_code == 200, f"{path}: {response.text}"
+        body = response.json()
+        if key:
+            assert key in body, path
+    listed = auth_client.get("/research/jobs").json()
+    assert [j["run_key"] for j in listed] == [started.json()["run_key"]] and listed[0]["cancellable"]
+    old = auth_client.get("/research?scope=unspecified").json()
+    assert [r["run_id"] for r in old] == ["old_run"] and old[0]["route"]["inferred"] is True
+    assert auth_client.get("/research?scope=demo").json() == []
+    schema = auth_client.get("/openapi.json").json()["components"]["schemas"]
+    for model in ("Authority", "Attention", "AccountScopes", "ResearchJob", "ResearchRecord",
+                  "Evaluation", "RouteQuality"):
+        assert model in schema and schema[model].get("additionalProperties") is False, model
 
 
 def test_openapi_schema_is_published_for_frontend_generation(auth_client):
