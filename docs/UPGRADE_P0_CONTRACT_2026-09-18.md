@@ -831,9 +831,9 @@ UI 显示"无需处理"，**只在 `readable: true` 时**。
    `tests/test_frontend.py` 的夹具同步到 `ui/assets/data.js`。
    **已完成（后端部分）**：`5c41382`（直接提交在 `main`）。七个模型全部 `extra="forbid"`，先建退化形状；`/evaluation` 返回
    `Evaluation | RouteQuality`；`GET /research/{run_key}` 仍为 dict（带 `log_tail`／`progress`／`assistant_result`）。
-   `tests/test_api.py` 在沙箱里把每个新读接口都走一遍模型校验。**未做**：`DEMO_SHAPES` 里没有登记新模型，因为 `ui/assets/data.js`
-   还没有这些接口的样例；前端补样例后，把 `attention`／`authority`／`accounts`／`researchJobs`／`evaluation` 加进
-   `tests/test_frontend.py::DEMO_SHAPES`（模型可从 `agentic_trading.service.shapes` 导入）。隔离工作树全套 851 项通过。
+   `tests/test_api.py` 在沙箱里把每个新读接口都走一遍模型校验。**前端样例已完成**：`ui/assets/data.js` 已补
+   `attention`／`authority`／`accounts`／非空 `researchJobs`／三个 evaluation 范围的脱敏样例；前五项登记到
+   `tests/test_frontend.py::DEMO_SHAPES`，三个 evaluation 样例逐一通过 `Evaluation | RouteQuality` 校验。
 2. `autonomy.effective_authority()` + `configuration.effective_authority()`，含 `actions[X].autonomous` / `.human_approval` 两侧阻断、
    `history` 与 `authority_versions` 记录；`autonomous_reductions` 改读它并加版本相等要求；`ApproveRequest` 加 `authority_version`、
    `acknowledge_authority_change`；`new_proposal` 记版本。交叉测试：PF04 × `autonomy.open` × `permits` 的八种组合，加"版本变化四种分类 × 有无确认"。

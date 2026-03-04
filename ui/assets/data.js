@@ -146,6 +146,63 @@ window.CT = (function () {
     execution_mode: "human_approval",
   };
 
+  const authorityVersion = "a11ce" + "0".repeat(59);
+  const authorityBlock = {
+    code: "real_money_disabled",
+    detail: "Demo data cannot place a real-money order.",
+  };
+  const authorityAction = (action) => ({
+    mode: "blocked",
+    autonomous: { permitted: false, blocked_by: [authorityBlock] },
+    human_approval: { permitted: false, blocked_by: [authorityBlock] },
+    limits: action === "SELL"
+      ? { quantity_basis: "full ledger holding" }
+      : { max_order_usd: 35.0, max_position_pct: 40.0 },
+  });
+  const authority = {
+    checked_at: "2026-09-04T20:32:16+00:00",
+    status: "READY",
+    detail: "Demo data shows the effective authority shape; all writes remain disabled.",
+    version: authorityVersion,
+    history: [{ version: authorityVersion, at: "2026-09-04T20:32:16+00:00" }],
+    config_revisions: { risk_profile: "demo-risk", investor_profile: "demo-investor" },
+    account: { scope: "agentic", account_id: "micro_live", venue: "robinhood", is_real_money: true },
+    stage: 3,
+    stage_allows: ["BUY", "ADD", "REDUCE", "SELL"],
+    real_money_enabled: false,
+    execution_mode: "human_approval",
+    kill_switch: { engaged: false, reason: null, at: null },
+    withdrawn: { active: false, reason: null, at: null },
+    actions: Object.fromEntries(["BUY", "ADD", "REDUCE", "SELL"].map(action => [action, authorityAction(action)])),
+    limits: { capital: { max_capital_usd: 100.0 }, tiers: { low: { max_order_usd: 35.0 } } },
+    pending_changes: [],
+    preflight: { ready: false, blocking: ["PF00"], checked_at: "2026-09-04T20:32:16+00:00", stale: false },
+    consistency: [],
+  };
+
+  const personalAccountA = "a".repeat(20);
+  const personalAccountB = "b".repeat(20);
+  const accounts = {
+    checked_at: "2026-09-04T20:32:16+00:00",
+    accounts: [
+      { scope: "agentic", account_scope_kind: "single", account_id: "micro_live", account_ids: [],
+        account_label: "Agentic", is_real_money: true, venue: "robinhood", source: "ledger, reconciled",
+        as_of: "2026-09-02", complete: true },
+      { scope: "personal", account_scope_kind: "single", account_id: personalAccountA, account_ids: [],
+        account_label: "••••1111", is_real_money: true, venue: "robinhood", source: "observed snapshot",
+        as_of: "2026-09-04T20:31:00+00:00", complete: true },
+      { scope: "personal", account_scope_kind: "single", account_id: personalAccountB, account_ids: [],
+        account_label: "••••2222", is_real_money: true, venue: "robinhood", source: "observed snapshot",
+        as_of: "2026-09-04T20:31:00+00:00", complete: true },
+      { scope: "personal", account_scope_kind: "all_personal", account_id: null,
+        account_ids: [personalAccountA, personalAccountB], account_label: "all personal accounts",
+        is_real_money: true, venue: "robinhood", source: "observed snapshot",
+        as_of: "2026-09-04T20:31:00+00:00", complete: true },
+    ],
+    errors: {},
+    personal_snapshot: { fetched_at: "2026-09-04T20:31:00+00:00", stale: false, errors: [] },
+  };
+
   // The version is half of the identity an approval is made against: the console pins the
   // detail to the list entry's (proposal_id, version) pair, so both carry the same one even
   // though demo mode never approves anything.
@@ -178,6 +235,7 @@ window.CT = (function () {
       },
       reference_price: 381.42,
       run_id: "2026-09-08_VTI_a1b2c3d4",
+      authority_version: authorityVersion,
     },
   ];
 
@@ -210,6 +268,8 @@ window.CT = (function () {
     },
     reference_price: 381.42,
     run_id: "2026-09-08_VTI_a1b2c3d4",
+    authority_version: authorityVersion,
+    authority_changed: null,
     history: [
       { at: "2026-09-04T01:33:01.850146+00:00", event: "created", detail: "BUY VTI in micro_live for $35.00 (long_only_diversified)" },
     ],
@@ -330,6 +390,25 @@ window.CT = (function () {
     { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
   ];
 
+  const researchJobs = [{
+    run_key: "2026-09-04_VTI_873e64ae", dedupe_key: "demo:VTI:2026-09-04",
+    ticker: "VTI", bucket: "core", trade_date: "2026-09-04", instrument_type: "etf",
+    trigger: "scheduled", state: "COMPLETE", created_at: "2026-09-04T20:30:00+00:00",
+    updated_at: "2026-09-04T20:31:30+00:00", started_at: "2026-09-04T20:30:02+00:00",
+    finished_at: "2026-09-04T20:31:30+00:00", deadline_at: "2026-09-04T21:30:02+00:00",
+    pid: null, attempts: 1, max_attempts: 2,
+    timeout_seconds: 3600, log: "Research completed without a proposal.", exit_code: 0, error: null,
+    limit_recoveries: 0, proposal_created: false, proposal_id: null, task: null,
+    authority_version: authorityVersion, opened_at: null, purpose: "candidate",
+    request_id: "11111111-1111-4111-8111-111111111111", scope: "demo",
+    account_scope_kind: "single", account_id: "conceptual", account_ids: [],
+    account_label: "Demo", task_type: "full_research",
+    route: { name: "tradingagents", inferred: false, package_version: "demo",
+      upstream_commit: "0000000000000000000000000000000000000000", skill_version: null,
+      models: { quick: "sample-model", deep: "sample-model" } },
+    cancellable: false,
+  }];
+
   const schedule = {
     enabled: true, period: "weekly", calendar: "XNYS", market_timezone: "America/New_York",
     on_non_session_day: "previous_session", run_while_paused: true,
@@ -378,6 +457,7 @@ window.CT = (function () {
 
   const evaluation = {
     scope: 'demo', sample: { basis: 'sessions', last_snapshot_on: '2026-09-01', days_recorded: 1, gaps: [], stale: false, sessions_behind: 0 },
+    account: { scope: 'demo', account_id: 'conceptual', label: 'Demo' }, buckets: ['core', 'sandbox'],
     study_id: "demo-forward-record", state: "RUNNING", started_on: "2026-09-01",
     days_recorded: 1, config_drifted: false, readable: false, conclusive: false,
     declared: {
@@ -398,13 +478,39 @@ window.CT = (function () {
 
   const evaluationExamples = {
     demo: evaluation,
-    agentic: { scope: 'agentic', state: 'NOT_STARTED', days_recorded: 0, declared: null,
-      strategy: {}, benchmark: {}, decisions: { research_runs: 0, llm_calls: 0 }, execution: { fills: 0, traded_usd: 0 } },
+    agentic: { scope: 'agentic', account: { scope: 'agentic', account_id: 'micro_live', label: 'Agentic' },
+      buckets: ['micro_live'], study_id: null, state: 'NOT_STARTED', started_on: null, days_recorded: 0,
+      declared: null, config_drifted: false, frozen_fingerprint: null, current_fingerprint: null,
+      strategy: {}, benchmark: {}, strategy_minus_benchmark_pct_points: null,
+      decisions: { research_runs: 0, llm_calls: 0 }, execution: { fills: 0, traded_usd: 0 },
+      stop_rules_triggered: [], sample: { basis: 'sessions', gaps: [], stale: false, sessions_behind: 0 },
+      readable: true, conclusive: false, caveat: 'No Agentic study has been declared.' },
     route_quality: { scope: 'route_quality', checked_at: '2026-09-04T20:32:01+00:00', since: '2026-09-01',
       routes: [{ route: 'tradingagents', runs: 3, complete: 2, failed: 0, timed_out: 1, limit_hits: 0,
         median_elapsed_seconds: 1800, llm_calls_total: 42, evidence_check_pass_rate_pct: 50,
         format_pass_rate_pct: null, fact_accuracy_pct: null, human_edit_rate_pct: null,
-        evaluated: { timing: true, calls: true, failures: true, evidence: true, format: false, facts: false, edits: false } }] },
+        evaluated: { timing: true, calls: true, failures: true, evidence: true, format: false, facts: false, edits: false } }],
+      note: 'Fact accuracy, format quality and human edits have not been evaluated.' },
+  };
+
+  const attentionItem = {
+    id: "proposal_waiting:2026-09-08-VTI-f4c6ec7f", kind: "proposal_waiting",
+    severity: "warning", priority: 20, requires_person: true, scope: "agentic",
+    account_scope_kind: "single", account_id: "micro_live", account_ids: [],
+    account_label: "Agentic", subject: "2026-09-08-VTI-f4c6ec7f",
+    title: "VTI proposal is waiting for a decision",
+    detail: "Review the current proposal and effective authority.",
+    since: "2026-09-04T01:33:01.850005+00:00",
+    link: { page: "approvals", params: { proposal: "2026-09-08-VTI-f4c6ec7f" } },
+    actions: ["review"],
+  };
+  const attention = {
+    checked_at: "2026-09-04T20:32:16+00:00", readable: true, unreadable: [],
+    top: attentionItem, items: [attentionItem],
+    summary: { total: 1, requires_person: 1,
+      by_severity: { critical: 0, warning: 1, info: 0 } },
+    context: { market_open: false, paused: false, autonomy_armed: false,
+      autonomous_queue: 0, next_scheduled_at: "2026-09-11T13:30:00-07:00" },
   };
 
   const authSessions = {
@@ -762,8 +868,8 @@ window.CT = (function () {
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
-    approveExecuted, approveReanalysis, research, researchJobs: [], orders,
+    approveExecuted, approveReanalysis, research, researchJobs, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
-    pushDevices: { devices: [] }, authSessions, activity, config,
+    pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts,
   };
 })();

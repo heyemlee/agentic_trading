@@ -1757,6 +1757,7 @@ test('unchanged account markup is not replaced when another resource updates', (
 
 test('home follows active research and clears stale account details when the ledger is withheld', () => {
   const c = homePage(); c.CT_DEMO = false;
+  c.CT.attention = null;
   c.CT_API.watchRun = key => { c.CT_API.activeRun = key; };
   c.CT.researchJobs = [{ run_key: '2026-09-15_VTI_test', state: 'RUNNING' }]; c.render();
   assert.equal(c.CT_API.activeRun, '2026-09-15_VTI_test');

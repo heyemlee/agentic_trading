@@ -8,12 +8,18 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from agentic_trading.service.shapes import (
+    AccountScopes,
+    Attention,
+    Authority,
+    Evaluation,
     Health,
     MicroLive,
     Orders,
     Portfolio,
     ProposalDetail,
     ProposalSummary,
+    ResearchJob,
+    RouteQuality,
 )
 
 UI_ASSETS = Path(__file__).resolve().parents[1] / "ui" / "assets"
@@ -26,6 +32,11 @@ DEMO_SHAPES = {
     "orders": Orders,                         # GET /orders
     "proposals": list[ProposalSummary],       # GET /proposals
     "proposalDetail": ProposalDetail,         # GET /proposals/{proposal_id}
+    "authority": Authority,                   # GET /config/authority
+    "attention": Attention,                   # GET /attention
+    "accounts": AccountScopes,                # GET /accounts
+    "researchJobs": list[ResearchJob],        # GET /research/jobs
+    "evaluation": Evaluation,                 # GET /evaluation?scope=demo
 }
 
 
@@ -74,3 +85,8 @@ def test_demo_fixtures_are_the_shapes_the_api_returns():
     detail = fixtures["proposalDetail"]
     listed = [p for p in fixtures["proposals"] if p["proposal_id"] == detail["proposal_id"]]
     assert [p.get("version") for p in listed] == [detail["version"]]
+
+    evaluation_shape = TypeAdapter(Evaluation | RouteQuality)
+    for scope, payload in fixtures["evaluationExamples"].items():
+        parsed = evaluation_shape.validate_python(payload)
+        assert parsed.scope == scope
