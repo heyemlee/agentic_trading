@@ -826,6 +826,44 @@ function evaluationPage(report, scope = report.scope) {
   c.run('pages/evaluation.js'); return c;
 }
 
+function systemSchedulePage(schedule) {
+  const c = context(true); c.run('console.js');
+  c.CT.schedule = schedule;
+  c.Console.mount = c.Console.wireTabs = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { post: async () => ({}), readOnce: async () => {}, isLive: () => true };
+  c.run('pages/system.js');
+  return c;
+}
+
+test('System shows each account schedule, its trigger cadence, and the protected exit capacity', () => {
+  const c = context(true), schedule = JSON.parse(JSON.stringify(c.CT.schedule));
+  schedule.tasks[0].reason = 'Account reason <script>';
+  const page = systemSchedulePage(schedule);
+  assert.equal(page.element('sc-mode').textContent, 'sy.perAccount');
+  assert.equal(page.element('sc-fires').textContent, 'Daily');
+  assert.match(page.element('sc-reserve').textContent, /1 6/);
+  assert.equal(page.element('sc-task-section').hidden, false);
+  const html = page.element('sc-tasks').innerHTML;
+  assert.match(html, /bucket.micro_live · Holdings/);
+  assert.match(html, /Candidates/);
+  assert.match(html, /VTI, BND/);
+  assert.match(html, /Account reason &lt;script&gt;/);
+  assert.ok(!html.includes('<script>'));
+});
+
+test('System keeps the legacy schedule summary and clears account tasks when they are absent', () => {
+  const c = context(true), legacy = JSON.parse(JSON.stringify(c.CT.schedule));
+  delete legacy.tasks; delete legacy.per_account; delete legacy.fires_every; delete legacy.reserve_for_exits;
+  const page = systemSchedulePage(legacy);
+  assert.equal(page.element('sc-mode').textContent, 'sy.legacySchedule');
+  assert.equal(page.element('sc-task-section').hidden, true);
+  assert.equal(page.element('sc-period').textContent, 'daily · XNYS · America/New_York');
+  page.CT.schedule = null; page.render();
+  assert.equal(page.element('sc-task-section').hidden, true);
+  assert.equal(page.element('sc-tasks').innerHTML, '');
+});
+
 test('evaluation keeps NOT_STARTED counts but hides performance and unstarted integrity claims', () => {
   const c = evaluationPage({ scope: 'agentic', state: 'NOT_STARTED', days_recorded: 0, declared: null,
     decisions: { research_runs: 17 }, execution: { fills: 3, traded_usd: 500 } });

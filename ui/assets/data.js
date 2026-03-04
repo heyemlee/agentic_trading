@@ -410,23 +410,37 @@ window.CT = (function () {
   }];
 
   const schedule = {
-    enabled: true, period: "weekly", calendar: "XNYS", market_timezone: "America/New_York",
+    enabled: true, period: "daily", calendar: "XNYS", market_timezone: "America/New_York",
     on_non_session_day: "previous_session", run_while_paused: true,
-    tickers: ["VTI", "BND", "BIL"],
-    next_run_at: "2026-09-11T13:30:00-07:00",
-    current_period: "weekly:2026-W36", would_run_now: false,
-    reason: "already executed for weekly:2026-W36 at 2026-09-04T20:30:11+00:00",
+    tickers: ["VTI", "BND"],
+    next_run_at: "2026-09-05T13:30:00-07:00",
+    current_period: "daily:micro_live:holdings:2026-09-04", would_run_now: false,
+    reason: "already executed for daily:micro_live:holdings:2026-09-04",
     analyses_today: 1, daily_budget: 6,
-    last_period: "weekly:2026-W36",
+    fires_every: "daily", reserve_for_exits: 1, per_account: true,
+    last_period: "daily:micro_live:holdings:2026-09-04",
     last_run: {
       at: "2026-09-04T20:30:11+00:00", trade_date: "2026-09-03",
-      tickers: ["VTI", "BND", "BIL"], state: "STARTED",
+      tickers: ["VTI", "BND"], state: "STARTED", bucket: "micro_live", kind: "holdings",
       run_keys: ["2026-09-03_VTI_2bf5a8b5"], errors: [],
     },
     last_skip: {
       at: "2026-08-28T20:30:07+00:00", period_key: "weekly:2026-W35",
       reason: "2026-08-28 is not a trading session for XNYS",
     },
+    tasks: [
+      { bucket: "micro_live", kind: "holdings", period: "daily", max_tickers_per_run: 2,
+        current_period: "daily:micro_live:holdings:2026-09-04", would_run_now: false,
+        reason: "already executed for daily:micro_live:holdings:2026-09-04",
+        tickers: ["VTI", "BND"], trade_date: "2026-09-04",
+        last_run: { at: "2026-09-04T20:30:11+00:00", trade_date: "2026-09-03",
+          tickers: ["VTI", "BND"], state: "STARTED", bucket: "micro_live", kind: "holdings",
+          run_keys: ["2026-09-03_VTI_2bf5a8b5"], errors: [] } },
+      { bucket: "micro_live", kind: "candidates", period: "weekly", max_tickers_per_run: 1,
+        current_period: "weekly:micro_live:candidates:2026-W36", would_run_now: false,
+        reason: "one analysis is reserved for holding and exit reviews",
+        tickers: ["VTI"], trade_date: "2026-09-04", last_run: null },
+    ],
   };
 
   const operations = {

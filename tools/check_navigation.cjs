@@ -199,6 +199,20 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.equal(await page.locator('#content').isVisible(), true);
    assert.equal(await page.locator('#startup, .page-skeleton').count(), 0);
    assert.equal(await page.locator('.topnav').count(), 1);
+   if (name === 'system') {
+     await page.locator('#diagnostics').evaluate(details => { details.open = true; });
+     assert.match(await page.locator('#sc-mode').innerText(), /Per account|按账户调度/);
+     assert.equal(await page.locator('#sc-tasks .list-row').count(), 2);
+     assert.match(await page.locator('#sc-tasks').innerText(), /Holdings review|持仓复查/);
+     assert.match(await page.locator('#sc-tasks').innerText(), /Candidate research|候选研究/);
+     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+     if (process.env.CT_UI_CAPTURE_DIR) {
+       const folder = path.resolve(process.env.CT_UI_CAPTURE_DIR);
+       await fs.mkdir(folder, {recursive:true});
+       await page.locator('[data-od-id="schedule"]').scrollIntoViewIfNeeded();
+       await page.screenshot({path:path.join(folder, 'schedule-tasks-phone.png')});
+     }
+   }
  }
  await page.locator('[data-od-id="tab-more"]').click();
  for (const ticker of ['VTI', 'VOO']) {

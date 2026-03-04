@@ -51,8 +51,18 @@ window.Console.page('system', function (document) {
       $('sc-state').textContent = C.t('sy.unknown');
       $('sc-next').textContent = '—';
       $('sc-reason').textContent = C.t('sy.scheduleUnavailable');
+      $('sc-mode').textContent = '—';
+      $('sc-fires').textContent = '—';
+      $('sc-reserve').textContent = '—';
+      $('sc-task-section').hidden = true;
+      C.setHTML($('sc-tasks'), '');
       return;
     }
+    const named = (prefix, value) => {
+      const key = prefix + value;
+      const translated = C.t(key);
+      return translated === key ? C.code(value) : translated;
+    };
     const chip = $('sc-state');
     chip.textContent = C.t(s.enabled ? 'sy.scheduleOn' : 'sy.scheduleOff');
     chip.className = 'chip' + (s.enabled ? ' chip-accent' : ' chip-warn');
@@ -62,6 +72,11 @@ window.Console.page('system', function (document) {
       ' · ' + (s.market_timezone || '—');
     $('sc-tickers').textContent = (s.tickers || []).join(', ') || '—';
     $('sc-budget').textContent = s.analyses_today + ' / ' + s.daily_budget;
+    $('sc-mode').textContent = s.per_account === true ? C.t('sy.perAccount')
+      : s.per_account === false ? C.t('sy.coreReview') : C.t('sy.legacySchedule');
+    $('sc-fires').textContent = named('sy.periodValue.', s.fires_every || s.period || '');
+    $('sc-reserve').textContent = s.reserve_for_exits == null ? '—'
+      : C.t('sy.reserveOfBudget', { n: s.reserve_for_exits, total: s.daily_budget });
     const last = s.last_run;
     $('sc-last').textContent = last
       ? C.dateTime(last.at) + ' · ' + (last.run_keys || []).length + ' ' + C.t('sy.runsStarted')
@@ -69,6 +84,24 @@ window.Console.page('system', function (document) {
     $('sc-skip').textContent = s.last_skip
       ? C.dateTime(s.last_skip.at) + ' · ' + s.last_skip.reason : '—';
     $('sc-paused').textContent = C.t(s.run_while_paused ? 'sy.researchContinues' : 'sy.researchStops');
+    const tasks = Array.isArray(s.tasks) ? s.tasks : [];
+    $('sc-task-section').hidden = !tasks.length;
+    C.setHTML($('sc-tasks'), tasks.map((task, index) => {
+      const details = [named('sy.periodValue.', task.period),
+        C.t('sy.taskLimit', { n: task.max_tickers_per_run })];
+      if (task.trade_date) details.push(C.t('sy.taskTradeDate', { date: C.dateOnly(task.trade_date) }));
+      if ((task.tickers || []).length) details.push(C.t('sy.taskTickers', { tickers: task.tickers.join(', ') }));
+      if (task.reason) details.push(task.reason);
+      const lastRun = task.last_run;
+      if (lastRun?.at) details.push(C.t('sy.taskLast', {
+        date: C.dateTime(lastRun.at), n: (lastRun.run_keys || []).length }));
+      return C.listRow({
+        id: 'schedule-task-' + index,
+        title: C.bucket(task.bucket) + ' · ' + named('sy.scheduleTask.', task.kind),
+        sub: details.filter(Boolean).join(' · '),
+        value: C.t(task.would_run_now ? 'sy.taskWouldRun' : 'sy.taskNotDue'),
+      });
+    }).join(''));
   }
 
   /* ── background work: the loops nobody watches until they stop ───── */

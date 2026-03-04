@@ -348,7 +348,8 @@ def test_the_job_fires_as_often_as_the_shortest_period_any_account_asks_for(tmp_
         weekly, FRIDAY_AFTER_CLOSE)
 
 
-def test_every_configured_task_runs_and_the_two_share_one_days_allowance(tmp_path, monkeypatch):
+def test_every_configured_task_runs_and_the_two_share_one_days_allowance(
+        tmp_path, monkeypatch, offline_market_reads):
     """Holdings first, candidates after, and the day's count re-read between them.
 
     Deciding both against the count taken before either started would let them together spend

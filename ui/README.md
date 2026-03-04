@@ -165,6 +165,13 @@ polls unless it sets `staleAfter` in `assets/api.js` — assistant 5 min, orders
 `checked_at` (portfolio, micro-live) is aged from that stamp, moved onto the
 API's clock by its `Date` header, not from when the poll came back. The page
 waits for its initial data, then can display last-known values with this warning.
+
+System renders `/system/schedule` as both a backward-compatible first-task summary and a
+per-account task list. Each task keeps its server-provided reason, subjects, period and last
+run together. `fires_every` describes the operating-system trigger, while
+`reserve_for_exits` is shown separately from today's use so candidate capacity cannot be read
+as capacity available to holding and exit reviews. The screen is read-only; schedule changes
+continue through the reviewed Settings flow.
 One healthy endpoint cannot clear another endpoint's error. A ledger that has
 gone unconfirmed still answers, with its buckets emptied and the reason in
 `errors`, and the Portfolio page shows that gap rather than a zero. Approval
