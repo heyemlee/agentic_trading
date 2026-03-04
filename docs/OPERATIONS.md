@@ -239,6 +239,37 @@ trigger and an exhausted budget all get the same answer whichever entry point fi
 Every skip is recorded with its reason and shown on the console's System screen next to the
 next scheduled time, so "why did nothing run on Friday" is answerable from a phone.
 
+#### Scheduling an account rather than a list of funds
+
+The review above analyses `research_schedule.tickers`, or one representative per core exposure
+group when that list is empty. That describes the Core book. It does not describe the Agentic
+account, whose holdings are its own, so scheduling it means naming it:
+
+```yaml
+research_schedule:
+  accounts:                          # absent by default: one Core review, exactly as above
+    micro_live:
+      holdings:   {period: daily,  max_tickers_per_run: 2}
+      candidates: {period: weekly, max_tickers_per_run: 1}
+  reserve_for_exits: 1               # of max_analyses_per_day
+```
+
+What changes when an account is named:
+
+| | |
+| --- | --- |
+| Subjects | A `holdings` review reads that account's own ledger: least recently researched first, and anything never researched before those, so the rotation cannot leave one holding unexamined for months. A `candidates` study keeps the configured universe. A holding that has since left the universe is still reviewed, because the two lists are read from different places. |
+| Order | Holdings before candidates, across every account. Risk already on the books comes before risk that is not. |
+| Budget | `reserve_for_exits` is the part of `max_analyses_per_day` a candidate study may not touch. A holdings review draws on the whole allowance, because a holdings review is how an exit is found. The day's count is re-read between tasks, so two tasks cannot together spend more than the subscription allows. |
+| Period keys | Each task claims its own: `daily:micro_live:holdings:2026-09-19`. One account's review can never mark another's as already run, nor a holdings review a candidate study. The single Core review keeps the unscoped key it has always had. |
+| The launchd job | Fires as often as the shortest period any account asks for. A daily review invoked only on Fridays would be a weekly review wearing a daily name, so `research_schedule.launchd.weekday` is dropped from the job once any task is daily. Changing this section re-registers the job. |
+| `ct-trigger scheduled` | Runs every configured task. `--bucket micro_live` narrows it to one account's tasks. |
+| Purpose | A holdings run is recorded with `purpose: review_holding`, a candidate run with `candidate`, which is what the research record and the queue then carry. |
+
+Not scheduled by any of this: an event-triggered run when verified data arrives. `ct-trigger
+event` still exists and is still manual, because the arrival of a *verified* event time is not
+something this system can yet detect on its own.
+
 A run that is going nowhere can be stopped from the Research screen or through
 `POST /research/{run_key}/cancel`; it otherwise holds a concurrency slot until its timeout. A
 run stopped by the subscription limit is requeued automatically once the reset window passes,

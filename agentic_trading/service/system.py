@@ -257,7 +257,13 @@ class SystemMixin:
 
     # ---------------------------------------------------------------- schedule
     def schedule_status(self) -> dict[str, Any]:
-        """What the schedule will do next, what it last did, and why it last did nothing."""
+        """What the schedule will do next, what it last did, and why it last did nothing.
+
+        One entry per scheduled task, because a deployment that reviews its real-money holdings
+        daily and its candidates weekly has two answers to "what runs next", and a single one
+        would be a guess about which. The top-level fields describe the first task, which is the
+        only task until an account is configured, so a screen that reads them keeps working.
+        """
         from .. import schedule as scheduling
 
         profiles = self.profiles()
@@ -265,13 +271,17 @@ class SystemMixin:
         db = self.state_db(profiles)
         record = db.read_meta(scheduling.EXECUTIONS, {}) or {}
         jobs = self.research_jobs(limit=200)
+        history = self.research_history(limit=200)
         health = self.health()
-        decision = scheduling.decide(
-            profiles, health_status=health.status, paused=bool(health.paused),
-            executed=record, jobs=jobs)
+        plan = scheduling.tasks(cfg)
+        decisions = [scheduling.decide(
+            profiles, task=task, subjects=scheduling.subjects_for(profiles, task, history=history),
+            health_status=health.status, paused=bool(health.paused), executed=record, jobs=jobs)
+            for task in plan]
         periods = record.get("periods") or {}
         last_key = max(periods) if periods else None
         used = scheduling.analyses_today(jobs, cfg)
+        first = decisions[0]
         return {
             "enabled": bool(cfg.get("enabled", True)),
             "period": cfg.get("period"),
@@ -279,16 +289,30 @@ class SystemMixin:
             "market_timezone": cfg.get("market_timezone"),
             "on_non_session_day": cfg.get("on_non_session_day"),
             "run_while_paused": bool(cfg.get("run_while_paused", True)),
-            "tickers": scheduling.default_tickers(profiles, cfg),
-            "next_run_at": decision.next_run_at,
-            "current_period": decision.period_key,
-            "would_run_now": decision.run,
-            "reason": decision.reason,
+            "tickers": list(first.tickers),
+            "next_run_at": first.next_run_at,
+            "current_period": first.period_key,
+            "would_run_now": first.run,
+            "reason": first.reason,
             "analyses_today": used,
             "daily_budget": int(cfg.get("max_analyses_per_day", 6)),
             "last_period": last_key,
             "last_run": periods.get(last_key) if last_key else None,
             "last_skip": record.get("last_skip"),
+            # How often the operating system's job has to fire to serve every task, how much of
+            # the day's allowance a candidate study may not touch, and whether accounts are
+            # scheduled at all yet.
+            "fires_every": scheduling.finest_period(cfg),
+            "reserve_for_exits": int(cfg.get("reserve_for_exits", 0)),
+            "per_account": bool(cfg.get("accounts")),
+            "tasks": [{
+                "bucket": decision.bucket, "kind": decision.kind, "period": task.period,
+                "max_tickers_per_run": task.max_tickers,
+                "current_period": decision.period_key, "would_run_now": decision.run,
+                "reason": decision.reason, "tickers": list(decision.tickers),
+                "trade_date": decision.trade_date,
+                "last_run": periods.get(decision.period_key),
+            } for task, decision in zip(plan, decisions, strict=True)],
         }
 
     # ---------------------------------------------------------------- the console password

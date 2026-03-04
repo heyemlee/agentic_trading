@@ -101,14 +101,10 @@ class ResearchMixin:
     def _holds(self, profiles, bucket: str, ticker: str) -> bool:
         """Whether the book behind a bucket holds a symbol, from the ledger, never the venue."""
         from ..portfolio import PortfolioError, load_portfolio
+        from ..schedule import ledger_for
 
-        if bucket == MICRO_BUCKET:
-            path = (profiles.risk.get("micro_live_execution") or {}).get(
-                "ledger_file", "state/micro_live_portfolio.yaml")
-        else:
-            path = (profiles.risk.get("portfolio_state") or {}).get("file", "state/portfolio.yaml")
         try:
-            ledger = load_portfolio(profiles.project_dir / str(path))
+            ledger = load_portfolio(ledger_for(profiles, bucket))
         except (PortfolioError, OSError, ValueError) as exc:
             raise ServiceError(f"the {bucket} ledger could not be read: {exc}") from exc
         return ledger.position(ticker, bucket) is not None

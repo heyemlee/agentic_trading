@@ -64,19 +64,25 @@ def allowed_origins(*, origin: str | None, keep: list[str]) -> list[str]:
 
 
 def research_interval(data_dir: Path) -> dict[str, int]:
-    """When the weekly research job fires, read from the same config the console reports from.
+    """When the research job fires, read from the same config the console reports from.
 
     Two copies of a schedule drift, and the one a screen shows is the one a person plans around,
     so the plist is generated from the configuration rather than repeating it.
+
+    The job must fire at least as often as the shortest period any account schedules: a daily
+    holdings review that the operating system only invoked on Fridays would be considered once a
+    week, which is a weekly review wearing a daily name. ``schedule.finest_period`` is that
+    answer, and ``next_run_at`` reads the same one, so the plist and the screen agree.
     """
     default = {"Weekday": 5, "Hour": 13, "Minute": 30}
     try:
         from .profile import load_profiles
+        from .schedule import finest_period, settings
 
-        cfg = (load_profiles(Path(data_dir) / "config").risk.get("research_schedule") or {})
+        cfg = settings(load_profiles(Path(data_dir) / "config"))
         launchd = dict(cfg.get("launchd") or {})
         interval = {"Hour": int(launchd.get("hour", 13)), "Minute": int(launchd.get("minute", 30))}
-        if str(cfg.get("period", "weekly")) != "daily" and launchd.get("weekday") is not None:
+        if finest_period(cfg) != "daily" and launchd.get("weekday") is not None:
             interval["Weekday"] = int(launchd["weekday"])
         return interval
     except Exception:  # noqa: BLE001 - an unreadable profile must not block reinstalling

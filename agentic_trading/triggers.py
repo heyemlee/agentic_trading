@@ -28,37 +28,71 @@ logger = logging.getLogger(__name__)
 TRIGGERS = ("scheduled", "manual", "event")
 
 
-def scheduled_review(service: Service, *, tickers: list[str] | None = None,
-                     bucket: str = "core", now: datetime | None = None,
-                     force: bool = False) -> dict[str, Any]:
-    """A periodic portfolio review.
+#: Why a scheduled run was asked for, by the kind of task that asked. A holdings review is a
+#: review of something the book holds, which is what ``purpose`` means downstream; the single
+#: legacy review names no purpose, so it behaves exactly as it always has.
+PURPOSE_OF_KIND = {schedule.HOLDINGS: "review_holding", schedule.CANDIDATES: "candidate"}
 
-    Claims the period before starting anything, so a repeated trigger, a launchd catch-up after
-    a restart and a manual rerun all resume the same execution instead of analysing the same
-    week twice. A skip is recorded with its reason, because "why did nothing run on Friday" has
-    to be answerable from the phone.
+
+def scheduled_review(service: Service, *, tickers: list[str] | None = None,
+                     bucket: str | None = None, now: datetime | None = None,
+                     force: bool = False) -> dict[str, Any]:
+    """The periodic reviews, one per configured account and kind, holdings before candidates.
+
+    Each task claims its own period before starting anything, so a repeated trigger, a launchd
+    catch-up after a restart and a manual rerun all resume the same execution instead of
+    analysing the same week twice, and one account's review can never mark another's as run. A
+    skip is recorded with its reason, because "why did nothing run on Friday" has to be
+    answerable from the phone.
+
+    The day's allowance is re-read between tasks. Deciding every task against the count taken
+    before any of them started would let holdings and candidates together spend more than the
+    subscription allows, which is the one thing more concurrency cannot fix.
     """
     profiles = service.profiles()
     db = service.state_db(profiles)
+    cfg = schedule.settings(profiles)
     health = service.health()
-    decision = schedule.decide(
-        profiles, health_status=health.status, paused=bool(health.paused),
-        executed=db.read_meta(schedule.EXECUTIONS, {}) or {},
-        jobs=service.research_jobs(limit=200), now=now, force=force)
-    if tickers:
-        decision.tickers = [t.upper() for t in tickers]
+    history = service.research_history(limit=200)
+    plan = schedule.tasks(cfg, bucket=bucket)
+    results: list[dict[str, Any]] = []
 
+    for task in plan:
+        decision = schedule.decide(
+            profiles, task=task,
+            subjects=[t.upper() for t in tickers] if tickers else
+            schedule.subjects_for(profiles, task, history=history),
+            health_status=health.status, paused=bool(health.paused),
+            executed=db.read_meta(schedule.EXECUTIONS, {}) or {},
+            jobs=service.research_jobs(limit=200), now=now, force=force)
+        results.append(_run_task(service, db, task, decision, now=now, force=force))
+
+    at = datetime.now(UTC).isoformat()
+    if len(results) == 1:
+        return {**results[0], "tasks": results, "at": at}
+    started = [run for result in results for run in result["started"]]
+    reasons = [f"{result['schedule']['bucket']}:{result['schedule']['kind']}: {result['reason']}"
+               for result in results if result.get("reason")]
+    return {"started": started, "skipped": not started, "reason": "; ".join(reasons),
+            "errors": [error for result in results for error in result.get("errors") or []],
+            "schedule": results[0]["schedule"] if results else {}, "tasks": results, "at": at}
+
+
+def _run_task(service: Service, db, task: schedule.Task, decision: schedule.Decision, *,
+              now: datetime | None, force: bool) -> dict[str, Any]:
+    """Carry out one task's decision and record what came of it."""
+    at = datetime.now(UTC).isoformat()
     if not decision.run:
         schedule.record_skip(db, decision, now=now)
         # A skip is the schedule working, so it counts as the activity having run.
         operations.record(db, "schedule", f"skipped: {decision.reason}", min_interval_seconds=0)
         return {"started": [], "skipped": True, "reason": decision.reason,
-                "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
+                "schedule": decision.as_dict(), "at": at}
     if not force and not schedule.claim(db, decision, now=now):
         decision.run = False
         decision.reason = f"another invocation already claimed {decision.period_key}"
         return {"started": [], "skipped": True, "reason": decision.reason,
-                "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
+                "schedule": decision.as_dict(), "at": at}
 
     started, errors = [], []
     for ticker in decision.tickers:
@@ -68,19 +102,21 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
             # published, and anchoring to a date with no data yields an UNKNOWN regime and a
             # run that looks healthy while reasoning from evidence it does not have. The
             # service picks the newest session that actually has data.
-            started.append(service.start_research(ticker, bucket=bucket, trigger="scheduled"))
+            started.append(service.start_research(ticker, bucket=task.bucket, trigger="scheduled",
+                                                  purpose=PURPOSE_OF_KIND.get(task.kind)))
         except ServiceError as exc:      # one refused ticker must not lose the others
             errors.append({"ticker": ticker, "error": str(exc)})
     # Bookkeeping must not be able to fail a run that already started.
     analysed = sorted({run["trade_date"] for run in started if run.get("trade_date")})
     schedule.record_result(db, decision.period_key, state="STARTED",
                            run_keys=[run["run_key"] for run in started], errors=errors,
+                           bucket=task.bucket, kind=task.kind,
                            calendar_session=decision.trade_date, analysed_sessions=analysed,
                            finished_at=datetime.now(UTC).isoformat())
     operations.record(db, "schedule", f"{len(started)} run(s) started for {decision.trade_date}",
                       min_interval_seconds=0)
     return {"started": started, "skipped": False, "errors": errors,
-            "schedule": decision.as_dict(), "at": datetime.now(UTC).isoformat()}
+            "schedule": decision.as_dict(), "at": at}
 
 
 def event_analysis(service: Service, ticker: str, *, bucket: str = "core",

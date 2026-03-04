@@ -210,3 +210,184 @@ def test_the_run_anchors_to_a_session_with_data_not_to_the_calendar_date(sandbox
     record = db.read_meta(schedule.EXECUTIONS, {})["periods"][result["schedule"]["period_key"]]
     assert record["calendar_session"] == "2026-09-04"
     assert record["analysed_sessions"] == ["2026-09-03"]         # what was actually read
+
+
+# ------------------------------------------------------------------ per-account scheduling
+def accounts_config(config_dir, accounts, **extra):
+    """Write a per-account schedule into a copied config, leaving everything else as it was."""
+    import yaml
+
+    path = config_dir / "risk_profile.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["research_schedule"]["accounts"] = accounts
+    doc["research_schedule"].update(extra)
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return load_profiles(config_dir)
+
+
+def micro_ledger(state_dir, *symbols):
+    """A real-money ledger holding these symbols, dated a session the service accepts."""
+    import yaml
+
+    from tests.conftest import recent_session
+
+    (state_dir / "micro_live_portfolio.yaml").write_text(yaml.safe_dump({
+        "as_of": recent_session(), "currency": "USD", "buckets": {"micro_live": {"cash_usd": 40.0}},
+        "positions": [{"symbol": symbol, "bucket": "micro_live", "quantity": 0.2,
+                       "cost_basis_per_share": 100.0} for symbol in symbols],
+        "recent_opens": []}), encoding="utf-8")
+
+
+def test_without_accounts_the_plan_and_the_key_are_what_they_always_were(cfg):
+    """Installing per-account scheduling must not make this week look unexecuted.
+
+    The deployed schedule is one weekly review. If its executed-period key changed shape, the
+    current period would read as never run and the next trigger would spend a week's allowance
+    researching it again.
+    """
+    plan = schedule.tasks(cfg)
+    assert len(plan) == 1
+    assert (plan[0].bucket, plan[0].kind, plan[0].scoped) == ("core", schedule.REVIEW, False)
+    assert schedule.period_key(cfg, FRIDAY_AFTER_CLOSE, plan[0]) == schedule.period_key(
+        cfg, FRIDAY_AFTER_CLOSE)
+    assert schedule.finest_period(cfg) == cfg["period"]
+
+
+def test_holdings_come_before_candidates_and_each_account_keeps_its_own_period(cfg):
+    scheduled = {**cfg, "accounts": {
+        "micro_live": {"holdings": {"period": "daily", "max_tickers_per_run": 2},
+                       "candidates": {"period": "weekly"}},
+        "core": {"holdings": {"period": "weekly"}}}}
+    plan = schedule.tasks(scheduled)
+    assert [(task.bucket, task.kind) for task in plan] == [
+        ("core", schedule.HOLDINGS), ("micro_live", schedule.HOLDINGS),
+        ("micro_live", schedule.CANDIDATES)]
+    assert plan[1].period == "daily" and plan[1].max_tickers == 2
+    assert schedule.finest_period(scheduled) == "daily"
+
+    keys = {schedule.period_key(scheduled, FRIDAY_AFTER_CLOSE, task) for task in plan}
+    assert len(keys) == 3                      # no account can mark another's period as run
+    assert "daily:micro_live:holdings:" in " ".join(keys)
+    assert "weekly:micro_live:candidates:" in " ".join(keys)
+    # One account narrows to its own tasks, which is what ct-trigger --bucket asks for.
+    assert {task.bucket for task in schedule.tasks(scheduled, bucket="micro_live")} == {"micro_live"}
+    # A kind can be turned off without removing it.
+    off = {**scheduled, "accounts": {"micro_live": {"holdings": {"enabled": False},
+                                                     "candidates": {}}}}
+    assert [task.kind for task in schedule.tasks(off)] == [schedule.CANDIDATES]
+
+
+def test_a_holdings_review_reads_the_account_ledger_least_recently_researched_first(tmp_path):
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state, "VTI", "BND", "SGOV")
+    profiles = accounts_config(cfg_dir, {"micro_live": {"holdings": {"period": "daily"}}})
+    task = schedule.tasks(schedule.settings(profiles))[0]
+
+    history = [{"ticker": "BND", "bucket": "micro_live", "created_at": "2026-09-16T10:00:00+00:00"},
+               {"ticker": "VTI", "bucket": "micro_live", "created_at": "2026-09-10T10:00:00+00:00"},
+               # Another book's research says nothing about this one's rotation.
+               {"ticker": "SGOV", "bucket": "core", "created_at": "2026-09-18T10:00:00+00:00"}]
+    # Never researched first, then the longest since it was last looked at.
+    assert schedule.subjects_for(profiles, task, history=history) == ["SGOV", "VTI", "BND"]
+    # A candidate study keeps the configured universe rather than the book.
+    candidates = schedule.Task(bucket="micro_live", kind=schedule.CANDIDATES, period="weekly",
+                               max_tickers=3)
+    assert "SGOV" not in schedule.subjects_for(profiles, candidates, history=history)[:1]
+
+
+def test_a_holdings_review_of_an_empty_book_says_so_rather_than_inventing_a_subject(tmp_path):
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
+    profiles = accounts_config(cfg_dir, {"micro_live": {"holdings": {"period": "daily"}}})
+    task = schedule.tasks(schedule.settings(profiles))[0]
+    assert schedule.subjects_for(profiles, task) == []
+    decision = decide(profiles, task=task, subjects=[])
+    assert decision.run is False and "holds nothing to review" in decision.reason
+    assert decision.bucket == "micro_live" and decision.kind == schedule.HOLDINGS
+
+
+def test_a_candidate_study_may_not_spend_the_capacity_reserved_for_exits(profiles):
+    """Looking for something to buy must never leave a holding that needs an exit unexamined."""
+    # load_profiles reads the files on every call and caches nothing, and this fixture is
+    # per-test, so narrowing the allowance here cannot reach another test or the files.
+    profiles.risk["research_schedule"].update(max_analyses_per_day=3, reserve_for_exits=1)
+    today = FRIDAY_AFTER_CLOSE.isoformat()
+    spent = [{"created_at": today, "state": "COMPLETE"} for _ in range(2)]
+    holdings = schedule.Task(bucket="micro_live", kind=schedule.HOLDINGS, period="daily", max_tickers=2)
+    candidates = schedule.Task(bucket="micro_live", kind=schedule.CANDIDATES, period="weekly", max_tickers=2)
+
+    # Two of three spent: the exit review may still run, the candidate study may not.
+    assert decide(profiles, task=holdings, subjects=["VTI"], jobs=spent).run is True
+    refused = decide(profiles, task=candidates, subjects=["VTI"], jobs=spent)
+    assert refused.run is False and "reserved for exit reviews" in refused.reason
+
+
+def test_the_job_fires_as_often_as_the_shortest_period_any_account_asks_for(tmp_path):
+    """A daily review the operating system only invoked on Fridays is a weekly review."""
+    from agentic_trading import launchd
+
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    weekly = schedule.settings(load_profiles(cfg_dir))
+    assert "Weekday" in launchd.research_interval(tmp_path)
+    assert "-W" in schedule.period_key(weekly)
+
+    accounts_config(cfg_dir, {"micro_live": {"holdings": {"period": "daily"}}})
+    assert "Weekday" not in launchd.research_interval(tmp_path)
+    daily = schedule.settings(load_profiles(cfg_dir))
+    # The screen reads the same answer the job was written from.
+    assert schedule.next_run_at(daily, FRIDAY_AFTER_CLOSE) != schedule.next_run_at(
+        weekly, FRIDAY_AFTER_CLOSE)
+
+
+def test_every_configured_task_runs_and_the_two_share_one_days_allowance(tmp_path, monkeypatch):
+    """Holdings first, candidates after, and the day's count re-read between them.
+
+    Deciding both against the count taken before either started would let them together spend
+    more than the subscription allows, which no amount of concurrency can fix.
+    """
+    from agentic_trading.research_jobs import ResearchJobManager
+
+    monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "runs").mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state, "VTI", "BND")
+    accounts_config(cfg_dir, {"micro_live": {"holdings": {"period": "daily", "max_tickers_per_run": 2},
+                                              "candidates": {"period": "daily", "max_tickers_per_run": 2}}},
+                    max_analyses_per_day=3, reserve_for_exits=1)
+    service = Service(cfg_dir)
+    db = StateDB(state / "proposals.json")
+
+    result = scheduled_review(service)
+    assert [task["schedule"]["kind"] for task in result["tasks"]] == [
+        schedule.HOLDINGS, schedule.CANDIDATES]
+    holdings, candidates = result["tasks"]
+    # The book's two holdings are reviewed, as holdings, against the whole allowance.
+    assert {run["ticker"] for run in holdings["started"]} == {"VTI", "BND"}
+    assert {run["purpose"] for run in holdings["started"]} == {"review_holding"}
+    assert {run["bucket"] for run in holdings["started"]} == {"micro_live"}
+    # Two of three now spent, one reserved for exits: the candidate study is refused, and says so.
+    assert candidates["started"] == [] and "reserved for exit reviews" in candidates["reason"]
+    assert len(result["started"]) == 2 and result["skipped"] is False
+
+    # Each task claimed its own period, so neither marked the other as already run.
+    periods = db.read_meta(schedule.EXECUTIONS, {})["periods"]
+    assert holdings["schedule"]["period_key"] in periods
+    assert periods[holdings["schedule"]["period_key"]]["kind"] == schedule.HOLDINGS
+    assert candidates["schedule"]["period_key"] not in periods
+
+    # A repeat inside the same period starts nothing more.
+    again = scheduled_review(service)
+    assert again["started"] == [] and "already executed" in again["tasks"][0]["reason"]

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -25,6 +26,121 @@ BLOCKING_STATUS = ("HALTED", "CLAUDE_LIMIT_REACHED", "CONFIG_ERROR")
 #: The document that records which periods have already been executed.
 EXECUTIONS = "schedule_executions"
 MAX_RECORDS = 60
+
+#: What the schedule can do for one account. Reviewing what an account already holds comes
+#: before looking at what it might buy, because the risk that is already on the books is the
+#: risk a person is already carrying.
+HOLDINGS, CANDIDATES, REVIEW = "holdings", "candidates", "review"
+KIND_ORDER = (HOLDINGS, CANDIDATES)
+
+
+@dataclass(frozen=True)
+class Task:
+    """One account's one kind of scheduled research.
+
+    ``scoped`` says whether the executed-period key names the account and the kind. A deployment
+    that configures no accounts keeps the single unscoped review it has always had, on the key it
+    has always had: installing this code must not make the current period look unexecuted and
+    spend a week's allowance researching it again.
+    """
+
+    bucket: str
+    kind: str
+    period: str
+    max_tickers: int
+    scoped: bool = True
+
+    @property
+    def label(self) -> str:
+        return f"{self.bucket}:{self.kind}" if self.scoped else self.bucket
+
+
+def tasks(cfg: dict[str, Any], *, bucket: str | None = None) -> list[Task]:
+    """Every task the schedule would consider, holdings first, optionally for one account.
+
+    ``research_schedule.accounts`` is a map of bucket to the kinds it schedules, each with its
+    own period and its own cap::
+
+        accounts:
+          micro_live:
+            holdings:   {period: daily,  max_tickers_per_run: 2}
+            candidates: {period: weekly, max_tickers_per_run: 1}
+
+    Absent, this answers the one review the deployment already runs, so the schedule behaves
+    exactly as it did until an account is named deliberately.
+    """
+    accounts = cfg.get("accounts") or {}
+    period = str(cfg.get("period", "weekly"))
+    cap = int(cfg.get("max_tickers_per_run", 3))
+    if not accounts:
+        out = [Task(bucket=str(cfg.get("bucket", "core")), kind=REVIEW, period=period,
+                    max_tickers=cap, scoped=False)]
+    else:
+        out = []
+        for kind in KIND_ORDER:
+            for name in sorted(accounts):
+                block = (accounts.get(name) or {}).get(kind)
+                if not isinstance(block, dict) or block.get("enabled") is False:
+                    continue
+                out.append(Task(bucket=name, kind=kind,
+                                period=str(block.get("period", period)),
+                                max_tickers=int(block.get("max_tickers_per_run", cap))))
+    return [task for task in out if bucket is None or task.bucket == bucket]
+
+
+def finest_period(cfg: dict[str, Any]) -> str:
+    """The shortest period any task runs on.
+
+    The operating system's job has to fire at least this often, or a daily review would only
+    ever be considered once a week. Read by :mod:`agentic_trading.launchd` when it writes the
+    job, and by :func:`next_run_at`, so the time a screen shows is the time the job keeps.
+    """
+    return "daily" if any(task.period == "daily" for task in tasks(cfg)) else str(
+        cfg.get("period", "weekly"))
+
+
+def ledger_for(profiles, bucket: str) -> Path:
+    """The book that holds a bucket's positions. Real money keeps its own, separate ledger."""
+    if bucket == "micro_live":
+        configured = (profiles.risk.get("micro_live_execution") or {}).get(
+            "ledger_file", "state/micro_live_portfolio.yaml")
+    else:
+        configured = (profiles.risk.get("portfolio_state") or {}).get("file", "state/portfolio.yaml")
+    return Path(profiles.project_dir) / str(configured)
+
+
+def subjects_for(profiles, task: Task, *, history: list[dict[str, Any]] = ()) -> list[str]:
+    """What this task should analyse, in the order it should be analysed.
+
+    A holdings review reads the account's own ledger, so an account is reviewed on what it
+    actually holds rather than on a list of representative funds that may describe a different
+    book entirely. Least recently researched first, and anything never researched before that:
+    the rotation is what stops one holding from going unexamined for months while another is
+    looked at every day. Ordering by event proximity is deliberately not done here -- that needs
+    the event calendar and a verified event time, and guessing it would be worse than rotating.
+
+    A candidate study keeps the configured universe, which is what the single review has always
+    used. The universe bounds what may be *researched*; what may then be *bought* is the
+    authority's business, and a holding that has since left the universe must still be
+    reviewable, which is why the two lists are read from different places.
+    """
+    from .portfolio import PortfolioError, load_portfolio
+
+    if task.kind != HOLDINGS:
+        return default_tickers(profiles, settings(profiles))
+    try:
+        ledger = load_portfolio(ledger_for(profiles, task.bucket))
+    except (PortfolioError, OSError, ValueError):
+        # A book that cannot be read schedules nothing; the reason belongs to whatever reads
+        # the book for real, not to a decision about when to run.
+        return []
+    held = [position.symbol for position in ledger.positions if position.bucket == task.bucket]
+    seen: dict[str, str] = {}
+    for row in history or ():
+        symbol = str(row.get("ticker") or "").upper()
+        if row.get("bucket") == task.bucket and symbol:
+            seen.setdefault(symbol, str(row.get("created_at") or ""))
+    return sorted(dict.fromkeys(held), key=lambda symbol: (symbol in seen, seen.get(symbol, ""), symbol))
 
 
 @dataclass
@@ -43,11 +159,14 @@ class Decision:
     trade_date: str | None = None
     tickers: list[str] = field(default_factory=list)
     next_run_at: str | None = None
+    #: Which account and which kind of research this decision is about.
+    bucket: str = "core"
+    kind: str = REVIEW
 
     def as_dict(self) -> dict[str, Any]:
         return {"run": self.run, "reason": self.reason, "period_key": self.period_key,
                 "trade_date": self.trade_date, "tickers": list(self.tickers),
-                "next_run_at": self.next_run_at}
+                "next_run_at": self.next_run_at, "bucket": self.bucket, "kind": self.kind}
 
 
 def settings(profiles) -> dict[str, Any]:
@@ -62,6 +181,11 @@ def settings(profiles) -> dict[str, Any]:
     cfg.setdefault("max_analyses_per_day", 6)
     cfg.setdefault("run_while_paused", True)
     cfg.setdefault("launchd", {"weekday": 5, "hour": 13, "minute": 30})
+    # Per-account scheduling, off until an account is named: see tasks().
+    cfg.setdefault("accounts", {})
+    # How much of the day's allowance a candidate study may not touch, so that looking for
+    # something to buy can never leave a holding that needs an exit unexamined.
+    cfg.setdefault("reserve_for_exits", 0)
     return cfg
 
 
@@ -71,13 +195,24 @@ def market_now(cfg: dict[str, Any], now: datetime | None = None) -> datetime:
     return (now or datetime.now(UTC)).astimezone(zone)
 
 
-def period_key(cfg: dict[str, Any], now: datetime | None = None) -> str:
-    """Identifies one scheduled period. Two triggers inside it are the same execution."""
+def period_key(cfg: dict[str, Any], now: datetime | None = None,
+               task: Task | None = None) -> str:
+    """Identifies one scheduled period. Two triggers inside it are the same execution.
+
+    A scoped task names its account and its kind, so one account's review can never mark
+    another's as already run, and a holdings review never marks a candidate study as run.
+    """
+    period = task.period if task is not None else str(cfg.get("period", "weekly"))
     stamp = market_now(cfg, now)
-    if str(cfg.get("period", "weekly")) == "daily":
-        return f"daily:{stamp.date().isoformat()}"
-    year, week, _weekday = stamp.isocalendar()
-    return f"weekly:{year}-W{week:02d}"
+    if period == "daily":
+        moment = f"daily:{stamp.date().isoformat()}"
+    else:
+        year, week, _weekday = stamp.isocalendar()
+        moment = f"weekly:{year}-W{week:02d}"
+    if task is None or not task.scoped:
+        return moment
+    head, _, rest = moment.partition(":")
+    return f"{head}:{task.bucket}:{task.kind}:{rest}"
 
 
 def system_zone():
@@ -110,7 +245,7 @@ def next_run_at(cfg: dict[str, Any], now: datetime | None = None,
     weekday = launchd.get("weekday")
     local = (now or datetime.now(UTC)).astimezone(local_zone or system_zone())
     candidate = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if str(cfg.get("period", "weekly")) == "daily" or weekday is None:
+    if finest_period(cfg) == "daily" or weekday is None:
         if candidate <= local:
             candidate += timedelta(days=1)
         return candidate.isoformat()
@@ -195,14 +330,22 @@ def analyses_today(jobs: list[dict[str, Any]], cfg: dict[str, Any],
 
 def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, Any],
            jobs: list[dict[str, Any]], now: datetime | None = None,
-           force: bool = False) -> Decision:
-    """The whole scheduling decision, from configuration and durable state only."""
+           force: bool = False, task: Task | None = None,
+           subjects: list[str] | None = None) -> Decision:
+    """The whole scheduling decision, from configuration and durable state only.
+
+    ``task`` says which account and which kind of research this is about, and defaults to the
+    one review a deployment runs until it configures accounts. ``subjects`` is what that task
+    would analyse; absent, the configured universe, which is what the single review has always
+    used.
+    """
     cfg = settings(profiles)
-    key = period_key(cfg, now)
+    task = task or tasks(cfg)[0]
+    key = period_key(cfg, now, task)
     upcoming = next_run_at(cfg, now)
 
     def no(reason: str, trade_date: str | None = None) -> Decision:
-        return Decision(False, reason, key, trade_date, [], upcoming)
+        return Decision(False, reason, key, trade_date, [], upcoming, task.bucket, task.kind)
 
     if not cfg.get("enabled", True):
         return no("scheduled research is disabled in risk_profile.research_schedule")
@@ -220,14 +363,25 @@ def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, An
 
     limit = int(cfg.get("max_analyses_per_day", 6))
     used = analyses_today(jobs, cfg, now)
-    if used >= limit:
-        return no(f"daily research budget spent ({used}/{limit} analyses today)", trade_date)
+    # Looking for something to buy may not spend the capacity an exit review needs. A holdings
+    # review is how an exit is found, so it draws on the whole allowance.
+    reserved = int(cfg.get("reserve_for_exits", 0)) if task.kind == CANDIDATES else 0
+    available = limit - reserved
+    if used >= available:
+        spent = f"{used}/{limit} analyses today"
+        return no(f"daily research budget spent ({spent})" if not reserved else
+                  f"only {max(0, limit - used)} of the day's allowance is left and "
+                  f"{reserved} is reserved for exit reviews ({spent})", trade_date)
 
-    tickers = default_tickers(profiles, cfg)[:max(0, limit - used)]
+    if subjects is None:
+        subjects = default_tickers(profiles, cfg)
+    tickers = list(subjects)[:max(0, min(task.max_tickers, available - used))]
     if not tickers:
+        if task.kind == HOLDINGS:
+            return no(f"{task.bucket} holds nothing to review", trade_date)
         return no("no tickers are configured and no core exposure group has a representative",
                   trade_date)
-    return Decision(True, why, key, trade_date, tickers, upcoming)
+    return Decision(True, why, key, trade_date, tickers, upcoming, task.bucket, task.kind)
 
 
 def claim(db, decision: Decision, *, now: datetime | None = None) -> bool:
