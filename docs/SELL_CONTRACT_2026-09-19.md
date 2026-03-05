@@ -1,15 +1,26 @@
-# 退出链路接口契约（第二稿）
+# 退出链路接口契约（第三稿）
 
-日期：2026-09-19。状态：**第二稿，仍未写任何代码**。第一稿经前端审阅（见 git 历史 `4b98235`），本稿
-按审阅意见改写：第一、二、三、六、七条原则保留，其中第一条的一个推论是错的、已纠正；第四、五条重写。
-实施以本稿为准，仍待前端确认第四、五条。
+日期：2026-09-19。状态：**第三稿，仍未写任何代码**。第一稿 `4b98235`，第二稿 `64f5a4b`，两轮都经前端
+审阅并各找出真错误。本稿处理第二轮的四点：§2.4 的公式与样例不一致、自主基线会被小额加仓拉低、
+新鲜度在创建与批准两处都要查、`committed` 对部分成交重复扣减。实施以本稿为准。
 
 对应 `docs/UPGRADE_PLAN_2026-09-18.md` 第 5.3 节。本稿不修改前端、`config/*.yaml`、交易权限或部署。
 样例中的数量、时间、id 都是示意值，不是账户读数。
 
 ---
 
-## 0. 第一稿的四处错误，先认下来
+## 0. 两轮审阅改掉的错误
+
+**第二轮（本稿处理）**
+
+| 错在哪 | 为什么错 | 本稿怎么改 |
+| --- | --- | --- |
+| `committed` 按活动成员的完整授权量计，同时又扣 `filled` | 对部分成交重复扣减。授权 0.2、已成交 0.12、仍挂单，按旧定义 `committed=0.2`，剩余额度算成负数 | `committed` 只计**未成交**占用：`Σ(authorised − filled)`，见 §2.3 |
+| §2.4 允许单一来源算出 `expected_remaining`，样例 E 却返回 `null` | 公式与样例自相矛盾，实现时必有一方被写错 | 缺少任一有效来源时 `expected_remaining` 与 `expected_closes_position` 一律 `null`，已知来源的数量单独展示，见 §2.4 |
+| 自主基线取"人最后一次加仓后的持仓量" | 基线会被小额加仓拉低。基线 100、下限 25%，代码减到 25 后人买 1 股，基线变 26、下限降到 6.5，代码又可卖 19.5 股，等于小额加仓重置了自主空间 | 基线改为**同一持仓周期内只升不降**的高水位，见 §2.5 |
+| 人工批准仅凭 `approved_by` 不以 `autonomy:` 开头判断 | 字符串前缀不是身份依据 | 批准记录新增显式 `approved_via`，由调用方写入，判定不再看前缀，见 §2.5 |
+
+**第一轮（第二稿已处理，保留在此备查）**
 
 | 错在哪 | 为什么错 | 本稿怎么改 |
 | --- | --- | --- |
@@ -50,7 +61,7 @@
 
 ---
 
-## 2. 七个决定（一、二、三、六、七已接受；四、五重写待确认）
+## 2. 七个决定（全部已接受；四、五、六按第二轮意见补齐）
 
 ### 2.1 决定一（已接受，含一处纠正）：授权一个数量，永不超卖
 
@@ -73,7 +84,7 @@
 | --- | --- |
 | `allowance` | 根提案的 `authorised_quantity`。这是这条链永久的上限 |
 | `filled` | 链上所有成员的 `filled_quantity` 之和（券商累计成交，不含未成交） |
-| `committed` | 链上仍未完成的成员的 `authorised_quantity` 之和：状态为 `PROPOSED`、`APPROVED` 或仍在 `PENDING_EXECUTION` 的那些 |
+| `committed` | 链上仍未完成的成员**尚未成交**的占用：`Σ(authorised_quantity − filled_quantity)`，取状态为 `PROPOSED`、`APPROVED` 或仍在 `PENDING_EXECUTION` 的成员。只计未成交部分，否则对部分成交重复扣减：授权 0.2、已成交 0.12、仍挂单，是 `filled=0.12`、`committed=0.08` |
 | `remaining_allowance` | `max(0, allowance − filled − committed)` |
 
 所以零成交撤单会把那部分额度**还回**链上（它既没成交也不再占用），而已成交的部分永久扣减。
@@ -84,54 +95,66 @@
 2. `request_id`（UUID）幂等：同 id 重放返回同一个续做；同 id 不同内容 409。
 3. 创建在数据库事务内完成并再次检查前两条，所以双标签页、重启、并发重放都不会产生第二个可执行分支。
 
-### 2.4 决定四（重写，待确认）：数量口径与"清仓"的判定
+### 2.4 决定四（按第二轮意见补齐）：数量口径与"清仓"的判定
 
-四个量，各自的口径写明：
+**一条总纲**：两个来源都有效时，卖出数量取小、预计剩余取大；**任一来源缺失或过期时，与"剩余"和
+"清仓"有关的字段一律 `null`**，只单独展示已知来源自己的数量。第二稿的公式允许单一来源算出
+`expected_remaining`，样例却返回 `null`，两者矛盾，现按你们的建议统一到 `null`。
 
 | 字段 | 口径 |
 | --- | --- |
-| `sellable.quantity` | `min(可读来源) − committed_quantity`。**取小是为了不超卖，不能据此判断清仓** |
-| `expected_submit_quantity` | `min(authorised_quantity, sellable.quantity)`，向下取整到 `min_sellable_increment` |
-| `expected_remaining` | **`max(可读来源) − expected_submit_quantity`**，下限 0。用较大者，因为"是否还剩"必须悲观回答 |
-| `expected_remaining_basis` | `both_sources_agree` \| `ledger_only` \| `venue_only` \| `larger_of_two` |
+| `sellable.quantity` | `min(有效来源) − committed_quantity`。**取小是为了不超卖，不能据此判断清仓** |
+| `expected_submit_quantity` | `min(authorised_quantity, sellable.quantity)`，向下取整到 `min_sellable_increment`。只有一个有效来源时这是**估算** |
+| `sellable.basis` | `both_sources_agree`（两者都有效且相等）\| `smaller_of_two`（两者都有效但不一致，按较小者定量）\| `ledger_only` \| `venue_only` \| `none`（无有效来源，`quantity` 为 `null`） |
+| `expected_is_estimate` | `true` 当有效来源少于两个，即 `sellable.basis` 为 `ledger_only`、`venue_only` 或 `none`。屏幕必须把数量标为估算。两者都有效但不一致（`smaller_of_two`）不是估算，数量是确定的 |
+| `expected_remaining` | 两个来源都有效时为 `max(两者) − expected_submit_quantity`，下限 0；**否则 `null`**。用较大者，因为"是否还剩"必须悲观回答 |
+| `expected_remaining_basis` | `both_sources_agree`（两者相等）\| `larger_of_two`（两者都有效但不一致，按较大者算剩余）\| `unknown`（有效来源少于两个，`expected_remaining` 为 `null`）。这是与 `sellable.basis` **不同的枚举**：定量取小、算剩余取大，各有各的依据 |
 
 `expected_closes_position` 是三态：
 
 | 值 | 条件 |
 | --- | --- |
-| `true` | 两个来源都可读、一致（容差 1e-6），且 `expected_remaining == 0` |
-| `false` | 两个来源都可读，但 `expected_remaining > 0` |
+| `true` | 两个来源都有效、一致（容差 1e-6），且 `expected_remaining == 0` |
+| `false` | 两个来源都有效，但 `expected_remaining > 0`。**两者不一致时必然落在这里**：卖出量不超过较小者，剩余按较大者算，所以差额一定为正，此时有东西没对上，不能声称清仓 |
 | `null` | 任一来源不可读或过期。屏幕显示"无法确认"，**不填 0，不显示"预计清仓"** |
 
-审批前屏幕只说"**预计清仓**"，依据 `expected_closes_position == true`。
+审批前屏幕只说"**预计清仓**"，依据 `expected_closes_position === true`。
+
+**页面估算与实际执行是两件事。** 退回单一来源只用于页面预估；实际执行仍必须重新读取券商并校验，
+这也是今天的行为（`execution.py` 第 2 步从券商重建快照，第 6 步按券商真相重算数量）。券商在执行时
+读不到，执行就拒绝，不会拿账本数字下单。
 
 成交后另一组字段，同样三态：
 
 | 字段 | 口径 |
 | --- | --- |
 | `confirmed_remaining` | 成交后重新读到的持仓余量；任一来源不可读时为 `null` |
-| `confirmed_remaining_basis` | 同上四值 |
+| `confirmed_remaining_basis` | 同 `expected_remaining_basis` 三值 |
 | `position_closed` | `true` 仅当两个来源都**新读到**且都为 0；`false` 当确认仍有余量；`null` 当无法确认。**无法确认不填 0，屏幕不显示"已清仓"** |
 
 **读数过期的规则**：`venue_as_of` 早于 `venue_max_age_seconds`（建议 180，与控制台既有阈值一致）时，
 `venue_stale: true`，**该来源按不可读处理**：sizing 退回账本单一来源，`expected_closes_position` 与
 `position_closed` 变为 `null`。过期的券商读数不能用来声称清仓。
 
-### 2.5 决定五（重写，待确认）：自主减仓的持仓下限，不用滚动窗口
+### 2.5 决定五（按第二轮意见重写）：自主减仓的持仓下限，基线只升不降
 
-**撤回**第一稿的 `max_cumulative_reduction_pct`（滚动 30 天）。你们的反驳成立：窗口只约束窗口内，
-不能阻止长期逐步清空。
+第一稿的滚动窗口已撤回（窗口只约束窗口内）。第二稿的"人最后一次加仓后的持仓量"也不成立，你们给的
+反例是决定性的：基线 100、下限 25%，代码减到 25 后人买 1 股，基线变 26、下限降到 6.5，代码又能卖
+19.5 股，等于**一股重置了自主空间**。
 
-改为一条持久下限 `buckets.<bucket>.autonomy.reduce.min_remaining_pct_of_opened`：
+改为持仓数量的**高水位**，只升不降：`buckets.<bucket>.autonomy.reduce.min_remaining_pct_of_opened`
+作用在 `position_high_water_quantity` 上。
 
 | 问题 | 答案 |
 | --- | --- |
-| 分母是什么 | **人最后一次开仓或加仓成交后该持仓的数量**（`opened_baseline_quantity`）。从批准与成交记录算出：`approved_by` **不以** `autonomy:` 开头、动作为 `BUY`／`ADD` 的最后一笔成交之后的持仓量 |
-| 窗口起点 | 没有窗口。这是一条持久下限，所以"长期逐步清空"被堵死：代码把持仓减到下限后，再往下永远只能由人来做 |
-| 加仓后如何处理 | 人加仓会抬高基线，代码因此重获空间。这是对的：人加仓是人表达了看法 |
-| 如何计数 | 已离开的份额按**实际成交**计；活动预留按**占用**计，所以两次自主动作不会重复减同一份 |
-| 没有基线时 | 拒绝，代码 `no_opened_baseline`（转入的持仓、种子账本都属此类），失败闭合 |
-| 配置未声明时 | 拒绝自主减仓，代码 `no_min_remaining`，与"未声明的限额是拒绝而不是默认"一致 |
+| 分母是什么 | `position_high_water_quantity`：该持仓周期内，每一笔**人工**买入成交后取 `max(既有高水位, 成交后的持仓量)`。**只升不降** |
+| 周期何时重置 | 只在**确认清零**之后，判定与 §2.4 的 `position_closed === true` 完全相同（两来源都新读到 0）。之后人工重新建仓才开始新周期。读不到就不算清零，不重置 |
+| 想降低现有下限怎么办 | 改 `min_remaining_pct_of_opened` 本身，走配置流程（放宽要密码与冷静期）。**下限不因任何交易行为而降低** |
+| 怎么算出来 | 从成交记录与批准记录推导，不另存计数器，与 `acted_today` 同一做法（重启、崩溃、第二个进程都不会丢）。要求成交日志覆盖该持仓的建立；不覆盖则没有基线 |
+| 人工批准怎么认定 | 批准记录新增显式 `approved_via`（`console`／`cli`／`autonomy`），由调用方写入。**不再用 `approved_by` 的字符串前缀判断身份**；旧记录无此字段时按"无基线"处理，失败闭合 |
+| 如何计数 | 已离开的份额按**实际成交**计；活动预留按**未成交占用**计，所以两次自主动作不会重复减同一份 |
+| 没有基线时 | 拒绝，`no_opened_baseline`：转入的持仓、种子账本、成交日志不覆盖建仓、旧记录缺 `approved_via`，都属此类 |
+| 配置未声明时 | 拒绝，`no_min_remaining`，与"未声明的限额是拒绝而不是默认"一致 |
 
 这是收紧，不需要冷静期。`SELL` 仍永不自主，本条只约束 `REDUCE`。
 
@@ -146,12 +169,14 @@
 零成交撤单的恢复：**同样走 `continue_exit`**。额度全额返还，所以续做量等于原授权，仍需一次人工批准。
 第一稿写的"再批准原提案"是错的，代码不允许。
 
-**新鲜度**：续做沿用**根提案的新鲜度锚点**（`created_at`），不重新起算，否则就是把陈旧研究洗成一个
-看起来新鲜的提案。根提案已过期时 `continue_exit` 拒绝，代码 `research_expired`，文案指向重新研究。
-这与现有行为一致（`execution.py:168`，过期提案一律不执行）。
+**新鲜度（第二轮已定稿）**：续做沿用**根提案的新鲜度锚点**（`created_at`），不重新起算。创建新提案
+不重置研究时钟，否则就是把陈旧研究洗成一个看起来新鲜的提案。
 
-> 一个反面论据，供你们否决：退出的论点变旧不构成继续持有的理由，所以也可以主张"允许过期后的退出并
-> 标注"。我倾向保持与现有行为一致，但这条值得你们表态。
+- **两处都查**：`continue_exit` 创建时查，最终批准执行时再查（后者本来就有，`execution.py:168`）。
+- 根提案已过期时 `continue_exit` 拒绝，代码 `research_expired`，页面明确显示"原研究已过期，需要重新研究"。
+- 本轮**不接受**"过期但标注后继续退出"。旧论点不足以支持继续持有，但也不能自动证明原来的卖出数量和
+  判断仍然有效。
+- 将来若确实需要独立于研究时效的人工退出，另行定义明确的授权入口，**不通过续做悄悄放宽**。
 
 ### 2.7 决定七（已接受）：卖出不受事件黑窗、层级、置信度约束
 
@@ -170,8 +195,9 @@
 | `intent` | `close_position`（SELL）\| `reduce_position`（REDUCE），由动作派生 |
 | `authorised_quantity` | 批准会授权的股数，`terms.sell_quantity` 必须等于它 |
 | `sellable.*` | `quantity`、`basis`、`ledger_quantity`、`venue_quantity`、`venue_as_of`、`venue_stale`、`committed_quantity`、`agrees`、`note`。任一来源不可读时该项为 `null`，不写 0 |
-| `expected_submit_quantity` | 见 §2.4 |
-| `expected_remaining` / `expected_remaining_basis` | 见 §2.4，按较大来源 |
+| `expected_submit_quantity` | 见 §2.4；只有一个有效来源时是估算 |
+| `expected_is_estimate` | 见 §2.4。为真时屏幕把数量标为估算 |
+| `expected_remaining` / `expected_remaining_basis` | 见 §2.4。两来源都有效时按较大者（`both_sources_agree` 或 `larger_of_two`），否则 `null` 且 basis 为 `unknown` |
 | `expected_closes_position` | 三态，见 §2.4。**屏幕只据此显示"预计清仓"** |
 | `min_sellable_increment` | 券商最小增量（现为 1e-6） |
 | `already_filled` | 本提案已成交股数 |
@@ -209,8 +235,10 @@
 {
   "permitted": false,
   "min_remaining_pct_of_opened": 25,
-  "opened_baseline_quantity": 0.4,
-  "opened_baseline_at": "2026-09-12T14:02:11+00:00",
+  "position_high_water_quantity": 0.4,
+  "high_water_set_at": "2026-09-12T14:02:11+00:00",
+  "high_water_source": "console",
+  "cycle_started_at": "2026-09-12T14:02:11+00:00",
   "floor_quantity": 0.1,
   "current_quantity": 0.2,
   "headroom_quantity": 0.1,
@@ -218,8 +246,18 @@
 }
 ```
 
-`headroom_quantity = max(0, current_quantity − floor_quantity)`；代码的减仓量不得超过它。
-`opened_baseline_quantity` 为 `null` 时 `blocked_by` 含 `no_opened_baseline`。
+`floor_quantity = position_high_water_quantity × min_remaining_pct_of_opened ÷ 100`，
+`headroom_quantity = max(0, current_quantity − floor_quantity)`，代码的减仓量不得超过它。
+`high_water_source` 是把高水位推到当前值的那笔批准的 `approved_via`。
+`position_high_water_quantity` 为 `null` 时 `blocked_by` 含 `no_opened_baseline`。
+
+你们给的反例在这个形状下的表现（公式不变，第三稿把这里的结论算错了，现纠正）：高水位 100、
+下限 25% → `floor_quantity` 25；代码减到 25 后 `headroom_quantity = max(0, 25 − 25) = 0`；人买 1 股后
+持仓 26，高水位仍是 `max(100, 26) = 100`，`floor_quantity` 仍是 25，
+`headroom_quantity = 26 − 25 = 1`。
+
+所以代码**最多拿回那一股，永远不能越过 25 股的下限**。这正是要的性质：人加仓一股，代码最多动那一股；
+下限本身只能由配置改动来降低。（第二稿的定义下，这里会把下限降到 6.5，代码可再卖 19.5 股。）
 
 ### 3.4 `POST /proposals/{id}/continue_exit`
 
@@ -253,7 +291,7 @@
 
 ---
 
-## 4. 六种响应样例
+## 4. 七种响应样例
 
 **A. 正常**（清仓待批准，两来源一致，无阻断）：
 
@@ -264,7 +302,7 @@
   "sellable": {"quantity": 0.2, "basis": "both_sources_agree", "ledger_quantity": 0.2,
                "venue_quantity": 0.2, "venue_as_of": "2026-09-19T15:04:02+00:00",
                "venue_stale": false, "committed_quantity": 0.0, "agrees": true, "note": null},
-  "expected_submit_quantity": 0.2, "expected_remaining": 0.0,
+  "expected_submit_quantity": 0.2, "expected_is_estimate": false, "expected_remaining": 0.0,
   "expected_remaining_basis": "both_sources_agree", "expected_closes_position": true,
   "min_sellable_increment": 0.000001, "already_filled": 0.0,
   "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.0, "committed": 0.2,
@@ -288,7 +326,7 @@
                "venue_quantity": 0.08, "venue_as_of": "2026-09-19T15:31:40+00:00",
                "venue_stale": false, "committed_quantity": 0.08, "agrees": true,
                "note": "0.08 is committed to an order still working in this account"},
-  "expected_submit_quantity": 0.0, "expected_remaining": 0.08,
+  "expected_submit_quantity": 0.0, "expected_is_estimate": false, "expected_remaining": 0.08,
   "expected_remaining_basis": "both_sources_agree", "expected_closes_position": false,
   "min_sellable_increment": 0.000001, "already_filled": 0.12,
   "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.12, "committed": 0.08,
@@ -315,7 +353,7 @@
   "sellable": {"quantity": 0.08, "basis": "both_sources_agree", "ledger_quantity": 0.08,
                "venue_quantity": 0.08, "venue_as_of": "2026-09-19T15:46:10+00:00",
                "venue_stale": false, "committed_quantity": 0.0, "agrees": true, "note": null},
-  "expected_submit_quantity": 0.0, "expected_remaining": 0.08,
+  "expected_submit_quantity": 0.0, "expected_is_estimate": false, "expected_remaining": 0.08,
   "expected_remaining_basis": "both_sources_agree", "expected_closes_position": false,
   "min_sellable_increment": 0.000001, "already_filled": 0.12,
   "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.12, "committed": 0.0,
@@ -338,26 +376,40 @@
              "venue_quantity": null, "venue_as_of": null, "venue_stale": null,
              "committed_quantity": 0.0, "agrees": null,
              "note": "the venue has not been read; the ledger's own figure is unconfirmed"},
-"expected_submit_quantity": null, "expected_remaining": null,
-"expected_remaining_basis": "ledger_only", "expected_closes_position": null,
+"expected_submit_quantity": null, "expected_is_estimate": true, "expected_remaining": null,
+"expected_remaining_basis": "unknown", "expected_closes_position": null,
 "continuable": {"eligible": false, "quantity": null, "blocked_by": [
   {"code": "quantity_unknown", "detail": "no venue reading and no confirmed ledger"}]}
 ```
 屏幕："数量无法确认"，不提供批准，不显示 0 股，不显示"预计清仓"。
 
-**E. 券商读数过期**（数量取小，但清仓判断为"无法确认"）：
+**E. 券商读数过期**（退回账本单一来源，数量是估算，清仓判断为"无法确认"）：
 
 ```json
 "sellable": {"quantity": 0.2, "basis": "ledger_only", "ledger_quantity": 0.2,
              "venue_quantity": 0.3, "venue_as_of": "2026-09-19T14:58:00+00:00",
              "venue_stale": true, "committed_quantity": 0.0, "agrees": false,
              "note": "the venue reading is older than 180s and is not used for sizing; the two sources disagreed when last read (ledger 0.2, venue 0.3)"},
-"expected_submit_quantity": 0.2, "expected_remaining": null,
-"expected_remaining_basis": "ledger_only", "expected_closes_position": null
+"expected_submit_quantity": 0.2, "expected_is_estimate": true, "expected_remaining": null,
+"expected_remaining_basis": "unknown", "expected_closes_position": null
 ```
-这正是你们举的账本 0.2、券商 0.3 的例子：可以卖 0.2，但**不显示"预计清仓"**。
+这正是你们举的账本 0.2、券商 0.3 的例子：**可以卖 0.2，但不显示"预计清仓"**，因为券商读数过期后
+`expected_remaining` 与 `expected_closes_position` 都是 `null`，屏幕另外单独显示"账本 0.2、券商 0.3
+（读于 14:58，已过期）"。数量标为估算，执行时仍会重新读券商。
 
-**F. 失败**（额度已用尽，后来又建了新仓）：
+**F. 两来源都有效但不一致**（账本 0.2、券商 0.3，都新鲜；这是 `smaller_of_two` 与 `larger_of_two` 唯一同时出现的情形）：
+
+```json
+"sellable": {"quantity": 0.2, "basis": "smaller_of_two", "ledger_quantity": 0.2,
+             "venue_quantity": 0.3, "venue_as_of": "2026-09-19T15:04:02+00:00",
+             "venue_stale": false, "committed_quantity": 0.0, "agrees": false,
+             "note": "the two sources disagree: the ledger holds 0.2 and the venue 0.3; the smaller sizes the order and the larger says what would remain"},
+"expected_submit_quantity": 0.2, "expected_is_estimate": false, "expected_remaining": 0.1,
+"expected_remaining_basis": "larger_of_two", "expected_closes_position": false
+```
+卖 0.2 是确定的（不是估算），但**不显示"预计清仓"**：券商那 0.1 没有对上，差额照 §2.2 成为对账事项。
+
+**G. 失败**（额度已用尽，后来又建了新仓）：
 
 ```json
 "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.2, "committed": 0.0,
@@ -378,7 +430,8 @@
    `expected_remaining`、`expected_closes_position`。审批前最多说"**预计清仓**"，且仅当
    `expected_closes_position === true`；成交后说"已清仓"仅当 `position_closed === true`。
    两者为 `null` 时说"无法确认"，永不显示 0。
-2. **数量来源与读取时间。** 两来源分别显示，`venue_stale` 为真时标注"券商读数已过期，未用于计算"。
+2. **数量来源与读取时间。** 两来源分别显示，`venue_stale` 为真时标注"券商读数已过期，未用于计算"；
+   `expected_is_estimate` 为真时把数量标为估算，并说明执行时会重新读券商。
 3. **有什么挡着。** `exit.blocked_by` 与 `authority.actions[authority_action].human_approval.blocked_by`
    合并，任一非空不提供批准。
 4. **上一次尝试留下了什么。** `already_filled` 非零显示"已成交 N"；`continuable.eligible` 为真时提供
@@ -403,15 +456,22 @@
 
 1. `exit` 块：`sellable`、四个数量口径、三态判定、`chain`、`continuable`（只读，用 kept reading，
    不新增握手），`ProposalDetail` 加严格模型。
-2. `autonomy.reduce.min_remaining_pct_of_opened`：基线从批准与成交记录算出，未声明或无基线则拒绝；
-   规则进 `/config/authority.actions.REDUCE.limits`，按持仓的数字进 `exit.autonomous`。
-3. `continue_exit`：链额度、一条链一个未完成续做、事务内二次检查、幂等、新鲜度锚点继承。
-4. `exit_result` 与 `/attention` 的 `exit_incomplete`，判定与 `continuable.eligible` 同源。
-5. 隔离测试：授权 > 可卖、可卖 > 授权、两来源不一致、券商读数过期、精度不足、部分成交仍挂单时拒绝
+2. 批准记录新增 `approved_via`（`console`／`cli`／`autonomy`），由三个调用方各自写入；
+   `autonomy.acted_today` 一并改读它，旧记录回落到原前缀判断**仅用于显示**，不用于授权判定。
+3. `autonomy.reduce.min_remaining_pct_of_opened`：`position_high_water_quantity` 从成交与批准记录推导，
+   只升不降，只在确认清零后开新周期；未声明、无基线、旧记录缺 `approved_via` 都拒绝；规则进
+   `/config/authority.actions.REDUCE.limits`，按持仓的数字进 `exit.autonomous`。
+4. `continue_exit`：链额度（`committed` 只计未成交）、一条链一个未完成续做、事务内二次检查、幂等、
+   新鲜度锚点继承并在创建与批准两处检查。
+5. `exit_result` 与 `/attention` 的 `exit_incomplete`，判定与 `continuable.eligible` 同源。
+6. 隔离测试：授权 > 可卖、可卖 > 授权、两来源不一致、券商读数过期、精度不足、部分成交仍挂单时拒绝
    续做、部分成交后撤单可续做、零成交撤单额度全额返还、额度用尽后新持仓不可续做、一条链只允许一个
    未完成续做（并发与双 `request_id`）、重启后不产生第二分支、根提案过期拒绝、自主减仓触及持仓下限、
-   无基线时拒绝。全部离线，仍只有 `service/approvals.py` 一条下单入口。
-6. `deploy/checks.sh` 通过后提交，并把提交号与字段说明发前端。
+   无基线时拒绝、**小额人工加仓后 `headroom_quantity` 恰为加仓量且下限不变**（高水位 100、下限 25%、
+   人买 1 股 → headroom 1，且任何自主减仓都不能使持仓低于 25）、确认清零后才开新周期、
+   旧记录缺 `approved_via` 时拒绝自主减仓、两来源不一致时 `sellable.basis` 为 `smaller_of_two` 而
+   `expected_remaining_basis` 为 `larger_of_two` 且 `expected_closes_position` 为 `false`。全部离线，仍只有 `service/approvals.py` 一条下单入口。
+7. `deploy/checks.sh` 通过后提交，并把提交号与字段说明发前端。
 
 验收边界：本轮完成不等于可以启用自主减仓。`buckets.micro_live.autonomy.reduce.enabled` 仍是关的，
 打开它是单独的配置决定，届时受新的持仓下限约束。
