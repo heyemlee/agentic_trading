@@ -1,26 +1,25 @@
-# 退出链路接口契约（草稿，供前端审阅）
+# 退出链路接口契约（第二稿）
 
-日期：2026-09-19。状态：**草稿，尚未写任何代码**。按约定在实施前送审，因为部分成交、撤单、恢复
-和可卖数量决定审批页的结构，不只是字段。前端审阅后的版本作为第二稿，实施以第二稿为准。
+日期：2026-09-19。状态：**第二稿，仍未写任何代码**。第一稿经前端审阅（见 git 历史 `4b98235`），本稿
+按审阅意见改写：第一、二、三、六、七条原则保留，其中第一条的一个推论是错的、已纠正；第四、五条重写。
+实施以本稿为准，仍待前端确认第四、五条。
 
-对应 `docs/UPGRADE_PLAN_2026-09-18.md` 第 5.3 节"统一授权并补齐全量退出"。本稿不修改前端、
-`config/*.yaml`、交易权限或部署。样例中的数量、时间、id 都是示意值，不是账户读数。
+对应 `docs/UPGRADE_PLAN_2026-09-18.md` 第 5.3 节。本稿不修改前端、`config/*.yaml`、交易权限或部署。
+样例中的数量、时间、id 都是示意值，不是账户读数。
 
 ---
 
-## 0. 一句话说清这件事要解决什么
+## 0. 第一稿的四处错误，先认下来
 
-今天一个人可以批准卖出，链路是通的：提案带 `sell_quantity`，Hard Risk 的 HR14／HR14b 校验持仓
-并把数量夹到账本持仓，执行时按券商真相重算，成交与部分成交经对账记录。缺的不是"能不能卖"，
-而是三件事：
+| 错在哪 | 为什么错 | 本稿怎么改 |
+| --- | --- | --- |
+| 用 `PARTIALLY_FILLED` 作为续做资格 | `PENDING_EXECUTION = (SUBMITTING, SUBMITTED, PARTIALLY_FILLED, UNKNOWN)`（`proposals.py:41`）。部分成交意味着**订单可能还在挂着**，此时创建续做就是重复卖出 | 资格改为"原订单已终结 + 对账完成 + 账户无活动订单 + 链上还有额度"，见 §2.1 |
+| 额度按"已发出的授权量之和"计 | 零成交撤单的额度应当可以再用；按发出量计会把它永久作废 | 额度按**已成交**与**未完成占用**计，见 §2.3 |
+| 持仓变多时给续做入口 | 原授权不覆盖后来新增的持仓，那是新想法 | 原授权已全部成交则链关闭，`allowance_spent`；新增持仓需要新提案 |
+| 零成交撤单时建议"再批准原提案" | `_approvable` 要求状态为 `PROPOSED`，`CANCELED` 的提案无法再批准 | 零成交撤单同样走续做（额度全额返还），文案改正，见 §2.6 |
 
-1. **审批页无法说清这一笔卖出会留下什么。** 没有一个地方回答"账本说 0.2、券商说多少、已经成交
-   多少、这一笔之后还剩多少、这是不是清仓"。
-2. **部分成交或在券商端被撤单后，剩下的部分没有出路。** 要卖掉余量只能重新做一次完整研究，而
-   "把没卖完的卖完"不该是一次新研究。
-3. **自主减仓可以逐步走到接近清仓。** `REDUCE` 每次至多半仓、每天至多一个持仓，但连续几天对同
-   一持仓减半，数学上到不了零、实际上等于清仓。计划要求的"SELL 有独立授权，不能靠反复 REDUCE
-   绕过清仓权限"，缺的正是这个累计上限。
+另有一处疏忽：账户级权限必须按**实际动作**读 `actions.SELL` 或 `actions.REDUCE`，不能一律写 `SELL`。
+本稿所有字段都带 `authority_action` 明说该读哪一个。
 
 ---
 
@@ -28,263 +27,391 @@
 
 | 事实 | 位置 |
 | --- | --- |
-| `SELL` 只在已有持仓时产生；`Underweight` 映射为 `REDUCE`，`Sell` 映射为 `SELL` | `policy.py::RATING_TO_ACTION` |
+| `SELL` 只在已有持仓时产生；`Underweight`→`REDUCE`，`Sell`→`SELL` | `policy.py::RATING_TO_ACTION` |
 | `REDUCE` 按构造是半仓，`SELL` 是全部持仓；给了 `sell_quantity` 就用它 | `risk/engine.py` HR14 分支 |
 | 数量被夹到账本持仓：`min(requested, position.quantity)` | 同上 |
-| **减仓路径在 HR14／HR14b 之后直接返回**，所以置信度门、sizing、风险层级、事件黑窗、现金下限、集中度都不约束卖出 | 同上，早于 HR01／HR02 返回 |
-| 熔断与梯子不在风控引擎里拦卖出，在执行时拦：`revalidation.invalidate_triggers` 含 `kill_switch_active` | `execution.py` |
+| **减仓路径在 HR14／HR14b 之后直接返回**，置信度门、sizing、风险层级、事件黑窗、现金下限、集中度都不约束卖出 | 同上，早于 HR01／HR02 返回 |
+| 熔断与梯子在执行时拦，不在风控引擎里 | `execution.py`，`revalidation.invalidate_triggers` 含 `kill_switch_active` |
 | 梯子升级或市场状态变差**永不**使减仓失效 | `execution.py`，`reducing` 分支 |
-| 执行时数量 = `min(券商真相算出的可卖量, 已授权量)`，向下取整到六位小数；不足精度则不下单 | `execution.py` 第 6 步 |
-| **卖出不受 `min_reduction_ratio` 约束**；那条"不得少于批准的一半"只管买入 | 同上，SELL/REDUCE 提前返回 |
-| 一个账户同时只允许一个活动订单（唯一索引） | `state_db.py` `one_active_order_per_account` |
-| 真钱卖出走市价单："退出没成交就不算降了风险" | `config/risk_profile.yaml` `micro_live_execution.order_rules` |
-| 风险层级永不约束卖出："填满的层级必须仍可减" | 同上 `buckets.micro_live.tiers` |
-| `SELL` 永不自主；`autonomy.permits` 只认 `REDUCE` | `autonomy.py::AUTONOMOUS_ACTION` |
-| 授权对象已把这件事作为数据给出：`SELL.autonomous.blocked_by = [never_autonomous]` | `GET /config/authority` |
-| 批准时 `terms.sell_quantity` 必须与提案完全一致，不一致 409 | `service/approvals.py::_approvable` |
-| 部分成交、未知状态、对账失败都已有记录与恢复；`/attention` 已有 `order_unknown` 与 `reconciliation_error` | `execution.py`、`service/notifications.py` |
-| **控制台没有撤单入口**，任何路由都不撤单 | `api/app.py` |
-| 公司行动（拆股、并股、特别分红）没有任何代码读取 | 全库无 |
+| **过期提案一律不执行**，减仓也不例外；检查在 `revalidate` 第 1 步，在动作分支之前 | `execution.py:168` |
+| 执行时数量 = `min(券商真相可卖量, 已授权量)`，向下取整到六位小数；不足精度则不下单 | `execution.py` 第 6 步 |
+| **卖出不受 `min_reduction_ratio` 约束**；那条只管买入 | 同上，SELL/REDUCE 提前返回 |
+| `PARTIALLY_FILLED` 是**未终结**状态 | `proposals.py:41` `PENDING_EXECUTION` |
+| 订单预留在状态离开 `PENDING_EXECUTION` 时释放；一个账户同时只允许一个活动预留 | `proposals.py:315`、`state_db.py:28` |
+| 券商终态映射：`filled`→EXECUTED，`canceled`／`expired`／`done_for_day`→CANCELED，`rejected`→REJECTED | `execution.py:728` |
+| `filled_quantity` 是券商累计成交量，赋值而非累加 | `execution.py:725` |
+| `CANCELED` 的提案无法再批准（`_approvable` 要求 `PROPOSED`） | `service/approvals.py` |
+| 真钱卖出走市价单；风险层级永不约束卖出 | `config/risk_profile.yaml` `micro_live_execution.order_rules`、`buckets.micro_live.tiers` |
+| `SELL` 永不自主；授权对象已把它作为数据给出 | `autonomy.py::AUTONOMOUS_ACTION`、`GET /config/authority` |
+| 控制台没有撤单入口；公司行动无任何代码读取 | `api/app.py`；全库无 |
 
-结论：需要新增的是**可卖数量的事实、退出续做、自主减仓的累计上限**，以及把这些讲清楚的字段。
-不需要新增下单入口，`service/approvals.py` 仍是唯一一条。
+需要新增的是：**可卖数量的事实、退出续做、自主减仓的持仓下限**，以及把这些讲清楚的字段。
+`service/approvals.py` 仍是唯一下单入口。
 
 ---
 
-## 2. 要定的七个决定（每项给出我的建议与理由）
+## 2. 七个决定（一、二、三、六、七已接受；四、五重写待确认）
 
-**决定一：一个人批准清仓时，到底授权了什么。**
-建议：**授权一个数量，永不超卖。** 保留 `terms.sell_quantity` 必须完全一致这条规则，不放宽。
-屏幕上显示的是"清仓（当前 0.2 股）"，批准授权的就是 0.2。执行时按 `min(授权, 当前可卖)` 下单，
-所以持仓在这期间变少了就卖得更少；变多了就只卖 0.2，响应明确说**没有清完**并给出续做入口。
-理由：超卖是不可逆的错，少卖是可以再来一次的事。
+### 2.1 决定一（已接受，含一处纠正）：授权一个数量，永不超卖
 
-**决定二：可卖数量以账本还是券商为准。**
-建议：**显示两者，按较小者下单。** `sellable.quantity = min(账本, 券商) - 活动订单已占用`。两者不
-一致时不拒绝卖出（拒绝会在最需要退出时挡住退出），而是取小、标注不一致，并让差额照现有规则成为
-对账事项。券商数字取已有的 kept reading，不为开屏多开一次握手。
+保留 `terms.sell_quantity` 必须完全一致这条规则。屏幕显示"清仓（当前 0.2 股）"，批准授权 0.2。
+执行按 `min(授权, 当前可卖)` 下单，所以持仓变少就卖得少。
 
-**决定三：同账户已有活动订单时。**
-建议：审批页**不提供批准按钮**，显示"该账户已有一笔订单在进行"。这是数据库唯一索引的既有事实，
-提前说出来比让批准在下单时失败好。
+**纠正**：持仓变多时**不提供续做**。原授权不覆盖后来新增的份额，那是一个新想法，需要新提案。
+链上额度用尽时 `continuable.blocked_by` 为 `allowance_spent`。
 
-**决定四：SELL 的"独立授权"是什么（计划 5.3 的核心）。**
-建议：它是**自主一侧的累计上限**，不是对人的限制。人永远可以清仓，只受账户级的普适阻断（熔断、
-真钱开关、预检、梯子停机），这些授权对象已经在报。新增
-`buckets.<bucket>.autonomy.reduce.max_cumulative_reduction_pct`：滚动窗口内（建议 30 天）代码对同一
-持仓累计移除的比例上限，从批准记录本身算出（`approved_by` 以 `autonomy:` 开头的那些，带 ticker 和
-`sell_quantity`），与 `acted_today` 同样的做法，不另设计数器。**未声明则拒绝自主减仓**，代码
-`no_cumulative_cap`，与"未声明的限额是拒绝而不是默认"这条既有规则一致（`tests/test_autonomy.py` 有
-同名测试）。这一项是收紧，不需要冷静期。
+### 2.2 决定二（已接受）：两个来源都显示，按较小者下单
 
-**决定五：部分成交或券商端撤单后的余量。**
-建议：新增 `POST /proposals/{id}/continue_exit`，创建一个**绑定原提案**的续做提案，数量只能是
-"原授权减去已成交"，并再夹到当前可卖；沿用原 `run_id` 与原 `authority_version`，所以授权变化的确认
-规则照常适用；它**不会自己执行**，仍需一次人工批准。所有续做的授权量之和永不超过原授权，所以这不是
-绕过清仓权限的路，而是把一次被打断的退出做完。理由：要卖掉余量而必须重跑完整研究，是把"没卖完"
-当成"新想法"。
+`sellable.quantity = max(0, min(可读来源) − 活动预留占用)`。不一致时不拒绝退出，取小、标注，差额照
+现有规则成为对账事项。券商数字取已有 kept reading，不为开屏多开握手；读数过期按 §2.4 处理。
 
-**决定六：撤单要不要做成控制台动作。**
-建议：**不做。** 撤单是一次 venue 写操作，而 Robinhood 自己的 App 就是撤单的地方（owner 的"不重造
-Robinhood"规则）。本系统要做的是**正确处理别处发生的撤单**：对账已把 `canceled` 映射为 CANCELED 并
-保留部分成交，屏幕说"已在券商端撤单，已成交 N"，并在仍想退出时提供续做入口。
+### 2.3 决定三（已接受，重写算法）：额度按整条链算
 
-**决定七：卖出要不要受事件黑窗、层级、置信度约束。**
-建议：**都不受，并把这件事写进契约**，因为今天的代码已经如此，而"退出也照抄开仓的限制"是一个很容易
-被好意加进来的错。退出仍要过的检查是：持仓存在、数量有效且不超卖、报价可读且不过期、账户可读、
-熔断未启、券商预审通过。
+一条退出链由**根提案**（第一个 `SELL`／`REDUCE`）和它的续做组成。
+
+| 量 | 定义 |
+| --- | --- |
+| `allowance` | 根提案的 `authorised_quantity`。这是这条链永久的上限 |
+| `filled` | 链上所有成员的 `filled_quantity` 之和（券商累计成交，不含未成交） |
+| `committed` | 链上仍未完成的成员的 `authorised_quantity` 之和：状态为 `PROPOSED`、`APPROVED` 或仍在 `PENDING_EXECUTION` 的那些 |
+| `remaining_allowance` | `max(0, allowance − filled − committed)` |
+
+所以零成交撤单会把那部分额度**还回**链上（它既没成交也不再占用），而已成交的部分永久扣减。
+
+**重复分支的防护**（三条，缺一不可）：
+
+1. **一条链同时只允许一个未完成续做。** 已存在时，`continue_exit` 返回那一个而不新建。
+2. `request_id`（UUID）幂等：同 id 重放返回同一个续做；同 id 不同内容 409。
+3. 创建在数据库事务内完成并再次检查前两条，所以双标签页、重启、并发重放都不会产生第二个可执行分支。
+
+### 2.4 决定四（重写，待确认）：数量口径与"清仓"的判定
+
+四个量，各自的口径写明：
+
+| 字段 | 口径 |
+| --- | --- |
+| `sellable.quantity` | `min(可读来源) − committed_quantity`。**取小是为了不超卖，不能据此判断清仓** |
+| `expected_submit_quantity` | `min(authorised_quantity, sellable.quantity)`，向下取整到 `min_sellable_increment` |
+| `expected_remaining` | **`max(可读来源) − expected_submit_quantity`**，下限 0。用较大者，因为"是否还剩"必须悲观回答 |
+| `expected_remaining_basis` | `both_sources_agree` \| `ledger_only` \| `venue_only` \| `larger_of_two` |
+
+`expected_closes_position` 是三态：
+
+| 值 | 条件 |
+| --- | --- |
+| `true` | 两个来源都可读、一致（容差 1e-6），且 `expected_remaining == 0` |
+| `false` | 两个来源都可读，但 `expected_remaining > 0` |
+| `null` | 任一来源不可读或过期。屏幕显示"无法确认"，**不填 0，不显示"预计清仓"** |
+
+审批前屏幕只说"**预计清仓**"，依据 `expected_closes_position == true`。
+
+成交后另一组字段，同样三态：
+
+| 字段 | 口径 |
+| --- | --- |
+| `confirmed_remaining` | 成交后重新读到的持仓余量；任一来源不可读时为 `null` |
+| `confirmed_remaining_basis` | 同上四值 |
+| `position_closed` | `true` 仅当两个来源都**新读到**且都为 0；`false` 当确认仍有余量；`null` 当无法确认。**无法确认不填 0，屏幕不显示"已清仓"** |
+
+**读数过期的规则**：`venue_as_of` 早于 `venue_max_age_seconds`（建议 180，与控制台既有阈值一致）时，
+`venue_stale: true`，**该来源按不可读处理**：sizing 退回账本单一来源，`expected_closes_position` 与
+`position_closed` 变为 `null`。过期的券商读数不能用来声称清仓。
+
+### 2.5 决定五（重写，待确认）：自主减仓的持仓下限，不用滚动窗口
+
+**撤回**第一稿的 `max_cumulative_reduction_pct`（滚动 30 天）。你们的反驳成立：窗口只约束窗口内，
+不能阻止长期逐步清空。
+
+改为一条持久下限 `buckets.<bucket>.autonomy.reduce.min_remaining_pct_of_opened`：
+
+| 问题 | 答案 |
+| --- | --- |
+| 分母是什么 | **人最后一次开仓或加仓成交后该持仓的数量**（`opened_baseline_quantity`）。从批准与成交记录算出：`approved_by` **不以** `autonomy:` 开头、动作为 `BUY`／`ADD` 的最后一笔成交之后的持仓量 |
+| 窗口起点 | 没有窗口。这是一条持久下限，所以"长期逐步清空"被堵死：代码把持仓减到下限后，再往下永远只能由人来做 |
+| 加仓后如何处理 | 人加仓会抬高基线，代码因此重获空间。这是对的：人加仓是人表达了看法 |
+| 如何计数 | 已离开的份额按**实际成交**计；活动预留按**占用**计，所以两次自主动作不会重复减同一份 |
+| 没有基线时 | 拒绝，代码 `no_opened_baseline`（转入的持仓、种子账本都属此类），失败闭合 |
+| 配置未声明时 | 拒绝自主减仓，代码 `no_min_remaining`，与"未声明的限额是拒绝而不是默认"一致 |
+
+这是收紧，不需要冷静期。`SELL` 仍永不自主，本条只约束 `REDUCE`。
+
+**接口位置的纠正**：`/config/authority` 没有标的，不能返回"该持仓"的用量。所以
+`actions.REDUCE.limits` 只报**规则本身**（`min_remaining_pct_of_opened`），**按持仓的数字放在提案
+详情的 `exit.autonomous` 块**，那里才有确定的标的。
+
+### 2.6 决定六（已接受，文案纠正）：撤单留在券商端，恢复走续做
+
+撤单不做成控制台动作，Robinhood App 就是撤单的地方。本系统负责正确处理别处发生的撤单。
+
+零成交撤单的恢复：**同样走 `continue_exit`**。额度全额返还，所以续做量等于原授权，仍需一次人工批准。
+第一稿写的"再批准原提案"是错的，代码不允许。
+
+**新鲜度**：续做沿用**根提案的新鲜度锚点**（`created_at`），不重新起算，否则就是把陈旧研究洗成一个
+看起来新鲜的提案。根提案已过期时 `continue_exit` 拒绝，代码 `research_expired`，文案指向重新研究。
+这与现有行为一致（`execution.py:168`，过期提案一律不执行）。
+
+> 一个反面论据，供你们否决：退出的论点变旧不构成继续持有的理由，所以也可以主张"允许过期后的退出并
+> 标注"。我倾向保持与现有行为一致，但这条值得你们表态。
+
+### 2.7 决定七（已接受）：卖出不受事件黑窗、层级、置信度约束
+
+今天的代码已经如此，写进契约是为了防止有人出于好意把开仓的限制照抄给退出。退出仍要过的检查：
+持仓存在、数量有效且不超卖、报价可读且不过期、账户可读、熔断未启、券商预审通过。
 
 ---
 
 ## 3. 接口契约
 
-### 3.1 `GET /proposals/{id}` 新增 `exit` 块（仅 `SELL`／`REDUCE` 提案有，其余为 `null`）
+### 3.1 `GET /proposals/{id}` 的 `exit` 块（仅 `SELL`／`REDUCE`，其余 `null`）
 
 | 字段 | 说明 |
 | --- | --- |
-| `intent` | `close_position`（`SELL`）\| `reduce_position`（`REDUCE`）。由动作派生，不新增存储字段 |
-| `authorised_quantity` | 批准会授权的股数，即 `terms.sell_quantity` 必须等于的那个数 |
-| `sellable.quantity` | 现在实际可卖：`min(账本, 券商)` 减去活动订单占用 |
-| `sellable.ledger_quantity` / `sellable.venue_quantity` | 两个来源各自的数，**任一不可读时为 `null`，不写 0** |
-| `sellable.venue_as_of` | 券商读数的时刻（kept reading）；`null` 表示从未读到 |
-| `sellable.agrees` | 两个来源是否一致（容差 1e-6）；`false` 时 `note` 说明差在哪 |
-| `already_filled` | 本提案此前已成交的股数（部分成交、或被撤单前成交的部分） |
-| `remaining_after_execution` | 这一笔按当前可卖全部成交后，该持仓还会剩下多少 |
-| `closes_position` | `remaining_after_execution == 0`。**这是屏幕唯一可以据以说"清仓"的字段**，不要从 `intent` 推断 |
-| `min_sellable_increment` | 券商支持的最小增量（现为 1e-6）；余量低于它就卖不掉 |
-| `blocked_by[]` | 闭集，见下。空表示这一笔在**持仓层面**没有障碍 |
-| `continuation_of` / `continued_by` | 续做链的两端，`null` 表示不在链上 |
+| `action` / `authority_action` | `SELL` 或 `REDUCE`。**账户级权限读 `/config/authority.actions[authority_action]`**，不要写死 |
+| `intent` | `close_position`（SELL）\| `reduce_position`（REDUCE），由动作派生 |
+| `authorised_quantity` | 批准会授权的股数，`terms.sell_quantity` 必须等于它 |
+| `sellable.*` | `quantity`、`basis`、`ledger_quantity`、`venue_quantity`、`venue_as_of`、`venue_stale`、`committed_quantity`、`agrees`、`note`。任一来源不可读时该项为 `null`，不写 0 |
+| `expected_submit_quantity` | 见 §2.4 |
+| `expected_remaining` / `expected_remaining_basis` | 见 §2.4，按较大来源 |
+| `expected_closes_position` | 三态，见 §2.4。**屏幕只据此显示"预计清仓"** |
+| `min_sellable_increment` | 券商最小增量（现为 1e-6） |
+| `already_filled` | 本提案已成交股数 |
+| `chain.*` | `root_proposal_id`、`allowance`、`filled`、`committed`、`remaining_allowance`、`members[]`（每项 `proposal_id`、`status`、`authorised_quantity`、`filled_quantity`） |
+| `continuable.*` | `eligible`（bool）、`quantity`（可续做股数）、`blocked_by[]`。**在 GET 里，所以刷新页面或从待办进入都读得到** |
+| `autonomous` | 仅 `REDUCE` 有，见 §3.3；`SELL` 为 `null` |
+| `blocked_by[]` | 这一笔在**持仓层面**的阻断，闭集见下 |
 
-`exit.blocked_by` 代码（闭集，前端本地化）：
+`exit.blocked_by` 与 `continuable.blocked_by` 共用一个闭集：
 
 | 代码 | 含义 |
 | --- | --- |
-| `active_order` | 该账户已有一笔活动订单（唯一索引），此时不提供批准 |
-| `position_gone` | 账本与券商都不再持有该标的 |
-| `quantity_unknown` | 券商读不到且账本未确认，数量无法确定；不猜，不卖 |
-| `below_precision` | 可卖余量小于券商最小增量 |
-| `reconciliation_pending` | 本提案上一次尝试状态未明，对账仍在进行；**绝不提供再卖一次** |
+| `order_working` | 本链有成员处于 `PENDING_EXECUTION`（含 `PARTIALLY_FILLED`）：券商可能还在成交，此时创建续做会重复卖出 |
+| `reconciliation_unresolved` | 有 `reconciliation_error` 或状态 `UNKNOWN`：对账未完成，**绝不提供再卖一次** |
+| `active_order` | 该账户已有活动预留（唯一索引），任何新订单都进不去 |
+| `allowance_spent` | `remaining_allowance == 0`：原授权已用尽。后来新增的持仓不属于本链，需要新提案 |
+| `position_gone` | 账本与券商都不再持有 |
+| `quantity_unknown` | 券商不可读或过期，且账本未确认；不猜，不卖 |
+| `below_precision` | 可续做量小于 `min_sellable_increment` |
+| `research_expired` | 根提案已过其新鲜度窗口，见 §2.6 |
 
-**分工要说清**：`exit.blocked_by` 只讲**这个持仓**；熔断、真钱开关、预检、梯子停机这些**账户级**
-阻断在 `GET /config/authority.actions.SELL.human_approval.blocked_by`。审批页必须读两处，任一非空
-就不提供批准。
+**分工**：`exit.blocked_by` 只讲这个持仓与这条链；熔断、真钱开关、预检、梯子停机在
+`/config/authority.actions[authority_action].human_approval.blocked_by`。审批页两处都要读，
+任一非空就不提供批准。
 
 ### 3.2 `POST /proposals/{id}/approve` 的响应新增 `exit_result`
 
-现有字段（`status`、`outcome`、`submitted`、`order`、`error`、`reasons`、`message`、
-`authority_changed`）不变。减仓提案另带：
+现有字段不变。减仓提案另带：`requested_quantity`、`submitted_quantity`、`filled_quantity`、
+`confirmed_remaining`、`confirmed_remaining_basis`、`position_closed`（三态）、
+`continuable`（同 §3.1 的结构）。
 
-| 字段 | 说明 |
-| --- | --- |
-| `requested_quantity` | 授权量 |
-| `submitted_quantity` | 实际下单量（`min(授权, 当前可卖)`，向下取整到精度） |
-| `filled_quantity` | 已成交（同步读到的部分；未终态时可能为 0） |
-| `remaining_quantity` | 该持仓仍剩余的股数 |
-| `position_closed` | 是否已清仓 |
-| `continuation_available` | 是否可以调用 `continue_exit` |
+### 3.3 `exit.autonomous`（仅 `REDUCE`）
 
-### 3.3 `POST /proposals/{id}/continue_exit`（新增）
+```json
+{
+  "permitted": false,
+  "min_remaining_pct_of_opened": 25,
+  "opened_baseline_quantity": 0.4,
+  "opened_baseline_at": "2026-09-12T14:02:11+00:00",
+  "floor_quantity": 0.1,
+  "current_quantity": 0.2,
+  "headroom_quantity": 0.1,
+  "blocked_by": [{"code": "not_enabled", "detail": "buckets.micro_live.autonomy.reduce.enabled is not true"}]
+}
+```
+
+`headroom_quantity = max(0, current_quantity − floor_quantity)`；代码的减仓量不得超过它。
+`opened_baseline_quantity` 为 `null` 时 `blocked_by` 含 `no_opened_baseline`。
+
+### 3.4 `POST /proposals/{id}/continue_exit`
 
 | 请求字段 | 规则 |
 | --- | --- |
-| `request_id` | UUID，幂等；同 id 重放返回同一个续做提案，同 id 不同内容 409 |
+| `request_id` | UUID，幂等 |
 | `confirm` | 必须 `true` |
-| `authority_version` | 与批准一致的规则：与当前不符 409 要求重载 |
-| `acknowledge_authority_change` | 放宽／混合／未知时必须为 `true`，且必须带 `authority_version` |
+| `authority_version` | 与批准同规则，不符 409 |
+| `acknowledge_authority_change` | 放宽／混合／未知时必须 `true`，且必须带 `authority_version` |
 
 | 情形 | 响应 |
 | --- | --- |
-| 原提案是 `PARTIALLY_FILLED`，或 `CANCELED` 且有部分成交 | 200，返回新提案摘要，`continuation_of` 指向原提案；状态 `WAITING_FOR_APPROVAL`，**不执行** |
-| 原提案未成交任何数量 | 400 `"nothing was filled; approve the original proposal again or request fresh research"` |
-| 原提案仍在对账中 | 409 `"the previous attempt is unresolved; reconciliation continues"` |
-| 续做量会超过原授权减已成交 | 服务端自行夹小，不报错；响应里的数量就是夹小后的 |
+| 有资格（终结 + 已对账 + 无活动预留 + 有剩余额度 + 可卖 > 0 + 研究未过期） | 200，新提案摘要，`continuation_of` 指向根提案，状态 `WAITING_FOR_APPROVAL`，**不执行** |
+| 本链已有未完成续做 | 200，返回那一个，`deduplicated: true`（不新建第二个分支） |
+| 订单仍在进行 | 409 `"an order from this exit is still working at the venue; reconciliation decides what remains"` |
+| 对账未完成 | 409 `"the previous attempt is unresolved; reconciliation continues"` |
+| 额度已用尽 | 400 `"the original authorisation is fully filled; a position acquired since is a new idea and needs its own proposal"` |
+| 根提案已过期 | 400 `"the research behind this exit has expired; request fresh research"` |
 | 持仓已不存在 | 400 `"the position is gone; nothing to continue"` |
 
-续做提案继承原 `run_id`、`authority_version`、`strategy`、`instrument_type`，`purpose` 记为
-`exit_review`，并在历史里留一条 `exit_continued`。
-
-### 3.4 `GET /config/authority` 的 `SELL` 部分（已存在，本轮只增一个代码）
-
-`SELL.autonomous.blocked_by` 现有 `never_autonomous` 不变。`REDUCE.autonomous.blocked_by` 新增
-`no_cumulative_cap`（未声明 `max_cumulative_reduction_pct`），并在 `REDUCE.limits` 增
-`max_cumulative_reduction_pct` 与 `cumulative_used_pct`（该持仓在窗口内已被代码移除的比例）。
-`consistency` 新增一项 `reduce_without_cumulative_cap`，说明"每次半仓且每天一个"不足以阻止代码把一
-个持仓逐步减到接近零。
+续做提案继承根提案的 `run_id`、`authority_version`、`strategy`、`instrument_type` 与**新鲜度锚点**，
+`purpose` 记为 `exit_review`，历史留一条 `exit_continued`。
 
 ### 3.5 `/attention` 新增一个 kind
 
 | kind | 出现 | 退出 | 严重性／优先级 |
 | --- | --- | --- | --- |
-| `exit_incomplete` | 减仓提案部分成交或被撤单且有成交，持仓仍有余量，72 小时内，且未创建续做 | 创建了续做提案；持仓清零；或满 72 小时（之后只在 Activity 里） | high／3，`requires_person: true`，`actions: ["continue_exit", "open"]` |
+| `exit_incomplete` | 退出链已终结且对账完成、`remaining_allowance > 0`、持仓仍有余量、72 小时内、且本链无未完成续做 | 创建了续做；额度用尽；持仓清零；或满 72 小时 | high／3，`requires_person: true`，`actions: ["continue_exit", "open"]` |
+
+**判定与接口、按钮同源**：`/attention` 这一项的出现条件就是 `exit.continuable.eligible`，三处不各算一遍。
 
 ---
 
-## 4. 四种响应样例
+## 4. 六种响应样例
 
-**正常**（清仓待批准，账本与券商一致，无障碍）：
+**A. 正常**（清仓待批准，两来源一致，无阻断）：
 
 ```json
 "exit": {
-  "intent": "close_position", "authorised_quantity": 0.2,
-  "sellable": {"quantity": 0.2, "ledger_quantity": 0.2, "venue_quantity": 0.2,
-               "venue_as_of": "2026-09-19T15:04:02+00:00", "agrees": true, "note": null},
-  "already_filled": 0.0, "remaining_after_execution": 0.0, "closes_position": true,
-  "min_sellable_increment": 0.000001, "blocked_by": [],
-  "continuation_of": null, "continued_by": null
+  "action": "SELL", "authority_action": "SELL", "intent": "close_position",
+  "authorised_quantity": 0.2,
+  "sellable": {"quantity": 0.2, "basis": "both_sources_agree", "ledger_quantity": 0.2,
+               "venue_quantity": 0.2, "venue_as_of": "2026-09-19T15:04:02+00:00",
+               "venue_stale": false, "committed_quantity": 0.0, "agrees": true, "note": null},
+  "expected_submit_quantity": 0.2, "expected_remaining": 0.0,
+  "expected_remaining_basis": "both_sources_agree", "expected_closes_position": true,
+  "min_sellable_increment": 0.000001, "already_filled": 0.0,
+  "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.0, "committed": 0.2,
+            "remaining_allowance": 0.0,
+            "members": [{"proposal_id": "p_41aa07", "status": "WAITING_FOR_APPROVAL",
+                         "authorised_quantity": 0.2, "filled_quantity": 0.0}]},
+  "continuable": {"eligible": false, "quantity": 0.0,
+                  "blocked_by": [{"code": "order_working",
+                                  "detail": "this exit has not been attempted yet"}]},
+  "autonomous": null, "blocked_by": []
 }
 ```
 
-**空数据**（从未读到券商，账本也未确认）：
+**B. 部分成交但订单仍挂着**（前端要求的第一个样例，**不可续做**）：
 
 ```json
 "exit": {
-  "intent": "close_position", "authorised_quantity": 0.2,
-  "sellable": {"quantity": null, "ledger_quantity": 0.2, "venue_quantity": null,
-               "venue_as_of": null, "agrees": null,
-               "note": "the venue has not been read; the ledger's own figure is unconfirmed"},
-  "already_filled": 0.0, "remaining_after_execution": null, "closes_position": false,
-  "min_sellable_increment": 0.000001,
-  "blocked_by": [{"code": "quantity_unknown",
-                  "detail": "no venue reading and no confirmed ledger; the quantity cannot be established"}],
-  "continuation_of": null, "continued_by": null
+  "action": "SELL", "authority_action": "SELL", "intent": "close_position",
+  "authorised_quantity": 0.2,
+  "sellable": {"quantity": 0.0, "basis": "both_sources_agree", "ledger_quantity": 0.08,
+               "venue_quantity": 0.08, "venue_as_of": "2026-09-19T15:31:40+00:00",
+               "venue_stale": false, "committed_quantity": 0.08, "agrees": true,
+               "note": "0.08 is committed to an order still working in this account"},
+  "expected_submit_quantity": 0.0, "expected_remaining": 0.08,
+  "expected_remaining_basis": "both_sources_agree", "expected_closes_position": false,
+  "min_sellable_increment": 0.000001, "already_filled": 0.12,
+  "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.12, "committed": 0.08,
+            "remaining_allowance": 0.0,
+            "members": [{"proposal_id": "p_41aa07", "status": "PARTIALLY_FILLED",
+                         "authorised_quantity": 0.2, "filled_quantity": 0.12}]},
+  "continuable": {"eligible": false, "quantity": 0.0, "blocked_by": [
+    {"code": "order_working",
+     "detail": "the order is still working at the venue; it may yet fill the remaining 0.08"},
+    {"code": "active_order", "detail": "an order is already working in micro_live"}]},
+  "autonomous": null,
+  "blocked_by": [{"code": "order_working", "detail": "the order is still working at the venue"}]
 }
 ```
-屏幕显示"数量无法确认"，不提供批准，不显示 0 股。
+屏幕：显示"已成交 0.12，订单仍在进行"，**不提供续做按钮，也不提供批准**。`/attention` 不出
+`exit_incomplete`（链未终结）。
 
-**过期／被打断**（部分成交后余量未卖，可续做）：
+**C. 部分成交后在券商端撤单且对账完成**（前端要求的第二个样例，**可续做**）：
 
 ```json
 "exit": {
-  "intent": "close_position", "authorised_quantity": 0.2,
-  "sellable": {"quantity": 0.08, "ledger_quantity": 0.08, "venue_quantity": 0.08,
-               "venue_as_of": "2026-09-19T15:31:40+00:00", "agrees": true, "note": null},
-  "already_filled": 0.12, "remaining_after_execution": 0.0, "closes_position": true,
-  "min_sellable_increment": 0.000001, "blocked_by": [],
-  "continuation_of": null, "continued_by": null
+  "action": "SELL", "authority_action": "SELL", "intent": "close_position",
+  "authorised_quantity": 0.2,
+  "sellable": {"quantity": 0.08, "basis": "both_sources_agree", "ledger_quantity": 0.08,
+               "venue_quantity": 0.08, "venue_as_of": "2026-09-19T15:46:10+00:00",
+               "venue_stale": false, "committed_quantity": 0.0, "agrees": true, "note": null},
+  "expected_submit_quantity": 0.0, "expected_remaining": 0.08,
+  "expected_remaining_basis": "both_sources_agree", "expected_closes_position": false,
+  "min_sellable_increment": 0.000001, "already_filled": 0.12,
+  "chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.12, "committed": 0.0,
+            "remaining_allowance": 0.08,
+            "members": [{"proposal_id": "p_41aa07", "status": "CANCELED",
+                         "authorised_quantity": 0.2, "filled_quantity": 0.12}]},
+  "continuable": {"eligible": true, "quantity": 0.08, "blocked_by": []},
+  "autonomous": null, "blocked_by": []
 }
 ```
 配套 `exit_result`：`{"requested_quantity": 0.2, "submitted_quantity": 0.2, "filled_quantity": 0.12,
-"remaining_quantity": 0.08, "position_closed": false, "continuation_available": true}`，
-`/attention` 出现一条 `exit_incomplete`。
+"confirmed_remaining": 0.08, "confirmed_remaining_basis": "both_sources_agree",
+"position_closed": false, "continuable": {"eligible": true, "quantity": 0.08, "blocked_by": []}}`。
+`/attention` 出一条 `exit_incomplete`。屏幕提供"**创建余量续做提案**"，旁注"创建后仍需批准"。
 
-**失败**（该账户已有活动订单，且授权版本在放宽后未确认）：
+**D. 空数据**（从未读到券商，账本未确认）：
 
 ```json
-"exit": {
-  "intent": "reduce_position", "authorised_quantity": 0.1,
-  "sellable": {"quantity": 0.0, "ledger_quantity": 0.2, "venue_quantity": 0.2,
-               "venue_as_of": "2026-09-19T15:04:02+00:00", "agrees": true,
-               "note": "0.2 is committed to an order already working in this account"},
-  "already_filled": 0.0, "remaining_after_execution": 0.2, "closes_position": false,
-  "min_sellable_increment": 0.000001,
-  "blocked_by": [{"code": "active_order",
-                  "detail": "an order is already working in micro_live; one account holds one active order"}],
-  "continuation_of": null, "continued_by": null
-}
+"sellable": {"quantity": null, "basis": "ledger_only", "ledger_quantity": 0.2,
+             "venue_quantity": null, "venue_as_of": null, "venue_stale": null,
+             "committed_quantity": 0.0, "agrees": null,
+             "note": "the venue has not been read; the ledger's own figure is unconfirmed"},
+"expected_submit_quantity": null, "expected_remaining": null,
+"expected_remaining_basis": "ledger_only", "expected_closes_position": null,
+"continuable": {"eligible": false, "quantity": null, "blocked_by": [
+  {"code": "quantity_unknown", "detail": "no venue reading and no confirmed ledger"}]}
 ```
-批准请求会以 409 被拒（授权变化未确认），并且即便确认了也仍被 `active_order` 挡住。
+屏幕："数量无法确认"，不提供批准，不显示 0 股，不显示"预计清仓"。
+
+**E. 券商读数过期**（数量取小，但清仓判断为"无法确认"）：
+
+```json
+"sellable": {"quantity": 0.2, "basis": "ledger_only", "ledger_quantity": 0.2,
+             "venue_quantity": 0.3, "venue_as_of": "2026-09-19T14:58:00+00:00",
+             "venue_stale": true, "committed_quantity": 0.0, "agrees": false,
+             "note": "the venue reading is older than 180s and is not used for sizing; the two sources disagreed when last read (ledger 0.2, venue 0.3)"},
+"expected_submit_quantity": 0.2, "expected_remaining": null,
+"expected_remaining_basis": "ledger_only", "expected_closes_position": null
+```
+这正是你们举的账本 0.2、券商 0.3 的例子：可以卖 0.2，但**不显示"预计清仓"**。
+
+**F. 失败**（额度已用尽，后来又建了新仓）：
+
+```json
+"chain": {"root_proposal_id": "p_41aa07", "allowance": 0.2, "filled": 0.2, "committed": 0.0,
+          "remaining_allowance": 0.0, "members": [{"proposal_id": "p_41aa07", "status": "EXECUTED",
+                                                   "authorised_quantity": 0.2, "filled_quantity": 0.2}]},
+"continuable": {"eligible": false, "quantity": 0.0, "blocked_by": [
+  {"code": "allowance_spent",
+   "detail": "the original authorisation of 0.2 is fully filled; the 0.15 held now was acquired since and needs its own proposal"}]}
+```
 
 ---
 
-## 5. 审批页结构建议（这是前端要的那部分）
+## 5. 审批页结构（前端要的那部分）
 
-一屏内要能回答四个问题，顺序建议如下：
+一屏内按顺序回答四个问题：
 
-1. **这一笔会卖掉多少、之后还剩多少、是不是清仓。** 用 `authorised_quantity`、
-   `sellable.quantity`、`remaining_after_execution`、`closes_position`。"清仓"只认
-   `closes_position`，不要从动作名或 `intent` 推断。
-2. **数量的来源是否一致、读于何时。** 两个来源各自显示，不一致时显示两者与 `note`；任一为 `null`
-   显示"未读到"，不显示 0。
-3. **有什么挡着。** `exit.blocked_by`（这个持仓）与 `authority.actions.SELL.human_approval.blocked_by`
-   （这个账户）合并展示，任一非空就不提供批准按钮。
-4. **上一次尝试留下了什么。** `already_filled` 非零时显示"已成交 N"，
-   `continuation_available` 为真时提供"把剩下的卖完"，它会新建一个待批准的续做提案，而不是立即下单。
+1. **这一笔会卖多少、之后还剩多少、是不是清仓。** 用 `expected_submit_quantity`、
+   `expected_remaining`、`expected_closes_position`。审批前最多说"**预计清仓**"，且仅当
+   `expected_closes_position === true`；成交后说"已清仓"仅当 `position_closed === true`。
+   两者为 `null` 时说"无法确认"，永不显示 0。
+2. **数量来源与读取时间。** 两来源分别显示，`venue_stale` 为真时标注"券商读数已过期，未用于计算"。
+3. **有什么挡着。** `exit.blocked_by` 与 `authority.actions[authority_action].human_approval.blocked_by`
+   合并，任一非空不提供批准。
+4. **上一次尝试留下了什么。** `already_filled` 非零显示"已成交 N"；`continuable.eligible` 为真时提供
+   "创建余量续做提案"，旁注"创建后仍需批准"；为假时显示 `continuable.blocked_by` 的原因，
+   **`order_working` 与 `reconciliation_unresolved` 这两种情况下按钮必须不存在**。
 
-必须避免的三件事：对账未明时提供"再卖一次"；把 `intent` 当成结果；把账本与券商不一致做成拒绝退出。
+必须避免：对账未明或订单仍在进行时提供任何再卖入口；把 `intent` 当成结果；把两来源不一致做成拒绝
+退出；把无法确认显示为 0 或"已清仓"。
 
 ---
 
 ## 6. 本轮不做
 
-- **公司行动调整**：没有任何数据源。拆股会让账本与券商数量不一致，届时按决定二取小并作为对账事项
-  浮现，不假装算得准。
-- **控制台撤单**：见决定六，撤单留在券商端。
-- **给卖出加事件黑窗、风险层级、置信度门**：见决定七，明确不做。
-- **自主清仓**：`SELL` 永不自主，本轮不变。
+- **公司行动调整**：无数据源。拆股会使两来源不一致，按 §2.2 取小并作为对账事项浮现，不假装算得准。
+- **控制台撤单**：见 §2.6。
+- **给卖出加事件黑窗、风险层级、置信度门**：见 §2.7。
+- **自主清仓**：`SELL` 永不自主。
 
 ---
 
-## 7. 实施顺序与验收（第二稿确定后）
+## 7. 实施顺序与验收（第四、五条确认后）
 
-1. `exit` 块与 `sellable` 的计算（只读，用 kept reading，不新增握手），`ProposalDetail` 加严格模型。
-2. `autonomy.reduce.max_cumulative_reduction_pct`：从批准记录算累计比例，未声明则拒绝；授权对象与
-   `consistency` 同步。
-3. `continue_exit`：续做提案、授权版本继承、累计不超原授权、幂等。
-4. `exit_result` 与 `/attention` 的 `exit_incomplete`。
-5. 隔离测试：超卖（授权 > 可卖、可卖 > 授权）、部分成交后续做、券商端撤单后续做、对账未明时拒绝
-   再卖、活动订单占用、账本与券商不一致、精度不足、授权在研究后收紧与放宽、续做累计不超原授权、
-   自主减仓累计触顶。全部离线，仍只有 `service/approvals.py` 一条下单入口。
+1. `exit` 块：`sellable`、四个数量口径、三态判定、`chain`、`continuable`（只读，用 kept reading，
+   不新增握手），`ProposalDetail` 加严格模型。
+2. `autonomy.reduce.min_remaining_pct_of_opened`：基线从批准与成交记录算出，未声明或无基线则拒绝；
+   规则进 `/config/authority.actions.REDUCE.limits`，按持仓的数字进 `exit.autonomous`。
+3. `continue_exit`：链额度、一条链一个未完成续做、事务内二次检查、幂等、新鲜度锚点继承。
+4. `exit_result` 与 `/attention` 的 `exit_incomplete`，判定与 `continuable.eligible` 同源。
+5. 隔离测试：授权 > 可卖、可卖 > 授权、两来源不一致、券商读数过期、精度不足、部分成交仍挂单时拒绝
+   续做、部分成交后撤单可续做、零成交撤单额度全额返还、额度用尽后新持仓不可续做、一条链只允许一个
+   未完成续做（并发与双 `request_id`）、重启后不产生第二分支、根提案过期拒绝、自主减仓触及持仓下限、
+   无基线时拒绝。全部离线，仍只有 `service/approvals.py` 一条下单入口。
 6. `deploy/checks.sh` 通过后提交，并把提交号与字段说明发前端。
 
 验收边界：本轮完成不等于可以启用自主减仓。`buckets.micro_live.autonomy.reduce.enabled` 仍是关的，
-打开它是单独的配置决定，且届时会被新的累计上限约束。
+打开它是单独的配置决定，届时受新的持仓下限约束。
