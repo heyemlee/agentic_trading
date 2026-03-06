@@ -131,6 +131,26 @@ const ui = path.resolve(__dirname, '../ui');
     assert.match(await exit.innerText(), /无法确认/);
     assert.equal(await page.locator('#btn-approve').isVisible(), false);
     assert.equal(posts.length, 2, 'exit reads must never start a write');
+    Object.assign(proposal, { action: 'REDUCE' });
+    Object.assign(proposal.exit, { action: 'REDUCE', authority_action: 'REDUCE',
+      expected_submit_quantity: 0.2, blocked_by: [], autonomous: {
+        permitted: false, min_remaining_pct_of_opened: null, position_high_water_quantity: 100,
+        high_water_set_at: now, high_water_source: 'console', cycle_started_at: now,
+        current_quantity: 26, floor_quantity: null, headroom_quantity: null,
+        blocked_by: [{ code: 'no_min_remaining', detail: 'Synthetic undeclared floor' }],
+      } });
+    authority.actions.REDUCE = { human_approval: { permitted: true, blocked_by: [] },
+      autonomous: { permitted: false, blocked_by: [{ code: 'not_enabled', detail: 'Synthetic autonomy off' }] } };
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('exit-autonomous')?.textContent.includes('Synthetic undeclared floor'));
+    assert.match(await page.locator('#exit-autonomous').innerText(), /未声明最低持仓保留比例/);
+    assert.match(await page.locator('#exit-autonomous').innerText(), /未读到/);
+    assert.equal(await page.locator('#btn-approve').isEnabled(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#exit-autonomous').scrollIntoViewIfNeeded();
+    if (process.env.CT_UI_CAPTURE_DIR) await page.screenshot({
+      path: path.join(process.env.CT_UI_CAPTURE_DIR, 'approval-autonomy-phone.png') });
+    assert.equal(posts.length, 2);
     assert.deepEqual(errors, []);
     console.log('Approval browser check passed: acknowledgement, conflict, explicit retry, exit sources, unknown quantities, mobile layout.');
   } catch (error) {

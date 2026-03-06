@@ -771,6 +771,55 @@ test('exit chain shows fills and unfilled commitments separately, without a cont
   assert.equal(c.element('exit-detail').innerHTML, '');
 });
 
+test('autonomous floor refusal is visible without disabling an otherwise permitted human reduction', () => {
+  const c = exitApprovalPage(), p = c.CT.proposalDetail;
+  p.action = p.exit.action = p.exit.authority_action = 'REDUCE'; p.is_real_money = true;
+  c.CT.health.micro_live_enabled = true; c.CT.microLive.preflight_ready = true;
+  c.CT.authority.actions.REDUCE = {
+    human_approval: { permitted: true, blocked_by: [] },
+    autonomous: { permitted: false, blocked_by: [{ code: 'no_min_remaining', detail: 'account floor not declared' }] },
+  };
+  p.exit.autonomous = { permitted: false, min_remaining_pct_of_opened: null,
+    position_high_water_quantity: 100, high_water_set_at: '2026-09-12T14:02:11Z', high_water_source: 'console',
+    cycle_started_at: '2026-09-12T14:02:11Z', current_quantity: 26, floor_quantity: null, headroom_quantity: null,
+    blocked_by: [{ code: 'no_min_remaining', detail: 'not declared <script>unsafe</script>' }] };
+  c.render(); const html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitAutoPositionBlocked/);
+  assert.match(html, /ap.exitAutoPct<\/dt><dd>ap.exitAutoUndeclared/);
+  assert.match(html, /ap.exitAutoFloor<\/dt><dd>ap.exitUnread/);
+  assert.match(html, /ap.exitAutoHeadroom<\/dt><dd>ap.exitUnread/);
+  assert.match(html, /ap.exitAutoBlock.no_min_remaining/);
+  assert.match(html, /account floor not declared/);
+  assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>/);
+  assert.equal(c.element('btn-approve').disabled, false);
+  c.element('btn-approve').events.click(); c.element('approve-confirm').checked = true;
+  c.element('approve-confirm').events.change(); assert.equal(c.element('approve-submit').disabled, false);
+});
+
+test('autonomous headroom shows zero and one exactly, never recomputes a baseline or leaks into SELL', () => {
+  const c = exitApprovalPage(), p = c.CT.proposalDetail;
+  p.action = p.exit.action = p.exit.authority_action = 'REDUCE';
+  c.render(); assert.match(c.element('exit-detail').innerHTML, /ap.exitAutoUnknown/);
+  p.exit.autonomous = { permitted: false, min_remaining_pct_of_opened: 25,
+    position_high_water_quantity: 100, current_quantity: 25, floor_quantity: 25, headroom_quantity: 0,
+    high_water_source: 'cli', blocked_by: [{ code: 'below_floor', detail: 'at floor' }] };
+  c.render(); assert.match(c.element('exit-detail').innerHTML, /ap.exitAutoHeadroom<\/dt><dd>ap.exitShares 0/);
+  Object.assign(p.exit.autonomous, { permitted: true, current_quantity: 26, headroom_quantity: 1, blocked_by: [] });
+  c.render(); let html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitAutoHighWater<\/dt><dd>ap.exitShares 100/);
+  assert.match(html, /ap.exitAutoFloor<\/dt><dd>ap.exitShares 25/);
+  assert.match(html, /ap.exitAutoHeadroom<\/dt><dd>ap.exitShares 1/);
+  assert.match(html, /ap.exitAutoPositionReady/); assert.match(html, /ap.exitAutoBoundary/);
+  // The server owns the numbers; missing provenance must stay unavailable.
+  p.exit.autonomous.position_high_water_quantity = null; p.exit.autonomous.headroom_quantity = null;
+  p.exit.autonomous.blocked_by = [{ code: 'no_opened_baseline', detail: 'ledger cannot be read' }];
+  c.render(); html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitAutoHighWater<\/dt><dd>ap.exitUnread/);
+  assert.match(html, /ledger cannot be read/);
+  p.action = p.exit.action = p.exit.authority_action = 'SELL'; p.exit.autonomous = null;
+  c.render(); assert.doesNotMatch(c.element('exit-detail').innerHTML, /exit-autonomous|ap.exitAutoTitle/);
+});
+
 test('open approval dialog stays bound to its original proposal and disables on a queue change', async () => {
   const c = approvalPage(); let posted = 0; c.CT_API.post = async () => { posted++; };
   c.element('btn-approve').events.click();

@@ -107,6 +107,11 @@ proposal version is unchanged. Live orders also require the actual action's auth
 Continuation eligibility and reasons are read-only for now: no `continue_exit` request or
 button is wired until that endpoint ships. The browser check covers these views on mobile;
 the frontend suite also covers confirmation invalidation, chain amounts and authority gating.
+REDUCE also displays `exit.autonomous`: the configured retained percentage, holding high-water
+mark and its provenance, cycle start, current holding, floor, headroom and reasons. These
+figures come from the service, not frontend arithmetic; null never becomes zero. Position
+autonomy and account autonomy constraints are separate from human approval constraints.
+Passing position conditions is not presented as passing all proposal/execution checks.
 
 ## Live data
 

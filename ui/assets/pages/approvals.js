@@ -48,6 +48,32 @@ window.Console.page('approvals', function (document) {
       : e.expected_closes_position === false ? 'ap.exitWillRemain' : 'ap.exitCannotConfirm';
     const accountBlocks = p.is_real_money
       ? D.authority?.actions?.[e.authority_action]?.human_approval?.blocked_by || [] : [];
+    // Position autonomy is informative here; its refusal never becomes a human
+    // approval refusal. The service remains responsible for all execution gates.
+    let autonomous = '';
+    if (p.action === 'REDUCE') {
+      const a = e.autonomous;
+      const accountAutonomy = p.is_real_money ? D.authority?.actions?.REDUCE?.autonomous : null;
+      const at = value => value ? C.dateTime(value) : C.t('ap.exitUnread');
+      const via = value => ['console', 'cli', 'autonomy'].includes(value)
+        ? C.t('ap.exitAutoVia.' + value) : C.t('ap.exitUnread');
+      autonomous = '<div id="exit-autonomous">' + title('ap.exitAutoTitle') +
+        '<p class="body-sm">' + C.escapeHtml(C.t(!a ? 'ap.exitAutoUnknown' : a.permitted === true
+          ? 'ap.exitAutoPositionReady' : a.permitted === false ? 'ap.exitAutoPositionBlocked' : 'ap.exitAutoUnknown')) + '</p>' +
+        (a ? '<dl class="kv" style="margin-top:12px;">' +
+          row('ap.exitAutoPct', Number.isFinite(a.min_remaining_pct_of_opened) ? C.pct(a.min_remaining_pct_of_opened) : C.t('ap.exitAutoUndeclared')) +
+          row('ap.exitAutoHighWater', shares(a.position_high_water_quantity)) +
+          row('ap.exitAutoHighWaterAt', at(a.high_water_set_at)) + row('ap.exitAutoSource', via(a.high_water_source)) +
+          row('ap.exitAutoCycle', at(a.cycle_started_at)) + row('ap.exitAutoCurrent', shares(a.current_quantity)) +
+          row('ap.exitAutoFloor', shares(a.floor_quantity)) + row('ap.exitAutoHeadroom', shares(a.headroom_quantity)) + '</dl>' +
+          '<div class="list list-inset">' + (a.blocked_by || []).map(x => C.listRow({
+            title: C.t('ap.exitAutoBlock.' + x.code), sub: x.detail,
+          })).join('') + '</div>' : '') +
+        (accountAutonomy?.blocked_by?.length ? '<p class="eyebrow" style="margin-top:12px;">' +
+          C.escapeHtml(C.t('ap.exitAutoAccountBlocks')) + '</p><div class="list list-inset">' +
+          accountAutonomy.blocked_by.map(x => C.listRow({ title: x.detail })).join('') + '</div>' : '') +
+        '<p class="body-sm body-muted" style="margin-top:12px;">' + C.escapeHtml(C.t('ap.exitAutoBoundary')) + '</p></div>';
+    }
     C.setHTML(card, '<div class="stack stack-6">' +
       '<div>' + title('ap.exitTitle') + '<p class="body-sm" style="margin-bottom:12px;">' + C.escapeHtml(C.t(disposition)) + '</p><dl class="kv">' +
       row('ap.exitAuthorised', shares(e.authorised_quantity)) +
@@ -67,7 +93,7 @@ window.Console.page('approvals', function (document) {
       '<div>' + title('ap.exitObstacles') + '<div class="list list-inset">' + exitReasons(e.blocked_by) +
       accountBlocks.map(x => C.listRow({ title: x.detail })).join('') +
       (!e.blocked_by?.length && !accountBlocks.length ? C.listRow({ title: C.t('ap.exitNoPositionBlocks') }) : '') + '</div></div>' +
-      '<div>' + title('ap.exitChain') + '<dl class="kv">' +
+      autonomous + '<div>' + title('ap.exitChain') + '<dl class="kv">' +
       row('ap.exitRoot', chain.root_proposal_id || C.t('ap.exitUnread')) + row('ap.exitAlreadyFilled', shares(e.already_filled)) +
       row('ap.exitAllowance', shares(chain.allowance)) + row('ap.exitChainFilled', shares(chain.filled)) +
       row('ap.exitChainCommitted', shares(chain.committed)) + row('ap.exitChainRemaining', shares(chain.remaining_allowance)) + '</dl>' +
