@@ -295,3 +295,39 @@ def test_the_open_budget_counts_buys_and_the_reduce_budget_counts_reductions(arm
     everything = bought + reduced
     assert autonomy.opened_today(everything, MICRO, now=NOW) == 2
     assert autonomy.reduced_today(everything, MICRO, now=NOW) == 1
+
+
+# ------------------------------------------------------------------ who approved it
+def _approved(via=None, by=None, action="REDUCE", ticker="VTI", bucket="micro_live"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(bucket=bucket, action=action, ticker=ticker, approved_by=by,
+                           approved_via=via, approved_at=datetime.now(UTC).isoformat())
+
+
+def test_who_approved_it_is_read_from_the_record_not_from_a_username():
+    """`approved_by` carries a session's username, which a person chooses. A limit decided by
+    looking for a prefix in it would be a limit decided on something a person can pick."""
+    assert autonomy.was_autonomous(_approved(via="autonomy")) is True
+    assert autonomy.was_autonomous(_approved(via="console")) is False
+    assert autonomy.was_human(_approved(via="console")) is True
+    assert autonomy.was_human(_approved(via="cli")) is True
+    assert autonomy.was_human(_approved(via="autonomy")) is False
+    # A username that looks autonomous does not make it so once the record says otherwise.
+    assert autonomy.was_autonomous(_approved(via="console", by="autonomy:reduce")) is False
+    assert autonomy.was_human(_approved(via="console", by="autonomy:reduce")) is True
+
+
+def test_a_record_from_before_the_field_falls_back_in_the_safe_direction():
+    """The two questions face opposite ways, so the fallback differs and each errs toward less
+    autonomy: an unattributable record is counted against code's daily allowance, and is never
+    evidence of the human purchase a position floor is measured from."""
+    legacy_auto = _approved(by="autonomy:reduce")
+    legacy_human = _approved(by="owner")
+    # Counted as autonomous: under-counting would hand code an extra reduction.
+    assert autonomy.was_autonomous(legacy_auto) is True
+    assert autonomy.reduced_today([legacy_auto], "micro_live") == 1
+    # Never read as a person: a baseline raised by a record we cannot attribute is no baseline.
+    assert autonomy.was_human(legacy_auto) is False
+    assert autonomy.was_human(legacy_human) is False
+    assert autonomy.was_autonomous(legacy_human) is False

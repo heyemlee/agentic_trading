@@ -497,8 +497,13 @@ def test_an_autonomous_approval_is_not_handed_back_to_the_loop(tmp_path, monkeyp
     back would approve it again every fifteen seconds for as long as the market stayed shut."""
     _, p, broker, store, service = waiting(tmp_path, monkeypatch)
     broker.set_market_open(False)
-    service.approve(p.proposal_id, **{**approve_arguments(p), 'identity': 'autonomy:reduce'})
+    # As the loop calls it: the caller kind is recorded, not inferred from the identity's text.
+    service.approve(p.proposal_id, **{**approve_arguments(p), 'identity': 'autonomy:reduce',
+                                      'approved_via': 'autonomy'})
     assert store.get(p.proposal_id).status == EXPIRED
+    from agentic_trading import autonomy
+
+    assert autonomy.was_autonomous(store.get(p.proposal_id)) is True
 
 
 def test_service_recovery_does_not_submit(tmp_path, monkeypatch):

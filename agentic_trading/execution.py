@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import autonomy
 from .broker.base import (
     BrokerAdapter,
     BrokerError,
@@ -329,10 +330,11 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         sell_quantity=proposal.sell_quantity,
         missing_information=proposal.missing_information,
         evidence=proposal.evidence,
-        # Derived from who approved it, not passed in. The macro blackout and the autonomous
+        # Read from the approval record, not passed in. The macro blackout and the autonomous
         # allowance both key on this, and both would be silently inert if the flag never made
-        # it from the approval record to the rules that read it.
-        autonomous=str(proposal.approved_by or "").startswith("autonomy:"),
+        # it from the approval record to the rules that read it. `was_autonomous` reads the
+        # recorded caller kind and falls back to the old prefix, which here can only restrict.
+        autonomous=autonomy.was_autonomous(proposal),
     )
     result = HardRiskEngine(profiles).evaluate(risk_proposal, snap, ladders, regime)
     rv.hard_risk = result.as_dict()

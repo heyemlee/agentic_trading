@@ -231,6 +231,9 @@ class ProposalSummary(BaseModel):
     requires_human_approval: bool
     created_at: str
     approved_at: str | None = None
+    #: Which kind of caller approved it: console, cli or autonomy. None on a record written
+    #: before the field existed, which is not evidence that a person approved it.
+    approved_via: str | None = None
     freshness: ProposalFreshness
     reference_price: float | None = None
     run_id: str | None = None

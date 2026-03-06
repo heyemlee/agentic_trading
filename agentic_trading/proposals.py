@@ -130,6 +130,12 @@ class Proposal:
     requires_human_approval: bool = True
     approved_at: str | None = None
     approved_by: str | None = None
+    #: Which kind of caller approved it: console | cli | autonomy. Written by the caller rather
+    #: than inferred from ``approved_by``, whose text is a session's username and is not an
+    #: identity a limit may be decided on. None on a record written before the field existed;
+    #: `autonomy.was_autonomous` and `was_human` say what to do with that, and they answer
+    #: differently because the safe fallback differs by question.
+    approved_via: str | None = None
     approval_note: str | None = None
     executed_at: str | None = None
     client_order_id: str | None = None

@@ -494,6 +494,7 @@ def approve_main(argv: list[str] | None = None) -> int:
         proposal.status = APPROVED
         proposal.approved_at = utcnow().isoformat()
         proposal.approved_by = "investor"
+        proposal.approved_via = "cli"
         proposal.approval_note = args.note
         proposal.note("approved", args.note or "approved via ct-approve")
         store.save(proposal)

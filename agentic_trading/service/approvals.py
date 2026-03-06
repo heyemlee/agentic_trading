@@ -77,6 +77,7 @@ class ApprovalsMixin:
             requires_human_approval=p.requires_human_approval,
             created_at=p.created_at,
             approved_at=p.approved_at,
+            approved_via=p.approved_via,
             freshness=ProposalFreshness(
                 state=freshness, label=FRESHNESS_LABELS.get(freshness, freshness),
                 detail=why, freshness_class=p.freshness_class(profiles),
@@ -166,8 +167,15 @@ class ApprovalsMixin:
     def approve(self, proposal_id: str, note: str | None = None, *, identity: str | None = None,
                 version: str | None = None, request_id: str | None = None,
                 terms: dict[str, Any] | None = None, authority_version: str | None = None,
-                acknowledge_authority_change: bool = False) -> dict[str, Any]:
-        """Approve a specific idea once, under the verified caller's identity."""
+                acknowledge_authority_change: bool = False,
+                approved_via: str = "console") -> dict[str, Any]:
+        """Approve a specific idea once, under the verified caller's identity.
+
+        ``approved_via`` says which kind of caller this is -- the console, the CLI, or the
+        autonomous pass -- and is recorded rather than inferred from ``identity``, whose text is
+        a session's username. A limit that decided anything by reading a username for a prefix
+        would be deciding on something a person can choose.
+        """
         profiles = self.profiles()
         store = self._store(profiles)
         initial = store.get(proposal_id)
@@ -206,6 +214,7 @@ class ApprovalsMixin:
                         p.status = APPROVED
                         p.approved_at = utcnow().isoformat()
                         p.approved_by = identity
+                        p.approved_via = approved_via
                         p.approval_note = note
                         p.approval_request_id = request_id
                         p.approved_version = version
@@ -213,7 +222,8 @@ class ApprovalsMixin:
                         # approval's answer, and the answer is what gets returned below.
                         p.approval_response = None
                         p.note("approved", note or "explicit approval through the console",
-                               identity=identity, version=version, request_id=request_id, terms=terms,
+                               identity=identity, via=approved_via, version=version,
+                               request_id=request_id, terms=terms,
                                authority_version=current_authority,
                                authority_changed=authority_changed)
                         store.save(p)
@@ -393,7 +403,7 @@ class ApprovalsMixin:
                     terms={"ticker": proposal.ticker, "bucket": proposal.bucket,
                            "action": proposal.action, "notional_usd": proposal.notional_usd,
                            "sell_quantity": proposal.sell_quantity},
-                    authority_version=current_authority)
+                    authority_version=current_authority, approved_via=autonomy.AUTONOMOUS_VIA)
             except ServiceConflict as exc:
                 # A person reached the same proposal first, or it moved underneath us. The
                 # approval protocol resolved the race; there is nothing to repair.

@@ -237,6 +237,37 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
     return Decision(True, reasons)
 
 
+#: What may appear in ``Proposal.approved_via``. A person's approval comes through the console
+#: or the CLI; deterministic code's comes through the autonomous pass.
+HUMAN_VIA = ("console", "cli")
+AUTONOMOUS_VIA = "autonomy"
+
+
+def was_autonomous(proposal) -> bool:
+    """Whether deterministic code approved this, read from the record's own field.
+
+    A record written before ``approved_via`` existed has no field, and the honest fallback is
+    the old prefix — but only because of which way it errs here. This answer feeds rate limits
+    and the blackout that applies to autonomous action, so counting an unattributable record as
+    autonomous can only restrict code further. :func:`was_human` faces the opposite direction
+    and therefore takes the opposite fallback.
+    """
+    via = getattr(proposal, "approved_via", None)
+    if via:
+        return via == AUTONOMOUS_VIA
+    return str(getattr(proposal, "approved_by", None) or "").startswith("autonomy:")
+
+
+def was_human(proposal) -> bool:
+    """Whether a person approved this, read from the record's own field and nothing else.
+
+    No fallback: a record that cannot be attributed to a person is not evidence of one. The
+    position floor autonomous reductions may not cross is measured from what a person bought,
+    so a record we cannot attribute must never raise it.
+    """
+    return getattr(proposal, "approved_via", None) in HUMAN_VIA
+
+
 def acted_today(proposals, bucket: str, actions, now: datetime | None = None) -> int:
     """How many distinct positions code has acted on by itself in this bucket in the last 24h.
 
@@ -247,7 +278,7 @@ def acted_today(proposals, bucket: str, actions, now: datetime | None = None) ->
     wanted = set(actions)
     seen: set[str] = set()
     for p in proposals:
-        if p.bucket != bucket or not str(p.approved_by or "").startswith("autonomy:"):
+        if p.bucket != bucket or not was_autonomous(p):
             continue
         if p.action not in wanted:
             continue

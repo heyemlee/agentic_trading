@@ -418,7 +418,7 @@ class NotificationsMixin:
 
         def acted() -> None:
             for proposal in stored.values():
-                if not str(proposal.approved_by or "").startswith("autonomy:"):
+                if not autonomy.was_autonomous(proposal):
                     continue
                 out.append(Condition(
                     # Keyed on the status too, so the outcome arrives as well as the decision.
