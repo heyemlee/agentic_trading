@@ -311,7 +311,7 @@ def test_the_block_carries_what_the_screen_needs_and_nothing_it_must_guess():
                           "sellable", "expected_submit_quantity", "expected_is_estimate",
                           "expected_remaining", "expected_remaining_basis",
                           "expected_closes_position", "min_sellable_increment", "already_filled",
-                          "chain", "continuable", "blocked_by"}
+                          "chain", "continuable", "autonomous", "blocked_by"}
     assert set(block["sellable"]) == {"quantity", "basis", "ledger_quantity", "venue_quantity",
                                       "venue_as_of", "venue_stale", "committed_quantity",
                                       "agrees", "note"}

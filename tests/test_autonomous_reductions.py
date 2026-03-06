@@ -5,6 +5,7 @@ declines correctly and gets out of the way: an autonomous approval is a real app
 the same locked, recorded, revalidated path as a person's.
 """
 
+import json
 import uuid
 
 import pytest
@@ -13,7 +14,7 @@ import yaml
 from agentic_trading import autonomy
 from agentic_trading.broker import SimulatedBroker
 from agentic_trading.execution_scenarios import PRICES, TRADE_DATE, _profiles, _proposal
-from agentic_trading.proposals import PROPOSED, ProposalStore
+from agentic_trading.proposals import EXECUTED, PROPOSED, ProposalStore
 from agentic_trading.service import Service, ServiceConflict
 from agentic_trading.service.shapes import MarketStatus
 
@@ -35,9 +36,15 @@ def setup(tmp_path, monkeypatch):
         **(profiles.risk.get("micro_live_execution") or {}),
         "enabled": True, "ledger_file": str(ledger)}
     profiles.risk["buckets"][MICRO]["autonomy"] = {
-        "reduce": {"enabled": True, "min_confidence": 80, "max_positions_reduced_per_day": 1}}
+        "reduce": {"enabled": True, "min_confidence": 80, "max_positions_reduced_per_day": 1,
+                   "min_remaining_pct_of_opened": 25}}
+    fills = tmp_path / "fills.jsonl"
+    profiles.risk["broker"] = {**(profiles.risk.get("broker") or {}), "fills_file": str(fills)}
 
     store = ProposalStore(tmp_path / "proposals.json")
+    # The purchase that built the position, and its fill: without one there is no high water
+    # mark and every reduction refuses, which is a different test from the ones below.
+    human_buy(store, fills, quantity=0.2)
     broker = SimulatedBroker(prices=dict(PRICES), cash=40.0)
     service = Service()
     monkeypatch.setattr(service, "profiles", lambda: profiles)
@@ -46,6 +53,26 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "market_status", lambda: MarketStatus(is_open=True))
     monkeypatch.setattr(autonomy, "note_version", lambda *_: AUTHORITY)
     return service, profiles, store
+
+
+def human_buy(store, fills_path, *, quantity=0.2, at="2026-09-10T14:00:00+00:00",
+              via="console", ticker="VTI"):
+    """A purchase a person approved, recorded the way execution records one.
+
+    The floor is replayed from the fills and the approval records, so a test that wants code to
+    be allowed to reduce has to say who bought the position in the first place.
+    """
+    bought = _proposal(bucket=MICRO, action="BUY", ticker=ticker, notional=quantity * 370.0,
+                       limit_class="broad_diversified_etf")
+    bought.status = EXECUTED
+    bought.approved_via = via
+    store.save(bought)
+    line = json.dumps({"at": at, "proposal_id": bought.proposal_id, "bucket": MICRO,
+                       "symbol": ticker, "side": "buy", "quantity": quantity, "price": 370.0,
+                       "status": "FILLED", "fill_id": uuid.uuid4().hex})
+    with fills_path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+    return bought
 
 
 def reduction(**over):
@@ -194,3 +221,60 @@ def test_the_approval_is_recorded_under_its_own_identity(setup, monkeypatch):
     assert seen["terms"]["action"] == "REDUCE" and seen["terms"]["bucket"] == MICRO
     assert uuid.UUID(seen["request_id"]), "the approval protocol needs a fresh request id"
     assert "confidence" in seen["note"], "the gate's reasoning is kept with the approval"
+
+
+def test_the_screen_reads_the_same_floor_the_gate_enforces(setup):
+    """One derivation, two readers: what the approvals page shows is what the pass applies.
+
+    The position was built by the purchase the fixture records, so there is a baseline; the
+    ledger holds 0.2 of it and the floor is a quarter of the 0.2 a person bought.
+    """
+    service, _, store = setup
+    p = reduction()
+    store.save(p)
+    block = service.proposal(p.proposal_id).exit["autonomous"]
+    assert block["min_remaining_pct_of_opened"] == 25
+    assert block["position_high_water_quantity"] == 0.2
+    assert block["high_water_source"] == "console"
+    assert block["current_quantity"] == 0.2
+    assert block["floor_quantity"] == pytest.approx(0.05)
+    assert block["headroom_quantity"] == pytest.approx(0.15)
+    assert block["permitted"] is True and block["blocked_by"] == []
+
+
+def test_a_transferred_in_position_is_shown_as_having_no_baseline(setup, tmp_path):
+    """The ledger holds more than the fills account for: nothing code may measure a floor from."""
+    service, _profiles, store = setup
+    ledger = tmp_path / "micro_live_portfolio.yaml"
+    doc = yaml.safe_load(ledger.read_text(encoding="utf-8"))
+    doc["positions"][0]["quantity"] = 0.5          # 0.3 arrived from somewhere else
+    ledger.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    p = reduction()
+    store.save(p)
+    block = service.proposal(p.proposal_id).exit["autonomous"]
+    assert block["permitted"] is False
+    assert [b["code"] for b in block["blocked_by"]] == ["no_opened_baseline"]
+    report = service.autonomous_reductions()
+    assert report["approved"] == []
+    assert "shares the log cannot explain" in report["declined"][0]["reasons"][-1]
+
+
+def test_closing_a_position_has_no_autonomous_block_at_all(setup):
+    """SELL is never autonomous, so a number there would invite a screen to reason about it."""
+    service, _, store = setup
+    p = reduction(action="SELL")
+    p.sell_quantity = 0.2
+    store.save(p)
+    assert service.proposal(p.proposal_id).exit["autonomous"] is None
+
+
+def test_the_pass_stops_at_the_floor_rather_than_walking_a_position_down(setup):
+    """Halving is bounded per order and per day; neither stops a week of halvings. This does."""
+    service, profiles, store = setup
+    profiles.risk["buckets"][MICRO]["autonomy"]["reduce"]["min_remaining_pct_of_opened"] = 100
+    p = reduction()
+    store.save(p)
+    report = service.autonomous_reductions()
+    assert report["approved"] == []
+    assert "at its floor of 0.2 shares" in report["declined"][0]["reasons"][-1]
+    assert store.get(p.proposal_id).status == PROPOSED

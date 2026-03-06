@@ -334,8 +334,15 @@ def continuable(proposal: Proposal, everything: list[Proposal], *, sources: Sour
 
 def view(proposal: Proposal, everything: list[Proposal], *, sources: Sources,
          account_has_active_order: bool, research_expired: bool,
+         autonomous: dict[str, Any] | None = None,
          increment: float = MIN_INCREMENT) -> dict[str, Any]:
-    """The whole ``exit`` block for one reducing proposal, as the approvals screen reads it."""
+    """The whole ``exit`` block for one reducing proposal, as the approvals screen reads it.
+
+    ``autonomous`` is the floor under this one position, and belongs to ``REDUCE`` alone: ``SELL``
+    is never autonomous, so a number there would invite a screen to reason about a limit that
+    does not apply. It is passed in rather than derived, because deriving it needs the fills and
+    the approval records, which this module deliberately does not read.
+    """
     chain = chain_of(proposal, everything)
     expected = expectations(sources, authorised=proposal.sell_quantity, increment=increment)
     onward = continuable(proposal, everything, sources=sources, chain=chain,
@@ -357,5 +364,6 @@ def view(proposal: Proposal, everything: list[Proposal], *, sources: Sources,
         "already_filled": float(proposal.filled_quantity or 0.0),
         "chain": chain,
         "continuable": onward,
+        "autonomous": autonomous if proposal.action == "REDUCE" else None,
         "blocked_by": blocked,
     }

@@ -20,13 +20,20 @@ NOW = datetime(2026, 9, 10, 15, 0, tzinfo=UTC)
 def armed(tmp_path):
     profiles = _profiles(tmp_path)
     profiles.risk["buckets"][MICRO]["autonomy"] = {
-        "reduce": {"enabled": True, "min_confidence": 80, "max_positions_reduced_per_day": 1}}
+        "reduce": {"enabled": True, "min_confidence": 80, "max_positions_reduced_per_day": 1,
+                   "min_remaining_pct_of_opened": 25}}
     return profiles
+
+
+#: A position with room in it: two shares held, a person bought all two, so the floor is half a
+#: share and code has one and a half to work with. The tests about the floor itself replace it.
+ROOM = autonomy.PositionFloor(high_water=2.0, high_water_at="2026-09-09T14:00:00+00:00",
+                              high_water_via="console", current=2.0, floor=0.5, headroom=1.5)
 
 
 def ask(profiles, **over):
     kw = {"bucket": MICRO, "action": "REDUCE", "confidence": 85, "held_quantity": 2.0,
-          "requested_quantity": 1.0, "reduced_today": 0, "now": NOW}
+          "requested_quantity": 1.0, "reduced_today": 0, "now": NOW, "floor": ROOM}
     kw.update(over)
     return autonomy.permits(profiles, **kw)
 

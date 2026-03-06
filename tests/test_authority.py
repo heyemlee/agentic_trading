@@ -362,3 +362,27 @@ def test_a_tightened_authority_needs_no_acknowledgement_but_a_loosened_one_does(
                                                      authority_version=current))
     assert response["authority_changed"]["classification"] == autonomy.LOOSENED
     assert response["authority_changed"]["paths"] == ["autonomy.withdrawn"]
+
+def test_the_position_floor_appears_as_a_rule_and_never_as_a_position(world):
+    """There is no ticker here, so there can be no "this position" numbers here.
+
+    The rule and the refusal belong to the account; what the rule comes to for one holding is in
+    that proposal's ``exit.autonomous`` block, which has a symbol.
+    """
+    profiles, db = world
+    profiles.risk["buckets"][MICRO]["autonomy"]["reduce"]["min_remaining_pct_of_opened"] = 25
+    limits = authority(profiles, db)["actions"]["REDUCE"]["limits"]
+    assert limits["min_remaining_pct_of_opened"] == 25
+    assert limits["min_remaining_basis"] == "position_high_water_quantity"
+    assert not [k for k in limits if k.startswith("position_") or k.endswith("_quantity")]
+
+
+def test_an_undeclared_position_floor_withholds_autonomous_reduction(world):
+    """An undeclared limit is a refusal, not a default of nought percent."""
+    profiles, db = world
+    profiles.risk["buckets"][MICRO]["autonomy"]["reduce"] = {
+        **REDUCE, "enabled": True, "min_remaining_pct_of_opened": None}
+    reduce = authority(profiles, db)["actions"]["REDUCE"]
+    assert "no_min_remaining" in codes(reduce["autonomous"])
+    assert reduce["autonomous"]["permitted"] is False
+    assert reduce["human_approval"]["permitted"] is True, "a person may still reduce"

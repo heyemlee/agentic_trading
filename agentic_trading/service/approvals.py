@@ -139,6 +139,27 @@ class ApprovalsMixin:
             exit=self._exit_view(profiles, store, p),
         )
 
+    def _fills_for_replay(self, profiles: Profiles) -> list[dict[str, Any]]:
+        """The recorded fills, as far back as a position floor may be replayed.
+
+        The same reader the Activity screen uses, so the legacy log a database from before the
+        fills table still holds is read here too. ``Fill`` allows unknown keys, so an older
+        row keeps whatever it carried.
+        """
+        return [f.model_dump() for f in self._recorded_fills(profiles, autonomy.FILL_REPLAY_LIMIT)]
+
+    def _autonomous_block(self, profiles: Profiles, store: ProposalStore, p: Proposal,
+                          ledger_quantity: float | None,
+                          fills: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+        """The floor under this one position, or None for an action that is never autonomous."""
+        if p.action != autonomy.AUTONOMOUS_ACTION:
+            return None
+        floor = autonomy.position_floor_for(
+            profiles, fills=fills if fills is not None else self._fills_for_replay(profiles),
+            proposals=store.all(), bucket=p.bucket, symbol=p.ticker,
+            ledger_quantity=ledger_quantity)
+        return autonomy.reduce_block(profiles, p.bucket, floor)
+
     def _exit_view(self, profiles: Profiles, store: ProposalStore,
                    p: Proposal) -> dict[str, Any] | None:
         """What a sell would do to this position, or None for anything that is not a sell.
@@ -174,7 +195,8 @@ class ApprovalsMixin:
         state, _why = p.freshness(profiles)
         return exits.view(p, store.all(), sources=sources,
                           account_has_active_order=bool(mine - {p.proposal_id}),
-                          research_expired=state == EXPIRED)
+                          research_expired=state == EXPIRED,
+                          autonomous=self._autonomous_block(profiles, store, p, ledger_quantity))
 
     # ---------------------------------------------------------------- actions
     def revalidate_proposal(self, proposal_id: str) -> dict[str, Any]:
@@ -413,6 +435,10 @@ class ApprovalsMixin:
         ledger = load_portfolio(profiles.project_dir / str(
             (profiles.risk.get("micro_live_execution") or {}).get(
                 "ledger_file", "state/micro_live_portfolio.yaml")))
+        # Read once for the pass, not once per candidate: the replay is the same log every time,
+        # and this runs on a fifteen-second loop.
+        fills = self._fills_for_replay(profiles) if any(
+            p.action == autonomy.AUTONOMOUS_ACTION for p in candidates) else []
         for proposal in candidates:
             if proposal.authority_version != current_authority:
                 born_under = proposal.authority_version or "no recorded version"
@@ -421,14 +447,20 @@ class ApprovalsMixin:
                 report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [reason]})
                 continue
             held = ledger.position(proposal.ticker, MICRO_BUCKET)
+            held_quantity = float(held.quantity) if held else None
+            floor = (autonomy.position_floor_for(
+                profiles, fills=fills, proposals=everything, bucket=MICRO_BUCKET,
+                symbol=proposal.ticker, ledger_quantity=held_quantity)
+                if proposal.action == autonomy.AUTONOMOUS_ACTION else None)
             decision = autonomy.permits(
                 profiles, bucket=MICRO_BUCKET, action=proposal.action,
                 confidence=proposal.confidence,
                 limit_class=proposal.limit_class,
-                held_quantity=held.quantity if held else None,
+                held_quantity=held_quantity,
                 requested_quantity=proposal.sell_quantity,
                 reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET),
-                opened_today=autonomy.opened_today(everything, MICRO_BUCKET))
+                opened_today=autonomy.opened_today(everything, MICRO_BUCKET),
+                floor=floor)
             if not decision.permitted:
                 # Not a refusal to trade: the proposal stays in the queue for a person.
                 report["declined"].append({"proposal_id": proposal.proposal_id,

@@ -341,14 +341,29 @@ on the other, and they count against separate daily allowances. `open` additiona
 No autonomous action bypasses the Hard Risk Layer, and `SELL` is never autonomous — a full close
 is always a person's decision.
 
+**The floor under a position.** Halving is bounded per order and per day, and neither of those
+stops code from walking the same position down over a week. `reduce.min_remaining_pct_of_opened`
+does: it is a share of `position_high_water_quantity`, the most a position ever reached after a
+purchase **a person approved**, and that baseline only ever rises while the position lives. A
+person buying one share into a position code has already reduced to its floor therefore gives
+code that one share back and nothing more; lowering the floor itself is a configuration change,
+with the password and the cooling-off period that implies. It is undeclared today, and an
+undeclared limit is a refusal: `/config/authority` reports `no_min_remaining` and no reduction
+can be autonomous until the percentage is written down. The baseline is replayed from the fills
+and the approval records rather than stored in a counter, so a restart cannot lose it; a position
+the fills do not account for — transferred in, seeded, or approved before `approved_via` was
+recorded — has no baseline and is refused rather than guessed at.
+
 **Arming order.** Each step is a separate decision, and none of them is code work:
 
 1. Positions exist, bought by hand, and their decision records read well.
-2. Arm `reduce` only. Watch it on real fills until the daily loss gate has been seen to work.
-3. Populate `config/event_calendar.yaml` and set `maintained_through`. An autonomous open fails
+2. Declare `reduce.min_remaining_pct_of_opened`. Until it is declared, arming `reduce` does
+   nothing, which is the intended order: the floor is decided before the switch.
+3. Arm `reduce` only. Watch it on real fills until the daily loss gate has been seen to work.
+4. Populate `config/event_calendar.yaml` and set `maintained_through`. An autonomous open fails
    closed while that calendar is empty or expired, which is the current state and is deliberate:
    a blackout calendar carrying guessed dates is worse than none.
-4. Arm `open` last.
+5. Arm `open` last.
 
 **Stopping.** One gesture, no config editing:
 

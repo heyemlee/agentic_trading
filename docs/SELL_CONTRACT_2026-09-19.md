@@ -475,3 +475,50 @@
 
 验收边界：本轮完成不等于可以启用自主减仓。`buckets.micro_live.autonomy.reduce.enabled` 仍是关的，
 打开它是单独的配置决定，届时受新的持仓下限约束。
+
+## 8. 实现记录
+
+定稿后逐步实现，每步记录提交号与**与契约文字的偏差**。偏差不隐藏：下面每一条要么是契约写不下来的
+东西，要么是比契约更严的做法。
+
+| 步骤 | 提交 | 状态 |
+| --- | --- | --- |
+| 1. `exit` 块 | `9786cc7` | 已完成，`agentic_trading/exits.py` + `tests/test_exits.py`（26 项，按样例 A–G 命名） |
+| 2. `approved_via` | `6ab98bc` | 已完成，三个调用方各自写入；`acted_today` 改读它 |
+| 3. 持仓下限 | 本次提交 | 已完成，`autonomy.position_floor` / `reduce_block` / `permits` + `tests/test_position_floor.py`（21 项）与 `tests/test_autonomous_reductions.py` 新增 4 项 |
+| 4. `continue_exit` | 未开始 | |
+| 5. `exit_result` 与 `exit_incomplete` | 未开始 | |
+| 6. 隔离测试 | 随 4、5 补齐 | 第 3 步相关的已写完，含你们那条逐字用例 |
+
+### 8.1 第 3 步的四处偏差
+
+**一、周期边界改用成交记录自身的净额归零，不用 `position_closed`。** 契约 §2.5 写"只在确认清零之后，
+判定与 §2.4 的 `position_closed === true` 完全相同（两来源都新读到 0）"。这一句实现不了，而且不应该
+实现：`position_closed` 是**当刻**的两来源读数，周期边界是**历史事件**，重放历史时没有"当时的券商
+读数"可查。更要紧的是方向不对——用运行时读数决定历史边界，等于让一次幻影读数（券商瞬间返回 0）
+清掉高水位、把整个持仓交给代码。
+
+实现改为：**周期在成交记录自身净额归零处结束**。成交不会产生幻影，没有成交就没有行，所以没有任何
+读数能凭空清掉高水位。另加一道检查：重放出的净额必须与当前账本一致，不一致就 `no_opened_baseline`
+（转入的持仓、种子账本都落在这里）。两条合起来比契约原文严。
+
+**二、`no_opened_baseline` 也覆盖"账本读不到"。** 闭集不变。契约里这个码的定义是一串"没有基线"的
+情形，账本读不到时基线**算不出**，归入同一码而不是新增一个码。`detail` 会说明是哪一种。
+
+**三、重放上限 5000 条成交，超过就拒绝。** 成交日志不覆盖建仓时没有基线，这是契约已有的规定；上限
+是同一条规定的可操作形式——读不到那么远，就当作没覆盖。
+
+**四、`/config/authority.actions.REDUCE.limits` 多一个键。** 除 `min_remaining_pct_of_opened` 外还有
+`min_remaining_basis`，常量 `"position_high_water_quantity"`，这样屏幕不必把分母的含义写死在前端。
+
+### 8.2 一个立刻可见的后果
+
+`config/` 里现在**没有**声明 `min_remaining_pct_of_opened`，而未声明的限额是拒绝而不是默认。所以从
+这次提交起：
+
+* `/config/authority.actions.REDUCE.autonomous.permitted` 为 `false`，`blocked_by` 多一条
+  `no_min_remaining`；
+* `exit.autonomous.permitted` 同样为 `false`。
+
+这不是回归，是 fail-closed：自主减仓本来就是关的（`buckets.micro_live.autonomy.reduce.enabled: false`）。
+我没有改生产配置——这个百分比定多少是所有者的决定，改动本身要走配置流程。
