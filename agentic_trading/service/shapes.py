@@ -339,6 +339,10 @@ class ProposalDetail(ProposalSummary):
     #: module's own serialisation, passed through whole (from, to, at, paths, classification).
     authority_changed: dict[str, Any] | None = None
     authority_changed_during_research: bool = False
+    #: What a sell would do to the position, and what blocks it: None for anything that is not a
+    #: sell. The exits module's own serialisation, passed through whole, because its shape is
+    #: the contract in docs/SELL_CONTRACT_2026-09-19.md rather than something this layer owns.
+    exit: dict[str, Any] | None = None
 
 
 class Fill(BaseModel):

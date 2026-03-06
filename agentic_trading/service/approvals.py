@@ -21,6 +21,7 @@ from ..portfolio import load_portfolio
 from ..profile import Profiles
 from ..proposals import (
     APPROVED,
+    EXPIRED,
     NEEDS_REANALYSIS,
     PROPOSED,
     REJECTED,
@@ -135,7 +136,45 @@ class ApprovalsMixin:
             authority_changed=autonomy.authority_change(
                 autonomy.version_history(store.db), p.authority_version, current_authority),
             authority_changed_during_research=p.authority_changed_during_research,
+            exit=self._exit_view(profiles, store, p),
         )
+
+    def _exit_view(self, profiles: Profiles, store: ProposalStore,
+                   p: Proposal) -> dict[str, Any] | None:
+        """What a sell would do to this position, or None for anything that is not a sell.
+
+        Read-only, and off readings that already exist: the ledger, and the venue reading the
+        console keeps between polls. A screen asking how much can be sold must not cost a
+        Robinhood session, and execution re-reads the venue for itself in any case.
+        """
+        from .. import exits
+        from ..portfolio import PortfolioError, load_portfolio
+        from ..schedule import ledger_for
+
+        if p.action not in exits.REDUCING:
+            return None
+        ledger_quantity = None
+        try:
+            ledger = load_portfolio(ledger_for(profiles, p.bucket))
+            held = ledger.position(p.ticker, p.bucket)
+            ledger_quantity = float(held.quantity) if held else 0.0
+        except (PortfolioError, OSError, ValueError):
+            ledger_quantity = None            # unreadable is not empty
+        reading = None
+        if p.bucket == MICRO_BUCKET and self._micro_enabled(profiles):
+            reading, _stale = self._venue_reading.peek()
+        active = [row for row in store.db.reservations(active_only=True)
+                  if str(row["account_key"]) == ("micro_live" if p.bucket == MICRO_BUCKET
+                                                 else "conceptual")]
+        mine = {row["proposal_id"] for row in active}
+        committed = sum(float(row["quantity"] or 0.0) for row in active
+                        if (store.get(row["proposal_id"]) or p).ticker == p.ticker)
+        sources = exits.from_reading(ledger_quantity=ledger_quantity, reading=reading,
+                                    symbol=p.ticker, committed_quantity=committed)
+        state, _why = p.freshness(profiles)
+        return exits.view(p, store.all(), sources=sources,
+                          account_has_active_order=bool(mine - {p.proposal_id}),
+                          research_expired=state == EXPIRED)
 
     # ---------------------------------------------------------------- actions
     def revalidate_proposal(self, proposal_id: str) -> dict[str, Any]:

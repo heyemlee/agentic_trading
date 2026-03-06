@@ -152,6 +152,10 @@ class Proposal:
     execution_ledger_path: str | None = None
     approval_request_id: str | None = None
     approved_version: str | None = None
+    #: The proposal this one continues, when it takes up the unsold part of an earlier exit.
+    #: The chain it belongs to is what bounds how much may still be sold under the original
+    #: authorisation; see exits.py and docs/SELL_CONTRACT_2026-09-19.md.
+    continuation_of: str | None = None
     approval_response: dict[str, Any] | None = None
     # The authority (autonomy.effective_authority) this idea was born under. An approval
     # compares it with the authority of the moment; None means it predates the record.

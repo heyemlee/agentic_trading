@@ -61,19 +61,36 @@ class VenueReading:
     #: What reading the account raised, raised again wherever preflight reads the account.
     account_error: BaseException | None = None
     tools: dict[str, str] = field(default_factory=dict)
+    #: What the venue says it holds, by symbol. Read in the same handshake as the account so a
+    #: screen asking "how much of this can I actually sell" costs no session of its own. None
+    #: when the read failed, which is different from an empty book: see positions_error.
+    positions: dict[str, float] | None = None
+    positions_error: str | None = None
 
 
 def read_venue(broker: Any, checked_at: str) -> VenueReading:
-    """Ask the venue, once, what preflight's venue gates need. Records nothing."""
+    """Ask the venue, once, what preflight's venue gates need. Records nothing.
+
+    The positions come along for the ride. Preflight does not read them, but the exit screens do
+    (docs/SELL_CONTRACT_2026-09-19.md), and asking here keeps them on the one reading the
+    console already keeps between polls instead of opening a session per request. A failure to
+    read them is kept as text and never raised: it must not cost preflight its account gates.
+    """
     try:
         account = broker.get_account()
         agentic = broker.agentic_account() if hasattr(broker, "agentic_account") else {}
         error = None
     except Exception as exc:  # noqa: BLE001 - kept, and raised where preflight reads the account
         account, agentic, error = None, None, exc
+    positions, positions_error = None, None
+    try:
+        positions = {str(p.symbol).upper(): float(p.quantity) for p in broker.get_positions()}
+    except Exception as exc:  # noqa: BLE001 - an unreadable book is reported, never guessed at
+        positions_error = f"{type(exc).__name__}: {exc}"[:200]
     return VenueReading(checked_at=checked_at, connected=True, account=account,
                         agentic_account=agentic, account_error=error,
-                        tools=dict(getattr(broker, "tools", {}) or {}))
+                        tools=dict(getattr(broker, "tools", {}) or {}),
+                        positions=positions, positions_error=positions_error)
 
 
 class _AnsweredFrom:
