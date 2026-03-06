@@ -98,6 +98,16 @@ in `tests/frontend.test.cjs` and run through `deploy/checks.sh`.
 responses, including a version conflict and an explicit second confirmation. It also starts
 only a static server; all API requests are intercepted. Set `CT_UI_CAPTURE_DIR` to save a screenshot.
 
+SELL/REDUCE details render the server's `exit` quantities, source readings, expected closure
+state and exit chain. Missing quantities say "Not read"; unknown remainder/closure says
+"Cannot confirm". Source disagreement uses the server's smaller-size/larger-remainder bases;
+the page does no quantity arithmetic. Approvals bind to fixed shares and are unavailable when
+exit detail is missing or blocked. A changed exit reading clears confirmation even if the
+proposal version is unchanged. Live orders also require the actual action's authority.
+Continuation eligibility and reasons are read-only for now: no `continue_exit` request or
+button is wired until that endpoint ships. The browser check covers these views on mobile;
+the frontend suite also covers confirmation invalidation, chain amounts and authority gating.
+
 ## Live data
 
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals

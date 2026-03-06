@@ -93,8 +93,46 @@ const ui = path.resolve(__dirname, '../ui');
     await page.waitForFunction(() => document.getElementById('result-slot').textContent.includes('Synthetic pending order'));
     assert.equal(posts.length, 2);
     assert.notEqual(posts[0].idempotency_key, posts[1].idempotency_key);
+    // The exit detail is a read-only projection of the service's quantities. These
+    // synthetic cases never submit an exit or touch a venue.
+    Object.assign(proposal, { action: 'SELL', sell_quantity: 0.2, exit: {
+      action: 'SELL', authority_action: 'SELL', intent: 'close_position', authorised_quantity: 0.2,
+      sellable: { quantity: 0.2, ledger_quantity: 0.2, venue_quantity: 0.3,
+        venue_as_of: now, venue_stale: false, committed_quantity: 0, basis: 'smaller_of_two',
+        agrees: false, note: 'Synthetic ledger/broker mismatch' },
+      expected_submit_quantity: 0.2, expected_remaining: 0.1, expected_remaining_basis: 'larger_of_two',
+      expected_closes_position: false, expected_is_estimate: false, min_sellable_increment: 0.000001,
+      already_filled: 0, chain: { root_proposal_id: proposal.proposal_id, allowance: 0.2, filled: 0,
+        committed: 0.2, remaining_allowance: 0, members: [{ proposal_id: proposal.proposal_id,
+          status: 'PROPOSED', authorised_quantity: 0.2, filled_quantity: 0 }] },
+      continuable: { eligible: false, quantity: 0, blocked_by: [{ code: 'not_attempted', detail: 'Not submitted' }] },
+      blocked_by: [],
+    } });
+    authority.actions.SELL = { human_approval: { permitted: true, blocked_by: [] } };
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('exit-detail').textContent.includes('Synthetic ledger/broker mismatch'));
+    await page.evaluate(() => I18N.set('zh'));
+    const exit = page.locator('#exit-detail');
+    assert.match(await exit.innerText(), /预计仍有持仓/);
+    assert.match(await exit.innerText(), /取两来源较大值/);
+    assert.equal(await page.locator('#btn-approve').isEnabled(), true);
+    assert.equal(await exit.locator('button').count(), 0, 'no continuation action before its endpoint ships');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await exit.scrollIntoViewIfNeeded();
+    if (process.env.CT_UI_CAPTURE_DIR) await page.screenshot({
+      path: path.join(process.env.CT_UI_CAPTURE_DIR, 'approval-exit-phone.png'), fullPage: true });
+    Object.assign(proposal.exit, { expected_submit_quantity: null, expected_remaining: null,
+      expected_closes_position: null, expected_is_estimate: true,
+      blocked_by: [{ code: 'quantity_unknown', detail: 'Synthetic unreadable quantities' }] });
+    proposal.exit.sellable.venue_quantity = null;
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('exit-detail').textContent.includes('Synthetic unreadable quantities'));
+    assert.match(await exit.innerText(), /未读到/);
+    assert.match(await exit.innerText(), /无法确认/);
+    assert.equal(await page.locator('#btn-approve').isVisible(), false);
+    assert.equal(posts.length, 2, 'exit reads must never start a write');
     assert.deepEqual(errors, []);
-    console.log('Approval browser check passed: separate acknowledgement, version conflict, explicit retry, mobile layout.');
+    console.log('Approval browser check passed: acknowledgement, conflict, explicit retry, exit sources, unknown quantities, mobile layout.');
   } catch (error) {
     console.error(await page?.evaluate(() => ({ errors: document.body.innerText.slice(-2500),
       resources: window.CT_API?.state.resources, proposal: window.CT?.proposalDetail?.proposal_id,

@@ -663,6 +663,114 @@ function approvalPage() {
   return c;
 }
 
+function exitApprovalPage() {
+  const c = approvalPage(), p = c.CT.proposalDetail;
+  Object.assign(p, { action: 'SELL', sell_quantity: 0.2, exit: {
+    action: 'SELL', authority_action: 'SELL', intent: 'close_position', authorised_quantity: 0.2,
+    sellable: { quantity: 0.2, ledger_quantity: 0.2, venue_quantity: 0.2,
+      venue_as_of: '2026-09-19T15:04:02Z', venue_stale: false, committed_quantity: 0,
+      basis: 'both_sources_agree', agrees: true, note: null },
+    expected_submit_quantity: 0.2, expected_is_estimate: false, expected_remaining: 0,
+    expected_remaining_basis: 'both_sources_agree', expected_closes_position: true,
+    min_sellable_increment: 0.000001, already_filled: 0,
+    chain: { root_proposal_id: 'A', allowance: 0.2, filled: 0, committed: 0.2, remaining_allowance: 0,
+      members: [{ proposal_id: 'A', status: 'PROPOSED', authorised_quantity: 0.2, filled_quantity: 0 }] },
+    continuable: { eligible: false, quantity: 0, blocked_by: [{ code: 'not_attempted', detail: 'not submitted' }] },
+    blocked_by: [],
+  } });
+  c.render();
+  return c;
+}
+
+test('exit review uses shares, server closure state and distinct quantity bases', () => {
+  const c = exitApprovalPage(), e = c.CT.proposalDetail.exit;
+  assert.match(c.element('d-headline').textContent, /ap.exitShares 0.2/);
+  assert.match(c.element('exit-detail').innerHTML, /ap.exitWillClose/);
+  // SELL and close_position do not imply closure when the holding grows.
+  e.expected_closes_position = false; e.expected_remaining = 0.1;
+  e.expected_remaining_basis = 'larger_of_two';
+  Object.assign(e.sellable, { venue_quantity: 0.3, agrees: false, basis: 'smaller_of_two', note: '<script>unsafe</script>' });
+  c.render();
+  const html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitWillRemain/); assert.doesNotMatch(html, /ap.exitWillClose/);
+  assert.match(html, /ap.exitBasis.larger_of_two/); assert.match(html, /ap.exitBasis.smaller_of_two/);
+  assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>/);
+  assert.equal(c.element('btn-approve').disabled, false, 'disagreement alone does not refuse an exit');
+});
+
+test('unknown and stale exit quantities never render as zero or expected closure', () => {
+  const c = exitApprovalPage(), e = c.CT.proposalDetail.exit;
+  e.sellable.venue_quantity = null; e.sellable.venue_as_of = null; e.sellable.agrees = null;
+  e.sellable.basis = 'ledger_only'; e.expected_is_estimate = true;
+  e.expected_remaining = null; e.expected_closes_position = null; e.expected_remaining_basis = 'unknown';
+  c.render();
+  let html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitVenue<\/dt><dd>ap.exitUnread/);
+  assert.match(html, /ap.exitRemaining<\/dt><dd>ap.exitCannotConfirm/);
+  assert.match(html, /ap.exitEstimate/); assert.doesNotMatch(html, /ap.exitWillClose/);
+  e.sellable.venue_quantity = 0.3; e.sellable.venue_stale = true; c.render();
+  assert.match(c.element('exit-detail').innerHTML, /ap.exitStale/);
+});
+
+test('exit blocks and unavailable detail prevent both approval entry and a checked submission', async () => {
+  const c = exitApprovalPage(); let posts = 0; c.CT_API.post = async () => { posts++; };
+  c.element('btn-approve').events.click();
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  assert.equal(c.element('approve-submit').disabled, false);
+  c.CT.proposalDetail.exit.blocked_by = [{ code: 'order_working', detail: 'still at venue' }]; c.render();
+  assert.equal(c.element('btn-approve').hidden, true);
+  assert.equal(c.element('approve-confirm').checked, false);
+  await c.element('approve-submit').events.click(); assert.equal(posts, 0);
+  c.CT.proposalDetail.exit = null; c.render();
+  assert.match(c.element('exit-detail').innerHTML, /ap.exitUnavailable/);
+  assert.equal(c.element('btn-approve').disabled, true);
+});
+
+test('exit readings invalidate confirmation without a proposal or authority version change', async () => {
+  const c = exitApprovalPage(); let posts = 0; c.CT_API.post = async () => { posts++; };
+  c.element('btn-approve').events.click();
+  assert.match(c.element('approve-dialog-title').textContent, /ap.exitShares 0.2/);
+  c.element('approve-confirm').checked = true; c.element('approve-confirm').events.change();
+  c.CT.proposalDetail.exit.expected_submit_quantity = 0.1;
+  // The handler rechecks even before the render callback has run.
+  await c.element('approve-submit').events.click(); assert.equal(posts, 0);
+  c.render(); assert.equal(c.element('approve-confirm').checked, false);
+  assert.equal(c.element('approve-submit').disabled, true);
+});
+
+test('live REDUCE reads its own authority and rejects inconsistent permission or terms', () => {
+  const c = exitApprovalPage(), p = c.CT.proposalDetail;
+  p.is_real_money = true; p.action = p.exit.authority_action = p.exit.action = 'REDUCE';
+  c.CT.health.micro_live_enabled = true; c.CT.microLive.preflight_ready = true;
+  c.CT.authority.actions.REDUCE = { human_approval: { permitted: true, blocked_by: [] } };
+  c.CT.authority.actions.SELL = { human_approval: { permitted: false, blocked_by: [{ detail: 'sell blocked' }] } };
+  c.render(); assert.equal(c.element('btn-approve').disabled, false);
+  c.CT.authority.actions.REDUCE.human_approval.blocked_by = [{ detail: 'reduce blocked' }];
+  c.render(); assert.equal(c.element('btn-approve').disabled, true);
+  assert.match(c.element('exit-detail').innerHTML, /reduce blocked/);
+  assert.doesNotMatch(c.element('exit-detail').innerHTML, /sell blocked/);
+  c.CT.authority.actions.REDUCE.human_approval.blocked_by = [];
+  p.exit.authorised_quantity = 0.3; c.render(); assert.equal(c.element('btn-approve').disabled, true);
+});
+
+test('exit chain shows fills and unfilled commitments separately, without a continuation write', () => {
+  const c = exitApprovalPage(), p = c.CT.proposalDetail, e = p.exit;
+  p.status = 'CANCELED'; e.already_filled = 0.12;
+  Object.assign(e.chain, { filled: 0.12, committed: 0, remaining_allowance: 0.08 });
+  e.chain.members = [{ proposal_id: 'root<&', status: 'CANCELED', authorised_quantity: 0.2, filled_quantity: 0.12 }];
+  e.continuable = { eligible: true, quantity: 0.08, blocked_by: [] }; c.render();
+  const html = c.element('exit-detail').innerHTML;
+  assert.match(html, /ap.exitChainFilled<\/dt><dd>ap.exitShares 0.12/);
+  assert.match(html, /ap.exitChainRemaining<\/dt><dd>ap.exitShares 0.08/);
+  assert.match(html, /ap.exitContinuable ap.exitShares 0.08/);
+  assert.match(html, /proposal=root%3C%26/);
+  assert.doesNotMatch(html, /<button|continue_exit/);
+  assert.equal(c.element('btn-approve').hidden, true);
+  p.action = 'BUY'; p.exit = null; c.render();
+  assert.equal(c.element('exit-detail').hidden, true);
+  assert.equal(c.element('exit-detail').innerHTML, '');
+});
+
 test('open approval dialog stays bound to its original proposal and disables on a queue change', async () => {
   const c = approvalPage(); let posted = 0; c.CT_API.post = async () => { posted++; };
   c.element('btn-approve').events.click();

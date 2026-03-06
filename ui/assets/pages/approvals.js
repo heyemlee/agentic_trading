@@ -3,20 +3,83 @@ window.Console.page('approvals', function (document) {
   C.mount('approvals');
   C.wireTabs();
   let intent = null, inFlight = false, uncertain = false, authorityAcknowledgementRequired = false;
+  let reviewedExit = null;
+  const isExit = p => ['SELL', 'REDUCE'].includes(p?.action);
+  const exitReady = p => !isExit(p) || !!(p.exit && p.exit.authority_action === p.action &&
+    p.exit.authorised_quantity === p.sell_quantity && Array.isArray(p.exit.blocked_by) &&
+    p.exit.blocked_by.length === 0 && Number.isFinite(p.exit.expected_submit_quantity) &&
+    p.exit.expected_submit_quantity > 0);
+  // Quantities can change without changing the proposal's fixed authorisation/version.
+  const exitReading = p => !isExit(p) ? null : JSON.stringify([p.exit?.authorised_quantity,
+    p.exit?.expected_submit_quantity, p.exit?.expected_remaining, p.exit?.expected_closes_position,
+    p.exit?.expected_is_estimate, p.exit?.sellable?.ledger_quantity, p.exit?.sellable?.venue_quantity,
+    p.exit?.sellable?.venue_stale, p.exit?.sellable?.committed_quantity, p.exit?.blocked_by]);
   const critical = () => ['proposals', 'proposalDetail', 'health', 'authority', ...(D.proposalDetail?.is_real_money ? ['microLive'] : [])];
   const authorityReady = () => window.ApprovalIntent.authorityMatches(D.proposalDetail, D.authority) &&
     (!D.proposalDetail.is_real_money || D.authority.preflight?.ready === true && D.authority.preflight?.stale === false);
   const canApprove = () => CT_API.canAct(critical()) && D.proposalDetail?.status === 'WAITING_FOR_APPROVAL' &&
-    authorityReady() &&
+    authorityReady() && exitReady(D.proposalDetail) &&
     !D.health.paused && (D.health.market || {}).is_open === true &&
     (!D.proposalDetail.is_real_money || D.health.micro_live_enabled === true && D.microLive.preflight_ready === true &&
-      D.authority.actions?.[D.proposalDetail.action]?.human_approval?.permitted === true);
-  const matches = () => window.ApprovalIntent.matches(intent, D.proposalDetail, D.authority);
+      D.authority.actions?.[D.proposalDetail.exit?.authority_action || D.proposalDetail.action]?.human_approval?.permitted === true &&
+      D.authority.actions?.[D.proposalDetail.exit?.authority_action || D.proposalDetail.action]?.human_approval?.blocked_by?.length === 0);
+  const matches = () => window.ApprovalIntent.matches(intent, D.proposalDetail, D.authority) &&
+    reviewedExit === exitReading(D.proposalDetail);
 
   C.setHTML(document.getElementById('banner-icon'), C.ICON.lock);
 
   const set = (id, v) => { document.getElementById(id).textContent = v; };
   const plainRows = (arr) => (arr || []).map((x) => C.listRow({ title: x })).join('');
+  const shares = q => Number.isFinite(q) ? C.t('ap.exitShares', { n: q.toLocaleString('en-US', { maximumFractionDigits: 6 }) }) : C.t('ap.exitUnread');
+  const exitReasons = arr => (arr || []).map(x => C.listRow({
+    title: C.t('ap.exitBlock.' + x.code), sub: x.detail,
+  })).join('');
+  function renderExit(p) {
+    const card = document.getElementById('exit-detail');
+    card.hidden = !isExit(p);
+    if (card.hidden) { C.setHTML(card, ''); return; }
+    const e = p.exit;
+    if (!e) { C.setHTML(card, '<p>' + C.escapeHtml(C.t('ap.exitUnavailable')) + '</p>'); return; }
+    const s = e.sellable || {}, chain = e.chain || {}, onward = e.continuable || {};
+    const row = (key, value) => '<div class="kv-row"><dt>' + C.escapeHtml(C.t(key)) + '</dt><dd>' + C.escapeHtml(value) + '</dd></div>';
+    const title = key => '<h2 style="margin-bottom:12px;">' + C.escapeHtml(C.t(key)) + '</h2>';
+    const basis = value => C.t('ap.exitBasis.' + (value || 'unknown'));
+    const disposition = e.expected_closes_position === true ? 'ap.exitWillClose'
+      : e.expected_closes_position === false ? 'ap.exitWillRemain' : 'ap.exitCannotConfirm';
+    const accountBlocks = p.is_real_money
+      ? D.authority?.actions?.[e.authority_action]?.human_approval?.blocked_by || [] : [];
+    C.setHTML(card, '<div class="stack stack-6">' +
+      '<div>' + title('ap.exitTitle') + '<p class="body-sm" style="margin-bottom:12px;">' + C.escapeHtml(C.t(disposition)) + '</p><dl class="kv">' +
+      row('ap.exitAuthorised', shares(e.authorised_quantity)) +
+      row('ap.exitSellable', shares(s.quantity)) +
+      row('ap.exitExpected', shares(e.expected_submit_quantity) + (e.expected_is_estimate ? ' · ' + C.t('ap.exitEstimate') : '')) +
+      row('ap.exitRemaining', e.expected_remaining == null ? C.t('ap.exitCannotConfirm') : shares(e.expected_remaining)) +
+      row('ap.exitRemainingBasis', basis(e.expected_remaining_basis)) +
+      row('ap.exitIncrement', shares(e.min_sellable_increment)) + '</dl>' +
+      '<p class="body-sm body-muted" style="margin-top:12px;">' + C.escapeHtml(C.t('ap.exitRecheck')) + '</p></div>' +
+      '<div>' + title('ap.exitSources') + '<dl class="kv">' +
+      row('ap.exitLedger', shares(s.ledger_quantity)) + row('ap.exitVenue', shares(s.venue_quantity)) +
+      row('ap.exitVenueAt', s.venue_as_of ? C.dateTime(s.venue_as_of) : C.t('ap.exitUnread')) +
+      row('ap.exitSourceState', s.venue_stale === true ? C.t('ap.exitStale') : s.agrees === true
+        ? C.t('ap.exitAgrees') : s.agrees === false ? C.t('ap.exitDisagrees') : C.t('ap.exitCannotConfirm')) +
+      row('ap.exitSellableBasis', basis(s.basis)) + row('ap.exitReserved', shares(s.committed_quantity)) + '</dl>' +
+      (s.note ? '<p class="body-sm body-muted" style="margin-top:12px;">' + C.escapeHtml(s.note) + '</p>' : '') + '</div>' +
+      '<div>' + title('ap.exitObstacles') + '<div class="list list-inset">' + exitReasons(e.blocked_by) +
+      accountBlocks.map(x => C.listRow({ title: x.detail })).join('') +
+      (!e.blocked_by?.length && !accountBlocks.length ? C.listRow({ title: C.t('ap.exitNoPositionBlocks') }) : '') + '</div></div>' +
+      '<div>' + title('ap.exitChain') + '<dl class="kv">' +
+      row('ap.exitRoot', chain.root_proposal_id || C.t('ap.exitUnread')) + row('ap.exitAlreadyFilled', shares(e.already_filled)) +
+      row('ap.exitAllowance', shares(chain.allowance)) + row('ap.exitChainFilled', shares(chain.filled)) +
+      row('ap.exitChainCommitted', shares(chain.committed)) + row('ap.exitChainRemaining', shares(chain.remaining_allowance)) + '</dl>' +
+      '<div class="list list-inset">' + (chain.members || []).map(m => C.listRow({
+        title: m.proposal_id, sub: C.code(m.status),
+        value: C.t('ap.exitMember', { authorised: shares(m.authorised_quantity), filled: shares(m.filled_quantity) }),
+        href: 'approvals.html?proposal=' + encodeURIComponent(m.proposal_id),
+      })).join('') + '</div></div>' +
+      '<div>' + title('ap.exitContinuation') + '<p class="body-sm">' +
+      C.escapeHtml(onward.eligible === true ? C.t('ap.exitContinuable', { q: shares(onward.quantity) }) : C.t('ap.exitNotContinuable')) +
+      '</p><div class="list list-inset">' + exitReasons(onward.blocked_by) + '</div></div></div>');
+  }
 
   /* With one proposal there is nothing to choose, so the queue stays out of
      the way. With several, the page used to show the first and give no way to
@@ -56,6 +119,7 @@ window.Console.page('approvals', function (document) {
         C.t('ap.changedReview');
     }
     approveBtn.disabled = inFlight || uncertain || !canApprove();
+    approveBtn.hidden = isExit(p) && !canApprove();
     const detail = document.querySelector('[data-od-id="proposal-detail"]');
     const empty = document.getElementById('queue-empty');
     if (!p) {
@@ -75,12 +139,13 @@ window.Console.page('approvals', function (document) {
     empty.hidden = true;
     document.getElementById('live-conditions').hidden = false;
     const r = p.research || {};
+    renderExit(p);
 
     /* the whole head is read from the proposal, never baked into markup */
     set('d-bucket', (p.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.bucket(p.bucket));
     set('d-id', p.proposal_id);
     set('d-shape', C.t('ap.orderShape', { action: C.code(p.action) }));
-    set('d-headline', p.ticker + ' ' + C.usd(p.notional_usd));
+    set('d-headline', p.ticker + ' ' + (isExit(p) ? shares(p.sell_quantity) : C.usd(p.notional_usd)));
     /* The position cap only exists inside the HR08 rule text, not as a field: no stored
        decision record carries one, and HardRiskView does not project one. This used to read
        hard_risk.position_cap_pct and fall back when it was absent, which it always was — so
@@ -96,13 +161,15 @@ window.Console.page('approvals', function (document) {
     set('detail-created', C.dateTime(p.created_at));
     set('queue-count', C.t('common.open', { n: C.openCount() }) + ' · ' + C.psCopy(p.status));
     document.getElementById('btn-approve').textContent =
-      C.t('ap.approve', { v: C.usd(p.notional_usd) });
+      C.t('ap.approve', { v: isExit(p) ? shares(p.sell_quantity) : C.usd(p.notional_usd) });
 
     const why = document.getElementById('wouldnot-why');
     if (why) {
       const blocked = p.is_real_money ? ((D.microLive || {}).blocking || []) : [];
       why.textContent = [
         !CT_API.canAct(['authority']) || !authorityReady() ? C.t('ap.authorityUnavailable') : null,
+        isExit(p) && !p.exit ? C.t('ap.exitUnavailable') : null,
+        ...(p.exit?.blocked_by || []).map(x => C.t('ap.exitBlock.' + x.code) + (x.detail ? ' · ' + x.detail : '')),
         ...(p.is_real_money ? (D.authority?.actions?.[p.action]?.human_approval?.blocked_by || []).map(x => x.detail) : []),
         (D.health.market || {}).is_open ? null : C.t('home.marketClosed'),
         blocked.length ? C.t('home.blocking', { ids: blocked.join(', ') }) : null,
@@ -231,6 +298,7 @@ window.Console.page('approvals', function (document) {
   approveBtn.addEventListener('click', () => {
     if (!canApprove() || inFlight || uncertain) return;
     intent = window.ApprovalIntent.capture(D.proposalDetail, crypto.randomUUID(), D.authority);
+    reviewedExit = exitReading(D.proposalDetail);
     authorityAcknowledgementRequired = window.ApprovalIntent.needsAcknowledgement(D.proposalDetail);
     authorityConfirm.checked = false;
     document.getElementById('approve-authority-change').hidden = !D.proposalDetail.authority_changed;
@@ -240,10 +308,10 @@ window.Console.page('approvals', function (document) {
     document.getElementById('approve-note').value = '';
     document.getElementById('approve-dialog-warning').textContent = '';
     document.getElementById('approve-dialog-title').textContent =
-      C.code(intent.action) + ' ' + C.usd(intent.notional_usd) + ' · ' + intent.ticker;
+      C.code(intent.action) + ' ' + (isExit(intent) ? shares(intent.sell_quantity) : C.usd(intent.notional_usd)) + ' · ' + intent.ticker;
     document.getElementById('approve-dialog-terms').textContent =
       C.bucket(intent.bucket) + ' · ' + (D.proposalDetail.is_real_money ? 'REAL MONEY / 真金' : 'SIMULATED / 模拟') +
-      (intent.sell_quantity != null ? ' · ' + intent.sell_quantity + ' shares' : '') +
+      (intent.sell_quantity != null ? ' · ' + shares(intent.sell_quantity) : '') +
       ' · ' + intent.proposal_id;
     C.openSheet('approve-dialog');
   });
