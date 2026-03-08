@@ -61,6 +61,15 @@ and changes nothing. Recommended as a preview step before showing the approve bu
 be `EXECUTED`, or `STALE`, `REANALYSIS_REQUIRED`, `INVALIDATED`, `HARD_RISK_REJECTED`,
 `BROKER_REVIEW_REJECTED`. Never render "done" before reading `status`.
 
+**Continue an exit that stopped half way.** `POST /proposals/{id}/continue_exit` with
+`{confirm: true, request_id: <uuid>, authority_version?, acknowledge_authority_change?}`. It
+creates the proposal for the unsold remainder and approves nothing, so the person still approves
+it like any other. Offer it only when `exit.continuable.eligible` is true; the same reasons appear
+in `exit.continuable.blocked_by`. A repeated tap and a second tab both get the continuation that
+already exists, with `deduplicated: true`, because one exit chain holds one at a time. The new
+proposal inherits the root's research clock, so its `created_at` is the root's and `continued_at`
+is when the record was made. Field by field in `docs/SELL_CONTRACT_2026-09-19.md`.
+
 **Reject.** `POST /proposals/{id}/reject` with an optional reason.
 
 **Ask for fresh research.** `POST /proposals/{id}/reanalyze` marks the proposal and starts a
@@ -91,7 +100,7 @@ Sections the backend actually supports. Visual design and navigation are yours.
 | Dashboard | `/health`, `/portfolio`, `/proposals`, `/micro-live` |
 | Portfolio | `/portfolio`, `/risk` |
 | AI Research | `/research`, `/research/{run_key}`, `POST /research` |
-| Approval queue | `/proposals`, `/proposals/{id}`, approve / reject / reanalyze |
+| Approval queue | `/proposals`, `/proposals/{id}`, approve / reject / reanalyze / continue_exit |
 | Risk | `/risk`, `/micro-live` (preflight gates), Hard Risk rules inside a proposal |
 | Orders and activity | `/orders` |
 | History and audit | `/research`, proposal `history` |
@@ -147,6 +156,7 @@ be reviewed and acknowledged.
 |---|---|---|---|
 | POST | `/research` | `{ticker, bucket, instrument_type?, trade_date?, trigger?, scope?, request_id?, purpose?}` | enqueues a durable run; an identical active request returns its existing `run_key`. `scope` (`agentic` or `demo`) must hold `bucket` or the request is refused (400). `request_id` (UUID) makes a repeated tap return the run it already started (`deduplicated: true`) and a different request under the same id a 409. `purpose` is `review_holding`, `candidate` or `exit_review`; the two that speak of a holding are refused (400) for a symbol the book does not hold |
 | POST | `/proposals/{id}/approve` | `{confirm, version, idempotency_key, ticker, bucket, action, notional_usd, sell_quantity?, note?, authority_version?, acknowledge_authority_change?}` | authorises, revalidates, re-runs Hard Risk, venue review, then may execute. `authority_version` is the version `/config/authority` showed; one that has moved is refused with 409 like a moved proposal `version`. A proposal made under an authority that has since loosened, or moved in a way the record cannot classify (including one made before the record existed), is refused with 409 until `acknowledge_authority_change: true`; the response and `GET /proposals/{id}` carry `authority_changed` |
+| POST | `/proposals/{id}/continue_exit` | `{confirm, request_id, authority_version?, acknowledge_authority_change?}` | prepares the unsold remainder of an exit as a new proposal awaiting a person; executes and approves nothing. One per chain and one per `request_id`: a replay returns the same one with `deduplicated: true`. 409 while an order is still working, while reconciliation is unresolved, when the account holds an active order, or when the authority moved; 400 when the authorisation is fully filled, the research has expired, or the position is gone |
 | POST | `/proposals/{id}/reject` | `{reason?}` | closes the proposal |
 | POST | `/proposals/{id}/reanalyze` | none | marks it and starts fresh research |
 | POST | `/portfolio/confirm` | `{ledger?, dry_run?}` | runs the ledger check and renews `as_of` where it agrees |

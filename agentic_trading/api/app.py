@@ -43,6 +43,7 @@ from ..service.shapes import (
     Authority,
     ClaudeStatus,
     Evaluation,
+    ExitContinuation,
     Health,
     MarketStatus,
     MicroLive,
@@ -778,6 +779,29 @@ def approve(proposal_id: str, body: ApproveRequest, request: Request) -> dict[st
                request_id=str(body.idempotency_key),
                terms=body.model_dump(include={"ticker", "bucket", "action", "notional_usd", "sell_quantity"}),
                authority_version=body.authority_version,
+               acknowledge_authority_change=body.acknowledge_authority_change)
+
+
+class ContinueExitRequest(BaseModel):
+    """Take up the unsold part of an exit. Creates a proposal; approves and executes nothing."""
+
+    model_config = ConfigDict(extra="forbid")
+    confirm: StrictBool
+    #: One continuation per id. A repeated tap returns the one it already made; the same id
+    #: pointed at another exit is refused rather than quietly making a second branch.
+    request_id: UUID
+    authority_version: str | None = Field(None, min_length=1, max_length=32)
+    acknowledge_authority_change: bool = False
+
+
+@app.post("/proposals/{proposal_id}/continue_exit", tags=["proposals"],
+          summary="Prepare the unsold remainder of this exit as a proposal for a person")
+def continue_exit(proposal_id: str, body: ContinueExitRequest,
+                  request: Request) -> ExitContinuation:
+    if body.confirm is not True:
+        raise HTTPException(status_code=400, detail="continuing an exit requires explicit confirm=true")
+    return _ok(_service.continue_exit, proposal_id, request_id=str(body.request_id),
+               identity=request.state.identity, authority_version=body.authority_version,
                acknowledge_authority_change=body.acknowledge_authority_change)
 
 

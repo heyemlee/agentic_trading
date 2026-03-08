@@ -592,7 +592,7 @@ def test_the_new_reads_answer_through_their_declared_models(auth_client, monkeyp
     assert auth_client.get("/research?scope=demo").json() == []
     schema = auth_client.get("/openapi.json").json()["components"]["schemas"]
     for model in ("Authority", "Attention", "AccountScopes", "ResearchJob", "ResearchRecord",
-                  "Evaluation", "RouteQuality"):
+                  "Evaluation", "RouteQuality", "ExitContinuation"):
         assert model in schema and schema[model].get("additionalProperties") is False, model
 
 
@@ -601,11 +601,18 @@ def test_openapi_schema_is_published_for_frontend_generation(auth_client):
     schema = client.get("/openapi.json").json()
     paths = set(schema["paths"])
     for required in ("/health", "/portfolio", "/risk", "/micro-live", "/proposals",
-                     "/proposals/{proposal_id}", "/proposals/{proposal_id}/approve", "/research",
+                     "/proposals/{proposal_id}", "/proposals/{proposal_id}/approve",
+                     "/proposals/{proposal_id}/continue_exit", "/research",
                      "/research/jobs", "/orders"):
         assert required in paths, required
     approve = schema["paths"]["/proposals/{proposal_id}/approve"]["post"]
     assert "current conditions" in approve["summary"]
+    # Continuing an exit is a write that creates a proposal and nothing else. The request model
+    # says so: a confirmation, an idempotent id, and the authority the screen showed.
+    onward = schema["paths"]["/proposals/{proposal_id}/continue_exit"]["post"]
+    assert "for a person" in onward["summary"]
+    assert set(schema["components"]["schemas"]["ContinueExitRequest"]["properties"]) == {
+        "confirm", "request_id", "authority_version", "acknowledge_authority_change"}
 
     # A published path is not a generatable document. A route that returns dict[str, Any]
     # publishes `additionalProperties: true`, and everything generated from it is `any`, which

@@ -156,6 +156,13 @@ class Proposal:
     #: The chain it belongs to is what bounds how much may still be sold under the original
     #: authorisation; see exits.py and docs/SELL_CONTRACT_2026-09-19.md.
     continuation_of: str | None = None
+    #: The request that created this continuation. One request id makes one continuation, however
+    #: many times the tab is tapped; the same id against another chain is a conflict.
+    continuation_request_id: str | None = None
+    #: When the continuation record was actually made. ``created_at`` is deliberately not that
+    #: moment: a continuation inherits the root's, because that is the research clock and creating
+    #: a record must not wash stale research into something that looks fresh.
+    continued_at: str | None = None
     approval_response: dict[str, Any] | None = None
     # The authority (autonomy.effective_authority) this idea was born under. An approval
     # compares it with the authority of the moment; None means it predates the record.
@@ -190,6 +197,18 @@ class Proposal:
         if age > stale_after:
             return STALE, f"{cls}: {age:.0f} min old, past the {stale_after:.0f} min mark; revalidation is mandatory"
         return VALID, f"{cls}: {age:.0f} min old, inside the {stale_after:.0f} min window"
+
+    def research_expired(self, profiles: Profiles, now: datetime | None = None) -> bool:
+        """Whether the research behind this proposal is past its lifetime, whatever its status.
+
+        ``freshness`` answers with the lifecycle status for a proposal that has finished, which is
+        the right answer to "may this be approved" and the wrong one to "is the thinking still
+        good". An exit that filled part of its authorisation and stopped is marked ``EXECUTED``,
+        and it is exactly the proposal a continuation is asked for: its research is as old as it
+        is, and the short circuit would report it as fresh forever.
+        """
+        ttl = float(self.freshness_rules(profiles).get("ttl_minutes", 2880))
+        return self.age_minutes(now) > ttl
 
     def approval_expired(self, profiles: Profiles, now: datetime | None = None) -> tuple[bool, str]:
         approved = _parse(self.approved_at)

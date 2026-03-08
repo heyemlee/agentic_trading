@@ -13,7 +13,7 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
-from .. import autonomy
+from .. import autonomy, exits
 from ..execution import ExecutionResult, needs_reconciliation, reconcile_proposal, revalidate
 from ..execution import execute as execute_proposal
 from ..micro_live import BUCKET as MICRO_BUCKET
@@ -21,7 +21,6 @@ from ..portfolio import load_portfolio
 from ..profile import Profiles
 from ..proposals import (
     APPROVED,
-    EXPIRED,
     NEEDS_REANALYSIS,
     PROPOSED,
     REJECTED,
@@ -32,6 +31,7 @@ from ..proposals import (
 from ..storage import file_lock
 from .errors import ServiceConflict, ServiceError
 from .shapes import (
+    ExitContinuation,
     HardRiskRule,
     HardRiskView,
     ProposalDetail,
@@ -41,6 +41,31 @@ from .shapes import (
     ProposalWorld,
 )
 from .status import FRESHNESS_LABELS, ProposalStatus, SystemStatus, proposal_status
+
+#: How each way of being blocked is answered. A conflict says "this may become possible
+#: without anybody changing their mind" -- the venue is still working, the reading is old --
+#: and a plain refusal says "not under this authorisation". The console shows the text, so
+#: the wording is the contract's and not this module's invention.
+_ORDER_WORKING_SAYS = ("an order from this exit is still working at the venue; reconciliation "
+                       "decides what remains")
+_UNRESOLVED_SAYS = "the previous attempt is unresolved; reconciliation continues"
+_SPENT_SAYS = ("the original authorisation is fully filled; a position acquired since is a new "
+               "idea and needs its own proposal")
+_EXPIRED_SAYS = "the research behind this exit has expired; request fresh research"
+CONTINUE_REFUSALS: dict[str, tuple[type[ServiceError], str | None]] = {
+    exits.ORDER_WORKING: (ServiceConflict, _ORDER_WORKING_SAYS),
+    exits.RECONCILIATION_UNRESOLVED: (ServiceConflict, _UNRESOLVED_SAYS),
+    exits.ALLOWANCE_SPENT: (ServiceError, _SPENT_SAYS),
+    exits.RESEARCH_EXPIRED: (ServiceError, _EXPIRED_SAYS),
+    exits.POSITION_GONE: (ServiceError, "the position is gone; nothing to continue"),
+    # No wording of its own: the block already says which order, which account, which reading.
+    exits.ACTIVE_ORDER: (ServiceConflict, None),
+    exits.QUANTITY_UNKNOWN: (ServiceConflict, None),
+    exits.CONTINUATION_WAITING: (ServiceConflict, None),
+    exits.BELOW_PRECISION: (ServiceError, None),
+    exits.NOT_ATTEMPTED: (ServiceError, None),
+}
+
 
 #: Named for the package rather than this module: the split is internal, so a log
 #: record must still read as it did, and getLogger returns the one same object.
@@ -160,20 +185,21 @@ class ApprovalsMixin:
             ledger_quantity=ledger_quantity)
         return autonomy.reduce_block(profiles, p.bucket, floor)
 
-    def _exit_view(self, profiles: Profiles, store: ProposalStore,
-                   p: Proposal) -> dict[str, Any] | None:
-        """What a sell would do to this position, or None for anything that is not a sell.
+    def _exit_facts(self, profiles: Profiles, store: ProposalStore,
+                    p: Proposal) -> dict[str, Any]:
+        """The readings every answer about this exit is derived from, taken once.
 
         Read-only, and off readings that already exist: the ledger, and the venue reading the
         console keeps between polls. A screen asking how much can be sold must not cost a
         Robinhood session, and execution re-reads the venue for itself in any case.
+
+        The screen, the continuation endpoint and the to-do list all take this. The contract asks
+        for one derivation on purpose -- three that agree today would not stay agreed.
         """
         from .. import exits
         from ..portfolio import PortfolioError, load_portfolio
         from ..schedule import ledger_for
 
-        if p.action not in exits.REDUCING:
-            return None
         ledger_quantity = None
         try:
             ledger = load_portfolio(ledger_for(profiles, p.bucket))
@@ -190,13 +216,157 @@ class ApprovalsMixin:
         mine = {row["proposal_id"] for row in active}
         committed = sum(float(row["quantity"] or 0.0) for row in active
                         if (store.get(row["proposal_id"]) or p).ticker == p.ticker)
-        sources = exits.from_reading(ledger_quantity=ledger_quantity, reading=reading,
-                                    symbol=p.ticker, committed_quantity=committed)
-        state, _why = p.freshness(profiles)
-        return exits.view(p, store.all(), sources=sources,
-                          account_has_active_order=bool(mine - {p.proposal_id}),
-                          research_expired=state == EXPIRED,
-                          autonomous=self._autonomous_block(profiles, store, p, ledger_quantity))
+        everything = store.all()
+        # The research clock of the chain, not of this member: a continuation inherits the root's
+        # ``created_at``, and ``research_expired`` reads the age rather than the lifecycle status,
+        # so a root marked EXECUTED after a partial fill -- the very case a continuation is for --
+        # does not report itself as fresh forever.
+        root_id = exits.chain_of(p, everything)["root_proposal_id"]
+        anchor = next((m for m in everything if m.proposal_id == root_id), p)
+        return {"sources": exits.from_reading(ledger_quantity=ledger_quantity, reading=reading,
+                                             symbol=p.ticker, committed_quantity=committed),
+                "ledger_quantity": ledger_quantity,
+                "everything": everything,
+                "account_has_active_order": bool(mine - {p.proposal_id}),
+                "research_expired": anchor.research_expired(profiles)}
+
+    def _exit_view(self, profiles: Profiles, store: ProposalStore,
+                   p: Proposal) -> dict[str, Any] | None:
+        """What a sell would do to this position, or None for anything that is not a sell."""
+        from .. import exits
+
+        if p.action not in exits.REDUCING:
+            return None
+        facts = self._exit_facts(profiles, store, p)
+        return exits.view(p, facts["everything"], sources=facts["sources"],
+                          account_has_active_order=facts["account_has_active_order"],
+                          research_expired=facts["research_expired"],
+                          autonomous=self._autonomous_block(profiles, store, p,
+                                                            facts["ledger_quantity"]))
+
+    # ------------------------------------------------------------ continuing an exit
+    def continue_exit(self, proposal_id: str, *, request_id: str, identity: str | None = None,
+                      authority_version: str | None = None,
+                      acknowledge_authority_change: bool = False) -> dict[str, Any]:
+        """Take up the unsold part of an exit as a new proposal, for a person to approve.
+
+        Nothing is executed here and nothing is approved: an exit that stopped half way is a
+        second decision, and this endpoint only prepares the thing that decision is made about.
+        Three guards stop one chain growing two executable branches, and all three are re-read
+        inside the store lock, so two tabs, a restart and a repeated tap cannot beat them:
+        one unfinished continuation per chain, one continuation per request id, and a refusal
+        while any member of the chain could still be acted on at the venue.
+
+        The continuation inherits the root's research clock rather than starting its own. That is
+        the whole reason the contract insists on it: creating a record must not wash stale
+        research into something that looks fresh, and a root past its lifetime is refused here
+        rather than quietly given a new one.
+        """
+        profiles = self.profiles()
+        store = self._store(profiles)
+        asked = store.get(proposal_id)
+        if asked is None or asked.proposal_id != proposal_id:
+            raise ServiceError(f"no proposal {proposal_id!r}")
+        if asked.action not in exits.REDUCING:
+            raise ServiceError(f"{asked.action} has no exit chain; only SELL and REDUCE do")
+        # By the same rule as an approval, and before anything is written: a screen that showed an
+        # older authority reloads, and one that has loosened needs the person to say they looked.
+        current_authority, authority_changed = self._authority_check(
+            profiles, store, asked, authority_version, acknowledge_authority_change)
+        with store.locked():
+            return self._continue_locked(profiles, store, proposal_id, request_id=request_id,
+                                         identity=identity, authority=current_authority,
+                                         authority_changed=authority_changed)
+
+    def _continue_locked(self, profiles: Profiles, store: ProposalStore, proposal_id: str, *,
+                         request_id: str, identity: str | None, authority: str,
+                         authority_changed: dict[str, Any] | None) -> dict[str, Any]:
+        """The whole decision and the write, with the store lock held for both."""
+        p = store.get(proposal_id)
+        if p is None:
+            raise ServiceError(f"no proposal {proposal_id!r}")
+        facts = self._exit_facts(profiles, store, p)
+        everything = facts["everything"]
+        members = exits.members_of(p, everything)
+        root = members[0]
+
+        # One request id makes one continuation, whatever happened to it since; the same id
+        # pointed at another chain is a different intention wearing the same label.
+        replayed = next((m for m in everything if m.continuation_request_id == request_id), None)
+        if replayed is not None:
+            if replayed.proposal_id not in {m.proposal_id for m in members}:
+                raise ServiceConflict(
+                    f"request id {request_id} already created the continuation "
+                    f"{replayed.proposal_id} of another exit; use a new id for this one")
+            return self._continuation_answer(profiles, replayed, root, deduplicated=True)
+        waiting = exits.open_continuation(p, everything)
+        if waiting is not None:
+            return self._continuation_answer(profiles, waiting, root, deduplicated=True)
+
+        chain = exits.chain_of(p, everything)
+        onward = exits.continuable(p, everything, sources=facts["sources"], chain=chain,
+                                   account_has_active_order=facts["account_has_active_order"],
+                                   research_expired=facts["research_expired"])
+        if not onward["eligible"]:
+            first = onward["blocked_by"][0]
+            error, wording = CONTINUE_REFUSALS.get(first["code"], (ServiceError, None))
+            raise error(wording or first["detail"])
+
+        quantity = float(onward["quantity"])
+        # A proportional share of the original authorisation's value. The figure is not what the
+        # order is sized by -- the quantity is -- but it is what every screen and every notional
+        # limit reads, so it has to describe this proposal rather than the whole exit.
+        allowance = float(root.sell_quantity or 0.0)
+        notional = (float(root.notional_usd) * quantity / allowance) if allowance > 0 else \
+            float(root.notional_usd)
+        continuation = replace(
+            root,
+            proposal_id=f"{root.trade_date}-{root.ticker}-{uuid.uuid4().hex[:8]}",
+            status=PROPOSED,
+            sell_quantity=quantity,
+            notional_usd=notional,
+            requires_human_approval=True,
+            continuation_of=root.proposal_id,
+            continuation_request_id=request_id,
+            continued_at=utcnow().isoformat(),
+            # Inherited on purpose: created_at is the research clock, not the moment this record
+            # was made. What this record's own age is, continued_at says.
+            created_at=root.created_at,
+            # Nothing of the earlier attempt carries over. An inherited order id or fill count
+            # would make the new proposal look like it had already been to the venue, and the
+            # chain's arithmetic counts every member's fills.
+            approved_at=None, approved_by=None, approved_via=None, approval_note=None,
+            approval_request_id=None, approved_version=None, approval_response=None,
+            executed_at=None, client_order_id=None, broker_order_id=None,
+            executed_notional_usd=None, submit_attempts=0, order_status=None, order_request=None,
+            filled_quantity=0.0, filled_avg_price=None, reconciled_at=None,
+            reconciliation_error=None, execution_ledger_path=None,
+            history=[],
+            _revision=0,
+        )
+        continuation.note(
+            "exit_continued",
+            f"continues {root.proposal_id}: {quantity:g} of the {allowance:g} authorised remains "
+            f"unsold, {chain['filled']:g} filled",
+            root_proposal_id=root.proposal_id, request_id=request_id, identity=identity,
+            purpose="exit_review", research_anchor_at=root.created_at,
+            authority_version=authority, authority_changed=authority_changed,
+            remaining_allowance=chain["remaining_allowance"])
+        store.save(continuation)
+        return self._continuation_answer(profiles, continuation, root, deduplicated=False)
+
+    def _continuation_answer(self, profiles: Profiles, continuation: Proposal, root: Proposal, *,
+                             deduplicated: bool) -> dict[str, Any]:
+        """The one answer shape, whether a continuation was just made or already existed."""
+        return ExitContinuation(
+            deduplicated=deduplicated,
+            continuation_of=continuation.continuation_of or root.proposal_id,
+            root_proposal_id=root.proposal_id,
+            authorised_quantity=float(continuation.sell_quantity or 0.0),
+            research_anchor_at=continuation.created_at,
+            continued_at=continuation.continued_at,
+            proposal=self._proposal_summary(continuation, profiles),
+        ).model_dump()
 
     # ---------------------------------------------------------------- actions
     def revalidate_proposal(self, proposal_id: str) -> dict[str, Any]:

@@ -321,6 +321,31 @@ class HardRiskView(BaseModel):
     regime: dict[str, Any] | None = None
 
 
+class ExitContinuation(BaseModel):
+    """The answer to continuing an exit: the proposal a person now has to approve.
+
+    The same shape whether one was just created or one already existed, so a repeated tap and a
+    second tab read alike. ``deduplicated`` is the only thing that distinguishes them, and nothing
+    here has been approved or sent anywhere: the continuation waits for a person exactly as the
+    root did.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: True when this continuation already existed: the same request id was replayed, or the
+    #: chain already held one. One chain never holds two.
+    deduplicated: bool
+    continuation_of: str
+    root_proposal_id: str
+    authorised_quantity: float
+    #: The research clock this inherits, which is the root's ``created_at``. It is also this
+    #: proposal's ``created_at``, deliberately: a continuation does not restart the clock.
+    research_anchor_at: str
+    #: When the continuation record was actually made, which is what its age as a record is.
+    continued_at: str | None = None
+    proposal: ProposalSummary
+
+
 class ProposalDetail(ProposalSummary):
     """Everything the queue shows, plus the reasoning and the rules behind it.
 

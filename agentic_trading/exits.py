@@ -67,6 +67,11 @@ POSITION_GONE = "position_gone"
 QUANTITY_UNKNOWN = "quantity_unknown"
 BELOW_PRECISION = "below_precision"
 RESEARCH_EXPIRED = "research_expired"
+#: A continuation of this chain is already waiting for a person. Added to the set the contract
+#: settled, because two of its requirements meet here: one chain may hold one continuation, and
+#: the to-do item must disappear once a continuation exists. Without it a continuation for less
+#: than the whole remaining allowance would leave the chain looking continuable again.
+CONTINUATION_WAITING = "continuation_waiting"
 
 
 def floor_to_increment(quantity: float, increment: float = MIN_INCREMENT) -> float:
@@ -244,12 +249,27 @@ def members_of(proposal: Proposal, everything: list[Proposal]) -> list[Proposal]
                     and candidate.proposal_id not in {m.proposal_id for m in chain}):
                 chain.append(candidate)
                 changed = True
-    return sorted(chain, key=lambda p: p.created_at)
+    # The root is first by identity, not by timestamp. A continuation inherits the root's
+    # ``created_at`` -- that is the research clock, and creating a record must not restart it --
+    # so ordering by time alone would leave which member is the root to a tie-break.
+    return [root, *sorted(chain[1:], key=lambda p: (p.continued_at or p.created_at))]
 
 
 def unfinished(proposal: Proposal) -> bool:
     """Whether this member could still consume allowance: awaiting a decision, or working."""
     return proposal.status in (PROPOSED, APPROVED) or proposal.status in PENDING_EXECUTION
+
+
+def open_continuation(proposal: Proposal, everything: list[Proposal]) -> Proposal | None:
+    """The continuation of this chain that has not finished, if there is one.
+
+    One chain holds one at a time. The check is by ``continuation_of`` rather than by counting,
+    so the root itself -- which is nobody's continuation -- never answers this.
+    """
+    for member in members_of(proposal, everything):
+        if member.continuation_of and unfinished(member):
+            return member
+    return None
 
 
 def chain_of(proposal: Proposal, everything: list[Proposal]) -> dict[str, Any]:
@@ -305,7 +325,16 @@ def continuable(proposal: Proposal, everything: list[Proposal], *, sources: Sour
         blocked.append({"code": ACTIVE_ORDER,
                         "detail": f"an order is already working in {proposal.bucket}; one account "
                                   "holds one active order"})
-    if not any(m.client_order_id for m in chain_members):
+    waiting = open_continuation(proposal, everything)
+    if waiting is not None and waiting.proposal_id != proposal.proposal_id:
+        blocked.append({"code": CONTINUATION_WAITING,
+                        "detail": f"a continuation of this exit ({waiting.proposal_id}) is already "
+                                  "waiting for a person; one chain holds one at a time"})
+    # Two ways nothing has been attempted yet, and the answer to both is the same: approve this
+    # one. The chain has never reached the venue at all, or this member has not -- which is what
+    # a continuation still waiting for a person looks like from its own screen.
+    if (not any(m.client_order_id for m in chain_members)
+            or (unfinished(proposal) and not proposal.client_order_id)):
         blocked.append({"code": NOT_ATTEMPTED,
                         "detail": "this exit has not been attempted yet; approve it rather than "
                                   "continuing it"})

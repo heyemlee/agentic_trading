@@ -486,9 +486,9 @@
 | 1. `exit` 块 | `9786cc7` | 已完成，`agentic_trading/exits.py` + `tests/test_exits.py`（26 项，按样例 A–G 命名） |
 | 2. `approved_via` | `6ab98bc` | 已完成，三个调用方各自写入；`acted_today` 改读它 |
 | 3. 持仓下限 | 本次提交 | 已完成，`autonomy.position_floor` / `reduce_block` / `permits` + `tests/test_position_floor.py`（21 项）与 `tests/test_autonomous_reductions.py` 新增 4 项 |
-| 4. `continue_exit` | 未开始 | |
+| 4. `continue_exit` | 本次提交 | 已完成，`service/approvals.py::continue_exit` + `POST /proposals/{id}/continue_exit` + `tests/test_continue_exit.py`（22 项） |
 | 5. `exit_result` 与 `exit_incomplete` | 未开始 | |
-| 6. 隔离测试 | 随 4、5 补齐 | 第 3 步相关的已写完，含你们那条逐字用例 |
+| 6. 隔离测试 | 随 5 补齐 | 第 3、4 步相关的已写完，含你们那条逐字用例 |
 
 ### 8.1 第 3 步的四处偏差
 
@@ -522,3 +522,37 @@
 
 这不是回归，是 fail-closed：自主减仓本来就是关的（`buckets.micro_live.autonomy.reduce.enabled: false`）。
 我没有改生产配置——这个百分比定多少是所有者的决定，改动本身要走配置流程。
+
+### 8.3 第 4 步的五处偏差
+
+**一、`WAITING_FOR_APPROVAL` 不是本系统的状态。** 契约 §3.4 写续做提案状态为 `WAITING_FOR_APPROVAL`；
+提案的状态词表里没有这个值。"等人批准"在本系统各处的表示就是 `PROPOSED` 加
+`requires_human_approval: true`，续做按这个创建。请按这两个字段判断，不要找那个字符串。
+
+**二、`purpose: exit_review` 记在历史条目里，不在提案上。** `purpose` 是研究任务的字段
+（`service/research.py` 的 `PURPOSES`），提案没有这个字段，续做也不是一次研究。它写在
+`exit_continued` 历史条目上，和 `root_proposal_id`、`request_id`、`research_anchor_at` 在一起。
+
+**三、闭集新增一个码：`continuation_waiting`。** 契约有两条要求在这里相遇：一条链只允许一个未完成
+续做，且续做存在后待办必须消失。而"待办出现条件就是 `continuable.eligible`"。若续做的数量小于剩余
+额度（账本少于授权时就会这样），剩余额度仍大于零，这条链看起来又可续做了。所以 `continuable` 现在
+显式报这个码。
+
+在根提案的屏幕上，续做等待时 `blocked_by` 会有**两条**：`continuation_waiting` 在前（可操作的那条），
+`allowance_spent` 在后——因为等待的续做把额度作为 `committed` 占住了，`remaining_allowance` 为 0。
+两条都成立，第二条的 `detail` 说的是"已被占用（accounted for）"而不是"已成交"。
+
+**四、新鲜度锚点按年龄判断，不走 `freshness()`。** 这是一个真缺陷，不只是措辞：`Proposal.freshness`
+对已终结的提案直接返回生命周期状态，而部分成交后撤单的根提案正是 `EXECUTED`——也正是续做要针对的
+那一个。照原样实现，它会永远报告自己新鲜。新增 `Proposal.research_expired(profiles)` 只读年龄与
+`ttl_minutes`，`continue_exit` 与 `GET` 的 `exit` 块都用它。
+
+**对第 1 步的影响**：一个久远的 `EXECUTED` 根提案，现在 `exit.continuable.blocked_by` 会多一条
+`research_expired`，此前没有。这是收紧，两处判定也因此同源。
+
+**五、`continued_at` 与 `request_id` 两个命名。** 续做的 `created_at` 是继承来的研究时钟，所以记录
+自身的创建时刻放在新字段 `continued_at`（响应里同名返回）。请求字段按契约叫 `request_id`，注意它与
+`approve` 的 `idempotency_key` 名字不同，两者语义一致。
+
+另外 `notional_usd` 取根提案的等比份额（`root.notional_usd × 续做量 ÷ 原授权`）。下单看数量不看金额，
+但屏幕与金额类限额都读它，所以它要描述这一笔而不是整条链。
