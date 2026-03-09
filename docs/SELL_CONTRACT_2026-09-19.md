@@ -487,8 +487,8 @@
 | 2. `approved_via` | `6ab98bc` | 已完成，三个调用方各自写入；`acted_today` 改读它 |
 | 3. 持仓下限 | 本次提交 | 已完成，`autonomy.position_floor` / `reduce_block` / `permits` + `tests/test_position_floor.py`（21 项）与 `tests/test_autonomous_reductions.py` 新增 4 项 |
 | 4. `continue_exit` | 本次提交 | 已完成，`service/approvals.py::continue_exit` + `POST /proposals/{id}/continue_exit` + `tests/test_continue_exit.py`（22 项） |
-| 5. `exit_result` 与 `exit_incomplete` | 未开始 | |
-| 6. 隔离测试 | 随 5 补齐 | 第 3、4 步相关的已写完，含你们那条逐字用例 |
+| 5. `exit_result` 与 `exit_incomplete` | 本次提交 | 已完成，`exits.result` + 批准响应 + `/attention` 的 `exit_incomplete` + `tests/test_exit_result.py`（14 项） |
+| 6. 隔离测试 | 本次提交 | §7 清单全部覆盖，含并发、重启与你们那条逐字用例 |
 
 ### 8.1 第 3 步的四处偏差
 
@@ -525,9 +525,10 @@
 
 ### 8.3 第 4 步的五处偏差
 
-**一、`WAITING_FOR_APPROVAL` 不是本系统的状态。** 契约 §3.4 写续做提案状态为 `WAITING_FOR_APPROVAL`；
-提案的状态词表里没有这个值。"等人批准"在本系统各处的表示就是 `PROPOSED` 加
-`requires_human_approval: true`，续做按这个创建。请按这两个字段判断，不要找那个字符串。
+**一、`WAITING_FOR_APPROVAL` 就是接口返回的那个值（原文无误，这里只说清两层词表）。** 存储里的状态
+是 `PROPOSED`，API 返回的展示状态经 `service/status.py` 映射为 `WAITING_FOR_APPROVAL`。续做创建为
+`PROPOSED` 且 `requires_human_approval: true`，所以 `proposal.status` 读到的就是
+`WAITING_FOR_APPROVAL`，与其他等待审批的提案完全一致。
 
 **二、`purpose: exit_review` 记在历史条目里，不在提案上。** `purpose` 是研究任务的字段
 （`service/research.py` 的 `PURPOSES`），提案没有这个字段，续做也不是一次研究。它写在
@@ -556,3 +557,30 @@
 
 另外 `notional_usd` 取根提案的等比份额（`root.notional_usd × 续做量 ÷ 原授权`）。下单看数量不看金额，
 但屏幕与金额类限额都读它，所以它要描述这一笔而不是整条链。
+
+### 8.4 第 5、6 步：一个真缺陷与两处说明
+
+**一、续做继承持仓指纹会让它永远无法批准（已修）。** 这是端到端测试抓出来的，不是走查看出来的。
+`execution.revalidate` 第 4 步比对 `positions_fingerprint`，不一致就 `REANALYZE` 并直接返回。续做继承
+研究，而研究是对**成交前**的账本做的——部分成交后账本必然不同，于是每一个续做都会在批准时被拒。
+
+修法按"这次变化是不是我们自己造成的"分情况：
+
+| 情形 | 续做的 `positions_fingerprint` | 理由 |
+| --- | --- | --- |
+| 链上有成交（`chain.filled > 0`） | `null`（跳过该检查） | 账本的变化正是本链自己卖出造成的，不是这项检查要抓的意外 |
+| 零成交撤单（`chain.filled == 0`） | 继承根提案的 | 账本应当与研究时一致，此时不一致是真的意外，检查仍然有效 |
+
+两种情形下根提案的指纹都记在 `exit_continued` 历史条目的 `positions_fingerprint_at_analysis` 里。
+跳过它并没有放宽卖出的约束：执行时仍重读券商、按券商真相重算数量，HR14／HR14b 仍拒绝超卖，再加上本
+契约的链额度——这些才是退出的实际护栏，指纹从来不是。
+
+**二、`exit_result` 的券商读数是在订单之后、会话关闭之前新取的。** 契约要求 `position_closed` 只能
+由"两来源都新读到 0"得出，而控制台保留的那份读数描述的是下单之前的世界。所以批准路径在
+`execute` 之后、`_close(broker)` 之前多读一次持仓。读不到就三态取 `null`，不写 0，也绝不让这次读取
+失败影响批准本身的记录。`exit_result.chain` 一并返回，这样屏幕不必再取一次详情。
+
+**三、`exit_incomplete` 与按钮、端点同源。** `/attention` 这一项的出现条件就是对**根提案**求
+`exits.continuable`，与 `GET` 的 `exit.continuable` 和 `continue_exit` 的准入用同一个函数。一条链只出
+一条待办，`detail` 写"已卖 X / 授权 Y"，`since` 取链上最后一次对账时间，超过 72 小时不再提醒。
+严重性 high、优先级 3、`requires_person: true`、`actions: ["continue_exit", "open"]`，与契约一致。

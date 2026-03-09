@@ -97,6 +97,9 @@ def test_a_stopped_exit_becomes_a_proposal_a_person_must_approve(setup):
 
     made = store.get(answer["proposal"]["proposal_id"])
     assert made.status == PROPOSED and made.requires_human_approval is True
+    # What the contract calls the status: the stored value is PROPOSED, and the one the API
+    # publishes is the display status every other waiting proposal has.
+    assert answer["proposal"]["status"] == "WAITING_FOR_APPROVAL"
     assert made.continuation_of == first.proposal_id
     assert made.sell_quantity == pytest.approx(0.08)
     assert made.action == "REDUCE" and made.ticker == "VTI" and made.bucket == MICRO
@@ -334,3 +337,59 @@ def test_the_inherited_clock_is_checked_again_at_approval(setup):
                          SimulatedBroker(prices=dict(PRICES), cash=40.0), persist_risk=False)
     assert preview.outcome == OUT_STALE
     assert any("expired proposals are never executed" in r for r in preview.reasons)
+
+
+def test_a_position_acquired_since_is_not_part_of_the_old_authorisation(setup):
+    """The allowance is spent, and buying more does not refill it. That would be a new idea."""
+    service, _, store, ledger = setup
+    doc = yaml.safe_load(ledger.read_text(encoding="utf-8"))
+    doc["positions"][0]["quantity"] = 5.0          # a great deal more than was ever authorised
+    ledger.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ServiceError) as exc:
+        ask(service, root(store, filled=0.2, status=EXECUTED))
+    assert "needs its own proposal" in str(exc.value)
+
+
+def test_two_requests_at_once_still_make_one_continuation(setup):
+    """Two tabs, two ids, the same instant. The lock is the whole guard, so it is tested as one."""
+    import threading
+
+    service, _, store, _ = setup
+    first = root(store)
+    answers, errors = [], []
+    start = threading.Barrier(2)
+
+    def attempt():
+        start.wait(timeout=5)
+        try:
+            answers.append(ask(service, first))
+        except Exception as exc:  # noqa: BLE001 - recorded and asserted on below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == [], errors
+    assert len({a["proposal"]["proposal_id"] for a in answers}) == 1
+    assert [a["deduplicated"] for a in answers].count(True) == 1
+    assert len([p for p in store.all() if p.continuation_of]) == 1
+
+
+def test_a_restart_does_not_grow_a_second_branch(setup, tmp_path, monkeypatch):
+    """A fresh process reads the same store and finds the continuation that already exists."""
+    service, profiles, store, _ = setup
+    first = root(store)
+    made = ask(service, first)
+
+    restarted = Service()
+    reopened = ProposalStore(tmp_path / "proposals.json")
+    monkeypatch.setattr(restarted, "profiles", lambda: profiles)
+    monkeypatch.setattr(restarted, "_store", lambda _=None: reopened)
+    monkeypatch.setattr(restarted, "market_status", lambda: MarketStatus(is_open=True))
+    again = restarted.continue_exit(first.proposal_id, request_id=str(uuid.uuid4()))
+    assert again["deduplicated"] is True
+    assert again["proposal"]["proposal_id"] == made["proposal"]["proposal_id"]
+    assert len([p for p in reopened.all() if p.continuation_of]) == 1

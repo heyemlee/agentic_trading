@@ -361,6 +361,33 @@ def continuable(proposal: Proposal, everything: list[Proposal], *, sources: Sour
     return {"eligible": not blocked, "quantity": quantity, "blocked_by": blocked}
 
 
+def result(proposal: Proposal, everything: list[Proposal], *, sources: Sources,
+           account_has_active_order: bool, research_expired: bool,
+           submitted_quantity: float | None,
+           increment: float = MIN_INCREMENT) -> dict[str, Any]:
+    """What the attempt did to the position, and whether anything is left to take up.
+
+    ``sources`` has to be a reading taken **after** the attempt. The contract will not call a
+    position closed on figures read before the order went, and the venue is the only place a
+    fresh one comes from -- which is why the caller reads it while the session is still open.
+
+    ``continuable`` is the same function the screen and the to-do list read, deliberately: the
+    answer a person gets immediately after an exit must be the answer they get when they come
+    back to the page an hour later.
+    """
+    chain = chain_of(proposal, everything)
+    return {
+        "requested_quantity": proposal.sell_quantity,
+        "submitted_quantity": submitted_quantity,
+        "filled_quantity": float(proposal.filled_quantity or 0.0),
+        **confirmation(sources),
+        "chain": chain,
+        "continuable": continuable(proposal, everything, sources=sources, chain=chain,
+                                   account_has_active_order=account_has_active_order,
+                                   research_expired=research_expired, increment=increment),
+    }
+
+
 def view(proposal: Proposal, everything: list[Proposal], *, sources: Sources,
          account_has_active_order: bool, research_expired: bool,
          autonomous: dict[str, Any] | None = None,

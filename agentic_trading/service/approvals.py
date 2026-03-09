@@ -185,8 +185,8 @@ class ApprovalsMixin:
             ledger_quantity=ledger_quantity)
         return autonomy.reduce_block(profiles, p.bucket, floor)
 
-    def _exit_facts(self, profiles: Profiles, store: ProposalStore,
-                    p: Proposal) -> dict[str, Any]:
+    def _exit_facts(self, profiles: Profiles, store: ProposalStore, p: Proposal, *,
+                    reading: Any | None = None) -> dict[str, Any]:
         """The readings every answer about this exit is derived from, taken once.
 
         Read-only, and off readings that already exist: the ledger, and the venue reading the
@@ -207,8 +207,9 @@ class ApprovalsMixin:
             ledger_quantity = float(held.quantity) if held else 0.0
         except (PortfolioError, OSError, ValueError):
             ledger_quantity = None            # unreadable is not empty
-        reading = None
-        if p.bucket == MICRO_BUCKET and self._micro_enabled(profiles):
+        if reading is None and p.bucket == MICRO_BUCKET and self._micro_enabled(profiles):
+            # The reading the console keeps between polls. A caller that has just been to the
+            # venue passes its own instead: after an order, the kept one describes the past.
             reading, _stale = self._venue_reading.peek()
         active = [row for row in store.db.reservations(active_only=True)
                   if str(row["account_key"]) == ("micro_live" if p.bucket == MICRO_BUCKET
@@ -243,6 +244,34 @@ class ApprovalsMixin:
                           research_expired=facts["research_expired"],
                           autonomous=self._autonomous_block(profiles, store, p,
                                                             facts["ledger_quantity"]))
+
+    def _venue_after_exit(self, profiles: Profiles, p: Proposal, broker: Any) -> Any | None:
+        """A fresh venue reading for an exit, or None when there is no venue to ask.
+
+        Never raises and never lets a failure reach the approval: an unreadable book after the
+        order means the remainder cannot be confirmed, which the block says in three-state
+        fields, and an approval must always end in a recorded answer.
+        """
+        if p.action not in exits.REDUCING or p.bucket != MICRO_BUCKET:
+            return None
+        try:
+            from ..micro_live import read_venue
+            return read_venue(broker, utcnow().isoformat())
+        except Exception:  # noqa: BLE001 - an unconfirmable remainder is reported, never guessed
+            logger.warning("could not re-read the venue after an exit on %s", p.proposal_id)
+            return None
+
+    def _exit_result(self, profiles: Profiles, store: ProposalStore, p: Proposal,
+                     after: Any | None) -> dict[str, Any] | None:
+        """What the attempt did, for the answer the approval returns. None if it was not an exit."""
+        if p.action not in exits.REDUCING:
+            return None
+        submitted = (p.order_request or {}).get("quantity")
+        facts = self._exit_facts(profiles, store, p, reading=after)
+        return exits.result(p, facts["everything"], sources=facts["sources"],
+                            account_has_active_order=facts["account_has_active_order"],
+                            research_expired=facts["research_expired"],
+                            submitted_quantity=float(submitted) if submitted is not None else None)
 
     # ------------------------------------------------------------ continuing an exit
     def continue_exit(self, proposal_id: str, *, request_id: str, identity: str | None = None,
@@ -332,9 +361,20 @@ class ApprovalsMixin:
             # Inherited on purpose: created_at is the research clock, not the moment this record
             # was made. What this record's own age is, continued_at says.
             created_at=root.created_at,
-            # Nothing of the earlier attempt carries over. An inherited order id or fill count
-            # would make the new proposal look like it had already been to the venue, and the
-            # chain's arithmetic counts every member's fills.
+            # The book this may act on. The fingerprint asks "was the thesis formed against a
+            # different position book?", and after a fill of our own the answer is always yes --
+            # by our own hand, which is not the surprise the check exists to catch, and a check
+            # that always fails is not a check. So it is kept only where it still means
+            # something: a cancel that filled nothing left the book exactly as the analysis found
+            # it, and a change there is a real one. What guards the rest is what guards every
+            # exit -- the venue is re-read at execution, the quantity is recomputed from it, and
+            # HR14/HR14b refuse an oversell -- plus the chain allowance, which no fingerprint
+            # could give. The root's is kept in the history entry either way.
+            positions_fingerprint=(root.positions_fingerprint
+                                   if chain["filled"] <= exits.TOLERANCE else None),
+            # Nothing else of the earlier attempt carries over. An inherited order id or fill
+            # count would make the new proposal look like it had already been to the venue, and
+            # the chain's arithmetic counts every member's fills.
             approved_at=None, approved_by=None, approved_via=None, approval_note=None,
             approval_request_id=None, approved_version=None, approval_response=None,
             executed_at=None, client_order_id=None, broker_order_id=None,
@@ -350,6 +390,7 @@ class ApprovalsMixin:
             f"unsold, {chain['filled']:g} filled",
             root_proposal_id=root.proposal_id, request_id=request_id, identity=identity,
             purpose="exit_review", research_anchor_at=root.created_at,
+            positions_fingerprint_at_analysis=root.positions_fingerprint,
             authority_version=authority, authority_changed=authority_changed,
             remaining_allowance=chain["remaining_allowance"])
         store.save(continuation)
@@ -462,6 +503,10 @@ class ApprovalsMixin:
                     result = execute_proposal(profiles, p, broker, store)
                 except Exception as exc:  # noqa: BLE001 - an approval must always end in a recorded answer
                     result = self._execution_failed(store, proposal_id, exc)
+                # Both books as they stand after the attempt, taken while the session is open.
+                # "Closed" may only be said of a reading made after the order, and the venue is
+                # the only place one comes from; the kept reading describes the world before.
+                after = self._venue_after_exit(profiles, p, broker)
             finally:
                 _close(broker)
             with store.locked():
@@ -477,6 +522,9 @@ class ApprovalsMixin:
                     "message": _approval_message(status, result),
                     "authority_changed": authority_changed,
                 }
+                exit_result = self._exit_result(profiles, store, p, after)
+                if exit_result is not None:
+                    response["exit_result"] = exit_result
                 p.approval_response = response
                 store.save(p)
                 return response

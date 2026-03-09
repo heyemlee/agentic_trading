@@ -35,6 +35,7 @@ RANKING: dict[str, tuple[str, int, bool]] = {
     "risk_halt": ("critical", 2, True),
     "autonomy_withdrawn": ("high", 2, True),
     "proposal_waiting": ("high", 3, True),
+    "exit_incomplete": ("high", 3, True),
     "proposal_stale": ("normal", 3, True),
     "research_failed": ("normal", 4, True),
     "research_limit_exhausted": ("normal", 4, True),
@@ -54,6 +55,7 @@ ACTIONS: dict[str, list[str]] = {
     "risk_halt": ["open"],
     "autonomy_withdrawn": ["reset_autonomy", "open"],
     "proposal_waiting": ["approve", "reject", "reanalyze"],
+    "exit_incomplete": ["continue_exit", "open"],
     "proposal_stale": ["reanalyze", "reject"],
     "research_failed": ["retry", "open"],
     "research_limit_exhausted": ["retry", "cancel", "open"],
@@ -70,6 +72,11 @@ _SEVERITY_RANK = {"critical": 0, "high": 1, "normal": 2, "info": 3}
 #: does. After that they are history, which is Activity's to show, not a to-do.
 DONE_HOURS = 24.0
 FAILED_HOURS = 72.0
+
+#: How long an exit that stopped part way keeps asking. A sell nobody finished is not a
+#: permanent to-do: after this the remainder is an ordinary position, and continuing it under
+#: research this old would be refused anyway.
+EXIT_INCOMPLETE_HOURS = 72.0
 
 #: The personal tasks a person asked for by name. A chat or a refresh that failed is announced
 #: like any failure, but it is not something Home keeps asking about.
@@ -243,6 +250,55 @@ class NotificationsMixin:
                     scope=scope, account_id=account, account_label=_label(scope, account),
                     subject=proposal.proposal_id, since=proposal.created_at,
                     link=_link("approvals", proposal=proposal.proposal_id)))
+
+        def unfinished_exits() -> None:
+            """Exits that stopped with shares still on the book and allowance still unspent.
+
+            One item per chain, and the condition is ``exit.continuable.eligible`` itself rather
+            than a second reading of the same rules. The endpoint, the button on the approvals
+            page and this to-do therefore cannot disagree: when a continuation exists, or the
+            allowance is spent, or the venue has not finished, all three go quiet together.
+            """
+            from .. import exits
+
+            store = self._store(profiles)
+            everything = store.all()
+            seen: set[str] = set()
+            for proposal in everything:
+                if proposal.action not in exits.REDUCING or proposal.continuation_of:
+                    continue
+                if proposal.proposal_id in seen:
+                    continue
+                members = exits.members_of(proposal, everything)
+                root = members[0]
+                seen.update(m.proposal_id for m in members)
+                if any(exits.unfinished(m) for m in members):
+                    continue                      # still somebody's move, not an unfinished exit
+                last = max([m.reconciled_at or m.executed_at or m.created_at for m in members])
+                since = _parse(last)
+                if since is None or (now - since).total_seconds() / 3600 > EXIT_INCOMPLETE_HOURS:
+                    continue
+                facts = self._exit_facts(profiles, store, root)
+                chain = exits.chain_of(root, facts["everything"])
+                onward = exits.continuable(
+                    root, facts["everything"], sources=facts["sources"], chain=chain,
+                    account_has_active_order=facts["account_has_active_order"],
+                    research_expired=facts["research_expired"])
+                if not onward["eligible"]:
+                    continue
+                scope, account = _bucket_scope(root.bucket)
+                out.append(Condition(
+                    id=f"exit_incomplete:{root.proposal_id}:{chain['filled']:g}",
+                    kind="exit_incomplete",
+                    title=f"{root.ticker} was only partly sold",
+                    detail=(f"{chain['filled']:g} of the {chain['allowance']:g} authorised sold; "
+                            f"{onward['quantity']:g} may still be taken up under the same "
+                            "authorisation"),
+                    scope=scope, account_id=account, account_label=_label(scope, account),
+                    subject=root.proposal_id, since=last,
+                    link=_link("approvals", proposal=root.proposal_id),
+                    notify_kind="exit_incomplete", notify_link="/ui/approvals.html",
+                    urgent=root.bucket == MICRO_BUCKET))
 
         def research() -> None:
             jobs = self.research_jobs(limit=50)
@@ -431,7 +487,8 @@ class NotificationsMixin:
                     attention=False, notify_kind="autonomy_acted", notify_link="/ui/activity.html",
                     urgent=proposal.bucket == MICRO_BUCKET))
 
-        for source, collector in (("proposals", proposals), ("research", research), ("venue", venue),
+        for source, collector in (("proposals", proposals), ("exits", unfinished_exits),
+                                  ("research", research), ("venue", venue),
                                   ("ladders", ladders), ("ledger_report", ledgers),
                                   ("operations", operations), ("autonomy", withdrawn),
                                   ("config_changes", changes), ("autonomy_acted", acted)):
