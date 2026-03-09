@@ -485,10 +485,11 @@
 | --- | --- | --- |
 | 1. `exit` 块 | `9786cc7` | 已完成，`agentic_trading/exits.py` + `tests/test_exits.py`（26 项，按样例 A–G 命名） |
 | 2. `approved_via` | `6ab98bc` | 已完成，三个调用方各自写入；`acted_today` 改读它 |
-| 3. 持仓下限 | 本次提交 | 已完成，`autonomy.position_floor` / `reduce_block` / `permits` + `tests/test_position_floor.py`（21 项）与 `tests/test_autonomous_reductions.py` 新增 4 项 |
-| 4. `continue_exit` | 本次提交 | 已完成，`service/approvals.py::continue_exit` + `POST /proposals/{id}/continue_exit` + `tests/test_continue_exit.py`（22 项） |
-| 5. `exit_result` 与 `exit_incomplete` | 本次提交 | 已完成，`exits.result` + 批准响应 + `/attention` 的 `exit_incomplete` + `tests/test_exit_result.py`（14 项） |
-| 6. 隔离测试 | 本次提交 | §7 清单全部覆盖，含并发、重启与你们那条逐字用例 |
+| 3. 持仓下限 | `5ada011` | 已完成，`autonomy.position_floor` / `reduce_block` / `permits` + `tests/test_position_floor.py`（20 项，含参数化共 21 例）与 `tests/test_autonomous_reductions.py` 新增 4 项 |
+| 4. `continue_exit` | `3ac345f` | 已完成，`service/approvals.py::continue_exit` + `POST /proposals/{id}/continue_exit` + `tests/test_continue_exit.py`（24 项，含参数化共 25 例） |
+| 5. `exit_result` 与 `exit_incomplete` | `06f2728` | 已完成，`exits.result` + 批准响应 + `/attention` 的 `exit_incomplete` + `tests/test_exit_result.py`（14 项） |
+| 6. 隔离测试 | `06f2728` | §7 清单全部覆盖，含并发、重启与你们那条逐字用例 |
+| 7. 门禁与交接 | `06f2728` | `deploy/checks.sh` 全绿（Ruff、Python 951、前端 141、秘密扫描）；提交号与字段说明随本节交前端。未推送、未发布 |
 
 ### 8.1 第 3 步的四处偏差
 
