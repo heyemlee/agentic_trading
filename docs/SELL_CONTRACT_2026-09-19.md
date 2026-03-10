@@ -489,7 +489,8 @@
 | 4. `continue_exit` | `3ac345f` | 已完成，`service/approvals.py::continue_exit` + `POST /proposals/{id}/continue_exit` + `tests/test_continue_exit.py`（24 项，含参数化共 25 例） |
 | 5. `exit_result` 与 `exit_incomplete` | `06f2728` | 已完成，`exits.result` + 批准响应 + `/attention` 的 `exit_incomplete` + `tests/test_exit_result.py`（14 项） |
 | 6. 隔离测试 | `06f2728` | §7 清单全部覆盖，含并发、重启与你们那条逐字用例 |
-| 7. 门禁与交接 | `06f2728` | `deploy/checks.sh` 全绿（Ruff、Python 951、前端 141、秘密扫描）；提交号与字段说明随本节交前端。未推送、未发布 |
+| 7. 门禁与交接 | `06f2728` | 已交前端；前端实现 `52f6b30` |
+| 8. 合并后核对 | 本次提交 | 两边合并树 `deploy/checks.sh` 全绿（Ruff、Python 952、前端 151、秘密扫描）；十个阻断码、自主减仓块九个字段、`exit_result` 八个字段与控制台读取逐项对齐；补一条真实 HTTP 往返测试。未推送、未发布 |
 
 ### 8.1 第 3 步的四处偏差
 
@@ -585,3 +586,19 @@
 `exits.continuable`，与 `GET` 的 `exit.continuable` 和 `continue_exit` 的准入用同一个函数。一条链只出
 一条待办，`detail` 写"已卖 X / 授权 Y"，`since` 取链上最后一次对账时间，超过 72 小时不再提醒。
 严重性 high、优先级 3、`requires_person: true`、`actions: ["continue_exit", "open"]`，与契约一致。
+
+### 8.5 合并后核对（两边都在 `main` 上之后）
+
+前端 `52f6b30` 落地后我自己把合并树验了一遍，而不是只看报告。门禁全绿，字段逐项对齐：闭集十个码控制台
+全部有译文（含 `continuation_waiting`），`exit.autonomous` 九个字段、`exit_result` 八个字段、续做响应
+七个字段都是控制台实际读取的那些。控制台用 `res.blocked` 判断演示模式，那是它自己合成的，不是接口字段。
+
+补了两处：
+
+**一、`continue_exit` 的真实 HTTP 往返测试**（`tests/test_api.py`）。服务层测试覆盖决策，前端用例覆盖
+屏幕，两者之间的接缝只有一次真实调用能验：请求体通过校验、响应模型把每个字段都送出去、授权过期是
+409、`confirm: false` 是 400、缺 `request_id` 是 422、重放是同一个续做、待办随之消失。
+
+**二、`chain` 的四个数字按券商六位精度取整。** 两次浮点求和会把
+`remaining_allowance` 变成 `0.08000000000000002` 送上线。这里所有判定都是按容差做的，取整不改变任何
+决定，只是不该让屏幕去解释这件事。`allowance`、`filled`、`committed`、`remaining_allowance` 四个都取整。

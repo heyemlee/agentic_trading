@@ -285,12 +285,15 @@ def chain_of(proposal: Proposal, everything: list[Proposal]) -> dict[str, Any]:
     filled = sum(float(m.filled_quantity or 0.0) for m in chain)
     committed = sum(max(0.0, float(m.sell_quantity or 0.0) - float(m.filled_quantity or 0.0))
                     for m in chain if unfinished(m))
+    # Rounded to the venue's six places, as every other quantity in this module is. Two sums of
+    # floats put 0.08000000000000002 on the wire, and a screen is not the place to explain that.
+    # The refusals here are all tolerance-based, so rounding changes no decision.
     return {
         "root_proposal_id": root.proposal_id,
-        "allowance": allowance,
-        "filled": filled,
-        "committed": committed,
-        "remaining_allowance": max(0.0, allowance - filled - committed),
+        "allowance": round(allowance, 6),
+        "filled": round(filled, 6),
+        "committed": round(committed, 6),
+        "remaining_allowance": round(max(0.0, allowance - filled - committed), 6),
         "members": [{"proposal_id": m.proposal_id, "status": m.status,
                      "authorised_quantity": m.sell_quantity,
                      "filled_quantity": m.filled_quantity} for m in chain],

@@ -9,8 +9,10 @@ import json
 import re
 import shutil
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
+import yaml
 
 from agentic_trading.execution_scenarios import _proposal
 from agentic_trading.proposals import (
@@ -20,6 +22,7 @@ from agentic_trading.proposals import (
     NEEDS_REANALYSIS,
     PROPOSED,
     ProposalStore,
+    positions_fingerprint,
     utcnow,
 )
 from agentic_trading.research_jobs import ResearchJobManager
@@ -1054,3 +1057,72 @@ def test_get_portfolio_is_answered_from_the_kept_reading(auth_client, sandbox_se
     assert len(computed) == 1
     assert bodies[0]["checked_at"]
     assert all(body["checked_at"] == bodies[0]["checked_at"] for body in bodies)
+
+
+def test_continuing_an_exit_over_http(auth_client, monkeypatch, sandbox_service):
+    """One real round trip for the continuation endpoint, request model to response model.
+
+    The service tests cover the decision and the frontend's own cases cover the screen; what
+    only a call can check is the seam between them -- that the body the console sends validates,
+    and that every field it reads comes back over the wire.
+    """
+    from agentic_trading import autonomy
+
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    profiles = sandbox_service.profiles()
+    profiles.risk["broker"]["state_file"] = "state/proposals.json"
+    store = ProposalStore(profiles.project_dir / "state" / "proposals.json")
+    version = autonomy.note_version(profiles, store.db)
+
+    # The book has to hold what the exit is about: the example ledger carries cash, not VTI.
+    ledger = profiles.project_dir / "state" / "portfolio.yaml"
+    book = yaml.safe_load(ledger.read_text(encoding="utf-8"))
+    book["positions"] = [{"symbol": "VTI", "bucket": "core", "quantity": 0.2,
+                          "cost_basis_per_share": 370.0}]
+    ledger.write_text(yaml.safe_dump(book), encoding="utf-8")
+
+    # An exit that reached the venue, sold part of what it was authorised for, and stopped.
+    p = _proposal(status=EXECUTED, action="REDUCE", ticker="VTI", bucket="core",
+                  fingerprint=positions_fingerprint({"VTI": 0.2}))
+    p.sell_quantity, p.filled_quantity = 0.2, 0.12
+    p.client_order_id = "co-over-http"
+    p.reconciled_at = utcnow().isoformat()
+    p.authority_version = version
+    store.save(p)
+
+    detail = auth_client.get(f"/proposals/{p.proposal_id}").json()
+    assert detail["exit"]["continuable"]["eligible"] is True, detail["exit"]
+    assert detail["exit"]["autonomous"] is not None       # REDUCE carries the floor block
+
+    body = {"confirm": True, "request_id": str(uuid4()), "authority_version": version,
+            "acknowledge_authority_change": False}
+    made = auth_client.post(f"/proposals/{p.proposal_id}/continue_exit", json=body)
+    assert made.status_code == 200, made.text
+    answer = made.json()
+    assert set(answer) == {"deduplicated", "continuation_of", "root_proposal_id",
+                           "authorised_quantity", "research_anchor_at", "continued_at",
+                           "proposal"}
+    assert answer["deduplicated"] is False
+    assert answer["continuation_of"] == answer["root_proposal_id"] == p.proposal_id
+    assert answer["authorised_quantity"] == pytest.approx(0.08)
+    assert answer["proposal"]["status"] == "WAITING_FOR_APPROVAL"
+
+    # The same body again is the same continuation, not a second branch.
+    again = auth_client.post(f"/proposals/{p.proposal_id}/continue_exit", json=body)
+    assert again.status_code == 200 and again.json()["deduplicated"] is True
+    assert again.json()["proposal"]["proposal_id"] == answer["proposal"]["proposal_id"]
+
+    # An authority the screen no longer holds is refused like a moved proposal version.
+    stale = auth_client.post(f"/proposals/{p.proposal_id}/continue_exit",
+                             json={**body, "request_id": str(uuid4()),
+                                   "authority_version": "a" * 12})
+    assert stale.status_code == 409, stale.text
+    assert auth_client.post(f"/proposals/{p.proposal_id}/continue_exit",
+                            json={**body, "confirm": False}).status_code == 400
+    assert auth_client.post(f"/proposals/{p.proposal_id}/continue_exit",
+                            json={"confirm": True}).status_code == 422, "request_id is required"
+
+    # And the to-do that asked for it is gone, because a continuation now exists.
+    items = [i for i in auth_client.get("/attention").json()["items"]
+             if i["kind"] == "exit_incomplete"]
+    assert items == []
