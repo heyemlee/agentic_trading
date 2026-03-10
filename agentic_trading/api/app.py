@@ -63,6 +63,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app):
+    try:
+        # Records when each background activity became expected, once per deployment. Cheap, and
+        # it must not stop the API coming up: a missing origin costs a grace period, nothing more.
+        from .. import operations as _ops
+        _ops.declare(_service.state_db(_service.profiles()))
+    except Exception:
+        logger.debug("could not declare the activity origins at startup", exc_info=True)
+
     async def reconcile_loop():
         while True:
             try:

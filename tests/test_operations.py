@@ -478,3 +478,136 @@ def test_maintenance_confirms_the_ledgers_and_survives_the_check_failing(service
     assert "the venue is unreachable" in kept["error"] and kept["at"]
     assert operations.heartbeats(service.state_db())["maintenance"]["detail"], \
         "the rest of the housekeeping still ran and said so"
+
+
+# ----------------------------------------------------------------- the four activity states
+# "Overdue" was answering two questions with one word: an activity whose code arrived this
+# afternoon and has not come due yet read exactly like one that should have run and did not.
+# docs/ACTIVITY_STATE_CONTRACT_2026-09-19.md settles the four states; these hold them.
+
+WINDOW = 1440.0          # ledger_confirm's window, a day
+
+
+def states(service):
+    return {row["id"]: row for row in service.operations()["activities"]}
+
+
+def ago(**kw):
+    return (datetime.now(UTC) - timedelta(**kw)).isoformat()
+
+
+def ahead(**kw):
+    return (datetime.now(UTC) + timedelta(**kw)).isoformat()
+
+
+def test_an_activity_not_yet_due_is_awaiting_its_first_run_not_late(service):
+    """The false alarm this exists to stop: the code arrived an hour ago."""
+    operations.declare(service.state_db(), origin=ago(hours=1))
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "awaiting_first_run"
+    assert row["expected_since"] is not None and row["due_by"] is not None
+    assert row["last_success_at"] is None and row["last_attempt_at"] is None
+    # The legacy boolean is deliberately left as it was, and deliberately disagrees here.
+    assert row["overdue"] is True, "the old field keeps its old formula"
+
+
+def test_the_first_deadline_passing_turns_it_overdue(service):
+    operations.declare(service.state_db(), origin=ago(days=2))
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "overdue"
+    assert row["due_by"] < datetime.now(UTC).isoformat()
+
+
+def test_an_origin_nobody_can_establish_gets_no_grace(service):
+    """A checkout, or an activity that predates the record: behave exactly as before."""
+    operations.declare(service.state_db(), origin=None)
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "overdue"
+    assert row["expected_since"] is None and row["due_by"] is None
+
+
+def test_an_origin_is_written_once_and_no_publish_can_move_it(service):
+    """The reset the frontend caught: a second pass must not hand out a fresh grace period."""
+    db = service.state_db()
+    operations.declare(db, origin=ago(days=3))
+    first = operations.origins(db)["ledger_confirm"]
+    for _ in range(3):                                  # three more publishes
+        operations.declare(db, origin=ago(minutes=1))
+    assert operations.origins(db)["ledger_confirm"] == first
+    assert states(service)["ledger_confirm"]["state"] == "overdue"
+
+
+def test_an_activity_added_after_the_migration_is_dated_from_now(service):
+    """A genuinely new id gets its grace; the migration's own ids never get a second one."""
+    db = service.state_db()
+    operations.declare(db, origin=ago(days=3))          # the migration pass
+    stored = db.read_meta(operations.ORIGINS, {})
+    stored["ids"].pop("ledger_confirm")                 # as if the id had not existed yet
+    db.write_meta(operations.ORIGINS, stored)
+    operations.declare(db)                              # a later pass sees a new id
+    assert states(service)["ledger_confirm"]["state"] == "awaiting_first_run"
+
+
+def test_a_success_ignores_the_origin_entirely(service):
+    """An activity that has run is judged by its success, so an origin cannot extend its deadline."""
+    db = service.state_db()
+    db.write_meta(operations.HEARTBEATS, {"ledger_confirm": {"at": ago(days=9), "detail": "old"}})
+    operations.declare(db, origin=ago(minutes=1))       # written today, must change nothing
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "overdue"
+    assert row["due_by"] < datetime.now(UTC).isoformat()
+
+
+def test_a_run_that_refused_reads_as_failed_with_the_reason(service):
+    db = service.state_db()
+    db.write_meta(operations.HEARTBEATS, {"ledger_confirm": {"at": ago(hours=25), "detail": "ok"}})
+    db.write_meta("ledger_confirm_report", {
+        "at": ago(minutes=30), "confirmed": False, "date": "2026-09-19",
+        "ledgers": [{"ledger": "micro_live", "confirmed": False,
+                     "error": "CashMismatch: the venue holds 101.50 and the ledger 100.00"}]})
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "failed"
+    assert row["last_attempt_at"] is not None
+    assert "CashMismatch" in row["last_failure"]["reason"]
+    # The contract's fourth point: a refusal is not a missed deadline, and the deadline may well
+    # be in the future.
+    assert row["due_by"] > datetime.now(UTC).isoformat()
+    assert row["overdue"] is False
+
+
+def test_a_later_success_ends_the_failure_without_anyone_clearing_it(service):
+    db = service.state_db()
+    db.write_meta("ledger_confirm_report", {"at": ago(hours=3), "confirmed": False,
+                                            "ledgers": [{"ledger": "micro_live", "error": "boom"}]})
+    db.write_meta(operations.HEARTBEATS, {"ledger_confirm": {"at": ago(hours=1), "detail": "ok"}})
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "current"
+    assert row["last_failure"] is not None, "the refusal is still on the record, just not current"
+
+
+def test_a_failure_that_stopped_being_retried_is_overdue_not_failing(service):
+    """Failing says it still runs. Once the attempts stop, that claim is false."""
+    db = service.state_db()
+    db.write_meta(operations.HEARTBEATS, {"ledger_confirm": {"at": ago(days=8), "detail": "ok"}})
+    db.write_meta("ledger_confirm_report", {"at": ago(days=6), "confirmed": False,
+                                            "ledgers": [{"ledger": "micro_live",
+                                                         "error": "BrokerUnavailable"}]})
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "overdue"
+    assert row["last_failure"] is not None and row["last_attempt_at"] is not None
+
+
+def test_an_activity_with_no_report_can_never_read_as_failed(service):
+    db = service.state_db()
+    db.write_meta(operations.HEARTBEATS, {"backup": {"at": ago(minutes=5), "detail": "ok"}})
+    row = states(service)["backup"]
+    assert row["state"] == "current"
+    assert row["last_attempt_at"] is None and row["last_failure"] is None
+
+
+def test_every_row_carries_the_contract_s_fields(service):
+    for row in service.operations()["activities"]:
+        assert set(row) == {"id", "last_success_at", "age_minutes", "expected_every_minutes",
+                            "overdue", "detail", "state", "expected_since", "due_by",
+                            "last_attempt_at", "last_failure"}
+        assert row["state"] in ("current", "awaiting_first_run", "overdue", "failed")

@@ -421,7 +421,12 @@ class NotificationsMixin:
 
         def operations() -> None:
             for activity in self.operations()["activities"]:
-                if activity["overdue"] and activity["id"] in ("backup", "maintenance", "ledger_confirm"):
+                # `state`, not the `overdue` boolean. An activity that has not come due yet is
+                # nobody's to-do, and one that ran and refused already raises a critical item of
+                # its own from its report: two items for one fact is how a person learns to
+                # ignore both.
+                if activity["state"] == "overdue" and activity["id"] in ("backup", "maintenance",
+                                                                         "ledger_confirm"):
                     out.append(Condition(
                         id=f"backup_overdue:{activity['id']}:{now.date()}", kind="backup_overdue",
                         title=f"{activity['id'].replace('_', ' ')} has not run when expected",

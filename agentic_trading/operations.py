@@ -24,6 +24,68 @@ ACTIVITIES = ("reconciliation", "research_dispatch", "backup", "maintenance", "s
               "ledger_confirm")
 HEARTBEATS = "activity_heartbeats"
 
+#: When each activity became something this deployment expects to happen. Written once per id and
+#: never rewritten, because the one thing this must not do is hand a fresh grace period to an
+#: activity that has been silently missing for a week.
+ORIGINS = "activity_origins"
+
+#: Activities that keep a report of every run, refusals included, and so can be told apart from
+#: the ones that only leave a mark when they succeed. Only these can ever read as failed.
+REPORTED = {"ledger_confirm": "ledger_confirm_report"}
+
+
+def release_published_at() -> str | None:
+    """When the release this code is running from was published, or None in a checkout.
+
+    It is the earliest moment an activity added by that release could have run here, which makes
+    it the honest origin for one that has not run yet. A checkout has no release and gets no
+    grace, which matches what the reads there do today.
+    """
+    import json as _json
+
+    marker = Path(__file__).resolve().parent.parent / "RELEASE.json"
+    try:
+        return str(_json.loads(marker.read_text(encoding="utf-8"))["published_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None            # no release, unreadable, or a shape we do not recognise
+
+
+def declare(db, *, origin: str | None = None) -> dict[str, Any]:
+    """Record when each activity became expected. Idempotent, and never moves an existing entry.
+
+    The first pass on a deployment is a migration: every activity that has never run is dated
+    from the release, because that is the earliest its code could have run here. An id that
+    appears in any later pass is genuinely new and is dated from now. Either way the entry is
+    written once, so no number of publishes can reset a grace period -- and an activity that has
+    already succeeded is not given an entry at all, since nothing would read it.
+    """
+    try:
+        with db.transaction():
+            stored = db.read_meta(ORIGINS, None)
+            migrating = stored is None
+            stored = stored or {"ids": {}, "first_pass_at": datetime.now(UTC).isoformat()}
+            ids = dict(stored.get("ids") or {})
+            beats = db.read_meta(HEARTBEATS, {}) or {}
+            seeded = origin if migrating else None
+            if migrating and seeded is None:
+                seeded = release_published_at()
+            for name in ACTIVITIES:
+                if name in ids or (beats.get(name) or {}).get("at"):
+                    continue
+                when = seeded if migrating else datetime.now(UTC).isoformat()
+                if when is not None:
+                    ids[name] = when
+            stored["ids"] = ids
+            db.write_meta(ORIGINS, stored)
+            return stored
+    except Exception:      # an origin record never breaks the work it describes
+        logging.getLogger(__name__).debug("could not declare the activity origins", exc_info=True)
+        return {"ids": {}}
+
+
+def origins(db) -> dict[str, str]:
+    return dict((db.read_meta(ORIGINS, {}) or {}).get("ids") or {})
+
 
 def record(db, activity: str, detail: str = "", *, min_interval_seconds: float = 60.0) -> None:
     """Note that an activity just succeeded, at most once per ``min_interval_seconds``.
@@ -135,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = profiles.risk.get("operations") or {}
     state_file = str((profiles.risk.get("broker") or {}).get("state_file", "state/proposals.json"))
     db = StateDB(profiles.project_dir / state_file)
+    # Idempotent, and the reason it sits here rather than in the read: an activity's origin is a
+    # fact about this deployment, and a read that wrote one would date it from whenever somebody
+    # first opened a screen.
+    declare(db)
 
     if args.action == "heartbeat":
         record(db, args.activity, args.detail, min_interval_seconds=0)

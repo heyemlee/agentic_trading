@@ -1126,3 +1126,26 @@ def test_continuing_an_exit_over_http(auth_client, monkeypatch, sandbox_service)
     items = [i for i in auth_client.get("/attention").json()["items"]
              if i["kind"] == "exit_incomplete"]
     assert items == []
+
+
+def test_activity_states_reach_the_wire(auth_client, monkeypatch, sandbox_service):
+    """The console reads `state`, so it has to arrive with the dates behind it."""
+    from agentic_trading import operations
+
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox_service)
+    db = sandbox_service.state_db()
+    operations.declare(db, origin=(utcnow() - timedelta(hours=1)).isoformat())
+
+    body = auth_client.get("/system/operations").json()
+    rows = {row["id"]: row for row in body["activities"]}
+    assert set(rows) == set(operations.ACTIVITIES)
+    for row in rows.values():
+        assert set(row) == {"id", "last_success_at", "age_minutes", "expected_every_minutes",
+                            "overdue", "detail", "state", "expected_since", "due_by",
+                            "last_attempt_at", "last_failure"}
+    # Declared an hour ago, due in a day: not a to-do, whatever the legacy boolean says.
+    awaiting = rows["ledger_confirm"]
+    assert awaiting["state"] == "awaiting_first_run"
+    assert awaiting["due_by"] > utcnow().isoformat() and awaiting["overdue"] is True
+    assert "backup_overdue" not in [i["kind"] for i in auth_client.get("/attention").json()["items"]
+                                    if i["subject"] == "ledger_confirm"]

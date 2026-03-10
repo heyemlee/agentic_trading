@@ -245,3 +245,51 @@ def test_a_broken_broker_connection_is_a_to_do_under_its_old_key(service, monkey
     report = service.attention()
     assert kinds(report) == ["credential_invalid"] and report["items"][0]["id"] == "credential_invalid:robinhood"
     assert report["items"][0]["priority"] == 1
+
+
+# ------------------------------------------------------- what each activity state does to the list
+
+def test_an_activity_not_yet_due_is_not_a_to_do(service):
+    """The false alarm: a daily job whose code arrived an hour ago has nothing for a person."""
+    from agentic_trading import operations
+
+    operations.declare(service.state_db(), origin=(datetime.now(UTC) - timedelta(hours=1)).isoformat())
+    kinds = [i["kind"] for i in service.attention()["items"]]
+    assert "backup_overdue" not in kinds
+
+
+def test_an_activity_that_missed_its_deadline_is_a_to_do(service):
+    from agentic_trading import operations
+
+    operations.declare(service.state_db(), origin=(datetime.now(UTC) - timedelta(days=3)).isoformat())
+    items = [i for i in service.attention()["items"] if i["kind"] == "backup_overdue"]
+    assert {i["subject"] for i in items} >= {"ledger_confirm"}
+    item = next(i for i in items if i["subject"] == "ledger_confirm")
+    assert item["severity"] == "normal" and item["priority"] == 4
+    assert item["requires_person"] is True
+
+
+def test_a_refusal_raises_one_item_and_not_two(service):
+    """A ledger that refused already says so at critical; saying it again at normal teaches
+    a person to ignore both."""
+    from agentic_trading import operations
+
+    db = service.state_db()
+    operations.declare(db, origin=(datetime.now(UTC) - timedelta(days=3)).isoformat())
+    db.write_meta(operations.HEARTBEATS,
+                  {"ledger_confirm": {"at": (datetime.now(UTC) - timedelta(hours=25)).isoformat(),
+                                      "detail": "ok"}})
+    db.write_meta("ledger_confirm_report", {
+        "at": (datetime.now(UTC) - timedelta(minutes=20)).isoformat(), "confirmed": False,
+        "date": "2026-09-19",
+        "ledgers": [{"ledger": "micro_live", "confirmed": False,
+                     "error": "CashMismatch: the venue holds 101.50 and the ledger 100.00"}]})
+
+    items = service.attention()["items"]
+    overdue = [i["subject"] for i in items if i["kind"] == "backup_overdue"]
+    assert "ledger_confirm" not in overdue, "the refusal is the item; it is not also late"
+    assert "backup" in overdue, "the others are genuinely late and still say so"
+    unconfirmed = [i for i in items if i["kind"] == "ledger_unconfirmed"]
+    assert len(unconfirmed) == 1
+    assert unconfirmed[0]["severity"] == "critical" and unconfirmed[0]["priority"] == 1
+    assert "CashMismatch" in unconfirmed[0]["detail"]

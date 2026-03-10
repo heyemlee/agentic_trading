@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +145,64 @@ class SystemMixin:
         except Exception:
             logger.debug("could not record the %s heartbeat", activity, exc_info=True)
 
+    @staticmethod
+    def _activity_state(db, name: str, success_at: str | None, age: float | None, window: float,
+                        expected_since: str | None, now: datetime) -> dict[str, Any]:
+        """Which of the four states this activity is in, and the three dates behind the answer.
+
+        The states exist because "overdue" was answering two questions with one word: an activity
+        whose code arrived this afternoon and has not come due yet read exactly like one that
+        should have run and did not. See docs/ACTIVITY_STATE_CONTRACT_2026-09-19.md.
+
+        ``due_by`` is the moment the state flips to ``overdue``, not the next expected run: those
+        differ by the window of tolerance an activity that has run before is given, and a screen
+        that showed the second would count down to a deadline nothing happens at.
+        """
+        from .. import operations as ops
+
+        def moment(stamp: str | None) -> datetime | None:
+            try:
+                return datetime.fromisoformat(stamp) if stamp else None
+            except ValueError:
+                return None
+
+        success, since = moment(success_at), moment(expected_since)
+        # Two windows once it has run before, one from the moment it became expected. Both are
+        # the existing tolerances; only their publication is new.
+        due = (success + timedelta(minutes=window * 2) if success is not None
+               else since + timedelta(minutes=window) if since is not None else None)
+
+        attempt_at, failure = None, None
+        report_key = ops.REPORTED.get(name)
+        if report_key:
+            report = db.read_meta(report_key, {}) or {}
+            attempt_at = report.get("at")
+            if attempt_at and not report.get("confirmed", False):
+                reasons = [str(row.get("error")) for row in report.get("ledgers") or []
+                           if row.get("error")]
+                failure = {"at": attempt_at,
+                           "reason": "; ".join(reasons) or str(report.get("detail")
+                                                               or "the check did not pass")}
+
+        attempt = moment(attempt_at)
+        # Failure is the most recent outcome, never a state to be cleared by hand: one success
+        # newer than the refusal ends it. And a refusal only means "it runs and refuses" while
+        # the attempts themselves are still arriving; once they stop, this is not failing, it is
+        # not running, which is what overdue says.
+        refused_last = failure is not None and (success is None or attempt > success)
+        still_trying = attempt is not None and now <= attempt + timedelta(minutes=window * 2)
+        if refused_last and still_trying:
+            state = "failed"
+        elif (due is not None and now > due) or (due is None and success is None):
+            state = "overdue"
+        elif success is None:
+            state = "awaiting_first_run"
+        else:
+            state = "current"
+        return {"state": state, "expected_since": expected_since,
+                "due_by": due.isoformat() if due is not None else None,
+                "last_attempt_at": attempt_at, "last_failure": failure}
+
     def operations(self) -> dict[str, Any]:
         """Whether the unattended parts of the system are still running, and what they left."""
         from .. import operations as ops
@@ -152,7 +210,9 @@ class SystemMixin:
         profiles = self.profiles()
         cfg = profiles.risk.get("operations") or {}
         expected = dict(cfg.get("expected_every_minutes") or {})
-        record = ops.heartbeats(self.state_db(profiles))
+        db = self.state_db(profiles)
+        record = ops.heartbeats(db)
+        origin = ops.origins(db)
         now = utcnow()
 
         activities = []
@@ -166,14 +226,18 @@ class SystemMixin:
                 except ValueError:
                     at = None
             window = float(expected.get(name, 1440))
-            activities.append({
+            row = {
                 "id": name, "last_success_at": at, "age_minutes": age,
                 "expected_every_minutes": window,
                 # Never having run is overdue too: an install whose backup job was never loaded
-                # looks identical to a healthy one until the day it is needed.
+                # looks identical to a healthy one until the day it is needed. Kept exactly as it
+                # was, including for an activity that has not come due yet: `state` is what a
+                # screen reads, and this stays put so an older reader loses nothing.
                 "overdue": age is None or age > window * 2,
                 "detail": entry.get("detail") or "",
-            })
+            }
+            row.update(self._activity_state(db, name, at, age, window, origin.get(name), now))
+            activities.append(row)
 
         return {
             "checked_at": now.isoformat(),
