@@ -123,6 +123,15 @@ Passing position conditions is not presented as passing all proposal/execution c
 
 ## Live data
 
+System activity rows use `/system/operations.activities[].state` exclusively. The legacy
+`overdue` boolean is intentionally inconsistent with first-run waits and fresh failures.
+Only `failed` and `overdue` contribute to the local needs-attention count; first-run waits
+are shown separately. Missing states and stale reads stay unknown. `due_by` is displayed as
+a monitoring deadline, not a scheduled trigger or a frontend state countdown. Attempts and
+successes have separate timestamps. Failure reasons are escaped, wrapped and rendered in
+full, including for an overdue activity whose last failed attempt has stopped arriving.
+The demo includes all four states; `check_navigation.cjs` covers long failure text on mobile.
+
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals
 15s, health/authority/attention 30s, portfolio/risk/research/micro-live 60s. Authority is
 read only on pages that use it and opens no venue session. No websocket; the

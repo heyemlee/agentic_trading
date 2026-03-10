@@ -110,25 +110,46 @@ window.Console.page('system', function (document) {
     const ops = D.operations;
     if (!ops) {
       $('op-state').textContent = C.t('sy.unknown');
+      $('op-state').className = 'chip';
       C.setHTML($('op-list'), '');
       $('op-disk').textContent = '';
       return;
     }
-    const rows = ops.activities || [];
-    const stale = rows.filter((r) => r.overdue);
+    const rows = Array.isArray(ops.activities) ? ops.activities : [];
+    const states = ['current', 'awaiting_first_run', 'overdue', 'failed'];
+    const problems = rows.filter(r => ['overdue', 'failed'].includes(r.state));
+    const waiting = rows.filter(r => r.state === 'awaiting_first_run');
+    const unknown = rows.filter(r => !states.includes(r.state));
+    const fresh = window.CT_DEMO || CT_API.isLive('operations');
     const chip = $('op-state');
-    chip.textContent = stale.length ? C.t('sy.opsLate', { n: stale.length }) : C.t('sy.opsOk');
-    chip.className = 'chip' + (stale.length ? ' chip-warn' : ' chip-accent');
-    C.setHTML($('op-list'), rows.map((row) => C.listRow({
-      id: 'op-' + row.id,
-      title: C.t('sy.op.' + row.id),
-      sub: row.detail || '',
-      value: row.last_success_at ? C.dateTime(row.last_success_at) : C.t('sy.never'),
-      /* "overdue by 0m" would be the wrong story for a job that was never loaded. */
-      note: !row.overdue ? C.t('sy.onTime')
-            : row.age_minutes == null ? C.t('sy.neverRan')
-            : C.t('sy.overdue', { d: C.duration(row.age_minutes) }),
-    })).join(''));
+    const summary = [problems.length ? C.t('sy.opsNeedsAttention', { n: problems.length }) : '',
+      waiting.length ? C.t('sy.opsWaiting', { n: waiting.length }) : '',
+      unknown.length ? C.t('sy.opsUnknown', { n: unknown.length }) : ''].filter(Boolean);
+    chip.textContent = !fresh || !rows.length ? C.t('sy.unknown') : summary.join(' · ') || C.t('sy.opsOk');
+    chip.className = 'chip' + (!fresh || !rows.length ? '' : problems.length ? ' chip-warn'
+      : waiting.length || unknown.length ? '' : ' chip-accent');
+    const dateRow = (key, value) => '<div class="kv-row"><dt>' + C.escapeHtml(C.t(key)) + '</dt><dd>' +
+      C.escapeHtml(value ? C.dateTime(value) : C.t('sy.unknown')) + '</dd></div>';
+    C.setHTML($('op-list'), (!fresh ? '<p class="body-sm">' + C.escapeHtml(C.t('sy.opsStale')) + '</p>' : '') +
+      rows.map(row => {
+        const state = states.includes(row.state) ? row.state : 'unknown';
+        // No frontend deadline arithmetic: failed can have a future deadline,
+        // and the legacy overdue boolean intentionally disagrees with state.
+        const failure = ['failed', 'overdue'].includes(state) ? row.last_failure : null;
+        const name = C.t('sy.op.' + row.id);
+        return '<section class="operation-entry" data-od-id="op-' + C.escapeHtml(row.id) + '">' +
+          '<div class="row-between row-wrap"><h3 class="body-sm">' + C.escapeHtml(name === 'sy.op.' + row.id ? row.id : name) + '</h3>' +
+          '<span class="chip' + (['failed', 'overdue'].includes(state) ? ' chip-warn' : '') + '">' +
+          C.escapeHtml(C.t('sy.opState.' + state)) + '</span></div><dl class="kv">' +
+          dateRow('sy.opDue', row.due_by) +
+          (row.expected_since && !row.last_success_at ? dateRow('sy.opSince', row.expected_since) : '') +
+          (row.last_success_at ? dateRow('sy.opSuccess', row.last_success_at) : '') +
+          (row.last_attempt_at ? dateRow('sy.opAttempt', row.last_attempt_at) : '') + '</dl>' +
+          (row.detail ? '<p class="body-sm body-muted operation-text">' + C.escapeHtml(row.detail) + '</p>' : '') +
+          (failure || state === 'failed' ? '<div class="operation-failure"><p class="eyebrow">' + C.escapeHtml(C.t('sy.opFailure')) + '</p>' +
+            (failure?.at ? '<p class="body-sm">' + C.escapeHtml(C.dateTime(failure.at)) + '</p>' : '') +
+            '<p class="body-sm operation-text">' + C.escapeHtml(failure?.reason || C.t('sy.opFailureUnknown')) + '</p></div>' : '') + '</section>';
+      }).join(''));
     const disk = ops.disk || {};
     $('op-disk').textContent = disk.free_gb == null ? ''
       : C.t('sy.disk', { f: disk.free_gb.toFixed(1), p: disk.free_pct.toFixed(0),

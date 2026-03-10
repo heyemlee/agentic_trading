@@ -205,12 +205,23 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
      assert.equal(await page.locator('#sc-tasks .list-row').count(), 2);
      assert.match(await page.locator('#sc-tasks').innerText(), /Holdings review|持仓复查/);
      assert.match(await page.locator('#sc-tasks').innerText(), /Candidate research|候选研究/);
+     assert.match(await page.locator('#op-state').innerText(), /2 need attention|2 项需处理/);
+     assert.match(await page.locator('[data-od-id="op-maintenance"]').innerText(), /Awaiting first run|等待首次运行/);
+     // Full diagnostic text, including its tail amount, survives a narrow screen.
+     const reason = 'CashMismatch: ' + 'diagnostic context '.repeat(35) + '\n101.50 versus 100.00; difference 1.50 <untrusted>';
+     await page.evaluate(reason => {
+       CT.operations.activities.find(row => row.id === 'ledger_confirm').last_failure.reason = reason;
+       document.dispatchEvent(new CustomEvent('ct:data'));
+     }, reason);
+     assert.equal(await page.locator('[data-od-id="op-ledger_confirm"] .operation-failure .operation-text').textContent(), reason);
      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
      if (process.env.CT_UI_CAPTURE_DIR) {
        const folder = path.resolve(process.env.CT_UI_CAPTURE_DIR);
        await fs.mkdir(folder, {recursive:true});
        await page.locator('[data-od-id="schedule"]').scrollIntoViewIfNeeded();
        await page.screenshot({path:path.join(folder, 'schedule-tasks-phone.png')});
+       await page.locator('[data-od-id="op-ledger_confirm"]').scrollIntoViewIfNeeded();
+       await page.screenshot({path:path.join(folder, 'activity-states-phone.png')});
      }
    }
  }

@@ -1136,6 +1136,63 @@ function systemSchedulePage(schedule) {
   return c;
 }
 
+test('System uses explicit activity states, excluding first-run waits despite legacy overdue=true', () => {
+  const c = systemSchedulePage(null);
+  c.CT.operations = { activities: [{ id: 'ledger_confirm', state: 'awaiting_first_run', overdue: true,
+    expected_since: '2026-09-18T20:27:56Z', due_by: '2026-09-19T20:27:56Z', last_success_at: null }] };
+  c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.opsWaiting 1');
+  assert.doesNotMatch(c.element('op-state').className, /chip-warn/);
+  const html = c.element('op-list').innerHTML;
+  assert.match(html, /sy.opState.awaiting_first_run/); assert.match(html, /sy.opDue/);
+  assert.doesNotMatch(html, /sy.never|sy.overdue|sy.opState.overdue|sy.opSuccess/);
+});
+
+test('System shows a fresh failure in full even with overdue=false and recovers on the next success', () => {
+  const c = systemSchedulePage(null);
+  const reason = 'CashMismatch: ' + 'diagnostic context '.repeat(35) + '\n101.50 versus 100.00; difference 1.50 <script>untrusted</script>';
+  const row = { id: 'ledger_confirm', state: 'failed', overdue: false, due_by: '2026-09-20T10:45:02Z',
+    last_attempt_at: '2026-09-19T10:45:12Z', last_failure: { at: '2026-09-19T10:45:12Z', reason } };
+  c.CT.operations = { activities: [row] }; c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.opsNeedsAttention 1');
+  assert.match(c.element('op-list').innerHTML, /sy.opState.failed/);
+  assert.ok(c.element('op-list').innerHTML.includes(c.Console.escapeHtml(reason)));
+  assert.doesNotMatch(c.element('op-list').innerHTML, /<script>/);
+  // A retained historical report must not turn a recovered state back into a failure.
+  row.state = 'current'; row.last_success_at = '2026-09-19T11:00:00Z'; c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.opsOk');
+  assert.doesNotMatch(c.element('op-list').innerHTML, /CashMismatch|sy.opFailure/);
+  row.state = 'awaiting_first_run'; row.last_failure = null; row.last_success_at = null; c.render();
+  row.state = 'failed'; row.last_failure = { reason: 'First attempt failed' }; c.render();
+  assert.match(c.element('op-list').innerHTML, /First attempt failed/);
+});
+
+test('System preserves backend state and unknown deadlines, while retaining a stopped attempt failure reason', () => {
+  const c = systemSchedulePage(null);
+  c.CT.operations = { activities: [
+    { id: 'reconciliation', state: 'current', overdue: true, due_by: '2000-01-01T00:00:00Z' },
+    { id: 'maintenance', state: 'awaiting_first_run', overdue: true },
+    { id: 'ledger_confirm', state: 'overdue', overdue: false, due_by: null,
+      last_failure: { reason: 'BrokerUnavailable: no venue session' } },
+  ] }; c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.opsNeedsAttention 1 · sy.opsWaiting 1');
+  assert.match(c.element('op-list').innerHTML, /sy.opDue<\/dt><dd>sy.unknown/);
+  assert.match(c.element('op-list').innerHTML, /BrokerUnavailable: no venue session/);
+  assert.match(c.element('op-list').innerHTML, /sy.opState.current/);
+});
+
+test('System never derives health from a missing state, empty activity list or a stale read', () => {
+  const c = systemSchedulePage(null);
+  c.CT.operations = { activities: [{ id: 'backup', overdue: false, last_success_at: '2026-09-19T10:00:00Z' }] }; c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.opsUnknown 1');
+  assert.match(c.element('op-list').innerHTML, /sy.opState.unknown/);
+  c.CT.operations.activities = []; c.render(); assert.equal(c.element('op-state').textContent, 'sy.unknown');
+  c.CT.operations.activities = [{ id: 'backup', state: 'current', overdue: false }];
+  c.CT_DEMO = false; c.CT_API.state = { resources: {} }; c.CT_API.isLive = () => false; c.render();
+  assert.equal(c.element('op-state').textContent, 'sy.unknown');
+  assert.match(c.element('op-list').innerHTML, /sy.opsStale/);
+});
+
 test('System shows each account schedule, its trigger cadence, and the protected exit capacity', () => {
   const c = context(true), schedule = JSON.parse(JSON.stringify(c.CT.schedule));
   schedule.tasks[0].reason = 'Account reason <script>';
