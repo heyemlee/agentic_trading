@@ -136,6 +136,29 @@ def test_a_conversation_from_before_bindings_is_personal_and_takes_the_kind_of_i
     assert (bound.account_scope_kind, bound.account_id) == ("single", B)
 
 
+def test_a_replayed_assistant_request_aimed_at_another_account_conflicts(service):
+    """A replay is matched on the account it named, not only on the question it asked.
+
+    The idempotency key is the console's, and a client that derives one badly -- a retry that
+    reuses the last key, a key made from the symbol -- makes two accounts collide on it. The
+    danger is not a second run; it is being handed the first account's answer and reading it
+    as this account's. The same holds for the all-accounts review, which is a third scope and
+    not a superset a single account's request may be served from.
+    """
+    request_id = str(uuid.uuid4())
+    first = service.start_advisor(kind="analysis", request_id=request_id, ticker="VTI", account_id=A)
+    again = service.start_advisor(kind="analysis", request_id=request_id, ticker="VTI", account_id=A)
+    assert again["run_key"] == first["run_key"] and again["deduplicated"] is True
+    for other in ({"account_id": B}, {}):
+        with pytest.raises(ServiceConflict, match="different request"):
+            service.start_advisor(kind="analysis", request_id=request_id, ticker="VTI", **other)
+    with pytest.raises(ServiceConflict, match="different request"):
+        service.start_advisor(kind="chat", request_id=request_id, message="why?", scope="agentic",
+                              conversation_id="ag")
+    manager = service._research_manager(service.profiles())
+    assert [j["run_key"] for j in manager.store.list(limit=10)] == [first["run_key"]]
+
+
 # ------------------------------------------------------------------ what a scope sees
 @pytest.fixture
 def records(service):

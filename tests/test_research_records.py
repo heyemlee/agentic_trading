@@ -175,6 +175,31 @@ def test_a_repeated_request_returns_the_run_it_started_and_a_different_one_confl
         service.start_research("VTI", bucket="core", request_id="not-a-uuid")
 
 
+def test_a_replayed_request_aimed_at_another_account_conflicts(service):
+    """The replay is matched on the account too, not only on what was asked about.
+
+    Two consoles are open on two accounts and each makes its own idempotency key, so the ids
+    never collide in practice. They collide when something generates one badly -- a retry that
+    reuses the last key, a client that derives it from the symbol -- and the failure this guards
+    against is not a duplicate run but a silent swap: the Agentic console taps research and is
+    handed the Demo account's run, then reads its conclusion as being about real money. A
+    refusal is the only safe answer, because the request that arrived and the run on record
+    disagree about which book they are about.
+    """
+    request_id = str(uuid.uuid4())
+    demo = service.start_research("VTI", bucket="core", scope="demo", purpose="candidate",
+                                  request_id=request_id)
+    with pytest.raises(ServiceConflict, match="different request"):
+        service.start_research("VTI", bucket="micro_live", scope="agentic", purpose="candidate",
+                               request_id=request_id)
+    with pytest.raises(ServiceConflict, match="different request"):
+        service.start_research("VTI", bucket="sandbox", scope="demo", purpose="candidate",
+                               request_id=request_id)
+    # Nothing was started for the other books, and the one run on record is still the Demo one.
+    assert [j["run_key"] for j in service.research_jobs()] == [demo["run_key"]]
+    assert service.research_run(demo["run_key"])["bucket"] == "core"
+
+
 def test_the_scope_must_hold_the_bucket_and_a_holding_purpose_needs_the_holding(service):
     with pytest.raises(ServiceError, match="does not hold bucket"):
         service.start_research("VTI", bucket="micro_live", scope="demo")

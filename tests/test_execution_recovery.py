@@ -1,4 +1,5 @@
 """Cross-module regression cases: exits and recoverable, exactly-once accounting."""
+import shutil
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ import pytest
 
 from agentic_trading import execution
 from agentic_trading.broker.base import BrokerUnavailable, Quote
-from agentic_trading.execution_scenarios import _std
+from agentic_trading.execution_scenarios import TRADE_DATE, _proposal, _std
 from agentic_trading.portfolio import load_portfolio, snapshot_from_broker
 from agentic_trading.proposals import (
     CANCELED,
@@ -25,8 +26,9 @@ from agentic_trading.proposals import (
 )
 from agentic_trading.risk_scenarios import identity_lookup, regime
 from agentic_trading.service import Service, ServiceConflict, ServiceError
-from agentic_trading.service.status import ProposalStatus, proposal_status
+from agentic_trading.service.status import ProposalStatus, SystemStatus, proposal_status
 from agentic_trading.state_db import StateDB
+from tests.conftest import ROOT
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +55,27 @@ def setup(tmp_path, fill_mode='full'):
     store = ProposalStore(tmp_path / 'proposals.json')
     store.save(p)
     return profiles, p, broker, ledger, store
+
+
+def sandboxed(tmp_path, **kwargs):
+    """`setup`, with the configuration copied under tmp_path so project_dir is the test's own.
+
+    The scenario profiles read config/ where it lies, which leaves project_dir pointing at the
+    checkout. Execution never minds -- it is told every state path it writes -- but the research
+    queue puts its logs under project_dir/runs, so a test that reaches health through the queue
+    would create directories in the deployment's own run directory. Only the tree moves: the
+    rules are still the deployment's, and the state paths are still the scenario's.
+    """
+    from agentic_trading.profile import load_profiles
+
+    profiles, p, broker, ledger = _std(tmp_path, **kwargs)
+    store = ProposalStore(tmp_path / 'proposals.json')
+    store.save(p)
+    shutil.copytree(ROOT / 'config', tmp_path / 'config')
+    (tmp_path / 'runs').mkdir(exist_ok=True)
+    moved = load_profiles(tmp_path / 'config')
+    moved.risk = profiles.risk
+    return moved, p, broker, ledger, store
 
 
 def finish(broker, order, price=None):
@@ -296,6 +319,36 @@ def test_unresolved_order_blocks_another_proposal(tmp_path):
     result = execution.execute(profiles, other, broker, store, ledger_path=str(ledger))
     assert result.outcome == 'RECONCILIATION_REQUIRED'
     assert len(broker._orders) == 1
+
+
+@pytest.mark.parametrize('stranded_bucket, outcome, submitted, orders', [
+    ('core', 'RECONCILIATION_REQUIRED', False, 0),
+    ('sandbox', 'RECONCILIATION_REQUIRED', False, 0),
+    ('micro_live', 'SUBMITTED', True, 1),
+])
+def test_an_unresolved_order_blocks_its_own_venue_and_never_the_other(
+        tmp_path, stranded_bucket, outcome, submitted, orders):
+    """The guard above is written per venue rather than per bucket, and both halves carry.
+
+    core and sandbox are two sleeves of one paper book at one venue, so an order whose fate is
+    still unknown stops the next one whichever sleeve it sits in: that is how a position stops
+    being bought twice. micro_live is a different venue holding real money, and the two may not
+    reach across. Dropping the venue term would read as caution and would in fact let a paper
+    order nobody reconciled stand between a real position and its exit -- the term is one
+    symmetric expression, so it is exercised here from the side that needs no live venue.
+    """
+    profiles, live, broker, ledger, store = setup(tmp_path)
+    stranded = _proposal(bucket=stranded_bucket, status=SUBMITTED)
+    stranded.client_order_id = 'ct-order-the-venue-still-owns'
+    store.save(stranded)
+    assert needs_reconciliation(stranded)
+
+    store.save(live)
+    result = execution.execute(profiles, live, broker, store, ledger_path=str(ledger))
+    assert (result.outcome, result.submitted) == (outcome, submitted), result.as_dict()
+    assert len(broker._orders) == orders
+    if not submitted:
+        assert stranded.proposal_id in result.error
 
 
 def service_for(profiles, store, broker, monkeypatch):
@@ -599,3 +652,53 @@ def test_open_without_research_reference_price_is_not_repriced_and_submitted(tmp
     result = execution.execute(profiles, p, broker, store, ledger_path=str(ledger))
     assert result.outcome == "REANALYZE" and not result.submitted
     assert not broker._orders
+
+
+def test_a_subscription_limit_stops_research_and_never_an_exit(tmp_path, monkeypatch):
+    """The subscription is what research runs on. It is not what sells a position.
+
+    The limit is recorded on the research job, health reads it from there, and the scheduler
+    refuses on the status health reports: three modules, each half held on its own while the
+    join between them was not. Nothing on the approval path reads health at all, and that is
+    deliberate -- a quota that refills at some stated hour must never be the reason a holding
+    could not be sold. An intention nothing exercises is how a later, well-meant check ends up
+    standing between an exit and the venue.
+    """
+    from agentic_trading import schedule
+
+    held = 2.0
+    profiles, p, broker, ledger, store = sandboxed(
+        tmp_path,
+        broker_kwargs={'cash': 3000 - held * 100, 'positions': {'VTI': (held, 100)}},
+        ledger_kwargs={'core_cash': 2500 - held * 100,
+                       'positions': [{'symbol': 'VTI', 'bucket': 'core', 'quantity': held,
+                                      'cost_basis_per_share': 100}]},
+        proposal_kwargs={'action': 'SELL', 'notional': held * 100, 'price': 100,
+                         'fingerprint': f'VTI:{held}'})
+    broker.set_price('VTI', 100)
+    p.sell_quantity = held
+    p.status = PROPOSED
+    p.approved_at = None
+    store.save(p)
+    service = service_for(profiles, store, broker, monkeypatch)
+
+    manager = service._research_manager(profiles)
+    manager.create(run_key='limited', ticker='VTI', bucket='core', trade_date=TRADE_DATE,
+                   instrument_type='etf', trigger='scheduled')
+    manager.store.update('limited', {
+        'state': 'CLAUDE_LIMIT_REACHED', 'finished_at': datetime.now(UTC).isoformat(),
+        'error': "You've hit your session limit · resets 1:30pm"}, expected_states=('QUEUED',))
+
+    health = service.health()
+    assert health.claude.state == 'LIMIT_REACHED' and 'session limit' in health.claude.detail
+    assert health.status == SystemStatus.CLAUDE_LIMIT_REACHED
+    skipped = schedule.decide(profiles, health_status=health.status, paused=bool(health.paused),
+                              executed={}, jobs=[])
+    assert skipped.run is False and SystemStatus.CLAUDE_LIMIT_REACHED in skipped.reason
+
+    # And the exit goes through, under the same limit, into the same venue.
+    result = service.approve(p.proposal_id, **approve_arguments(p))
+    assert result['submitted'] is True, result
+    assert len(broker._orders) == 1
+    assert load_portfolio(ledger).position('VTI') is None
+    assert service.health().status == SystemStatus.CLAUDE_LIMIT_REACHED

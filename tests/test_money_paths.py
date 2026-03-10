@@ -34,9 +34,12 @@ EXEMPT = {
         "builds SimulatedBroker itself -- no make_broker, no credentials, no network",
 }
 
-#: Adapter methods that change something at the venue rather than read it. Checked inside service/
-#: only: execution.py and the adapters under broker/ are where they are implemented.
+#: Adapter methods that change something at the venue rather than read it.
 VENUE_WRITES = {"submit_order", "cancel_order", "review_order", "pre_submit_check"}
+
+#: The one module that calls them. The adapters under broker/ define these methods; defining
+#: one is not calling it, so they need no exemption here.
+VENUE_CALLER = "execution.py"
 
 
 def _sources():
@@ -85,16 +88,26 @@ def test_ct_approve_refuses_before_it_ever_reaches_a_venue(monkeypatch):
     assert cli.approve_main(["any-proposal-id", "--config-dir", str(ROOT / "config")]) == 2
 
 
-def test_no_module_in_service_asks_a_venue_to_do_something():
+def test_no_module_but_execution_asks_a_venue_to_do_something():
+    """Whole package, not service/ alone.
+
+    The import check above follows ``execution.execute``, which is how the live path reaches a
+    venue today. A module that took a broker and called ``submit_order`` on it directly would
+    carry no such import to find, and scanning service/ alone would not have looked at it
+    either: api/, cli.py and the schedulers all hold a broker at some point. Nothing outside
+    execution.py calls one now, and one walk of the tree is what it costs to keep it that way.
+    """
     offenders = []
-    for path in sorted((PACKAGE / "service").glob("*.py")):
-        if str(path.relative_to(PACKAGE)) == ALLOWED:
+    for path in _sources():
+        if path == PACKAGE / VENUE_CALLER:
             continue
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Attribute) and node.attr in VENUE_WRITES:
-                offenders.append(f"{path.name}:{node.lineno} .{node.attr}()")
+                offenders.append(f"{path.relative_to(PACKAGE)}:{node.lineno} .{node.attr}()")
     assert not offenders, (
-        f"only {ALLOWED} may ask a venue to place, change or cancel an order; found {offenders}")
+        f"only {VENUE_CALLER} may ask a venue to place, change or cancel an order, and only "
+        f"{ALLOWED} may ask it to; found {offenders}. Go through the approvals module rather "
+        "than holding a broker and calling it, so that what can move money stays in one file.")
 
 
 def test_the_convention_is_still_about_the_function_that_places_the_order():
