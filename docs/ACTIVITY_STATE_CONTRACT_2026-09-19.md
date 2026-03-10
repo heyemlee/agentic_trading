@@ -1,4 +1,4 @@
-# 后台活动状态契约（第二稿）
+# 后台活动状态契约（第三稿）
 
 `/system/operations` 与 `ct-ops status` 现在只回答"逾期与否"，把两件不同的事说成同一件：**从未到期**
 和**该跑没跑**。`ledger_confirm` 是第一个踩到的，以后每加一项后台活动都会再踩一次。
@@ -199,9 +199,15 @@ critical 的"账本无法确认"和一条 normal 的"确认作业没按时跑"�
 | 人在控制台确认掉差额 | 成功比报告更新 | `current` | 无（自动消失，无需人工清除） |
 | 若改为连尝试都停了 | `last_attempt_at` 超过监控期限 | `overdue` | normal `backup_overdue` |
 | 若首次期限过了仍未跑 | 从 `awaiting_first_run` 直接翻过去 | `overdue` | normal `backup_overdue` |
+| 若首次运行就被拒绝 | 报告有了，成功记录还没有 | `failed` | critical `ledger_unconfirmed` |
 
-两条不会发生的转换，写在这里以免前端为它们留分支：`awaiting_first_run` 永远不会直接变成 `failed`
-（没跑过就没有报告），`current` 也不会因为时间流逝变成 `awaiting_first_run`（有成功记录就永远不是首次）。
+**`awaiting_first_run → failed` 是有效转换**（第二稿这里写错了，前端指出，现更正）。第一次运行完全可能
+失败：那时报告已经存在而成功记录仍为空，判定第 1 条的"报告比成功更新（或从未成功）"正是为这种情形写的，
+所以状态是 `failed`，而 `due_by` 可以仍在未来。实现一直是这样，只有第二稿的这段文字说反了；
+`tests/test_operations.py` 现在有一例守着它。
+
+唯一不会发生的转换是 `current → awaiting_first_run`：有成功记录就永远不是首次。只有心跳记录本身丢失才
+会回到那里，那是状态损坏，不是正常流转。
 
 ## 7. 前端要改的三处
 
@@ -226,7 +232,7 @@ critical 的"账本无法确认"和一条 normal 的"确认作业没按时跑"�
 | `operations.declare` 写 `expected_since`，幂等 | 已完成 |
 | `service/system.py` 产出 `state` 与四个新字段 | 已完成 |
 | `notifications.py` 只在 `state == "overdue"` 时发 `backup_overdue` | 已完成 |
-| 测试 | `tests/test_operations.py` 新增 11 项、`tests/test_attention.py` 新增 3 项、`tests/test_api.py` 新增 1 项 |
+| 测试 | `tests/test_operations.py` 新增 12 项、`tests/test_attention.py` 新增 3 项、`tests/test_api.py` 新增 1 项 |
 
 写入点两处，都是幂等的：`ct-ops` 的任意一次调用（发布时的 `heartbeat`、每日作业的 `maintain`、
 `status`），以及 API 启动。所以一次发布或一次重启就会补齐，不需要额外的运维动作。

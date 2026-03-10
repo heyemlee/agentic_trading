@@ -611,3 +611,24 @@ def test_every_row_carries_the_contract_s_fields(service):
                             "overdue", "detail", "state", "expected_since", "due_by",
                             "last_attempt_at", "last_failure"}
         assert row["state"] in ("current", "awaiting_first_run", "overdue", "failed")
+
+
+def test_the_very_first_run_can_fail(service):
+    """A first attempt may refuse, so awaiting_first_run goes straight to failed.
+
+    The contract's second draft said this transition could not happen, on the reasoning that an
+    activity which has never run keeps no report. The reasoning is wrong: the report is written
+    by the run, so the first run writes one whether it passes or not. The code always read it
+    this way; this holds it there.
+    """
+    db = service.state_db()
+    operations.declare(db, origin=ago(hours=2))
+    db.write_meta("ledger_confirm_report", {
+        "at": ago(minutes=10), "confirmed": False,
+        "ledgers": [{"ledger": "micro_live", "error": "BrokerUnavailable: no venue session"}]})
+
+    row = states(service)["ledger_confirm"]
+    assert row["state"] == "failed"
+    assert row["last_success_at"] is None, "it has still never succeeded"
+    assert row["due_by"] > datetime.now(UTC).isoformat(), "and its first deadline has not passed"
+    assert "BrokerUnavailable" in row["last_failure"]["reason"]
