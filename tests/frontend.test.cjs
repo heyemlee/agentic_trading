@@ -753,7 +753,7 @@ test('live REDUCE reads its own authority and rejects inconsistent permission or
   p.exit.authorised_quantity = 0.3; c.render(); assert.equal(c.element('btn-approve').disabled, true);
 });
 
-test('exit chain shows fills and unfilled commitments separately, without a continuation write', () => {
+test('exit chain shows fills and unfilled commitments separately, without writing on render', () => {
   const c = exitApprovalPage(), p = c.CT.proposalDetail, e = p.exit;
   p.status = 'CANCELED'; e.already_filled = 0.12;
   Object.assign(e.chain, { filled: 0.12, committed: 0, remaining_allowance: 0.08 });
@@ -769,6 +769,149 @@ test('exit chain shows fills and unfilled commitments separately, without a cont
   p.action = 'BUY'; p.exit = null; c.render();
   assert.equal(c.element('exit-detail').hidden, true);
   assert.equal(c.element('exit-detail').innerHTML, '');
+});
+
+function continuationPage() {
+  const c = exitApprovalPage(), p = c.CT.proposalDetail;
+  p.status = 'CANCELED'; p.exit.already_filled = 0.12;
+  Object.assign(p.exit.chain, { filled: 0.12, committed: 0, remaining_allowance: 0.08 });
+  p.exit.continuable = { eligible: true, quantity: 0.08, blocked_by: [] };
+  c.render(); return c;
+}
+function confirmContinuation(c) {
+  c.element('btn-continue-exit').events.click();
+  c.element('continue-confirm').checked = true; c.element('continue-confirm').events.change();
+}
+const continuationAnswer = () => ({ deduplicated: false, continuation_of: 'A', root_proposal_id: 'A',
+  authorised_quantity: 0.08, research_anchor_at: '2026-09-19T13:00:00Z', continued_at: '2026-09-19T14:00:00Z',
+  proposal: { proposal_id: 'B', status: 'WAITING_FOR_APPROVAL' } });
+
+test('continuation double click creates once with request_id and opens a fresh detail without approving', async () => {
+  const c = continuationPage(), posts = [], reads = [], selected = []; let resolve;
+  c.CT_API.post = (url, body) => { posts.push({ url, body }); return new Promise(r => { resolve = r; }); };
+  c.CT_API.readOnce = async key => { reads.push(key); };
+  c.CT_API.selectProposal = (id, options) => { selected.push({ id, options }); c.CT.proposalDetail = null; };
+  assert.equal(c.element('btn-continue-exit').hidden, false);
+  confirmContinuation(c); assert.equal(c.element('continue-submit').disabled, false);
+  const first = c.element('continue-submit').events.click();
+  await c.element('continue-submit').events.click(); assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/proposals/A/continue_exit');
+  assert.equal(posts[0].body.confirm, true);
+  assert.equal(posts[0].body.authority_version, 'authority-a');
+  assert.match(posts[0].body.request_id, /^[a-f0-9-]{36}$/);
+  assert.equal(posts[0].body.idempotency_key, undefined);
+  resolve(continuationAnswer()); await first;
+  assert.equal(posts.length, 1); assert.equal(selected[0].id, 'B');
+  assert.equal(selected[0].options.includeClosed, true);
+  assert.ok(reads.includes('proposalDetail')); assert.ok(reads.includes('attention'));
+  assert.match(c.element('result-slot').innerHTML, /ap.continueCreated/);
+  assert.match(c.element('result-slot').innerHTML, /proposal=B/);
+  assert.equal(c.element('approve-dialog').open, undefined);
+});
+
+test('continuation 409 refreshes without replay; changed authority needs a separate acknowledgement', async () => {
+  const c = continuationPage(), posts = [];
+  c.CT_API.post = async (url, body) => {
+    posts.push(body);
+    if (posts.length === 1) throw Object.assign(Error('authority moved'), { status: 409 });
+    return continuationAnswer();
+  };
+  c.CT_API.readOnce = async key => {
+    if (key === 'authority') {
+      c.CT.authority.version = 'authority-b';
+      c.CT.proposalDetail.authority_changed = { from: 'authority-a', to: 'authority-b', classification: 'loosened' };
+    }
+  };
+  confirmContinuation(c); await c.element('continue-submit').events.click();
+  assert.equal(posts.length, 1); assert.match(c.element('result-slot').innerHTML, /ap.continueConflict/);
+  confirmContinuation(c);
+  assert.equal(c.element('continue-authority-ack-row').hidden, false);
+  assert.equal(c.element('continue-submit').disabled, true);
+  await c.element('continue-submit').events.click(); assert.equal(posts.length, 1);
+  c.element('continue-authority-confirm').checked = true; c.element('continue-authority-confirm').events.change();
+  await c.element('continue-submit').events.click(); assert.equal(posts.length, 2);
+  assert.equal(posts[1].authority_version, 'authority-b'); assert.equal(posts[1].acknowledge_authority_change, true);
+});
+
+test('lost continuation response keeps the same id only for an explicit retry and accepts deduplication', async () => {
+  const c = continuationPage(), posts = [];
+  c.CT_API.post = async (url, body) => {
+    posts.push(body);
+    if (posts.length === 1) throw Error('response lost');
+    return { ...continuationAnswer(), deduplicated: true };
+  };
+  confirmContinuation(c); await c.element('continue-submit').events.click();
+  assert.equal(posts.length, 1); assert.match(c.element('result-slot').innerHTML, /ap.continueRetry/);
+  assert.equal(c.element('continue-confirm').checked, false);
+  confirmContinuation(c); await c.element('continue-submit').events.click();
+  assert.equal(posts.length, 2); assert.equal(posts[0].request_id, posts[1].request_id);
+  assert.match(c.element('result-slot').innerHTML, /ap.continueExisting/);
+});
+
+test('continuation confirmation cannot survive quantity, authority, proposal or page changes', async () => {
+  for (const change of [
+    c => { c.CT.proposalDetail.exit.continuable.quantity = 0.04; },
+    c => { c.CT.authority.version = 'authority-b'; },
+    c => { c.CT.proposalDetail.proposal_id = 'other-account-proposal'; },
+    c => { c.document.dispatchEvent({ type: 'ct:leave' }); },
+    c => { c.CT_API.canAct = () => false; },
+  ]) {
+    const c = continuationPage(); let posts = 0; c.CT_API.post = async () => { posts++; };
+    confirmContinuation(c); change(c);
+    await c.element('continue-submit').events.click(); assert.equal(posts, 0);
+    c.render(); assert.equal(c.element('continue-confirm').checked, false);
+  }
+});
+
+test('late continuation creation does not select a proposal after leaving the page', async () => {
+  const c = continuationPage(); let resolve, selections = 0;
+  c.CT_API.post = () => new Promise(r => { resolve = r; });
+  c.CT_API.selectProposal = () => { selections++; };
+  confirmContinuation(c); const pending = c.element('continue-submit').events.click();
+  c.document.dispatchEvent({ type: 'ct:leave' }); resolve(continuationAnswer()); await pending;
+  assert.equal(selections, 0);
+});
+
+test('late continuation creation does not replace another proposal reached by a same-page link', async () => {
+  const c = continuationPage(), selected = []; let resolve;
+  c.CT_API.post = () => new Promise(r => { resolve = r; });
+  c.CT_API.selectProposal = id => { selected.push(id); };
+  confirmContinuation(c); const pending = c.element('continue-submit').events.click();
+  c.location.search = '?proposal=another-root';
+  c.location.href = 'https://console.test/ui/approvals.html?proposal=another-root';
+  c.document.dispatchEvent({ type: 'ct:route' }); resolve(continuationAnswer()); await pending;
+  assert.deepEqual(selected, ['another-root']);
+});
+
+test('continuation_waiting, unknown orders and expired research hide creation; market closure does not stop proposal creation', () => {
+  const c = continuationPage(), onward = c.CT.proposalDetail.exit.continuable;
+  c.CT.health.market.is_open = false; c.render(); assert.equal(c.element('btn-continue-exit').hidden, false);
+  for (const code of ['continuation_waiting', 'reconciliation_unresolved', 'order_working', 'research_expired']) {
+    onward.eligible = false; onward.blocked_by = [{ code, detail: 'server refusal' }]; c.render();
+    assert.equal(c.element('btn-continue-exit').hidden, true);
+    assert.match(c.element('exit-detail').innerHTML, new RegExp('ap.exitBlock.' + code));
+  }
+});
+
+test('exit result trusts post-submission three-state confirmation, not an EXECUTED status or sell intent', async () => {
+  for (const closed of [null, false, true]) {
+    const c = exitApprovalPage();
+    c.CT_API.post = async () => ({ status: 'EXECUTED', message: 'filled', exit_result: {
+      requested_quantity: 0.2, submitted_quantity: 0.2, filled_quantity: 0.2,
+      confirmed_remaining: closed == null ? null : closed ? 0 : 0.1, position_closed: closed,
+      confirmed_remaining_basis: closed == null ? 'unknown' : 'both_sources_agree',
+      chain: { filled: 0.2, committed: 0, remaining_allowance: 0 },
+      continuable: { eligible: false, quantity: 0, blocked_by: [{ code: 'allowance_spent', detail: 'all used' }] },
+    } });
+    c.element('btn-approve').events.click(); c.element('approve-confirm').checked = true;
+    c.element('approve-confirm').events.change(); await c.element('approve-submit').events.click();
+    const html = c.element('result-slot').innerHTML;
+    assert.match(html, /ap.exitResultTitle/);
+    if (closed === true) assert.match(html, /ap.exitClosed/);
+    else assert.doesNotMatch(html, /ap.exitClosed/);
+    if (closed == null) assert.match(html, /ap.exitConfirmedRemaining<\/dt><dd>ap.exitCannotConfirm/);
+    if (closed === false) assert.match(html, /ap.exitStillHeld/);
+  }
 });
 
 test('autonomous floor refusal is visible without disabling an otherwise permitted human reduction', () => {
@@ -1164,6 +1307,13 @@ test('More only offers approvals for collector items requiring a proposal decisi
   c.CT.attention = attentionPayload([attentionItem()]); c.render();
   assert.equal(c.element('more-approvals').hidden, false);
   assert.match(c.element('more-approvals').href, /approvals.html\?proposal=A/);
+  const unfinished = attentionItem({ kind: 'exit_incomplete', actions: ['continue_exit', 'open'],
+    link: { page: 'approvals', params: { proposal: 'exit-root' } } });
+  c.CT.attention = attentionPayload([unfinished]); c.render();
+  assert.equal(c.element('more-approvals').hidden, false);
+  assert.match(c.element('more-approvals').href, /proposal=exit-root/);
+  const home = homePage(); home.CT.attention = attentionPayload([unfinished]); home.render();
+  assert.match(home.element('needs-you-slot').innerHTML, /proposal=exit-root/);
   c.CT.attention.readable = false; c.render();
   assert.equal(c.element('more-attention-copy').textContent, 'at.unknown');
 });

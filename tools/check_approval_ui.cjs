@@ -25,7 +25,7 @@ const ui = path.resolve(__dirname, '../ui');
     '/config/authority': authority, '/proposals': [proposal],
     ['/proposals/' + proposal.proposal_id]: proposal,
   };
-  const posts = [], errors = [];
+  const posts = [], errors = [], postHandlers = new Map();
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (!url.pathname.startsWith('/ui/')) { res.writeHead(404).end(); return; }
@@ -52,11 +52,13 @@ const ui = path.resolve(__dirname, '../ui');
       if (url.pathname.startsWith('/ui/')) return route.continue();
       let status = 200, body = payload[url.pathname] || {};
       if (request.method() === 'POST') {
-        assert.equal(url.pathname, '/proposals/' + proposal.proposal_id + '/approve');
         const submitted = request.postDataJSON(); posts.push(submitted);
         assert.equal(submitted.acknowledge_authority_change, true);
         assert.equal(request.headers()['x-csrf-token'], 'test-only');
-        if (posts.length === 1) {
+        if (postHandlers.has(url.pathname)) {
+          body = postHandlers.get(url.pathname)(submitted);
+        } else if (posts.length === 1) {
+          assert.equal(url.pathname, '/proposals/' + proposal.proposal_id + '/approve');
           assert.equal(submitted.authority_version, 'authority-a');
           authority.version = 'authority-b'; proposal.authority_changed.to = 'authority-b';
           status = 409; body = { detail: 'authority changed since the screen loaded; reload and review' };
@@ -151,8 +153,62 @@ const ui = path.resolve(__dirname, '../ui');
     if (process.env.CT_UI_CAPTURE_DIR) await page.screenshot({
       path: path.join(process.env.CT_UI_CAPTURE_DIR, 'approval-autonomy-phone.png') });
     assert.equal(posts.length, 2);
+    // End-to-end continuation: creation never approves; the child is fetched,
+    // separately reviewed, then explicitly approved with its own fixed quantity.
+    proposal.status = 'CANCELED';
+    Object.assign(proposal.exit, { already_filled: 0.12, blocked_by: [],
+      continuable: { eligible: true, quantity: 0.08, blocked_by: [] } });
+    Object.assign(proposal.exit.chain, { filled: 0.12, committed: 0, remaining_allowance: 0.08 });
+    const child = structuredClone(proposal);
+    Object.assign(child, { proposal_id: 'synthetic-continuation', status: 'WAITING_FOR_APPROVAL',
+      version: 'c'.repeat(64), sell_quantity: 0.08, notional_usd: 20 });
+    Object.assign(child.exit, { authorised_quantity: 0.08, expected_submit_quantity: 0.08,
+      already_filled: 0, continuable: { eligible: false, quantity: 0, blocked_by: [
+        { code: 'continuation_waiting', detail: 'Review the existing continuation' }] } });
+    postHandlers.set('/proposals/' + proposal.proposal_id + '/continue_exit', submitted => {
+      assert.match(submitted.request_id, /^[a-f0-9-]{36}$/);
+      assert.equal(submitted.idempotency_key, undefined);
+      assert.equal(submitted.authority_version, 'authority-b');
+      payload['/proposals/' + child.proposal_id] = child;
+      payload['/proposals'] = [child];
+      proposal.exit.continuable = { eligible: false, quantity: 0, blocked_by: [
+        { code: 'continuation_waiting', detail: 'Review the existing continuation' }] };
+      return { deduplicated: false, continuation_of: proposal.proposal_id, root_proposal_id: proposal.proposal_id,
+        authorised_quantity: 0.08, research_anchor_at: now, continued_at: now, proposal: child };
+    });
+    postHandlers.set('/proposals/' + child.proposal_id + '/approve', submitted => {
+      assert.equal(submitted.sell_quantity, 0.08); assert.ok(submitted.idempotency_key);
+      child.status = 'EXECUTED';
+      return { status: 'EXECUTED', message: 'Synthetic exit fill', exit_result: {
+        requested_quantity: 0.08, submitted_quantity: 0.08, filled_quantity: 0.08,
+        confirmed_remaining: null, confirmed_remaining_basis: 'unknown', position_closed: null,
+        chain: { filled: 0.2, committed: 0, remaining_allowance: 0 },
+        continuable: { eligible: false, quantity: 0, blocked_by: [] },
+      } };
+    });
+    await page.goto(origin + '/ui/approvals.html?proposal=' + encodeURIComponent(proposal.proposal_id));
+    await page.waitForFunction(() => !document.getElementById('btn-continue-exit').hidden);
+    await page.locator('#btn-continue-exit').click();
+    await page.locator('#continue-confirm').check();
+    assert.equal(await page.locator('#continue-submit').isDisabled(), true);
+    await page.locator('#continue-authority-confirm').check();
+    assert.equal(await page.locator('#continue-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    if (process.env.CT_UI_CAPTURE_DIR) await page.screenshot({
+      path: path.join(process.env.CT_UI_CAPTURE_DIR, 'approval-continuation-phone.png') });
+    await page.locator('#continue-submit').click();
+    await page.waitForFunction(() => document.getElementById('d-id').textContent === 'synthetic-continuation');
+    assert.equal(posts.length, 3, 'creation did not approve');
+    assert.match(page.url(), /proposal=synthetic-continuation/);
+    assert.equal(await page.locator('#approve-dialog').isVisible(), false);
+    await page.locator('#btn-approve').click();
+    await page.locator('#approve-confirm').check(); await page.locator('#approve-authority-confirm').check();
+    await page.locator('#approve-submit').click();
+    await page.waitForFunction(() => document.getElementById('result-slot').textContent.includes('Synthetic exit fill'));
+    assert.equal(posts.length, 4);
+    assert.match(await page.locator('#result-slot').innerText(), /无法确认/);
+    assert.doesNotMatch(await page.locator('#result-slot').innerText(), /已确认清仓/);
     assert.deepEqual(errors, []);
-    console.log('Approval browser check passed: acknowledgement, conflict, explicit retry, exit sources, unknown quantities, mobile layout.');
+    console.log('Approval browser check passed: authority conflict, exit sources, continuation creation, separate approval, unknown remaining holding, mobile layout.');
   } catch (error) {
     console.error(await page?.evaluate(() => ({ errors: document.body.innerText.slice(-2500),
       resources: window.CT_API?.state.resources, proposal: window.CT?.proposalDetail?.proposal_id,

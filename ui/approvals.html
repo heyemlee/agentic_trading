@@ -94,6 +94,7 @@
       <div class="card" data-od-id="actions">
         <div class="btn-row">
           <button class="btn btn-green" id="btn-approve" data-od-id="cta-approve">—</button>
+          <button class="btn btn-secondary" id="btn-continue-exit" data-i18n="ap.continueCreate" hidden>—</button>
           <button class="btn btn-secondary" id="btn-revalidate" data-od-id="cta-revalidate" data-i18n="ap.checkFirst">—</button>
         </div>
         <div class="row" style="justify-content:center;gap:4px;margin-top:8px;">
@@ -176,6 +177,31 @@
 </main>
 
 <!-- ── dialogs ────────────────────────────────────────────────────── -->
+<dialog class="modal" data-sheet id="continue-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2 data-i18n="ap.continueCreate">—</h2>
+    <p class="body-sm" id="continue-terms" style="margin-top:12px;"></p>
+    <p class="body-sm body-muted" data-i18n="ap.continueBoundary" style="margin-top:12px;"></p>
+    <p class="body-sm" id="continue-warning" role="alert"></p>
+    <section id="continue-authority-change" hidden style="margin-top:16px;">
+      <h3 data-i18n="ap.authorityChanged">—</h3>
+      <p id="continue-authority-summary" class="body-sm" style="white-space:pre-wrap;overflow-wrap:anywhere;"></p>
+      <label id="continue-authority-ack-row" class="row row-top body-sm" style="margin-top:12px;gap:10px;" hidden>
+        <input type="checkbox" id="continue-authority-confirm" />
+        <span data-i18n="ap.continueAuthorityAck">—</span>
+      </label>
+    </section>
+    <label class="row row-top body-sm" style="margin-top:16px;gap:10px;">
+      <input type="checkbox" id="continue-confirm" />
+      <span data-i18n="ap.continueAck">—</span>
+    </label>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-green" id="continue-submit" data-i18n="ap.continueCreate" disabled>—</button>
+    <button class="btn btn-secondary" id="continue-cancel" data-i18n="common.cancel">—</button>
+  </div>
+</dialog>
+
 <dialog class="modal" data-sheet id="approve-dialog" data-od-id="approve-dialog">
   <form method="dialog" class="dialog-body">
     <h2 id="approve-dialog-title">—</h2>

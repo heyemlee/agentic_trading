@@ -4,6 +4,10 @@ window.Console.page('approvals', function (document) {
   C.wireTabs();
   let intent = null, inFlight = false, uncertain = false, authorityAcknowledgementRequired = false;
   let reviewedExit = null;
+  let continuationIntent = null, continuationEpoch = 0;
+  // In-memory request identities support explicit retries after a lost response;
+  // there is no persisted write queue or automatic replay.
+  const continuationRequests = new Map();
   const isExit = p => ['SELL', 'REDUCE'].includes(p?.action);
   const exitReady = p => !isExit(p) || !!(p.exit && p.exit.authority_action === p.action &&
     p.exit.authorised_quantity === p.sell_quantity && Array.isArray(p.exit.blocked_by) &&
@@ -25,6 +29,14 @@ window.Console.page('approvals', function (document) {
       D.authority.actions?.[D.proposalDetail.exit?.authority_action || D.proposalDetail.action]?.human_approval?.blocked_by?.length === 0);
   const matches = () => window.ApprovalIntent.matches(intent, D.proposalDetail, D.authority) &&
     reviewedExit === exitReading(D.proposalDetail);
+  const continuationReading = p => JSON.stringify([p?.proposal_id, p?.version, p?.bucket, p?.ticker,
+    p?.exit?.chain, p?.exit?.continuable, p?.authority_changed, exitReading(p), D.authority?.version]);
+  const canContinue = () => isExit(D.proposalDetail) &&
+    CT_API.canAct(['proposalDetail', 'authority']) &&
+    window.ApprovalIntent.authorityMatches(D.proposalDetail, D.authority) &&
+    D.proposalDetail.exit?.continuable?.eligible === true &&
+    typeof D.proposalDetail.exit?.chain?.root_proposal_id === 'string' &&
+    Number.isFinite(D.proposalDetail.exit.continuable.quantity) && D.proposalDetail.exit.continuable.quantity > 0;
 
   C.setHTML(document.getElementById('banner-icon'), C.ICON.lock);
 
@@ -146,6 +158,12 @@ window.Console.page('approvals', function (document) {
     }
     approveBtn.disabled = inFlight || uncertain || !canApprove();
     approveBtn.hidden = isExit(p) && !canApprove();
+    continueBtn.hidden = !canContinue();
+    continueBtn.disabled = inFlight;
+    if (continuationIntent && (!canContinue() || continuationIntent.reading !== continuationReading(p))) {
+      clearContinuation();
+      set('continue-warning', C.t('ap.changedReview'));
+    }
     const detail = document.querySelector('[data-od-id="proposal-detail"]');
     const empty = document.getElementById('queue-empty');
     if (!p) {
@@ -280,7 +298,7 @@ window.Console.page('approvals', function (document) {
   function resultPanel(res) {
     const done = res.status === 'EXECUTED';
     const o = res.order;
-    const extra = o
+    let extra = o
       ? '<hr style="margin-block:16px;" /><dl class="kv">' +
           '<div class="kv-row"><dt>' + C.t('ap.clientOrderId') + '</dt><dd>' + C.escapeHtml(o.client_order_id || '—') + '</dd></div>' +
           '<div class="kv-row"><dt>' + C.t('ap.typeStatus') + '</dt><dd>' + C.escapeHtml((o.order_type || '—') + ' · ' + (o.status || '—')) + '</dd></div>' +
@@ -290,6 +308,22 @@ window.Console.page('approvals', function (document) {
         '</dl>' +
         '<a class="btn btn-secondary btn-sm" href="activity.html" style="margin-top:16px;">' + C.t('ap.seeActivity') + '</a>'
       : '';
+    if (res.exit_result) {
+      const e = res.exit_result;
+      const row = (key, value) => '<div class="kv-row"><dt>' + C.escapeHtml(C.t(key)) + '</dt><dd>' + C.escapeHtml(value) + '</dd></div>';
+      extra += '<section style="margin-top:16px;"><h3>' + C.escapeHtml(C.t('ap.exitResultTitle')) + '</h3><p class="body-sm">' +
+        C.escapeHtml(C.t(e.position_closed === true ? 'ap.exitClosed' : e.position_closed === false
+          ? 'ap.exitStillHeld' : 'ap.exitCannotConfirm')) + '</p><dl class="kv">' +
+        row('ap.exitAuthorised', shares(e.requested_quantity)) + row('ap.exitSubmitted', shares(e.submitted_quantity)) +
+        row('ap.exitAlreadyFilled', shares(e.filled_quantity)) +
+        row('ap.exitConfirmedRemaining', e.confirmed_remaining == null ? C.t('ap.exitCannotConfirm') : shares(e.confirmed_remaining)) +
+        row('ap.exitRemainingBasis', C.t('ap.exitBasis.' + (e.confirmed_remaining_basis || 'unknown'))) +
+        row('ap.exitChainFilled', shares(e.chain?.filled)) + row('ap.exitChainCommitted', shares(e.chain?.committed)) +
+        row('ap.exitChainRemaining', shares(e.chain?.remaining_allowance)) + '</dl><p class="body-sm">' +
+        C.escapeHtml(e.continuable?.eligible === true ? C.t('ap.exitContinuable', { q: shares(e.continuable.quantity) })
+          : C.t('ap.exitNotContinuable')) + '</p><div class="list list-inset">' +
+        exitReasons(e.continuable?.blocked_by) + '</div></section>';
+    }
     panel(C.code(res.status) || res.outcome || C.t('ap.result'), done ? 'accent' : 'quiet',
       res.message || res.error || '', res.reasons || [], extra);
   }
@@ -307,6 +341,10 @@ window.Console.page('approvals', function (document) {
   const confirmBox = document.getElementById('approve-confirm');
   const authorityConfirm = document.getElementById('approve-authority-confirm');
   const submitBtn = document.getElementById('approve-submit');
+  const continueBtn = document.getElementById('btn-continue-exit');
+  const continueSubmit = document.getElementById('continue-submit');
+  const continueConfirm = document.getElementById('continue-confirm');
+  const continueAuthorityConfirm = document.getElementById('continue-authority-confirm');
   const classifications = { tightened: 'ap.authorityTightened', loosened: 'ap.authorityLoosened',
     mixed: 'ap.authorityMixed', unrelated: 'ap.authorityUnrelated', unknown: 'ap.authorityUnknown' };
   function changeSummary(proposal) {
@@ -319,6 +357,81 @@ window.Console.page('approvals', function (document) {
       proposal.authority_changed_during_research ? C.t('ap.authorityDuringResearch') : null,
     ].filter(Boolean).join('\n');
   }
+  function clearContinuation() {
+    continuationIntent = null;
+    continueConfirm.checked = false; continueAuthorityConfirm.checked = false;
+    continueSubmit.disabled = true;
+  }
+  const canCreateContinuation = () => !inFlight && continuationIntent && canContinue() &&
+    continuationIntent.reading === continuationReading(D.proposalDetail) && continueConfirm.checked &&
+    (!continuationIntent.needsAck || continueAuthorityConfirm.checked);
+  continueBtn.addEventListener('click', () => {
+    if (inFlight || !canContinue()) return;
+    const p = D.proposalDetail, root = p.exit.chain.root_proposal_id;
+    if (!continuationRequests.has(root)) continuationRequests.set(root, crypto.randomUUID());
+    continuationIntent = { proposal_id: p.proposal_id, root, request_id: continuationRequests.get(root),
+      authority_version: D.authority.version, reading: continuationReading(p),
+      needsAck: window.ApprovalIntent.needsAcknowledgement(p) };
+    continueConfirm.checked = false; continueAuthorityConfirm.checked = false; continueSubmit.disabled = true;
+    set('continue-warning', '');
+    set('continue-terms', C.t('ap.continueTerms', { ticker: p.ticker, account: C.bucket(p.bucket),
+      q: shares(p.exit.continuable.quantity), root }));
+    set('continue-authority-summary', changeSummary(p));
+    document.getElementById('continue-authority-change').hidden = !p.authority_changed;
+    document.getElementById('continue-authority-ack-row').hidden = !continuationIntent.needsAck;
+    C.openSheet('continue-dialog');
+  });
+  continueConfirm.addEventListener('change', () => { continueSubmit.disabled = !canCreateContinuation(); });
+  continueAuthorityConfirm.addEventListener('change', () => { continueSubmit.disabled = !canCreateContinuation(); });
+  document.getElementById('continue-cancel').addEventListener('click', () => { clearContinuation(); C.closeSheet('continue-dialog'); });
+  async function refreshContinuation() {
+    // Reads only, including after a failed write. A refresh never repeats creation.
+    for (const key of ['authority', 'proposals', 'proposalDetail', 'attention']) await CT_API.readOnce(key);
+  }
+  continueSubmit.addEventListener('click', async () => {
+    if (!canCreateContinuation()) return;
+    const saved = continuationIntent, epoch = continuationEpoch;
+    const acknowledged = saved.needsAck && continueAuthorityConfirm.checked;
+    inFlight = true; continueSubmit.disabled = true; continueBtn.disabled = true; approveBtn.disabled = true;
+    C.closeSheet('continue-dialog');
+    panel(C.t('ap.continueCreating'), 'quiet', C.t('ap.continueBoundary'), []);
+    let created = null;
+    try {
+      const res = await CT_API.post('/proposals/' + encodeURIComponent(saved.proposal_id) + '/continue_exit', {
+        confirm: true, request_id: saved.request_id, authority_version: saved.authority_version,
+        acknowledge_authority_change: acknowledged,
+      });
+      if (res.blocked) { blockedPanel('ap.verbContinue'); return; }
+      if (!res.proposal?.proposal_id) throw new Error(C.t('ap.continueNoResult'));
+      created = res.proposal.proposal_id;
+      continuationRequests.delete(saved.root);
+      if (epoch !== continuationEpoch) return;
+      const href = 'approvals.html?proposal=' + encodeURIComponent(created);
+      panel(C.t(res.deduplicated ? 'ap.continueExisting' : 'ap.continueCreated'), 'quiet', C.t('ap.continueBoundary'),
+        [C.t('ap.continueCreatedTerms', { q: shares(res.authorised_quantity),
+          at: C.dateTime(res.research_anchor_at), created: C.dateTime(res.continued_at) })],
+        '<a class="btn btn-secondary" href="' + C.escapeHtml(href) + '">' + C.escapeHtml(C.t('ap.continueReview')) + '</a>');
+      // Select a fresh GET, never promote the returned summary to approvable detail.
+      window.history?.replaceState(window.history.state, '', href);
+      CT_API.selectProposal(created, { includeClosed: true });
+      await refreshContinuation();
+    } catch (error) {
+      if (epoch !== continuationEpoch) return;
+      if (created) { panel(C.t('ap.continueCreated'), 'quiet', C.t('ap.continueReadFailed'), [error.message]); return; }
+      if (error.status === 409) {
+        continuationRequests.delete(saved.root);
+        panel(C.t('ap.reviewAgain'), 'quiet', error.message, [C.t('ap.continueConflict')]);
+      } else if (error.notSent || error.status >= 400 && error.status < 500) {
+        continuationRequests.delete(saved.root);
+        panel(C.t('ap.failed'), 'quiet', error.message, []);
+      } else {
+        panel(C.t('ap.failed'), 'quiet', error.message, [C.t('ap.continueRetry')]);
+      }
+      await refreshContinuation();
+    } finally {
+      inFlight = false; clearContinuation(); renderDetail();
+    }
+  });
   const canSubmit = () => confirmBox.checked && canApprove() && matches() &&
     (!authorityAcknowledgementRequired || authorityConfirm.checked) && !inFlight && !uncertain;
   approveBtn.addEventListener('click', () => {
@@ -359,8 +472,10 @@ window.Console.page('approvals', function (document) {
       if (res.blocked) { blockedPanel('ap.verbApprove'); return; }
       resultPanel(res);
       approveBtn.textContent = C.code(res.status || res.outcome);
+      if (isExit(approved)) CT_API.selectProposal(proposal_id, { includeClosed: true });
       await CT_API.readOnce('proposals');
       await CT_API.readOnce('proposalDetail');
+      if (isExit(approved)) await CT_API.readOnce('attention');
     } catch (error) {
       if (error.status === 409) {
         // A conflict requires another review, never a replay of the rejected request.
@@ -388,7 +503,7 @@ window.Console.page('approvals', function (document) {
   });
 
   let rejectedId = null;
-  document.getElementById('btn-reject').addEventListener('click', () => { rejectedId = pid(); C.openSheet('reject-dialog'); });
+  document.getElementById('btn-reject').addEventListener('click', () => { if (inFlight) return; rejectedId = pid(); C.openSheet('reject-dialog'); });
   document.getElementById('reject-cancel').addEventListener('click', () => C.closeSheet('reject-dialog'));
 
   /* POST /proposals/{id}/reject */
@@ -412,7 +527,7 @@ window.Console.page('approvals', function (document) {
        request goes out — silence is what makes people click twice — and hold
        the button until it comes back. */
     const button = document.getElementById('btn-reanalyze');
-    if (button.disabled) return;
+    if (button.disabled || inFlight) return;
     button.disabled = true;
     panel(C.t('ap.reanalysisStarted'), 'quiet', C.t('ap.reanalysisBody'), []);
     try {
@@ -433,12 +548,14 @@ window.Console.page('approvals', function (document) {
   // Leaving closes the sheet; coming back always requires a fresh explicit confirmation.
   document.addEventListener('ct:leave', () => {
     intent = null; confirmBox.checked = false; authorityConfirm.checked = false; submitBtn.disabled = true;
+    continuationEpoch++; clearContinuation();
   });
   C.live(['proposals', 'proposalDetail', 'health', 'microLive', 'authority'], renderDetail);
   let entryURL;
   function routeEntry() {
     if (entryURL === location.href) return;
     entryURL = location.href;
+    continuationEpoch++; clearContinuation(); C.closeSheet('continue-dialog');
     const proposal = new URLSearchParams(location.search).get('proposal');
     CT_API.selectProposal(proposal || null, { includeClosed: !!proposal });
   }

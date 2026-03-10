@@ -104,9 +104,17 @@ state and exit chain. Missing quantities say "Not read"; unknown remainder/closu
 the page does no quantity arithmetic. Approvals bind to fixed shares and are unavailable when
 exit detail is missing or blocked. A changed exit reading clears confirmation even if the
 proposal version is unchanged. Live orders also require the actual action's authority.
-Continuation eligibility and reasons are read-only for now: no `continue_exit` request or
-button is wired until that endpoint ships. The browser check covers these views on mobile;
-the frontend suite also covers confirmation invalidation, chain amounts and authority gating.
+Continuation creation is offered only when the current detail reports `continuable.eligible`.
+A separate confirmation sends `request_id` and the authority version to `continue_exit`;
+authority loosening requires acknowledgement. Creation selects a fresh GET of the new
+proposal, never approves it. Double clicks are suppressed; a lost response can be retried
+explicitly with the same in-memory request id. Conflicts refresh readings and require another
+confirmation. Page/quantity/authority changes invalidate a pending confirmation. Nothing is
+queued or replayed offline. Existing continuations are reachable through the chain links.
+Approval results render `exit_result` using its post-submission three-state closure reading;
+`EXECUTED` alone never means the position is closed. Home and More link `exit_incomplete`
+attention to its proposal. The browser check covers creation through separate approval on
+mobile; the frontend suite covers conflicts, lost responses, late responses and chain amounts.
 REDUCE also displays `exit.autonomous`: the configured retained percentage, holding high-water
 mark and its provenance, cycle start, current holding, floor, headroom and reasons. These
 figures come from the service, not frontend arithmetic; null never becomes zero. Position

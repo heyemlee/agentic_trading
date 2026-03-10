@@ -10,7 +10,7 @@ window.Console.page('more', function (document) {
 
   function render() {
     const attention = C.attentionState();
-    const approvals = attention.items.filter(x => x.requires_person && ['proposal_waiting', 'proposal_stale'].includes(x.kind));
+    const approvals = attention.items.filter(x => x.requires_person && ['proposal_waiting', 'proposal_stale', 'exit_incomplete'].includes(x.kind));
     document.getElementById('more-attention-copy').textContent = !attention.known ? C.t('at.unknown')
       : attention.items.length ? C.t('at.count', { n: attention.items.length }) : C.t('at.clear');
     document.getElementById('more-approvals').hidden = !approvals.length;
