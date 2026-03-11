@@ -374,7 +374,13 @@ profiles 的 `project_dir` 指向 checkout，而研究队列会往 `project_dir/
 
 ## 11. 检查记录
 
-2026-09-20，`deploy/checks.sh`：**前端 155 项通过、秘密扫描通过；Ruff 与 Python 套件各有失败，全部来自
+**最终状态（2026-09-20，合并树 `1b47279`，工作区干净）：`deploy/checks.sh` 全绿** —— Ruff 通过、
+Python **978 项全过**、前端用例通过、秘密扫描通过，末行 `all checks passed`。下面那次红灯是本次改动
+提交当时（`18e21f8`）的情况，已由对方的 `1b47279` 解除，留档是为了说明那条提交信息里为什么写着红灯。
+
+---
+
+提交当时，`deploy/checks.sh`：**前端 155 项通过、秘密扫描通过；Ruff 与 Python 套件各有失败，全部来自
 另一个 agent 同时在这个 checkout 上做的 P1 thesis-tracker 工作，与本次改动无关**。
 
 - Ruff：`agentic_trading/thesis_trial.py`（I001、TRY004）与 `tests/test_thesis_trial.py`（I001）。
