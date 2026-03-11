@@ -146,9 +146,8 @@
       active.storage.append(...active.nodes);
       document.getElementById('blank-state')?.remove();
       active = view;
-      // A retained Assistant view already carries fixed chat positioning in
-      // its className. Clear the source page's scroll before applying that
-      // class; iOS otherwise fixes the shell against the old visual offset.
+      // A retained Assistant view is a non-scrolling, viewport-height shell.
+      // Do not carry the source page's scroll position into it.
       if (view.className.split(/\s+/).includes('chat-view')) {
         view.scroll = 0;
         window.scrollTo(0, 0);

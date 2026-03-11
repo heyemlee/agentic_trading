@@ -63,15 +63,19 @@ const ui = path.resolve(__dirname, '../ui');
         const shell = document.body.getBoundingClientRect();
         const dock = document.querySelector('.composer-dock').getBoundingClientRect();
         return { input: input.toJSON(), send: send.toJSON(), tabTop: tabs.top, tabBottom: tabs.bottom, height: innerHeight,
-          width: innerWidth, scrollWidth: document.documentElement.scrollWidth, shell: shell.toJSON(), dock: dock.toJSON() };
+          width: innerWidth, scrollWidth: document.documentElement.scrollWidth, shell: shell.toJSON(), dock: dock.toJSON(),
+          bodyPosition: getComputedStyle(document.body).position };
       });
+      assert.equal(layout.bodyPosition, 'relative', 'Closed-keyboard chat must not use a fixed body');
       assert.ok(layout.input.top >= 0 && layout.send.bottom <= Math.min(layout.tabTop, layout.height), 'Composer must stay above navigation without scrolling: ' + JSON.stringify(layout));
       assert.ok(layout.send.width >= 44 && layout.send.height >= 44, 'Send needs a phone-sized touch target');
       assert.ok(layout.scrollWidth <= layout.width, 'No horizontal page overflow');
-      assert.ok(Math.abs(layout.dock.bottom - layout.tabTop) < 2, 'No blank region between composer and tabs');
+      assert.ok(Math.abs(layout.dock.bottom - layout.tabTop) < 2, 'No blank region between composer and tabs: ' + JSON.stringify(layout));
       assert.ok(Math.abs(layout.shell.height - layout.height) < 2, 'Chat fills the restored viewport');
       assert.ok(Math.abs(layout.shell.top) < 2, 'Chat is not shifted above the viewport');
       assert.ok(Math.abs(layout.tabBottom - layout.height) < 2, 'Navigation reaches the viewport bottom');
+      assert.equal(await page.locator('.tabbar').evaluate(el => getComputedStyle(el).position), 'fixed',
+        'Assistant navigation stays anchored to the viewport');
     };
     const capture = async name => {
       if (!process.env.CT_UI_CAPTURE_DIR) return;
@@ -210,11 +214,14 @@ const ui = path.resolve(__dirname, '../ui');
     }
     // Emulate a mobile visual viewport shrinking while the layout viewport stays tall.
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#chat-input').focus();
     await page.evaluate(() => {
       Object.defineProperty(visualViewport, 'height', { configurable: true, value: 460 });
       visualViewport.dispatchEvent(new Event('resize'));
     });
     await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'fixed',
+      'Only the open-keyboard layout uses a visual-viewport-sized fixed shell');
     assert.equal(await page.locator('.tabbar').isVisible(), false);
     assert.ok(await page.locator('#chat-send').evaluate(el => el.getBoundingClientRect().bottom <= 460));
     // iOS pans to a caret with a scroll-only event, even if the height is unchanged.
@@ -235,6 +242,7 @@ const ui = path.resolve(__dirname, '../ui');
     assert.equal(await page.locator('.tabbar').isVisible(), true, 'Discover must not inherit keyboard-hidden navigation');
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
     await page.locator('#view-chat').click();
+    await page.locator('#chat-input').focus();
     await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
     await page.locator('#assistant-context').click();
     assert.equal(await page.locator('#assistant-account').isVisible(), true);

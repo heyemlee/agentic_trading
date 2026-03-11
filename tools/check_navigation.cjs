@@ -139,9 +139,12 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  const enteredChat = await page.evaluate(() => {
    const body = document.body.getBoundingClientRect();
    const tabs = document.querySelector('.tabbar').getBoundingClientRect();
-   return {scrollY, bodyTop: body.top, bodyBottom: body.bottom, tabBottom: tabs.bottom, innerHeight};
+   return {scrollY, bodyTop: body.top, bodyBottom: body.bottom, tabBottom: tabs.bottom, innerHeight,
+     bodyPosition: getComputedStyle(document.body).position};
  });
  assert.equal(enteredChat.scrollY, 0);
+ assert.equal(enteredChat.bodyPosition, 'relative',
+   'Normal chat must not fix the whole body; real iOS can retain a stale fixed-body viewport');
  const scrollOrder = await page.evaluate(() => {
    const result = navigationScrollOrder;
    window.scrollTo = navigationOriginalScrollTo;
@@ -154,6 +157,18 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    'Chat shell must fill the viewport after bottom-tab navigation: ' + JSON.stringify(enteredChat));
  assert.ok(Math.abs(enteredChat.tabBottom - enteredChat.innerHeight) < 2,
    'Assistant navigation must stay attached to the screen bottom: ' + JSON.stringify(enteredChat));
+ assert.equal(await page.locator('.tabbar').evaluate(el => getComputedStyle(el).position), 'fixed',
+   'Assistant tab bar must stay anchored during mobile browser viewport changes');
+ // Route transitions can leave a short visual viewport even with no focused
+ // editor. Browser chrome alone must not hide the tab bar as if a keyboard opened.
+ await page.evaluate(() => {
+   Object.defineProperty(visualViewport, 'height', {configurable:true, value:innerHeight - 180});
+   visualViewport.dispatchEvent(new Event('resize'));
+ });
+ await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+ assert.equal(await page.locator('.tabbar').isVisible(), true);
+ assert.equal(await page.evaluate(() => document.body.classList.contains('assistant-keyboard')), false);
+ await page.evaluate(() => { delete visualViewport.height; visualViewport.dispatchEvent(new Event('resize')); });
  if (process.env.CT_UI_CAPTURE_DIR) {
    const folder = path.resolve(process.env.CT_UI_CAPTURE_DIR);
    await fs.mkdir(folder, {recursive:true});
@@ -162,6 +177,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  // Leave while the keyboard is open; close it on another page, then return
  // without a viewport resize event. A retained chat must not keep a short body.
  await page.evaluate(() => {
+   document.getElementById('chat-input').focus();
    Object.defineProperty(visualViewport, 'height', { configurable: true, value: 430 });
    Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 120 });
    visualViewport.dispatchEvent(new Event('resize'));

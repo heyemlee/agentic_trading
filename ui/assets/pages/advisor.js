@@ -119,9 +119,8 @@ window.Console.page('advisor', function (document) {
   function showView(view, focus = false) {
     if (binding.scope === 'agentic') view = 'chat';
     if (!views.includes(view)) view = 'chat';
-    // iOS can retain the previous page's visual scroll offset while the router
-    // swaps this body to fixed positioning. Reset it before locking the chat
-    // shell, otherwise the whole shell is shifted up and leaves space below.
+    // The chat shell does not scroll as a document. Clear the previous page's
+    // position before entering it so WebKit cannot restore that position later.
     if (view === 'chat') window.scrollTo?.(0, 0);
     document.body?.classList.toggle('chat-view', view === 'chat');
     for (const name of views) {
@@ -156,7 +155,10 @@ window.Console.page('advisor', function (document) {
     const height = viewport?.height || window.innerHeight;
     if (!(height > 0)) return;
     const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
-    const keyboard = layoutHeight - height > 140;
+    // Browser chrome and route restoration can shorten the visual viewport
+    // without a keyboard. Only an active editor may switch to keyboard mode.
+    const editor = document.activeElement?.matches('input, textarea, select, [contenteditable]');
+    const keyboard = !!editor && layoutHeight - height > 140;
     // iOS may pan the visual viewport to the caret without a resize. Once the
     // keyboard closes, ignore a stale offsetTop instead of leaving a blank gap.
     const top = keyboard ? Math.max(0, viewport?.offsetTop || 0) : 0;
