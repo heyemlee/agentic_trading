@@ -237,6 +237,44 @@ class AssistantReply(BaseModel):
     research_candidates: list[CandidateIdea] = Field(default_factory=list, max_length=10)
 
 
+def readable_answer(text: str, candidates: list[dict] | None = None) -> str:
+    """Remove leaked wire-format fields, without turning them into research actions.
+
+    Also used when reading old records: keep their bytes intact, and retain valid
+    embedded ideas as prose. Only the separately stored candidate field may create
+    buttons; recovering it here would bypass a shortlist's saved-source filter.
+    """
+    shown = {str(c.get("symbol", "")).upper() for c in candidates or [] if isinstance(c, dict)}
+
+    def ideas(match: re.Match) -> str:
+        payload = match[1].strip()
+        payload = re.sub(r"^```(?:json)?\s*|\s*```$", "", payload, flags=re.IGNORECASE)
+        try:
+            rows = json.loads(payload)
+        except (ValueError, TypeError):
+            return ""
+        if not isinstance(rows, list):
+            return ""
+        lines = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol, reason = row.get("symbol"), row.get("reason")
+            if not isinstance(symbol, str) or not isinstance(reason, str):
+                continue
+            symbol = symbol.upper()
+            if not SYMBOL.fullmatch(symbol) or symbol in shown:
+                continue
+            shown.add(symbol)
+            lines.append(f"- {symbol}: {reason.strip()}")
+        return "\n\n" + "\n".join(lines) + "\n\n" if lines else ""
+
+    text = re.sub(r"(?:\s*</answer>\s*)?<research_candidates>\s*(.*?)(?:</research_candidates>|$)",
+                  ideas, text, flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r"(?:\s*</(?:answer|invoke|research_candidates)>\s*)+$",
+                  "", text, flags=re.IGNORECASE).strip()
+
+
 def answer(profiles, context, message, history, language="zh", llm=None):
     llm = llm or ClaudeCodeChatModel(
         model=profiles.tradingagents.quick_think_llm, effort=profiles.llm.quick_effort,
@@ -264,7 +302,9 @@ def answer(profiles, context, message, history, language="zh", llm=None):
         "You cannot trade, approve orders, change settings or start a task yourself. For a request "
         "to research a symbol, include it in research_candidates; the UI offers the existing research "
         "workflow. Never claim actions were executed. Cite existing run IDs and dated data/tool "
-        "sources for claims. Explain missing and stale data. Check current facts with the existing "
+        "sources for claims. Put only readable Markdown in answer, and candidate objects only "
+        "in the separate research_candidates field; do not embed XML tags or serialized fields. "
+        "Explain missing and stale data. Check current facts with the existing "
         "read-only data tools when needed. Review concentration, liquidity needs, taxes and "
         "investment horizon only when known; ask for unknown personal details instead of inventing "
         "them. For shortlist requests rank ONLY the supplied candidate symbols by suitability and "
@@ -282,10 +322,9 @@ def answer(profiles, context, message, history, language="zh", llm=None):
     messages.extend(history[-12:])
     messages.append({"role": "user", "content": message})
     reply = llm.with_structured_output(AssistantReply).invoke(messages)
-    # Some CLI structured-output replies leak closing serialization markers into the text.
-    reply.answer = re.sub(r"(?:\s*</(?:answer|invoke)>\s*)+$", "", reply.answer).strip()
     reply.research_candidates = [c for c in reply.research_candidates
                                  if SYMBOL.fullmatch(c.symbol.upper())]
+    reply.answer = readable_answer(reply.answer, [c.model_dump() for c in reply.research_candidates])
     return reply.model_dump()
 
 

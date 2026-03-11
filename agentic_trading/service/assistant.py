@@ -129,6 +129,8 @@ class AssistantMixin:
         return (db.read_meta(CONVERSATIONS, {}) or {}).get(conversation_id)
 
     def _advisor_result(self, run_key: str) -> dict[str, Any] | None:
+        from ..advisor import readable_answer
+
         if not re.fullmatch(r"[A-Za-z0-9._-]+", run_key):
             raise ServiceError("invalid run identifier")
         root = (self.profiles().project_dir / "runs").resolve()
@@ -136,7 +138,10 @@ class AssistantMixin:
         if root not in path.parents:
             raise ServiceError("result is outside the run directory")
         try:
-            return json.loads(path.read_text(encoding="utf-8")).get("assistant_result")
+            result = json.loads(path.read_text(encoding="utf-8")).get("assistant_result")
+            if isinstance(result, dict) and isinstance(result.get("answer"), str):
+                result["answer"] = readable_answer(result["answer"], result.get("research_candidates"))
+            return result
         except (OSError, ValueError):
             return None
 

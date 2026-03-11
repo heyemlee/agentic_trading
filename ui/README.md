@@ -293,5 +293,20 @@ progressive disclosure take inspiration from [Robinhood's Cortex overview](https
 
 The Assistant browser check also exercises prompt drafts, pending and completed replies,
 clipboard actions, long-message scroll preservation, and phone, landscape, keyboard-height
-and desktop viewports. `CT_UI_CAPTURE_DIR` saves synthetic-data previews of the welcome,
+and desktop viewports. It checks scroll-only visual-viewport panning, keyboard dismissal
+with a stale offset, page restoration, and the absence of gaps below the composer.
+`CT_BROWSER_ENGINE=webkit` runs these cases in Playwright WebKit (clipboard permission
+checks remain Chromium-only). These are browser regressions, not a real iOS keyboard.
+`CT_UI_CAPTURE_DIR` saves synthetic-data previews of the welcome,
 conversation and waiting states.
+
+The chat shell is fixed to the visual viewport, with navigation in its flex layout.
+Resize and scroll events update its height and vertical offset; route entry and page
+restoration refresh geometry even when the keyboard closed on another page. Composer
+height changes only with its text or width, so background polls do not disturb the caret.
+See the [VisualViewport API](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)
+for the difference between visual and layout viewport position.
+
+Leaked `research_candidates` serialization is cleaned in the assistant service for both
+new and historical answers. Valid embedded ideas remain readable prose; only the separately
+stored, filtered candidate field creates research buttons. Stored records are not rewritten.

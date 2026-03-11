@@ -1,5 +1,5 @@
 // Offline Assistant integration: a static UI and synthetic, scope-bound API responses.
-const { chromium } = require('playwright');
+const { chromium, webkit } = require('playwright');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs/promises');
@@ -18,7 +18,9 @@ const ui = path.resolve(__dirname, '../ui');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser, page;
   try {
-    browser = await chromium.launch({ channel: process.env.CT_BROWSER_CHANNEL || 'chrome', headless: true });
+    const safari = process.env.CT_BROWSER_ENGINE === 'webkit';
+    browser = safari ? await webkit.launch({ headless: true })
+      : await chromium.launch({ channel: process.env.CT_BROWSER_CHANNEL || 'chrome', headless: true });
     page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(() => sessionStorage.setItem('ct.startup.seen.v1', '1'));
@@ -58,12 +60,16 @@ const ui = path.resolve(__dirname, '../ui');
         const input = document.getElementById('chat-input').getBoundingClientRect();
         const send = document.getElementById('chat-send').getBoundingClientRect();
         const tabs = document.querySelector('.tabbar').getBoundingClientRect();
+        const shell = document.body.getBoundingClientRect();
+        const dock = document.querySelector('.composer-dock').getBoundingClientRect();
         return { input: input.toJSON(), send: send.toJSON(), tabTop: tabs.top, height: innerHeight,
-          width: innerWidth, scrollWidth: document.documentElement.scrollWidth };
+          width: innerWidth, scrollWidth: document.documentElement.scrollWidth, shell: shell.toJSON(), dock: dock.toJSON() };
       });
       assert.ok(layout.input.top >= 0 && layout.send.bottom <= Math.min(layout.tabTop, layout.height), 'Composer must stay above navigation without scrolling: ' + JSON.stringify(layout));
       assert.ok(layout.send.width >= 44 && layout.send.height >= 44, 'Send needs a phone-sized touch target');
       assert.ok(layout.scrollWidth <= layout.width, 'No horizontal page overflow');
+      assert.ok(Math.abs(layout.dock.bottom - layout.tabTop) < 2, 'No blank region between composer and tabs');
+      assert.ok(Math.abs(layout.shell.height - layout.height) < 2, 'Chat fills the restored viewport');
     };
     const capture = async name => {
       if (!process.env.CT_UI_CAPTURE_DIR) return;
@@ -157,9 +163,11 @@ const ui = path.resolve(__dirname, '../ui');
     assert.equal(await page.locator('#chat-scroll').evaluate(el => el.scrollTop), 0);
     await page.locator('#chat-latest').click();
     assert.equal(await page.locator('#chat-latest').isVisible(), false);
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-    await page.locator('.message-copy').click();
-    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /持仓集中度/);
+    if (!safari) {
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.locator('.message-copy').click();
+      assert.match(await page.evaluate(() => navigator.clipboard.readText()), /持仓集中度/);
+    }
     for (const [width, height] of [[320, 568], [390, 460], [844, 390], [1280, 900]]) {
       await page.setViewportSize({ width, height });
       await page.waitForFunction(() => Math.abs(parseFloat(document.body.style.getPropertyValue('--app-height')) - visualViewport.height) < 1);
@@ -175,13 +183,47 @@ const ui = path.resolve(__dirname, '../ui');
       Object.defineProperty(visualViewport, 'height', { configurable: true, value: 460 });
       visualViewport.dispatchEvent(new Event('resize'));
     });
+    await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
     assert.equal(await page.locator('.tabbar').isVisible(), false);
     assert.ok(await page.locator('#chat-send').evaluate(el => el.getBoundingClientRect().bottom <= 460));
+    // iOS pans to a caret with a scroll-only event, even if the height is unchanged.
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 170 });
+      visualViewport.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForFunction(() => document.body.style.getPropertyValue('--chat-top') === '170px');
+    const keyboardLayout = await page.evaluate(() => ({
+      top: document.getElementById('chat-input').getBoundingClientRect().top,
+      bottom: document.querySelector('.composer-dock').getBoundingClientRect().bottom,
+      heading: document.querySelector('.assistant-heading').getBoundingClientRect().top,
+    }));
+    assert.ok(keyboardLayout.top >= 170 && keyboardLayout.heading >= 170, 'Caret and heading stay in the panned visual viewport');
+    assert.ok(Math.abs(keyboardLayout.bottom - 630) < 2, 'Composer stays at the keyboard, without a large blank gap');
+    await capture('assistant-keyboard-offset');
+    await page.locator('#view-discover').click();
+    assert.equal(await page.locator('.tabbar').isVisible(), true, 'Discover must not inherit keyboard-hidden navigation');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
+    await page.locator('#view-chat').click();
+    await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
     await page.locator('#assistant-context').click();
     assert.equal(await page.locator('#assistant-account').isVisible(), true);
     await page.locator('[data-close-sheet="context-sheet"]').click();
     await page.waitForFunction(() => !document.getElementById('context-sheet').open);
-    await page.evaluate(() => { delete visualViewport.height; visualViewport.dispatchEvent(new Event('resize')); });
+    // The keyboard can disappear with a stale offset, or while another tab is active.
+    await page.evaluate(() => {
+      delete visualViewport.height;
+      document.dispatchEvent(new Event('ct:route'));
+    });
+    await page.waitForFunction(() => !document.body.classList.contains('assistant-keyboard') &&
+      document.body.style.getPropertyValue('--chat-top') === '0px');
+    await assertComposer();
+    await page.evaluate(() => {
+      window.scrollTo(0, 300);
+      delete visualViewport.offsetTop;
+      window.dispatchEvent(new Event('pageshow'));
+    });
+    await page.waitForFunction(() => scrollY === 0);
+    await assertComposer();
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.waitForFunction(() => Math.abs(parseFloat(document.body.style.getPropertyValue('--app-height')) - visualViewport.height) < 1);
     await page.evaluate(() => I18N.set('en'));

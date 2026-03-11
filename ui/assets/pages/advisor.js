@@ -26,11 +26,19 @@ window.Console.page('advisor', function (document) {
   let busy = false, pendingRequest = null, shownMessages = [];
   let session = null, storageOK = false;
   let chatWorking = false, queuedChat = null;
+  let composerValue = null, composerWidth = null, viewportFrame = null;
+  const viewportTimers = new Set();
   const entryFor = id => session && (session.state.entries[id] ||= { draft: '', title: '' });
   function resizeComposer() {
     const input = el('chat-input');
+    // Repeated auto-height writes while iOS keeps the caret visible can pan the
+    // document. Polls and viewport scrolls do not change the draft's height.
+    if (input.value === composerValue && input.clientWidth === composerWidth) return;
+    composerValue = input.value; composerWidth = input.clientWidth;
+    const scroll = input.scrollTop;
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight || 44, 132) + 'px';
+    input.scrollTop = scroll;
   }
   function updateSend() {
     el('chat-send').disabled = busy || chatWorking ||
@@ -109,6 +117,8 @@ window.Console.page('advisor', function (document) {
     el('panel-personal').hidden = view !== 'chat' || binding.scope !== 'personal';
     el('panel-tools').hidden = view === 'chat' || binding.scope !== 'personal';
     if (focus) el('view-' + view).focus();
+    if (view === 'chat') scheduleViewport();
+    else clearViewport();
   }
   for (const [index, name] of views.entries()) {
     el('view-' + name).addEventListener('click', () => showView(name));
@@ -122,15 +132,56 @@ window.Console.page('advisor', function (document) {
   let entryPromptPending = params.get('prompt') === 'holdings-risk';
   if (params.get('view') === 'holdings') location.replace('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''));
   showView(params.get('view'));
-  if (window.visualViewport) {
-    const fitKeyboard = () => {
-      document.body.style.setProperty('--app-height', window.visualViewport.height + 'px');
-      document.body.classList.toggle('assistant-keyboard', window.innerHeight - window.visualViewport.height > 140);
-      resizeComposer(); updateLatest();
-    };
-    window.visualViewport.addEventListener('resize', fitKeyboard);
-    fitKeyboard();
+  function fitViewport() {
+    viewportFrame = null;
+    if (document.hidden || !document.body?.classList.contains('chat-view')) return;
+    const viewport = window.visualViewport;
+    // Pinch zoom must still pan naturally; it is not a software keyboard.
+    if (viewport && viewport.scale > 1.05) return;
+    const height = viewport?.height || window.innerHeight;
+    if (!(height > 0)) return;
+    const log = el('chat-scroll');
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
+    const keyboard = layoutHeight - height > 140;
+    // iOS may pan the visual viewport to the caret without a resize. Once the
+    // keyboard closes, ignore a stale offsetTop instead of leaving a blank gap.
+    const top = keyboard ? Math.max(0, viewport?.offsetTop || 0) : 0;
+    document.body.style.setProperty('--app-height', height + 'px');
+    document.body.style.setProperty('--chat-top', top + 'px');
+    document.body.classList.toggle('assistant-keyboard', keyboard);
+    resizeComposer();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    updateLatest();
   }
+  function scheduleViewport() {
+    if (!document.body || document.hidden || viewportFrame !== null) return;
+    viewportFrame = window.requestAnimationFrame(fitViewport);
+  }
+  function settleViewport() {
+    scheduleViewport();
+    // WebKit can report intermediate geometry during keyboard/restore animation.
+    for (const delay of [250, 700]) {
+      const timer = setTimeout(() => { viewportTimers.delete(timer); scheduleViewport(); }, delay);
+      viewportTimers.add(timer);
+    }
+  }
+  window.visualViewport?.addEventListener('resize', scheduleViewport);
+  window.visualViewport?.addEventListener('scroll', scheduleViewport);
+  window.addEventListener?.('resize', settleViewport);
+  window.addEventListener?.('pageshow', settleViewport);
+  document.addEventListener('visibilitychange', settleViewport);
+  document.addEventListener('focusin', settleViewport);
+  document.addEventListener('focusout', settleViewport);
+  function clearViewport() {
+    if (viewportFrame !== null) window.cancelAnimationFrame(viewportFrame);
+    viewportFrame = null;
+    viewportTimers.forEach(clearTimeout); viewportTimers.clear();
+    document.body?.style.removeProperty('--app-height');
+    document.body?.style.removeProperty('--chat-top');
+    document.body?.classList.remove('assistant-keyboard');
+  }
+  document.addEventListener('ct:leave', clearViewport);
   const status = text => { el('advisor-status').textContent = text; };
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
   function updateAccountLink() {
@@ -478,6 +529,7 @@ window.Console.page('advisor', function (document) {
      the deep link is gone; the sheet stays for editing mid-conversation. */
   if (params.get('sheet') === 'jobs') C.openSheet('jobs-sheet');
   function routeEntry() {
+    settleViewport();
     const next = new URLSearchParams(location.search);
     const selected = { scope: next.get('scope') || 'personal', account: next.get('account') || '' };
     if (selected.scope === 'agentic') selected.account = '';

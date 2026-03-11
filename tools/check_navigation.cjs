@@ -118,6 +118,23 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.locator('[data-od-id="tab-portfolio"]').click();
  await page.locator('[data-od-id="tab-advisor"]').click();
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
+ // Leave while the keyboard is open; close it on another page, then return
+ // without a viewport resize event. A retained chat must not keep a short body.
+ await page.evaluate(() => {
+   Object.defineProperty(visualViewport, 'height', { configurable: true, value: 430 });
+   Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 120 });
+   visualViewport.dispatchEvent(new Event('resize'));
+ });
+ await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
+ await page.evaluate(() => document.querySelector('[data-od-id="tab-portfolio"]').click());
+ assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
+ await page.evaluate(() => { delete visualViewport.height; delete visualViewport.offsetTop; });
+ await page.locator('[data-od-id="tab-advisor"]').click();
+ await page.waitForFunction(() => !document.body.classList.contains('assistant-keyboard') &&
+   Math.abs(document.body.getBoundingClientRect().height - visualViewport.height) < 2);
+ assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
+ assert.ok(await page.evaluate(() => Math.abs(document.querySelector('.composer-dock').getBoundingClientRect().bottom -
+   document.querySelector('.tabbar').getBoundingClientRect().top) < 2));
  await page.locator('#view-discover').click();
  await page.locator('[data-od-id="tab-more"]').click();
  await page.locator('[data-od-id="tab-advisor"]').click();

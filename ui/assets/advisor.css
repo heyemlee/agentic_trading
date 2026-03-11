@@ -78,7 +78,10 @@
 .assistant-shortcuts [aria-selected="true"]::after { content: ''; position: absolute; bottom: -7px; height: 2px; background: #151b12; left: 0; right: 0; }
 #assistant-account-status { color: #846324; font-size: 12px; line-height: 1.5; padding-top: 6px; }
 #assistant-account-status:empty { display: none; }
-body.advisor-page.chat-view { height: var(--app-height, 100dvh); min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+html:has(body.advisor-page.chat-view) { overflow: hidden; overscroll-behavior: none; }
+body.advisor-page.chat-view { position: fixed; top: var(--chat-top, 0px); left: 0; right: 0; height: var(--app-height, 100dvh); min-height: 0; padding-bottom: 0; overflow: hidden; display: flex; flex-direction: column; }
+.chat-view .topnav { position: relative; top: auto; }
+.chat-view .tabbar { position: relative; inset: auto; order: 100; flex-shrink: 0; }
 .chat-view .topnav, .chat-view #resource-status, .chat-view .conn-bar { flex-shrink: 0; }
 .advisor-page .topnav { background: #fff; backdrop-filter: none; }
 .advisor-page #resource-status { padding-top: 0; margin-top: 0; }
@@ -157,6 +160,6 @@ body.advisor-page.chat-view { height: var(--app-height, 100dvh); min-height: 0; 
 @media (prefers-reduced-motion: reduce) { .thinking-dot { animation: none; } .prompt-card { transition: none; } }
 
 /* The visual viewport shrinks above the software keyboard. */
-body.advisor-page.chat-view.assistant-keyboard { padding-bottom: env(safe-area-inset-bottom, 0px); }
+body.advisor-page.chat-view.assistant-keyboard { padding-top: env(safe-area-inset-top, 0px); padding-bottom: 0; }
 .advisor-page.assistant-keyboard .tabbar, .advisor-page.assistant-keyboard .topnav,
 .advisor-page.assistant-keyboard #resource-status, .advisor-page.assistant-keyboard .composer-note { display: none; }

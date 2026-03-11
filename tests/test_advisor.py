@@ -16,6 +16,7 @@ from agentic_trading.advisor import (
     now,
     profile_context,
     read_only_research,
+    readable_answer,
     run_task,
 )
 from agentic_trading.broker.base import BrokerUnavailable
@@ -310,6 +311,39 @@ def test_assistant_removes_only_trailing_serialization_markers(profiles):
             return AssistantReply(answer="A < B.\n</answer>\n</invoke>\n")
 
     assert answer(profiles, {}, "test", [], llm=Model())["answer"] == "A < B."
+
+
+def test_candidate_wire_format_is_readable_without_creating_actions():
+    payload = json.dumps([{"symbol": "VTI", "reason": "Broad exposure"},
+                          {"symbol": "AAPL", "reason": "Needs full research"}])
+    text = f"A < B.\n<research_candidates>{payload}</research_candidates>\n</answer>\n</invoke>"
+    assert readable_answer(text) == "A < B.\n\n\n- VTI: Broad exposure\n- AAPL: Needs full research"
+    clean = readable_answer(text, [{"symbol": "VTI", "reason": "Separate card"}])
+    assert "VTI" not in clean and "- AAPL: Needs full research" in clean
+    assert "research_candidates" not in clean
+    leaked = readable_answer(f"A < B.\n</answer>\n<research_candidates>{payload}</research_candidates>")
+    assert "</answer>" not in leaked and "- AAPL: Needs full research" in leaked
+    assert readable_answer("Discuss <ordinary>tags</ordinary> and A < B.") == (
+        "Discuss <ordinary>tags</ordinary> and A < B.")
+    assert readable_answer("Answer\n<research_candidates>broken JSON</research_candidates>\nAfter") == "Answer\n\nAfter"
+    assert readable_answer("Answer\n<research_candidates>[truncated") == "Answer"
+
+
+def test_old_conversation_wire_format_is_cleaned_without_rewriting_records(assistant_service):
+    s = assistant_service
+    job = s.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="My risks?")
+    path = s.profiles().project_dir / "runs" / job["run_key"] / "decision_record.json"
+    write_record(path, {"assistant_result": {
+        "answer": 'Research first.\n</answer>\n<research_candidates>[{"symbol":"VTI","reason":"Diversification"}]</research_candidates>',
+        "research_candidates": [],  # A saved filter must never be undone by display repair.
+    }})
+    original = path.read_bytes()
+    s._research_manager(s.profiles()).store.update(job["run_key"], {"state": "COMPLETE"})
+    reply = s.advisor_conversation().messages[-1]
+    assert "- VTI: Diversification" in reply.content
+    assert "<research_candidates>" not in reply.content
+    assert reply.research_candidates == []
+    assert path.read_bytes() == original
 
 
 def test_assistant_routes_are_authenticated_and_reject_order_fields(assistant_service, auth_client, monkeypatch):
