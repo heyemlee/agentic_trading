@@ -42,6 +42,7 @@ ct-ops = "agentic_trading.operations:main"
 ct-autonomy = "agentic_trading.autonomy:main"
 ct-notify = "agentic_trading.notify_cli:main"
 ct-evaluate = "agentic_trading.evaluate_cli:main"
+ct-thesis-trial = "agentic_trading.thesis_trial_cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.5"]
