@@ -6,8 +6,8 @@
     "locale": "en",
     "quality_profile": "showcase",
     "viewBox": [
-      1080,
-      460
+      1140,
+      560
     ]
   },
   "components": [
@@ -18,11 +18,11 @@
       "sublabel": "Holdings / mandate / limits",
       "pos": [
         50,
-        30
+        45
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
@@ -31,12 +31,12 @@
       "label": "Claude Code adapter",
       "sublabel": "LangChain-compatible runtime",
       "pos": [
-        410,
-        30
+        440,
+        45
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
@@ -45,55 +45,55 @@
       "label": "MCP data tools",
       "sublabel": "Market / news / fundamentals",
       "pos": [
-        770,
-        30
+        830,
+        45
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
       "id": "entry",
       "type": "frontend",
-      "label": "Console + triggers",
-      "sublabel": "FastAPI / durable research jobs",
+      "label": "Console + service",
+      "sublabel": "FastAPI / CLI / durable jobs",
       "pos": [
         50,
-        190
+        240
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
       "id": "research",
       "type": "backend",
       "label": "Research agents",
-      "sublabel": "Analysts / bull-bear / managers",
+      "sublabel": "Analysts / debate / synthesis",
       "pos": [
-        410,
-        190
+        440,
+        240
       ],
       "size": [
         260,
-        76
+        80
       ],
-      "tag": "TradingAgents + context"
+      "tag": "TradingAgents + LangGraph"
     },
     {
       "id": "policy",
       "type": "security",
       "label": "Policy + hard risk",
-      "sublabel": "Structured proposal / code rules",
+      "sublabel": "Pydantic / deterministic rules",
       "pos": [
-        770,
-        190
+        830,
+        240
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
@@ -103,25 +103,25 @@
       "sublabel": "Simulated / Robinhood MCP",
       "pos": [
         50,
-        350
+        435
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
       "id": "execution",
       "type": "backend",
       "label": "Revalidate + execute",
-      "sublabel": "Fresh state / risk checked again",
+      "sublabel": "Fresh state / idempotent orders",
       "pos": [
-        410,
-        350
+        440,
+        435
       ],
       "size": [
         260,
-        76
+        80
       ]
     },
     {
@@ -130,12 +130,12 @@
       "label": "Human review",
       "sublabel": "Approve or reject in console",
       "pos": [
-        770,
-        350
+        830,
+        435
       ],
       "size": [
         260,
-        76
+        80
       ]
     }
   ],
@@ -145,8 +145,7 @@
       "from": "entry",
       "to": "research",
       "label": "research",
-      "variant": "emphasis",
-      "labelDx": -8
+      "variant": "emphasis"
     },
     {
       "id": "inject-context",
@@ -185,8 +184,8 @@
       "label": "proposal",
       "variant": "security",
       "labelAt": [
-        900,
-        309
+        960,
+        377
       ]
     },
     {
@@ -207,23 +206,23 @@
   "cards": [
     {
       "dot": "emerald",
-      "title": "Agent collaboration",
+      "title": "Research authority",
       "items": [
-        "Analysts gather evidence; bull and bear researchers debate; managers synthesize a decision."
+        "Portfolio-aware agents use allowlisted data tools through Claude Code. They cannot submit broker orders."
       ]
     },
     {
       "dot": "rose",
-      "title": "Explicit authority",
+      "title": "Execution authority",
       "items": [
-        "Agents receive data tools only. Python owns broker access and rechecks risk after approval."
+        "Current live mode requires human approval. Python revalidates state, permissions and risk before submission."
       ]
     },
     {
       "dot": "violet",
-      "title": "Traceable decisions",
+      "title": "Durable evidence",
       "items": [
-        "Reports and tool-call traces are saved to files; SQLite tracks jobs, proposals and execution."
+        "SQLite WAL tracks jobs, approvals, orders and fills. Run files retain reports and tool traces for review."
       ]
     }
   ]

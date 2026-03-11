@@ -5,103 +5,126 @@
 <h1 align="center">Agentic Trading</h1>
 
 <p align="center">
-  <strong>AI agents research, debate, and propose. Humans approve.</strong><br />
-  A portfolio-aware multi-agent system with tool use, structured decisions, and auditable execution.
+  <strong>From multi-agent research to accountable execution.</strong><br />
+  Portfolio-aware analysis, explicit risk limits, and a human approval console.
 </p>
 
 <p align="center">
-  <a href="#how-it-works">Architecture</a> ·
-  <a href="#what-i-built">Engineering</a> ·
-  <a href="#run-locally">Quick start</a>
+  <img src="https://img.shields.io/badge/API-FastAPI-009688?style=flat" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/Frontend-Vanilla_JS-F7DF1E?style=flat" alt="Vanilla JavaScript frontend" />
 </p>
 
-## The idea
+<p align="center">
+  <a href="#overview">Overview</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#tech-stack">Tech stack</a> ·
+  <a href="#engineering-decisions">Engineering</a> ·
+  <a href="#quick-start">Quick start</a>
+</p>
 
-Give a team of AI agents a ticker and your portfolio context. Analysts gather evidence, bull and bear researchers challenge the thesis, and managers synthesize a recommendation. The system turns that research into a structured proposal with risks, missing information, and reasons to act—or do nothing.
+<!-- Replace the image below with docs/screenshots/dashboard.png when your main-console screenshot is ready. -->
+![Main console screenshot placeholder.](docs/screenshots/dashboard-placeholder.svg)
 
-The core design question: **how much authority should an agent have?** Here, agents own research; deterministic code enforces risk limits, and execution requires human approval and a fresh state check. Live trading is disabled by default.
+<p align="center"><sub>Main console screenshot goes here.</sub></p>
 
-## How it works
+## Overview
 
-![Agentic Trading architecture: context-aware research agents use Claude and MCP data tools, then pass proposals through risk checks and human approval before execution.](docs/architecture/system.svg)
+Give the system a ticker and portfolio context. Analysts gather market evidence, bull and bear researchers debate the thesis, and managers synthesize a structured decision. Deterministic policy and risk checks decide whether that decision can become an actionable proposal.
 
-<sub>Drawn with <a href="https://github.com/tt-a1i/archify">Archify</a> · <a href="docs/architecture/system.html">Interactive HTML — download and open</a> · <a href="docs/architecture/system.architecture.json">Diagram source</a></sub>
+- **Research:** instrument-aware agent selection, portfolio constraints, analyst reports, and recorded tool calls.
+- **Review & execute:** inspect a proposal, approve its exact terms, and revalidate current state before sending an order.
+- **Personal assistant:** account-scoped holdings reviews, stock/ETF candidates, and persistent conversations. Personal accounts remain outside trading permissions.
+- **Observe & evaluate:** follow jobs, orders, fills, and audit events; compare forward results with a declared passive benchmark.
 
-## What I built
+The current live execution mode requires human approval. Research agents have data tools; execution authority stays in Python.
 
-Built on [TradingAgents](https://github.com/TauricResearch/TradingAgents), which supplies the research graph and agent roles. My work integrates that graph into a complete application:
+## Architecture
 
-| Area | Implementation |
+![Architecture: console and service start research; agents use portfolio context, Claude Code and MCP data tools; policy and risk checks gate human review, revalidation and broker submission.](docs/architecture/system.svg)
+
+<sub>Built with <a href="https://github.com/tt-a1i/archify">Archify</a> · <a href="docs/architecture/system.html">Interactive HTML — download and open</a> · <a href="docs/architecture/system.architecture.json">Editable source</a> · <a href="docs/architecture/README.md">Rebuild & validation</a></sub>
+
+**Research → proposal → approval → revalidation → submission → reconciliation.** A model recommendation is an input to this pipeline. `NO_TRADE`, expired evidence, rejected proposals, partial fills, and uncertain submissions all have explicit handling.
+
+## Tech stack
+
+| Layer | Technology | Role |
+| --- | --- | --- |
+| Runtime | **Python 3.12 · uv** | Typed application code, locked dependencies, and `ct-*` command-line tools. |
+| Agent orchestration | **TradingAgents · LangGraph · LangChain** | Pinned upstream research graph; local portfolio context, analyst selection, and model/effort routing. |
+| Model & tools | **Claude Code CLI · MCP Python SDK** | LangChain-compatible subscription-backed model adapter; allowlisted market, news, fundamental, and macro tools. |
+| API & contracts | **FastAPI · Uvicorn · Pydantic v2** | HTTP/OpenAPI interface and validated models over a shared Python service layer. |
+| State & configuration | **SQLite WAL · YAML · JSON/Markdown** | Transactional jobs, proposals, approvals, orders, and fills; reviewed configuration and inspectable research artefacts. |
+| Console | **HTML · CSS · Vanilla JavaScript** | Bilingual, same-origin interface with shared polling and retained page state; no frontend build step. |
+| Market & execution | **yfinance · FRED · exchange-calendars**; **simulated / Robinhood adapters** | Evidence retrieval, exchange sessions, and broker access behind deterministic execution checks. |
+| Quality & operations | **pytest · Ruff · Node test runner · GitHub Actions · macOS launchd** | Offline checks, scheduled jobs, immutable releases, rollback, backups, and health monitoring. |
+
+## Engineering decisions
+
+[TradingAgents](https://github.com/TauricResearch/TradingAgents) provides the research graph and agent roles. It is pinned to a Git commit, never vendored or edited. This repository builds the application and control boundaries around it:
+
+| Decision | Implementation and why it matters |
 | --- | --- |
-| **Agent orchestration** | Inject portfolio context and investment constraints into each role; select analysts by instrument type and route roles to different model/effort settings. [Code](agentic_trading/graph.py) |
-| **Runtime & tool use** | A LangChain-compatible Claude Code adapter with allowlisted MCP data tools, structured output, and captured tool-call traces. [Code](agentic_trading/llm/claude_code.py) |
-| **Decision boundaries** | Pydantic proposals, deterministic action mapping, and risk checks before review and again before execution. [Policy](agentic_trading/policy.py) · [Execution](agentic_trading/execution.py) |
-| **Reliability & evaluation** | Durable research jobs, idempotent order handling, SQLite audit state, and forward evaluation against a passive benchmark. [Jobs](agentic_trading/research_jobs.py) · [Evaluation](agentic_trading/evaluation.py) |
-
-Offline tests exercise the agent graph with a fake model runtime, tool isolation, policy failures, and execution recovery. [Explore tests →](tests)
+| **Separate reasoning from authority** | Pydantic decision records feed deterministic action mapping and hard risk rules. Confidence cannot override a limit. [Policy](agentic_trading/policy.py) · [Risk engine](agentic_trading/risk/engine.py) |
+| **Constrain the model runtime** | The Claude Code adapter disables built-in tools, uses a strict MCP configuration, strips API-billing overrides, and captures tool traces. CLI failures surface without switching providers. [Adapter](agentic_trading/llm/claude_code.py) |
+| **Revalidate at the money boundary** | Approval binds to a proposal version and exact terms. Execution refreshes portfolio and market state and checks risk again. The live order entry point is centralized and tested. [Approvals](agentic_trading/service/approvals.py) · [Boundary tests](tests/test_money_paths.py) |
+| **Recover ambiguous execution** | Persist order intent before submission; use idempotency keys and transactional reservations. An uncertain result enters reconciliation instead of blindly resubmitting. Partial fills remain distinct from completed exits. [Execution](agentic_trading/execution.py) · [State](agentic_trading/state_db.py) |
+| **Keep work durable and scoped** | SQLite-backed jobs use deduplication, concurrency limits, and explicit states. Personal accounts, the Agentic account, and demo research retain separate scopes. [Jobs](agentic_trading/research_jobs.py) · [Isolation tests](tests/test_account_scope.py) |
+| **Measure decisions, not selected wins** | Forward evaluation freezes study settings, records no-trades and failures, separates demo/live samples, and adjusts returns for cash flows. Software tests establish behavior; they do not establish investment performance. [Evaluation](agentic_trading/evaluation.py) |
 
 <details>
-<summary>View the research console</summary>
+<summary>Research console preview · sample data</summary>
 
-![Research console showing recorded runs and decision details using sample data.](docs/screenshots/readme-research.png)
-
-<sub>Sample-data preview. Review research reports and decisions from the web console.</sub>
+![Research console with sample runs and decision details.](docs/screenshots/readme-research.png)
 
 </details>
 
-## Personal assistant
+## Quick start
 
-The console's **Assistant** adds read-only Robinhood holdings reviews, sourced stock/ETF candidates and persistent profile-aware chat, reusing the same research graph and job queue. Ordinary accounts remain outside live-trading permissions. See [capabilities and boundaries](docs/PERSONAL_ASSISTANT.md).
+Requires **Python 3.12** and **[uv](https://docs.astral.sh/uv/)**. AI research additionally needs a signed-in Claude Code CLI with access to the models configured in `config/investor_profile.yaml`.
 
-## Run locally
-
-Requires **Python 3.12** and **[uv](https://docs.astral.sh/uv/)**. AI research also requires a signed-in Claude Code CLI with access to the models configured in `config/investor_profile.yaml`.
+For a **fresh local clone**:
 
 ```bash
 git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
-uv sync
+uv sync --frozen
 
-mkdir -p state runs          # ledgers and run artefacts; both are gitignored, so a clone has neither
+mkdir -p state runs
 cp -n .env.example .env
 cp -n config/examples/portfolio.example.yaml state/portfolio.yaml
 cp -n config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 
-uv run ct-auth               # set the console username and password, stored hashed in state/
-uv run ct-api                # serves the API and the console on 127.0.0.1:8787, foreground
+uv run ct-auth   # create console credentials
+uv run ct-api    # serve the API and console
 ```
 
-Open [localhost:8787](http://127.0.0.1:8787/) — the bare origin redirects to the console at
-`/ui/` — and sign in with what `ct-auth` just set. Stop the server with Ctrl-C.
+Open [localhost:8787](http://127.0.0.1:8787/) and sign in. Stop the foreground server with Ctrl-C.
 
-A fresh clone cannot place a real order, because it has no broker credentials: the default venue
-is `broker.adapter: simulated`, and the Robinhood path additionally needs an OAuth token that
-lives in `state/` and is never committed. Note that `config/` is this deployment's own live
-configuration, tracked deliberately so it can be reviewed and diffed — so a clone inherits the
-owner's settings, including `micro_live_execution.enabled: true`. That switch is one of several
-gates, not the only one, and the preflight refuses without an account behind it. Read
-`config/risk_profile.yaml` before pointing this at any account of your own. Connecting a broker,
-arming real money and the release/launchd deployment are all in the
-[operations guide](docs/OPERATIONS.md).
-
-**What to try first.** Research is the only thing that runs on its own, and it costs Claude
-subscription quota rather than API credit:
+> **Before connecting a broker:** `config/` contains the owner's tracked deployment settings, including enabled live-execution gates. A fresh clone has no broker token and cannot submit a real order; the general broker adapter is simulated. Review [risk configuration](config/risk_profile.yaml) and the [operations guide](docs/OPERATIONS.md) before connecting an account. Do not set `ANTHROPIC_API_KEY`; research uses the Claude Code subscription login.
 
 ```bash
-uv run ct-trigger manual --ticker VTI        # one research run, about 8 minutes, in the background
-uv run ct-trigger scheduled --dry-run        # what the weekly schedule would do, starting nothing
-uv run ct-state status                       # database integrity, record counts, unsettled orders
-uv run ct-ops status                         # background heartbeats and free disk; non-zero if late
+uv run ct-trigger manual --ticker VTI   # enqueue research; uses Claude subscription quota
+uv run ct-trigger scheduled --dry-run   # inspect the schedule without starting research
+uv run ct-state status                 # check state integrity and unsettled orders
+uv run ct-ops status                   # check background-job health
 ```
 
-The run writes a decision record and its analyst reports under `runs/<run-id>/`, and the console's
-Research page shows the same thing. `NO_TRADE` is a normal and common outcome: the deterministic
-layer turns a Hold rating with no position into no action, and missing evidence lowers confidence
-rather than being argued past.
+Reports and decision records are saved under `runs/<run-id>/` and appear in the console. Optional `.env` settings include `FRED_API_KEY` for macro data, `CT_PUSH_SUBJECT` for web push, and `CT_HEARTBEAT_URL` for an external monitor.
 
-**Optional keys**, all in `.env`, none required to start: `FRED_API_KEY` adds verified inflation,
-rate and labour data (without it those are recorded as missing evidence, which is correct
-conservative behaviour, not a fault); `CT_PUSH_SUBJECT` is needed before the console can send web
-push to a phone; `CT_HEARTBEAT_URL` points at an external watcher.
+## Development & docs
 
-<sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · Vanilla JS</sub>
+```bash
+deploy/checks.sh  # Ruff + offline Python tests + frontend cases + secret scan
+```
+
+The suite uses fake model and broker runtimes. It requires no live credentials or model calls and guards against access to production state.
+
+| Start here | Contents |
+| --- | --- |
+| [Application code](agentic_trading/) | Thin `api/`, shared `service/`, model adapters in `llm/`, deterministic `risk/` and `broker/` adapters. |
+| [Console](ui/README.md) | Frontend architecture, data freshness, approval interaction, and bilingual UI. |
+| [Personal assistant](docs/PERSONAL_ASSISTANT.md) | Holdings reviews, account scope, conversations, and capability boundaries. |
+| [Operations](docs/OPERATIONS.md) | Configuration, execution controls, reconciliation, and recovery. |
+| [macOS deployment](docs/MACOS_DEPLOYMENT.md) | launchd, releases, rollback, backups, and maintenance. |

@@ -1,0 +1,48 @@
+{
+  "diagram_type": "architecture",
+  "output": "system.html",
+  "generator": {
+    "repository": "https://github.com/tt-a1i/archify",
+    "revision": "5289f6867f048a7450ec5718f58459613a84cf41"
+  },
+  "specification_sha256": "98e058d42a0d22655dc1089d870f90dde81fb2d11122a872e972c3585670abe2",
+  "artifact_sha256": "12b162c1821777482f8d8f915f7b4f47cf50d89d0a45be7bfe31ea94c34d1394",
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "browser_evidence": "passed",
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 900,
+      "overflowX": false,
+      "overflowY": false
+    },
+    {
+      "width": 1600,
+      "height": 1000,
+      "overflowX": false,
+      "overflowY": false
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "overflowX": false,
+      "overflowY": false
+    },
+    {
+      "width": 2048,
+      "height": 1320,
+      "overflowX": false,
+      "overflowY": false
+    }
+  ],
+  "visual_review": "passed",
+  "visual_review_scope": "Inspected light 2048x1320 and dark 1440x900 screenshots; nodes, labels, routes and cards fit without clipping.",
+  "correction_rounds": 1
+}

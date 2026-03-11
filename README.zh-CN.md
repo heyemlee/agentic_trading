@@ -5,97 +5,126 @@
 <h1 align="center">Agentic Trading</h1>
 
 <p align="center">
-  <strong>AI Agent 负责研究、辩论和提案，人来批准。</strong><br />
-  一个理解持仓上下文、调用工具、输出结构化决策，并记录执行过程的多智能体系统。
+  <strong>从多智能体研究，到可审计的交易执行。</strong><br />
+  理解持仓的 AI 研究、明确的风控边界，以及人工审批控制台。
 </p>
 
 <p align="center">
-  <a href="#如何运行">系统架构</a> ·
-  <a href="#我实现了什么">工程实现</a> ·
-  <a href="#本地启动">快速开始</a>
+  <img src="https://img.shields.io/badge/API-FastAPI-009688?style=flat" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/Frontend-Vanilla_JS-F7DF1E?style=flat" alt="原生 JavaScript 前端" />
 </p>
 
-## 项目思路
+<p align="center">
+  <a href="#项目概览">项目概览</a> ·
+  <a href="#系统架构">系统架构</a> ·
+  <a href="#技术栈">技术栈</a> ·
+  <a href="#关键工程设计">工程设计</a> ·
+  <a href="#快速开始">快速开始</a>
+</p>
 
-给一组 AI Agent 一个标的和你的持仓上下文：分析师收集证据，多空研究员质疑论点，管理者综合形成建议。系统将研究结果转成结构化提案，写明风险、缺失信息，以及采取行动或保持观望的理由。
+<!-- 主界面截图准备好后，将下方图片路径替换为 docs/screenshots/dashboard.png。 -->
+![项目主界面截图预留位置。](docs/screenshots/dashboard-placeholder.svg)
 
-核心设计问题是：**应该给 Agent 多大的权限？** 在这里，Agent 负责研究，确定性代码约束风险，执行前必须经过人工审批并重新检查当前状态。实盘交易默认关闭。
+<p align="center"><sub>此处预留项目主界面截图。</sub></p>
 
-## 如何运行
+## 项目概览
 
-![Agentic Trading 架构：理解持仓上下文的研究 Agent 通过 Claude 和 MCP 调用数据工具，提案经风控和人工审批后，再次校验并执行。](docs/architecture/system.svg)
+输入一个标的和持仓上下文，分析师收集市场证据，多空研究员展开辩论，管理者汇总成结构化决策。随后由确定性策略与风控代码判断，这份决策能否成为可执行的提案。
 
-<sub>使用 <a href="https://github.com/tt-a1i/archify">Archify</a> 绘制 · <a href="docs/architecture/system.html">交互版 HTML：下载后打开</a> · <a href="docs/architecture/system.architecture.json">图表源文件</a></sub>
+- **研究分析：** 按标的类型选择 Agent，注入持仓约束，保留分析报告与工具调用记录。
+- **审批执行：** 查看提案、确认具体交易条款，提交订单前重新核验当前状态。
+- **个人助手：** 按账户分析持仓、筛选股票与 ETF，并保留连续对话；个人账户独立于交易权限。
+- **追踪评估：** 查看任务、订单、成交与审计事件，将前瞻结果与预先声明的被动基准比较。
 
-## 我实现了什么
+当前实盘执行模式要求人工审批。研究 Agent 使用数据工具，执行权限由 Python 代码掌握。
 
-项目基于 [TradingAgents](https://github.com/TauricResearch/TradingAgents)，复用其研究图和 Agent 角色。我的工作是把这套研究流程接入完整应用：
+## 系统架构
 
-| 方向 | 具体实现 |
+![系统架构：控制台和服务发起研究；Agent 使用持仓上下文、Claude Code 和 MCP 数据工具；提案经策略风控、人工审批、重新校验后提交券商。](docs/architecture/system.svg)
+
+<sub>使用 <a href="https://github.com/tt-a1i/archify">Archify</a> 绘制 · <a href="docs/architecture/system.html">交互版 HTML：下载后打开</a> · <a href="docs/architecture/system.architecture.json">可编辑源文件</a> · <a href="docs/architecture/README.md">重新生成与校验</a></sub>
+
+**研究 → 提案 → 审批 → 重新校验 → 提交订单 → 对账。** 模型建议是这条链路的输入。`NO_TRADE`、证据过期、提案拒绝、部分成交和提交结果不确定，都有明确的处理逻辑。
+
+## 技术栈
+
+| 层次 | 技术 | 在项目中的作用 |
+| --- | --- | --- |
+| 运行环境 | **Python 3.12 · uv** | 带类型约束的应用代码、锁定依赖，以及 `ct-*` 命令行工具。 |
+| Agent 编排 | **TradingAgents · LangGraph · LangChain** | 复用固定版本的上游研究图，扩展持仓上下文、分析师选择，以及模型与推理强度路由。 |
+| 模型与工具 | **Claude Code CLI · MCP Python SDK** | 兼容 LangChain 的订阅模型适配器；通过白名单开放行情、新闻、基本面和宏观数据工具。 |
+| API 与数据契约 | **FastAPI · Uvicorn · Pydantic v2** | 在共享 Python 服务层上提供 HTTP/OpenAPI 接口与数据模型校验。 |
+| 状态与配置 | **SQLite WAL · YAML · JSON/Markdown** | 事务化保存任务、提案、审批、订单与成交；配置可审阅，研究产物可直接检查。 |
+| 网页控制台 | **HTML · CSS · 原生 JavaScript** | 中英双语、同源访问、共享轮询和页面状态保留，无需前端构建。 |
+| 数据与交易 | **yfinance · FRED · exchange-calendars**；**模拟 / Robinhood 适配器** | 获取研究证据、识别交易所时段，并在确定性执行检查后访问券商。 |
+| 质量与运维 | **pytest · Ruff · Node test runner · GitHub Actions · macOS launchd** | 离线检查、定时任务、不可变版本发布、回滚、备份与健康监控。 |
+
+## 关键工程设计
+
+[TradingAgents](https://github.com/TauricResearch/TradingAgents) 提供研究图和 Agent 角色，以 Git commit 固定版本，不复制或修改上游源码。本项目围绕它实现应用层与权限边界：
+
+| 设计 | 实现与价值 |
 | --- | --- |
-| **Agent 编排** | 为各角色注入持仓上下文和投资约束；按标的类型选择分析师，为不同角色配置模型和推理强度。[代码](agentic_trading/graph.py) |
-| **运行时与工具调用** | 实现兼容 LangChain 的 Claude Code 适配器，支持 MCP 数据工具白名单、结构化输出及工具调用记录。[代码](agentic_trading/llm/claude_code.py) |
-| **决策权限边界** | 用 Pydantic 定义提案，通过确定性代码映射动作，在审批前和执行前分别检查风险。[策略](agentic_trading/policy.py) · [执行](agentic_trading/execution.py) |
-| **可靠性与评估** | 持久化研究任务、幂等订单处理、SQLite 审计状态，以及对照被动基准的前瞻评估。[任务](agentic_trading/research_jobs.py) · [评估](agentic_trading/evaluation.py) |
-
-离线测试通过模拟模型运行时验证 Agent 研究图，并覆盖工具隔离、策略失败和执行恢复。[查看测试 →](tests)
+| **推理与执行权限分离** | Pydantic 决策记录进入确定性动作映射和硬风控。模型再有信心，也不能放宽限制。[策略](agentic_trading/policy.py) · [风控引擎](agentic_trading/risk/engine.py) |
+| **收紧模型运行时权限** | Claude Code 适配器禁用内置工具，使用严格 MCP 配置，移除 API 计费覆盖变量，并记录工具轨迹。CLI 失败直接暴露，不自动切换供应商。[适配器](agentic_trading/llm/claude_code.py) |
+| **在资金入口重新校验** | 审批绑定提案版本与具体条款；执行前刷新持仓和市场状态，再检查一次风险。实盘下单入口集中管理，并由测试约束。[审批服务](agentic_trading/service/approvals.py) · [资金路径测试](tests/test_money_paths.py) |
+| **处理提交结果不确定的情况** | 先持久化下单意图，再访问券商；结合幂等键与事务化资金预留。结果不确定时进入对账，避免盲目重发；区分部分成交与退出完成。[执行](agentic_trading/execution.py) · [状态库](agentic_trading/state_db.py) |
+| **任务持久化与账户隔离** | SQLite 任务队列支持去重、并发限制和显式状态；个人账户、Agentic 账户与演示研究保留各自范围。[任务队列](agentic_trading/research_jobs.py) · [隔离测试](tests/test_account_scope.py) |
+| **评估完整决策记录** | 前瞻评估冻结研究设置，纳入不交易与失败记录，分开演示和实盘样本，并剔除现金流对收益率的影响。软件测试验证行为，投资表现由持续样本检验。[评估](agentic_trading/evaluation.py) |
 
 <details>
-<summary>展开查看研究控制台</summary>
+<summary>展开查看研究控制台 · 示例数据</summary>
 
-![使用示例数据的研究控制台，展示历史研究和决策详情。](docs/screenshots/readme-research.png)
-
-<sub>示例数据预览：通过网页控制台查看研究报告和决策。</sub>
+![使用示例数据的研究控制台，展示研究记录和决策详情。](docs/screenshots/readme-research.png)
 
 </details>
 
-## 个人投资助手
+## 快速开始
 
-控制台新增「投资助手」：只读分析所有 Robinhood 账户的股票与 ETF，从已有自选和筛选结果接入候选，并结合个人档案、补充信息和历史研究进行连续聊天。复用原有研究和后台任务，普通账户不会获得交易权限。使用方法和能力边界见 [个人助手说明](docs/PERSONAL_ASSISTANT.md)。
+需要 **Python 3.12** 和 **[uv](https://docs.astral.sh/uv/)**。AI 研究另需已登录的 Claude Code CLI，并能访问 `config/investor_profile.yaml` 中配置的模型。
 
-## 本地启动
-
-需要 **Python 3.12** 和 **[uv](https://docs.astral.sh/uv/)**。AI 研究还需要已登录的 Claude Code CLI，并能使用 `config/investor_profile.yaml` 中配置的模型。
+以下用于**全新本地克隆**：
 
 ```bash
 git clone https://github.com/heyemlee/agentic_trading.git
 cd agentic_trading
-uv sync
+uv sync --frozen
 
-mkdir -p state runs          # 账本与运行产物；两者都被 gitignore，克隆下来不存在
+mkdir -p state runs
 cp -n .env.example .env
 cp -n config/examples/portfolio.example.yaml state/portfolio.yaml
 cp -n config/examples/micro_live_portfolio.example.yaml state/micro_live_portfolio.yaml
 
-uv run ct-auth               # 设置控制台用户名与密码，散列后存在 state/
-uv run ct-api                # 在 127.0.0.1:8787 提供 API 与控制台，前台运行
+uv run ct-auth   # 创建控制台登录凭据
+uv run ct-api    # 启动 API 与网页控制台
 ```
 
-打开 [localhost:8787](http://127.0.0.1:8787/)（裸地址会跳转到 `/ui/`），用刚才 `ct-auth`
-设置的账号登录。Ctrl-C 停止。
+打开 [localhost:8787](http://127.0.0.1:8787/) 并登录，按 Ctrl-C 停止前台服务。
 
-全新克隆**下不了真单**，因为它没有券商凭据：默认场所是 `broker.adapter: simulated`，
-而 Robinhood 那条路另外需要一份 OAuth 令牌，它存在 `state/` 里且从不提交。注意
-`config/` 是这个部署自己的实时配置，**刻意**纳入 git 以便审阅和比对——所以克隆会继承
-所有者的设置，其中包括 `micro_live_execution.enabled: true`。那个开关只是若干道闸门之一，
-背后没有账户时 preflight 会直接拒绝。把它指向你自己的账户之前，请先读一遍
-`config/risk_profile.yaml`。券商连接、真钱开启和 release/launchd 部署见[操作文档](docs/OPERATIONS.md)。
-
-**先试什么。** 研究是唯一会自己跑起来的东西，它花的是 Claude 订阅额度而不是 API 按量计费：
+> **连接券商前：** `config/` 保存所有者纳入版本管理的部署设置，其中包含已开启的实盘执行开关。全新克隆没有券商令牌，不能提交真实订单；通用券商适配器为模拟模式。连接账户前，请先审阅[风控配置](config/risk_profile.yaml)与[操作文档](docs/OPERATIONS.md)。不要设置 `ANTHROPIC_API_KEY`，研究使用 Claude Code 的订阅登录。
 
 ```bash
-uv run ct-trigger manual --ticker VTI        # 跑一次研究，约 8 分钟，后台进行
-uv run ct-trigger scheduled --dry-run        # 定时研究此刻会做什么，不启动任何东西
-uv run ct-state status                       # 数据库完整性、记录数、未结订单
-uv run ct-ops status                         # 后台心跳与磁盘；有活动迟到则返回非零
+uv run ct-trigger manual --ticker VTI   # 提交研究任务，消耗 Claude 订阅额度
+uv run ct-trigger scheduled --dry-run   # 预览调度，不启动研究
+uv run ct-state status                 # 检查状态完整性和未结订单
+uv run ct-ops status                   # 检查后台任务健康状态
 ```
 
-运行结果写在 `runs/<run-id>/` 下的决策记录和分析师报告里，控制台的研究页看到的是同一份。
-`NO_TRADE` 是正常且常见的结论：确定性层把"评级持有且当前无仓"映射成不动，而缺失的证据
-会压低置信度，不会被话术绕过去。
+报告和决策记录保存在 `runs/<run-id>/`，也可在控制台查看。可选 `.env` 设置包括：用于宏观数据的 `FRED_API_KEY`、用于网页推送的 `CT_PUSH_SUBJECT`，以及外部监控地址 `CT_HEARTBEAT_URL`。
 
-**可选的密钥**都放 `.env`，启动一个都不需要：`FRED_API_KEY` 补上经过验证的通胀、利率与
-就业数据（没有它这些会被记为缺失证据，那是正确的保守行为，不是故障）；`CT_PUSH_SUBJECT`
-是控制台向手机发推送的前提；`CT_HEARTBEAT_URL` 指向一个外部看门狗。
+## 开发与文档
 
-<sub>Python · TradingAgents / LangGraph · Claude Code · MCP · FastAPI · Pydantic · SQLite · 原生 JavaScript</sub>
+```bash
+deploy/checks.sh  # Ruff + Python 离线测试 + 前端用例 + 密钥扫描
+```
+
+测试使用模拟模型与券商，不需要真实凭据或模型调用，并通过防护禁止测试访问生产状态。
+
+| 入口 | 内容 |
+| --- | --- |
+| [应用代码](agentic_trading/) | 轻量 `api/`、共享 `service/`、`llm/` 模型适配器、确定性 `risk/` 与 `broker/` 适配器。 |
+| [控制台](ui/README.md) | 前端架构、数据新鲜度、审批交互与双语界面。 |
+| [个人助手](docs/PERSONAL_ASSISTANT.md) | 持仓分析、账户范围、连续对话与能力边界。 |
+| [操作文档](docs/OPERATIONS.md) | 配置、执行控制、对账与恢复。 |
+| [macOS 部署](docs/MACOS_DEPLOYMENT.md) | launchd、发布、回滚、备份与维护。 |

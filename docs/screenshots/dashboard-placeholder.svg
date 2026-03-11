@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic Trading — main console screenshot</title>
+  <desc id="desc">Screenshot placeholder. Replace this asset reference with your dashboard screenshot.</desc>
+  <rect x="1" y="1" width="1438" height="638" rx="20" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  <rect x="1" y="1" width="1438" height="58" rx="20" fill="#eef2f6"/>
+  <path d="M1 39h1438v20H1z" fill="#eef2f6"/>
+  <g fill="#cbd5e1"><circle cx="31" cy="30" r="6"/><circle cx="53" cy="30" r="6"/><circle cx="75" cy="30" r="6"/></g>
+  <text x="720" y="36" text-anchor="middle" fill="#64748b" font-family="system-ui, sans-serif" font-size="15">AGENTIC TRADING / CONSOLE</text>
+  <rect x="64" y="112" width="1312" height="462" rx="12" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 8"/>
+  <g transform="translate(688 232)" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="64" height="48" rx="6"/><path d="M22 60h20M32 48v12M12 34l13-13 11 9 16-17"/>
+  </g>
+  <text x="720" y="354" text-anchor="middle" fill="#0f172a" font-family="system-ui, sans-serif" font-size="32" font-weight="600">Your dashboard, here.</text>
+  <text x="720" y="394" text-anchor="middle" fill="#64748b" font-family="system-ui, sans-serif" font-size="18">Main console screenshot · 主界面截图预留位置</text>
+</svg>
