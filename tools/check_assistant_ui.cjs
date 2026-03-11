@@ -62,7 +62,7 @@ const ui = path.resolve(__dirname, '../ui');
         const tabs = document.querySelector('.tabbar').getBoundingClientRect();
         const shell = document.body.getBoundingClientRect();
         const dock = document.querySelector('.composer-dock').getBoundingClientRect();
-        return { input: input.toJSON(), send: send.toJSON(), tabTop: tabs.top, height: innerHeight,
+        return { input: input.toJSON(), send: send.toJSON(), tabTop: tabs.top, tabBottom: tabs.bottom, height: innerHeight,
           width: innerWidth, scrollWidth: document.documentElement.scrollWidth, shell: shell.toJSON(), dock: dock.toJSON() };
       });
       assert.ok(layout.input.top >= 0 && layout.send.bottom <= Math.min(layout.tabTop, layout.height), 'Composer must stay above navigation without scrolling: ' + JSON.stringify(layout));
@@ -70,6 +70,8 @@ const ui = path.resolve(__dirname, '../ui');
       assert.ok(layout.scrollWidth <= layout.width, 'No horizontal page overflow');
       assert.ok(Math.abs(layout.dock.bottom - layout.tabTop) < 2, 'No blank region between composer and tabs');
       assert.ok(Math.abs(layout.shell.height - layout.height) < 2, 'Chat fills the restored viewport');
+      assert.ok(Math.abs(layout.shell.top) < 2, 'Chat is not shifted above the viewport');
+      assert.ok(Math.abs(layout.tabBottom - layout.height) < 2, 'Navigation reaches the viewport bottom');
     };
     const capture = async name => {
       if (!process.env.CT_UI_CAPTURE_DIR) return;
@@ -168,9 +170,38 @@ const ui = path.resolve(__dirname, '../ui');
       await page.locator('.message-copy').click();
       assert.match(await page.evaluate(() => navigator.clipboard.readText()), /持仓集中度/);
     }
+    // Sending from history resumes following, including messages loaded after the POST.
+    await page.locator('#chat-input').fill('继续分析最新消息');
+    await page.locator('#chat-scroll').evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+    await page.waitForSelector('#chat-latest:not([hidden])');
+    await page.locator('#chat-send').click();
+    await page.waitForFunction(() => document.getElementById('chat-input').value === '' && document.getElementById('chat-latest').hidden);
+    const assertLatest = async () => {
+      assert.ok(await page.locator('#chat-scroll').evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight < 2), 'Newest message stays at the bottom');
+    };
+    await assertLatest();
+    messages.get(conversation).push({ role: 'user', content: '继续分析最新消息', state: 'RUNNING' });
+    chatJobs = [{ run_key: 'chat-preview', state: 'RUNNING', task: { kind: 'chat', conversation_id: conversation } }];
+    await page.evaluate(() => CT_API.readOnce('assistant'));
+    await page.waitForFunction(() => document.querySelector('.chat-message:last-child')?.textContent.includes('继续分析最新消息'));
+    await assertLatest();
+    await capture('assistant-sent-latest');
+    messages.get(conversation).at(-1).state = 'COMPLETE';
+    messages.get(conversation).push({ role: 'assistant', content: ('后续回答应保持在最新位置。\n\n').repeat(12), state: 'COMPLETE' });
+    chatJobs[0].state = 'COMPLETE';
+    await page.evaluate(() => CT_API.readOnce('assistant'));
+    await page.waitForFunction(() => document.querySelector('.chat-message:last-child')?.textContent.includes('后续回答'));
+    await assertLatest();
+    await page.locator('#chat-scroll').evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+    messages.get(conversation).at(-1).content += '\n\n手动上翻时保留阅读位置。';
+    chatJobs[0].run_key = 'updated-response';
+    await page.evaluate(() => CT_API.readOnce('assistant'));
+    await page.waitForFunction(() => document.querySelector('.chat-message:last-child')?.textContent.includes('手动上翻'));
+    assert.equal(await page.locator('#chat-scroll').evaluate(el => el.scrollTop), 0);
+    await page.locator('#chat-latest').click();
     for (const [width, height] of [[320, 568], [390, 460], [844, 390], [1280, 900]]) {
       await page.setViewportSize({ width, height });
-      await page.waitForFunction(() => Math.abs(parseFloat(document.body.style.getPropertyValue('--app-height')) - visualViewport.height) < 1);
+      await page.waitForFunction(() => Math.abs(document.body.getBoundingClientRect().height - innerHeight) < 1);
       await assertComposer();
       await page.locator('#assistant-context').click();
       assert.equal(await page.locator('#assistant-account').isVisible(), true);
@@ -209,29 +240,32 @@ const ui = path.resolve(__dirname, '../ui');
     assert.equal(await page.locator('#assistant-account').isVisible(), true);
     await page.locator('[data-close-sheet="context-sheet"]').click();
     await page.waitForFunction(() => !document.getElementById('context-sheet').open);
-    // The keyboard can disappear with a stale offset, or while another tab is active.
+    // After dismissal, both offset and height can remain stale. A sub-keyboard
+    // height difference must not leave the navigation suspended above the bottom.
     await page.evaluate(() => {
-      delete visualViewport.height;
+      Object.defineProperty(visualViewport, 'height', { configurable: true, value: innerHeight - 96 });
       document.dispatchEvent(new Event('ct:route'));
     });
     await page.waitForFunction(() => !document.body.classList.contains('assistant-keyboard') &&
       document.body.style.getPropertyValue('--chat-top') === '0px');
     await assertComposer();
+    await capture('assistant-restored-viewport');
     await page.evaluate(() => {
       window.scrollTo(0, 300);
+      delete visualViewport.height;
       delete visualViewport.offsetTop;
       window.dispatchEvent(new Event('pageshow'));
     });
     await page.waitForFunction(() => scrollY === 0);
     await assertComposer();
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.waitForFunction(() => Math.abs(parseFloat(document.body.style.getPropertyValue('--app-height')) - visualViewport.height) < 1);
+    await page.waitForFunction(() => Math.abs(document.body.getBoundingClientRect().height - innerHeight) < 1);
     await page.evaluate(() => I18N.set('en'));
     await page.locator('#new-conversation').click();
     await assertComposer();
     await capture('assistant-desktop');
     assert.deepEqual(errors, []);
-    console.log('Assistant browser check passed: isolated accounts, review receipts, prompt drafts, pending/completed replies, copy, independent scroll, 320px/keyboard-height/landscape/desktop layouts.');
+    console.log('Assistant browser check passed: isolated accounts, review receipts, prompt drafts, pending/completed replies, copy, send/reply following, independent history scroll, stale viewport restoration, 320px/keyboard-height/landscape/desktop layouts.');
   } catch (error) { console.error(await page?.evaluate(() => document.body.innerText.slice(-4000))); throw error; }
   finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

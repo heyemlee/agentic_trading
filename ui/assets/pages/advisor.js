@@ -26,6 +26,7 @@ window.Console.page('advisor', function (document) {
   let busy = false, pendingRequest = null, shownMessages = [];
   let session = null, storageOK = false;
   let chatWorking = false, queuedChat = null;
+  let followingLatest = true;
   let composerValue = null, composerWidth = null, viewportFrame = null;
   const viewportTimers = new Set();
   const entryFor = id => session && (session.state.entries[id] ||= { draft: '', title: '' });
@@ -47,6 +48,15 @@ window.Console.page('advisor', function (document) {
   function updateLatest() {
     const log = el('chat-scroll');
     el('chat-latest').hidden = !shownMessages.length || log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  }
+  function followLatest() {
+    const log = el('chat-scroll');
+    if (followingLatest && shownMessages.length) log.scrollTop = log.scrollHeight;
+    updateLatest();
+  }
+  function jumpToLatest() {
+    followingLatest = true;
+    followLatest();
   }
   function remember() {
     if (!session) return false;
@@ -77,6 +87,7 @@ window.Console.page('advisor', function (document) {
     remember();
     status('');
     conversation = id; shownMessages = []; conversationSignature = '';
+    followingLatest = true;
     conversationEpoch++; conversationLoading = false; conversationBlocked = false;
     el('chat-input').value = entryFor(id)?.draft || '';
     pendingRequest = entryFor(id)?.pending || null;
@@ -108,6 +119,10 @@ window.Console.page('advisor', function (document) {
   function showView(view, focus = false) {
     if (binding.scope === 'agentic') view = 'chat';
     if (!views.includes(view)) view = 'chat';
+    // iOS can retain the previous page's visual scroll offset while the router
+    // swaps this body to fixed positioning. Reset it before locking the chat
+    // shell, otherwise the whole shell is shifted up and leaves space below.
+    if (view === 'chat') window.scrollTo?.(0, 0);
     document.body?.classList.toggle('chat-view', view === 'chat');
     for (const name of views) {
       el('panel-' + name).hidden = name !== view;
@@ -140,19 +155,19 @@ window.Console.page('advisor', function (document) {
     if (viewport && viewport.scale > 1.05) return;
     const height = viewport?.height || window.innerHeight;
     if (!(height > 0)) return;
-    const log = el('chat-scroll');
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
     const layoutHeight = Math.max(window.innerHeight, document.documentElement.clientHeight);
     const keyboard = layoutHeight - height > 140;
     // iOS may pan the visual viewport to the caret without a resize. Once the
     // keyboard closes, ignore a stale offsetTop instead of leaving a blank gap.
     const top = keyboard ? Math.max(0, viewport?.offsetTop || 0) : 0;
-    document.body.style.setProperty('--app-height', height + 'px');
+    // After dismissal WebKit can retain a shortened visual viewport. Let CSS
+    // 100dvh fill the screen again; only keyboard geometry needs a pixel height.
+    if (keyboard) document.body.style.setProperty('--app-height', height + 'px');
+    else document.body.style.removeProperty('--app-height');
     document.body.style.setProperty('--chat-top', top + 'px');
     document.body.classList.toggle('assistant-keyboard', keyboard);
     resizeComposer();
-    if (atBottom) log.scrollTop = log.scrollHeight;
-    updateLatest();
+    followLatest();
   }
   function scheduleViewport() {
     if (!document.body || document.hidden || viewportFrame !== null) return;
@@ -251,8 +266,6 @@ window.Console.page('advisor', function (document) {
       (account ? ' data-account="' + h(account) + '"' : '') + '>' + t('ai.research') + '</button>';
   }
   function paintMessages() {
-    const log = el('chat-scroll');
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
     paint('chat-messages', shownMessages.length ? shownMessages.map((m, index) =>
       '<div class="chat-message ' + (m.role === 'user' ? 'user' : 'assistant') + '">' +
       '<p class="eyebrow">' + t(m.role === 'user' ? 'ai.you' : 'ai.assistant') + '</p>' +
@@ -264,8 +277,7 @@ window.Console.page('advisor', function (document) {
       (m.role === 'user' && m.state !== 'COMPLETE' ? '<p class="body-sm">' + h(C.code(m.state)) + '</p>' : '') + '</div>'
     ).join('') : '');
     el('chat-welcome').hidden = shownMessages.length > 0 || chatWorking;
-    if (atBottom) log.scrollTop = log.scrollHeight;
-    updateLatest();
+    followLatest();
   }
   async function loadConversation(signature) {
     if (conversationLoading === conversation || window.CT_DEMO) return;
@@ -381,6 +393,7 @@ window.Console.page('advisor', function (document) {
   async function send(kind, extra = {}) {
     if (busy || kind === 'chat' && chatWorking || !available() || binding.scope === 'agentic' && kind !== 'chat' ||
         ['chat', 'shortlist'].includes(kind) && conversationBlocked || binding.account && extra.account_id && extra.account_id !== binding.account) return;
+    if (['chat', 'shortlist'].includes(kind)) followingLatest = true;
     busy = true; status(t('ai.running')); render();
     const payload = { kind, language: window.I18N.lang, conversation_id: conversation, ...extra,
       scope: binding.scope, account_id: binding.scope === 'agentic' ? null : extra.account_id || binding.account || null };
@@ -422,10 +435,14 @@ window.Console.page('advisor', function (document) {
       e.preventDefault(); el('chat-form').requestSubmit();
     }
   });
-  el('chat-scroll').addEventListener('scroll', updateLatest, { passive: true });
-  el('chat-latest').addEventListener('click', () => {
-    el('chat-scroll').scrollTop = el('chat-scroll').scrollHeight; updateLatest();
-  });
+  el('chat-scroll').addEventListener('scroll', () => {
+    const log = el('chat-scroll');
+    // Remember the reader's intent before a render changes message/composer
+    // height. Sending explicitly resumes following delayed replies as well.
+    followingLatest = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    updateLatest();
+  }, { passive: true });
+  el('chat-latest').addEventListener('click', jumpToLatest);
   function usePrompt(key) {
     el('chat-input').value = t(key); resizeComposer(); updateSend(); remember();
     el('chat-input').focus();
@@ -514,6 +531,7 @@ window.Console.page('advisor', function (document) {
       shownDecision = null; shownDecisionJob = null;
       session?.clear(); session = null; notesDirty = false; notesLoaded = false;
       conversation = 'default'; pendingRequest = null; shownMessages = []; conversationSignature = ''; conversationBlocked = false;
+      followingLatest = true;
       conversationLoading = false; conversationEpoch++;
       el('chat-input').value = ''; el('personal-notes').value = ''; paintMessages();
     }
@@ -538,6 +556,7 @@ window.Console.page('advisor', function (document) {
       remember(); binding = selected; scopeEpoch++; conversationEpoch++; session = null;
       conversation = 'default'; conversationLoading = false; conversationSignature = ''; conversationBlocked = false;
       shownMessages = []; shownDecision = null; shownDecisionJob = null; pendingRequest = null; queuedChat = null;
+      followingLatest = true;
       notesLoaded = false; notesDirty = false; notesRevision = 0;
       el('chat-input').value = ''; el('personal-notes').value = ''; status('');
       ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet'].forEach(id => el(id).close());

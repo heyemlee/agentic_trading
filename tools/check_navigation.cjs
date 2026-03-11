@@ -1,5 +1,5 @@
 // Offline browser regression: node tools/check_navigation.cjs (requires Playwright + Chrome).
-const { chromium } = require('playwright');
+const { chromium, webkit } = require('playwright');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs/promises');
@@ -31,7 +31,9 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  const origin = 'http://127.0.0.1:' + server.address().port;
  let browser;
  try {
- browser = await chromium.launch({channel:process.env.CT_BROWSER_CHANNEL || 'chrome',headless:true});
+ const safari = process.env.CT_BROWSER_ENGINE === 'webkit';
+ browser = safari ? await webkit.launch({headless:true})
+   : await chromium.launch({channel:process.env.CT_BROWSER_CHANNEL || 'chrome',headless:true});
  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  const page = await context.newPage();
  const errors = [], calls=[];
@@ -112,12 +114,51 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.waitForSelector('#startup', {state:'detached'});
  assert.equal(await page.locator('.tabbar').isVisible(),true);
  assert.equal(await page.locator('.tabitem:focus').count(), 0, 'startup must not leave a focus ring on the selected tab');
- assert.equal(await page.locator('#content').evaluate(el => el === document.activeElement), true);
+ if (!safari) assert.equal(await page.locator('#content').evaluate(el => el === document.activeElement), true);
  assert.match((await page.locator('.brand').innerText()).replace(/\s+/g, ' '), /Agentic Trading/);
  await page.locator('#chat-input').fill('Draft stays across tabs');
  await page.locator('[data-od-id="tab-portfolio"]').click();
+ // iOS keeps a scrolled page's visual offset while the next view changes the
+ // shared body to fixed positioning. Entering chat must clear it first.
+ const previousScroll = await page.evaluate(() => {
+   const spacer = document.createElement('div');
+   spacer.id = 'navigation-scroll-fixture'; spacer.style.height = '1200px';
+   document.getElementById('content').append(spacer);
+   window.scrollTo(0, 480);
+   window.navigationScrollOrder = [];
+   window.navigationOriginalScrollTo = window.scrollTo;
+   window.scrollTo = function (...args) {
+     navigationScrollOrder.push({fixed:document.body.classList.contains('chat-view'), top:args.at(-1)});
+     return navigationOriginalScrollTo.apply(this, args);
+   };
+   return window.scrollY;
+ });
+ assert.ok(previousScroll > 0, 'Navigation regression needs a scrolled source page');
  await page.locator('[data-od-id="tab-advisor"]').click();
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
+ const enteredChat = await page.evaluate(() => {
+   const body = document.body.getBoundingClientRect();
+   const tabs = document.querySelector('.tabbar').getBoundingClientRect();
+   return {scrollY, bodyTop: body.top, bodyBottom: body.bottom, tabBottom: tabs.bottom, innerHeight};
+ });
+ assert.equal(enteredChat.scrollY, 0);
+ const scrollOrder = await page.evaluate(() => {
+   const result = navigationScrollOrder;
+   window.scrollTo = navigationOriginalScrollTo;
+   delete window.navigationOriginalScrollTo;
+   delete window.navigationScrollOrder;
+   return result;
+ });
+ assert.equal(scrollOrder[0]?.fixed, false, 'Source scroll must clear before chat becomes fixed');
+ assert.ok(Math.abs(enteredChat.bodyTop) < 2 && Math.abs(enteredChat.bodyBottom - enteredChat.innerHeight) < 2,
+   'Chat shell must fill the viewport after bottom-tab navigation: ' + JSON.stringify(enteredChat));
+ assert.ok(Math.abs(enteredChat.tabBottom - enteredChat.innerHeight) < 2,
+   'Assistant navigation must stay attached to the screen bottom: ' + JSON.stringify(enteredChat));
+ if (process.env.CT_UI_CAPTURE_DIR) {
+   const folder = path.resolve(process.env.CT_UI_CAPTURE_DIR);
+   await fs.mkdir(folder, {recursive:true});
+   await page.screenshot({path:path.join(folder, 'assistant-after-tab-navigation.png'), animations:'disabled'});
+ }
  // Leave while the keyboard is open; close it on another page, then return
  // without a viewport resize event. A retained chat must not keep a short body.
  await page.evaluate(() => {

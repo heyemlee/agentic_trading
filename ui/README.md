@@ -300,9 +300,11 @@ checks remain Chromium-only). These are browser regressions, not a real iOS keyb
 `CT_UI_CAPTURE_DIR` saves synthetic-data previews of the welcome,
 conversation and waiting states.
 
-The chat shell is fixed to the visual viewport, with navigation in its flex layout.
-Resize and scroll events update its height and vertical offset; route entry and page
-restoration refresh geometry even when the keyboard closed on another page. Composer
+The chat shell is fixed to all four viewport edges, with navigation in its flex layout.
+The shared router clears any source-page scroll before restoring a retained fixed chat,
+and the Assistant clears it again when switching into chat within its page. Keyboard
+resize and scroll events then apply its visual height and vertical offset; route entry and
+page restoration refresh geometry even when the keyboard closed on another page. Composer
 height changes only with its text or width, so background polls do not disturb the caret.
 See the [VisualViewport API](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)
 for the difference between visual and layout viewport position.

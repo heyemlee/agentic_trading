@@ -79,7 +79,7 @@
 #assistant-account-status { color: #846324; font-size: 12px; line-height: 1.5; padding-top: 6px; }
 #assistant-account-status:empty { display: none; }
 html:has(body.advisor-page.chat-view) { overflow: hidden; overscroll-behavior: none; }
-body.advisor-page.chat-view { position: fixed; top: var(--chat-top, 0px); left: 0; right: 0; height: var(--app-height, 100dvh); min-height: 0; padding-bottom: 0; overflow: hidden; display: flex; flex-direction: column; }
+body.advisor-page.chat-view { position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; min-height: 0; padding-bottom: 0; overflow: hidden; display: flex; flex-direction: column; }
 .chat-view .topnav { position: relative; top: auto; }
 .chat-view .tabbar { position: relative; inset: auto; order: 100; flex-shrink: 0; }
 .chat-view .topnav, .chat-view #resource-status, .chat-view .conn-bar { flex-shrink: 0; }
@@ -160,6 +160,6 @@ body.advisor-page.chat-view { position: fixed; top: var(--chat-top, 0px); left: 
 @media (prefers-reduced-motion: reduce) { .thinking-dot { animation: none; } .prompt-card { transition: none; } }
 
 /* The visual viewport shrinks above the software keyboard. */
-body.advisor-page.chat-view.assistant-keyboard { padding-top: env(safe-area-inset-top, 0px); padding-bottom: 0; }
+body.advisor-page.chat-view.assistant-keyboard { top: var(--chat-top, 0px); bottom: auto; height: var(--app-height); padding-top: env(safe-area-inset-top, 0px); padding-bottom: 0; }
 .advisor-page.assistant-keyboard .tabbar, .advisor-page.assistant-keyboard .topnav,
 .advisor-page.assistant-keyboard #resource-status, .advisor-page.assistant-keyboard .composer-note { display: none; }
