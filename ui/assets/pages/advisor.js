@@ -25,7 +25,21 @@ window.Console.page('advisor', function (document) {
   let notesRevision = 0, notesLoaded = false, notesDirty = false;
   let busy = false, pendingRequest = null, shownMessages = [];
   let session = null, storageOK = false;
+  let chatWorking = false, queuedChat = null;
   const entryFor = id => session && (session.state.entries[id] ||= { draft: '', title: '' });
+  function resizeComposer() {
+    const input = el('chat-input');
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight || 44, 132) + 'px';
+  }
+  function updateSend() {
+    el('chat-send').disabled = busy || chatWorking ||
+      conversationBlocked || !available() || !el('chat-input').value.trim();
+  }
+  function updateLatest() {
+    const log = el('chat-scroll');
+    el('chat-latest').hidden = !shownMessages.length || log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  }
   function remember() {
     if (!session) return false;
     session.state.selected = conversation;
@@ -53,10 +67,12 @@ window.Console.page('advisor', function (document) {
   }
   function chooseConversation(id) {
     remember();
+    status('');
     conversation = id; shownMessages = []; conversationSignature = '';
     conversationEpoch++; conversationLoading = false; conversationBlocked = false;
     el('chat-input').value = entryFor(id)?.draft || '';
     pendingRequest = entryFor(id)?.pending || null;
+    el('chat-scroll').scrollTop = 0;
     remember(); paintMessages(); render();
   }
   const painted = new Map();
@@ -107,7 +123,11 @@ window.Console.page('advisor', function (document) {
   if (params.get('view') === 'holdings') location.replace('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''));
   showView(params.get('view'));
   if (window.visualViewport) {
-    const fitKeyboard = () => document.body.style.setProperty('--app-height', window.visualViewport.height + 'px');
+    const fitKeyboard = () => {
+      document.body.style.setProperty('--app-height', window.visualViewport.height + 'px');
+      document.body.classList.toggle('assistant-keyboard', window.innerHeight - window.visualViewport.height > 140);
+      resizeComposer(); updateLatest();
+    };
     window.visualViewport.addEventListener('resize', fitKeyboard);
     fitKeyboard();
   }
@@ -129,6 +149,9 @@ window.Console.page('advisor', function (document) {
     if (!options.some(([key]) => key === accountChoice)) options.push([accountChoice, binding.account || t('ai.scopeMismatch')]);
     paint('assistant-account', options.map(([key, label]) => '<option value="' + h(key) + '">' + h(label) + '</option>').join(''));
     el('assistant-account').value = accountChoice; updateAccountLink();
+    el('assistant-account-label').textContent = state.account_label || binding.account || (binding.scope === 'agentic' ? 'Agentic' : t('ai.allPersonal'));
+    el('assistant-context-summary').textContent = state.snapshot?.fetched_at
+      ? t('ai.fresh', { date: C.dateTime(state.snapshot.fetched_at) }) : t('ai.contextHint');
     el('assistant-scope-note').textContent = (state.account_label || binding.account || (binding.scope === 'agentic' ? 'Agentic' : t('ai.allPersonal'))) + ' · ' +
       t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.personalOnly');
     const source = A.state?.resources?.assistant;
@@ -177,17 +200,21 @@ window.Console.page('advisor', function (document) {
       (account ? ' data-account="' + h(account) + '"' : '') + '>' + t('ai.research') + '</button>';
   }
   function paintMessages() {
-    const log = el('chat-messages');
+    const log = el('chat-scroll');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-    paint('chat-messages', shownMessages.length ? shownMessages.map(m =>
+    paint('chat-messages', shownMessages.length ? shownMessages.map((m, index) =>
       '<div class="chat-message ' + (m.role === 'user' ? 'user' : 'assistant') + '">' +
       '<p class="eyebrow">' + t(m.role === 'user' ? 'ai.you' : 'ai.assistant') + '</p>' +
       '<div class="md">' + C.md(m.content) + '</div>' +
       (m.research_candidates || []).map(c => '<div class="advisor-row"><div><strong>' + h(c.symbol) +
         '</strong><p class="body-sm">' + h(c.reason) + '</p></div>' + researchButton(c.symbol) + '</div>').join('') +
+      (m.role !== 'user' && m.content ? '<button class="message-copy" data-copy-message="' + index + '">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg>' + t('ai.copy') + '</button>' : '') +
       (m.role === 'user' && m.state !== 'COMPLETE' ? '<p class="body-sm">' + h(C.code(m.state)) + '</p>' : '') + '</div>'
-    ).join('') : '<p class="body-muted">' + t('ai.noMessages') + '</p>');
+    ).join('') : '');
+    el('chat-welcome').hidden = shownMessages.length > 0 || chatWorking;
     if (atBottom) log.scrollTop = log.scrollHeight;
+    updateLatest();
   }
   async function loadConversation(signature) {
     if (conversationLoading === conversation || window.CT_DEMO) return;
@@ -210,7 +237,7 @@ window.Console.page('advisor', function (document) {
       conversationSignature = signature;
       paintMessages();
     } catch (err) { if (epoch === conversationEpoch) { conversationBlocked = true; status(t('ai.error', { error: err.message })); } }
-    finally { if (epoch === conversationEpoch) { conversationLoading = false; el('chat-send').disabled = conversationBlocked || busy || !available(); el('shortlist').disabled = conversationBlocked || busy || binding.scope !== 'personal' || !available(); } }
+    finally { if (epoch === conversationEpoch) { conversationLoading = false; updateSend(); el('shortlist').disabled = conversationBlocked || busy || binding.scope !== 'personal' || !available(); } }
   }
   function render() {
     restoreSession();
@@ -280,16 +307,28 @@ window.Console.page('advisor', function (document) {
     remember();
     el('notes-preview').textContent = binding.scope === 'personal' ? state.notes?.text || t('ux.personalHint') : '';
     const chatting = jobs.some(j => active(j) && j.task?.conversation_id === conversation);
-    el('chat-send').disabled = busy || chatting || conversationBlocked || !available();
+    if (queuedChat?.conversation === conversation) {
+      const finished = jobs.find(j => j.run_key === queuedChat.run);
+      if (finished && !active(finished)) {
+        status(finished.error ? t('ai.error', { error: finished.error }) : '');
+        queuedChat = null;
+      }
+    }
+    chatWorking = chatting;
+    el('chat-progress').hidden = !chatting;
+    el('chat-welcome').hidden = shownMessages.length > 0 || chatting;
+    resizeComposer(); updateSend();
     el('shortlist').disabled = busy || chatting || conversationBlocked || binding.scope !== 'personal' || !available();
     el('review-start').disabled = busy || binding.scope !== 'personal' || !available() || jobs.some(j => active(j) && j.task?.kind === 'portfolio_review');
     document.querySelectorAll('[data-research], #symbol-form button').forEach(button => { button.disabled = busy || binding.scope !== 'personal' || !available(); });
     const signature = conversation + JSON.stringify(jobs.filter(j => j.task?.conversation_id === conversation).map(j => [j.run_key, j.state]));
     if (currentState() && signature !== conversationSignature) loadConversation(signature);
-    if (window.CT_DEMO) { status(t('ai.demo')); paintMessages(); }
+    paintMessages();
+    if (window.CT_DEMO) status(t('ai.demo'));
+    updateSend();
   }
   async function send(kind, extra = {}) {
-    if (busy || !available() || binding.scope === 'agentic' && kind !== 'chat' ||
+    if (busy || kind === 'chat' && chatWorking || !available() || binding.scope === 'agentic' && kind !== 'chat' ||
         ['chat', 'shortlist'].includes(kind) && conversationBlocked || binding.account && extra.account_id && extra.account_id !== binding.account) return;
     busy = true; status(t('ai.running')); render();
     const payload = { kind, language: window.I18N.lang, conversation_id: conversation, ...extra,
@@ -308,6 +347,7 @@ window.Console.page('advisor', function (document) {
       if (pendingRequest === request) pendingRequest = null;
       const saved = entryFor(selected);
       if (kind === 'chat') {
+        queuedChat = { conversation: selected, run: result.run_key };
         if (saved?.pending?.request_id === request.request_id) delete saved.pending;
         if (saved && !saved.title) saved.title = (extra.message || '').slice(0, 90);
         if (selected === conversation && el('chat-input').value === sentText) el('chat-input').value = '';
@@ -323,9 +363,24 @@ window.Console.page('advisor', function (document) {
     e.preventDefault(); const message = el('chat-input').value.trim();
     if (message) send('chat', { message });
   });
-  el('chat-input').addEventListener('input', remember);
-  el('ask-risk').addEventListener('click', () => { el('chat-input').value = t('ai.askRisk'); remember(); });
-  el('ask-scenario').addEventListener('click', () => { el('chat-input').value = t('ai.askScenario'); remember(); });
+  el('chat-input').addEventListener('input', () => { resizeComposer(); updateSend(); remember(); });
+  el('chat-input').addEventListener('keydown', e => {
+    // Phone Enter keeps a newline; desktop Enter sends. Never submit an IME composition.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 &&
+        window.matchMedia?.('(pointer: fine)').matches) {
+      e.preventDefault(); el('chat-form').requestSubmit();
+    }
+  });
+  el('chat-scroll').addEventListener('scroll', updateLatest, { passive: true });
+  el('chat-latest').addEventListener('click', () => {
+    el('chat-scroll').scrollTop = el('chat-scroll').scrollHeight; updateLatest();
+  });
+  function usePrompt(key) {
+    el('chat-input').value = t(key); resizeComposer(); updateSend(); remember();
+    el('chat-input').focus();
+  }
+  el('ask-risk').addEventListener('click', () => usePrompt('ai.askRisk'));
+  el('ask-scenario').addEventListener('click', () => usePrompt('ai.askScenario'));
   el('shortlist').addEventListener('click', () => { showView('chat'); send('shortlist', { message: t('ai.shortlistPrompt') }); });
   el('review-start').addEventListener('click', () => send('portfolio_review'));
   el('symbol-form').addEventListener('submit', e => {
@@ -355,6 +410,14 @@ window.Console.page('advisor', function (document) {
     finally { el('save-notes').disabled = false; }
   });
   document.addEventListener('click', async e => {
+    const copy = e.target.closest?.('[data-copy-message]');
+    if (copy) {
+      const content = shownMessages[Number(copy.dataset.copyMessage)]?.content;
+      if (!content) return;
+      try { await navigator.clipboard.writeText(content); status(t('ai.copied')); }
+      catch { status(t('ai.copyFailed')); }
+      return;
+    }
     const choice = e.target.closest?.('[data-conversation]');
     if (choice) {
       const remote = (currentState()?.conversation_summaries || []).find(row => row.conversation_id === choice.dataset.conversation);
@@ -422,10 +485,10 @@ window.Console.page('advisor', function (document) {
     if (changed) {
       remember(); binding = selected; scopeEpoch++; conversationEpoch++; session = null;
       conversation = 'default'; conversationLoading = false; conversationSignature = ''; conversationBlocked = false;
-      shownMessages = []; shownDecision = null; shownDecisionJob = null; pendingRequest = null;
+      shownMessages = []; shownDecision = null; shownDecisionJob = null; pendingRequest = null; queuedChat = null;
       notesLoaded = false; notesDirty = false; notesRevision = 0;
       el('chat-input').value = ''; el('personal-notes').value = ''; status('');
-      ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet'].forEach(id => el(id).close());
+      ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet'].forEach(id => el(id).close());
       document.querySelectorAll('#review-panel details, #agentic-records-panel details').forEach(node => { node.open = false; });
       paintMessages();
     }

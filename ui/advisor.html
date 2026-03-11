@@ -17,47 +17,50 @@
 <body class="advisor-page">
 <main id="content" hidden data-i18n-title="ai.title">
   <section class="section pagehead"><div class="container">
-    <h1 data-i18n="ai.title">投资助手</h1>
-    <p class="body-muted" id="assistant-intro">从你的持仓和计划出发，讨论下一步。</p>
-    <div class="assistant-scope-controls"><div class="field"><label for="assistant-account" data-i18n="ai.account">Account scope</label><select id="assistant-account" class="select"></select></div>
-    <a id="assistant-switch" class="btn btn-secondary btn-sm" data-i18n="ai.switchAccount">Switch account</a></div>
-    <p id="assistant-scope-note" class="body-sm" style="margin-top:12px;"></p>
-    <p id="assistant-coverage" class="body-sm body-muted"></p>
-    <p id="assistant-account-status" class="body-sm body-muted" role="status"></p>
-    <div class="assistant-shortcuts" role="tablist" aria-label="Assistant">
-      <button class="btn btn-secondary btn-sm" id="view-chat" role="tab" aria-selected="true" aria-controls="panel-chat" data-i18n="app.chat">聊天</button>
-      <button class="btn btn-secondary btn-sm" id="view-discover" role="tab" aria-selected="false" aria-controls="panel-discover" tabindex="-1" data-i18n="app.discover">选股</button>
+    <div class="assistant-heading"><h1 data-i18n="ai.title">投资助手</h1>
+      <div class="chat-tools">
+        <button class="circle-control" data-open-sheet="conversation-sheet" data-i18n-aria="ai.history" aria-haspopup="dialog" data-icon="history"></button>
+        <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" data-icon="plus"></button>
+      </div>
     </div>
-    <a class="body-sm linkish" id="assistant-research-link" href="research.html" data-i18n="nav.hint.research">完整研究与 Agent 报告</a>
-    <p id="advisor-status" class="body-sm" role="status" aria-live="polite"></p>
+    <div class="assistant-subhead">
+      <button id="assistant-context" class="scope-pill" data-open-sheet="context-sheet" aria-haspopup="dialog"><span class="scope-dot" aria-hidden="true"></span><span id="assistant-account-label"></span><span class="scope-chevron" aria-hidden="true"></span></button>
+      <div class="assistant-shortcuts" role="tablist" data-i18n-aria="ai.title">
+        <button id="view-chat" role="tab" aria-selected="true" aria-controls="panel-chat" data-i18n="app.chat">聊天</button>
+        <button id="view-discover" role="tab" aria-selected="false" aria-controls="panel-discover" tabindex="-1" data-i18n="app.discover">选股</button>
+      </div>
+    </div>
+    <p id="assistant-account-status" class="body-sm body-muted" role="status"></p>
   </div></section>
-  <section class="section" style="padding-top:0;" id="review-panel"><div class="container"><details class="card app-disclosure"><summary data-i18n="ai.portfolioReview">Portfolio review</summary><p id="review-summary" class="body-sm body-muted"></p>
-    <p id="review-stale" class="body-sm" role="status"></p>
-    <div class="advisor-actions"><button id="review-start" class="btn btn-secondary btn-sm" data-i18n="ai.reviewStart">Review this portfolio</button><button id="review-open" class="btn btn-secondary btn-sm" data-i18n="ai.reviewOpen" hidden>View review</button></div>
-  </details></div></section>
-  <section class="section" id="agentic-records-panel" hidden><div class="container"><details class="card app-disclosure"><summary data-i18n="rs.runs">Research</summary><div id="agentic-records"></div></details></div></section>
   <section class="section" style="padding-top:0"><div class="container advisor-layout">
     <div class="stack stack-4">
       <div class="card" id="panel-chat" role="tabpanel" aria-labelledby="view-chat">
-        <div class="chat-toolbar">
-          <button class="history-control" data-open-sheet="conversation-sheet" aria-haspopup="dialog"><span class="mini-orb" data-icon="history" aria-hidden="true"></span><span id="conversation-label" data-i18n="ai.history">历史对话</span><span class="ux-chevron"></span></button>
-          <div class="chat-tools">
-          <button class="circle-control" data-open-sheet="personal-sheet" data-i18n-aria="ai.personal" aria-label="My personal context" data-icon="personal"></button>
-          <button class="circle-control" data-open-sheet="jobs-sheet" data-i18n-aria="ux.activity" aria-label="Activity" data-icon="activity"></button>
-          <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" aria-label="New conversation" data-icon="plus"></button>
+        <div class="chat-scroll" id="chat-scroll">
+          <div id="chat-welcome" class="chat-welcome">
+            <div class="assistant-spark" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none"><path d="M32 4C32 22 22 32 4 32c18 0 28 10 28 28 0-18 10-28 28-28C42 32 32 22 32 4Z" fill="currentColor"/><path d="M51 3v14M44 10h14" stroke="currentColor" stroke-width="2"/></svg></div>
+            <p class="welcome-eyebrow" data-i18n="ai.welcomeEyebrow">从你的投资出发</p>
+            <h2 data-i18n="ai.welcomeTitle">今天，想聊点什么？</h2>
+            <p id="assistant-intro" class="welcome-description"></p>
+            <div class="prompt-cards">
+              <button id="ask-risk" class="prompt-card"><span class="prompt-icon" data-icon="risk" aria-hidden="true"></span><span><strong data-i18n="ai.riskTitle">看懂持仓风险</strong><span data-i18n="ai.askRisk">我的持仓有哪些风险？</span></span><span class="prompt-arrow" aria-hidden="true">↗</span></button>
+              <button id="ask-scenario" class="prompt-card"><span class="prompt-icon" data-icon="evaluation" aria-hidden="true"></span><span><strong data-i18n="ai.scenarioTitle">推演市场变化</strong><span data-i18n="ai.askScenario">如果股票跌 5% 呢？</span></span><span class="prompt-arrow" aria-hidden="true">↗</span></button>
+            </div>
+            <button class="context-card" data-open-sheet="context-sheet" aria-haspopup="dialog"><span data-icon="portfolio" aria-hidden="true"></span><span><strong data-i18n="ai.contextTitle">围绕你的账户聊</strong><span id="assistant-context-summary"></span></span><span class="ux-chevron" aria-hidden="true"></span></button>
           </div>
+          <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+          <div id="chat-progress" class="chat-progress" role="status" hidden><span class="thinking-dot" aria-hidden="true"></span><span data-i18n="ai.thinking">正在分析你的问题…</span><button class="text-control" data-open-sheet="jobs-sheet" data-i18n="ux.activity">任务动态</button></div>
         </div>
-        <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
-        <div class="advisor-actions">
-          <button class="btn btn-secondary btn-sm" id="ask-risk" data-i18n="ai.askRisk">我的持仓有哪些风险？</button>
-          <button class="btn btn-secondary btn-sm" id="ask-scenario" data-i18n="ai.askScenario">如果股票跌 5% 呢？</button>
+        <div class="composer-dock">
+          <button id="chat-latest" class="latest-control" type="button" data-i18n="ai.latest" hidden>↓ 回到最新消息</button>
+          <p id="advisor-status" class="body-sm" role="status" aria-live="polite"></p>
+          <form id="chat-form">
+            <button class="composer-context" type="button" data-open-sheet="context-sheet" data-i18n-aria="ai.contextTools" aria-haspopup="dialog" data-icon="plus"></button>
+            <label for="chat-input" class="sr-only" data-i18n="ai.message">你的问题</label>
+            <textarea id="chat-input" class="form-input" rows="1" maxlength="4000" data-i18n-ph="ai.composerPlaceholder" required></textarea>
+            <button id="chat-send" class="btn" type="submit" data-i18n-aria="ai.send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
+          </form>
+          <p class="composer-note" data-i18n="ai.composerNote">结合已保存的持仓与研究 · 交易需另行审批</p>
         </div>
-        <form id="chat-form">
-          <label for="chat-input" class="sr-only" data-i18n="ai.message">你的问题</label>
-          <textarea id="chat-input" class="form-input" rows="2" maxlength="4000" data-i18n-ph="ai.message" required></textarea>
-          <button id="chat-send" class="btn btn-green" type="submit" data-i18n="ai.send">发送</button>
-        </form>
-        <p class="body-sm body-muted" id="assistant-chat-note">回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。</p>
       </div>
     </div>
     <div class="stack stack-4">
@@ -89,6 +92,24 @@
     </div>
   </div></section>
 </main>
+<dialog id="context-sheet" class="glass-sheet" data-sheet aria-labelledby="context-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="context-title" data-i18n="ai.contextTools">账户与工具</h2><button class="circle-control" data-close-sheet="context-sheet" data-i18n-aria="common.close" data-icon="cross"></button></div>
+    <div class="assistant-scope-controls"><div class="field"><label for="assistant-account" data-i18n="ai.account">Account scope</label><select id="assistant-account" class="select"></select></div>
+    <a id="assistant-switch" class="btn btn-secondary btn-sm" data-i18n="ai.switchAccount">Switch account</a></div>
+    <p id="assistant-scope-note" class="body-sm" style="margin-top:12px;"></p>
+    <p id="assistant-coverage" class="body-sm body-muted"></p>
+  <p id="assistant-chat-note" class="sheet-description"></p>
+  <section class="section" style="padding-top:0;" id="review-panel"><div class="container"><details class="card app-disclosure"><summary data-i18n="ai.portfolioReview">Portfolio review</summary><p id="review-summary" class="body-sm body-muted"></p>
+    <p id="review-stale" class="body-sm" role="status"></p>
+    <div class="advisor-actions"><button id="review-start" class="btn btn-secondary btn-sm" data-i18n="ai.reviewStart">Review this portfolio</button><button id="review-open" class="btn btn-secondary btn-sm" data-i18n="ai.reviewOpen" hidden>View review</button></div>
+  </details></div></section>
+  <section class="section" id="agentic-records-panel" hidden><div class="container"><details class="card app-disclosure"><summary data-i18n="rs.runs">Research</summary><div id="agentic-records"></div></details></div></section>
+  <div class="context-tools">
+    <button class="context-tool" data-open-sheet="personal-sheet"><span data-icon="personal" aria-hidden="true"></span><span data-i18n="ai.personal">我的个人情况</span><span class="ux-chevron" aria-hidden="true"></span></button>
+    <button class="context-tool" data-open-sheet="jobs-sheet"><span data-icon="activity" aria-hidden="true"></span><span data-i18n="ux.activity">任务动态</span><span class="ux-chevron" aria-hidden="true"></span></button>
+    <a class="context-tool" id="assistant-research-link" href="research.html"><span data-icon="research" aria-hidden="true"></span><span data-i18n="nav.hint.research">完整研究与 Agent 报告</span><span class="ux-chevron" aria-hidden="true"></span></a>
+  </div>
+</dialog>
 <dialog id="conversation-sheet" class="glass-sheet" data-sheet aria-labelledby="conversation-title">
   <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="conversation-title" data-i18n="ai.history">历史对话</h2><button class="circle-control" data-close-sheet="conversation-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
   <div id="conversations" class="conversation-options"></div>

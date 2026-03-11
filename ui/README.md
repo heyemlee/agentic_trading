@@ -275,3 +275,23 @@ its detail sheet is visible, using the independent idempotent `/opened` write.
 
 `node tools/check_assistant_ui.cjs` verifies account switching, retained drafts, Agentic chat,
 explicit review and opened receipts with synthetic APIs, including phone layout.
+
+The Assistant chat is a mobile-first, single-viewport layout. Its welcome prompts fill
+an editable draft; account selection, portfolio reviews and supporting tools open from
+the account chip or composer + button. Messages scroll independently above the composer,
+with a jump-to-latest control that does not interrupt someone reading older replies.
+The composer grows with its draft, respects IME composition, and keeps Enter as a newline
+on touch devices (desktop Enter sends; Shift+Enter adds a line). The visual viewport keeps
+it above the software keyboard. All controls retain the existing scoped API and draft storage.
+
+The supplied Chat02 React design is adapted as plain HTML/CSS/JavaScript in `advisor.html`,
+`assets/advisor.css` and `assets/pages/advisor.js`, preserving this console's no-build
+architecture. Its message bubbles, growing composer and latest-message control are connected
+to real conversation state. No React/shadcn/Tailwind runtime, simulated streaming, model
+picker or unsupported attachment/voice controls are added. The account-centered entry and
+progressive disclosure take inspiration from [Robinhood's Cortex overview](https://robinhood.com/us/en/newsroom/robinhood-presents-yes-no-event/).
+
+The Assistant browser check also exercises prompt drafts, pending and completed replies,
+clipboard actions, long-message scroll preservation, and phone, landscape, keyboard-height
+and desktop viewports. `CT_UI_CAPTURE_DIR` saves synthetic-data previews of the welcome,
+conversation and waiting states.
