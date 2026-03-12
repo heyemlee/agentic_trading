@@ -826,6 +826,16 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 .tabitem:active { transform: scale(.95); background: #dce8d780; }
 .tabitem svg { width: 23px; height: 23px; }
 .tabdot { background: var(--danger); }
+/* Black-and-white app chrome. Keep the proposal badge red because it signals
+   pending work; the navigation itself uses only neutral surfaces and text. */
+.topnav { background: rgba(255,255,255,.94); border-bottom: 1px solid #e5e5e5; }
+.brand-mark { filter: grayscale(1); }
+.tabitem[aria-current="page"], .tabitem[aria-expanded="true"], .tabitem[data-section-active="true"] {
+  background: #111; color: #fff; box-shadow: none;
+}
+.tabitem[aria-current="page"]:hover, .tabitem[aria-expanded="true"]:hover,
+.tabitem[data-section-active="true"]:hover { background: #222; color: #fff; }
+.tabitem:active { background: #e5e5e5; color: #111; }
 .pagefoot { display: none; }
 #resource-status { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .figure-lg { font-size: clamp(36px, 9vw, 50px); letter-spacing: -.045em; }
