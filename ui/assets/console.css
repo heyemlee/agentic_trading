@@ -42,6 +42,7 @@
   --meta:       color-mix(in oklab, var(--fg) 46%, var(--bg));  /* 3rd text 4.6:1 */
 
   --green-ink:  color-mix(in oklab, var(--green), black 44%);   /* green text    */
+  --green-contrast: var(--fg); /* text on a solid accent fill */
   --green-tint: color-mix(in oklab, var(--green)  9%, var(--bg));
   --green-line: color-mix(in oklab, var(--green) 34%, var(--bg));
   --green-press:color-mix(in oklab, var(--green), black 12%);
@@ -372,7 +373,7 @@ dialog.sheet[open]::backdrop { animation: fade-in var(--motion-base) var(--ease)
 .more-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0 var(--space-4); }
 .more-avatar {
   flex: none; width: 48px; height: 48px; border-radius: 16px;
-  display: grid; place-items: center; background: var(--green); color: var(--fg);
+  display: grid; place-items: center; background: var(--green); color: var(--green-contrast);
   font-size: 13px; font-weight: 750; letter-spacing: .02em;
 }
 .more-identity { min-width: 0; flex: 1; }
@@ -493,9 +494,9 @@ a.list-row:active .chevron { transform: translateX(2px); }
 .btn-block, .btn-primary, .btn-green { width: 100%; }
 .btn-sm { min-height: 40px; padding: 9px 18px; font-size: var(--text-sm); width: auto; }
 
-/* affirmative action — brand green, black label (11:1; white would be 1.9:1) */
-.btn-green, .btn-primary { background: var(--green); color: var(--fg); }
-.btn-green:hover, .btn-primary:hover { background: var(--green-press); color: var(--fg); }
+/* Pair the solid accent with its theme's readable label color. */
+.btn-green, .btn-primary { background: var(--green); color: var(--green-contrast); }
+.btn-green:hover, .btn-primary:hover { background: var(--green-press); color: var(--green-contrast); }
 
 /* neutral action */
 .btn-secondary { background: var(--surface); color: var(--fg); width: 100%; }
@@ -630,7 +631,7 @@ a.list-row:active .chevron { transform: translateX(2px); }
   display: grid; place-items: center;
   font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
-.trace-step[aria-expanded="true"] .trace-num { background: var(--green); color: var(--fg); }
+.trace-step[aria-expanded="true"] .trace-num { background: var(--green); color: var(--green-contrast); }
 .trace-label { flex: 1 1 auto; font-size: var(--text-lg); font-weight: 500; letter-spacing: -0.015em; }
 .trace-size { flex: none; font-size: var(--text-sm); color: var(--meta); font-variant-numeric: tabular-nums; }
 .trace-step .chevron { transition: transform var(--motion-base) var(--ease); }
@@ -718,7 +719,7 @@ a.list-row:active .chevron { transform: translateX(2px); }
   background: var(--surface-2); color: var(--muted);
 }
 .gate-mark svg { width: 12px; height: 12px; }
-.gate.is-pass .gate-mark { background: var(--green); color: var(--fg); }
+.gate.is-pass .gate-mark { background: var(--green); color: var(--green-contrast); }
 .gate.is-fail .gate-mark { background: var(--danger); color: var(--bg); }
 .gate.is-blocked .gate-mark { background: var(--fg); color: var(--bg); }
 .gate-body { min-width: 0; }

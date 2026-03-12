@@ -170,6 +170,7 @@ body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--cha
 .advisor-page {
   --green: #111;
   --green-ink: #111;
+  --green-contrast: #fff;
   --green-tint: #f3f3f3;
   --green-line: #d4d4d4;
   --green-press: #292929;
@@ -177,6 +178,10 @@ body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--cha
 }
 .advisor-page .topnav { background: #fff; border-bottom-color: #eee; }
 .advisor-page .nav-status .dot { background: #111; }
+.advisor-page .btn-green:disabled, .advisor-page .btn-primary:disabled,
+.advisor-page .btn-green:disabled:hover, .advisor-page .btn-primary:disabled:hover {
+  background: #eee; color: #666; opacity: 1;
+}
 .assistant-spark { color: #111; }
 .prompt-card { border-color: #e5e5e5; background: #f7f7f7; color: #111; }
 .prompt-card:hover { background: #eee; }
@@ -189,7 +194,7 @@ body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--cha
 #chat-form:focus-within { border-color: #777; box-shadow: 0 0 0 3px #11111112; }
 #chat-send { background: #111; color: #fff; }
 #chat-send:hover:not(:disabled) { background: #292929; }
-#chat-send:disabled { background: #eee; color: #999; }
+#chat-send:disabled { background: #eee; color: #666; }
 .thinking-dot { background: #111; }
 .text-control, .message-copy, .latest-control { color: #444; }
 .advisor-page .circle-control { color: #111; }
