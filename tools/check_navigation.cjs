@@ -41,7 +41,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
      await page.locator('#assistant-back').click();
      await page.waitForFunction(() => !document.body.classList.contains('advisor-page'));
    }
-   await page.locator('[data-od-id="tab-' + tab + '"]').click();
+   await page.locator(tab === 'advisor' ? '#assistant-launcher' : '[data-od-id="tab-' + tab + '"]').click();
  };
  const errors = [], calls=[];
  page.on('pageerror', e=> errors.push(e.message));
@@ -111,7 +111,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  for(const tab of ['portfolio','advisor','more','dashboard','portfolio','advisor']) {
    const t = await page.evaluate(tab=>{
     const before = performance.now();
-    document.querySelector('[data-od-id="tab-'+tab+'"]').click();
+    document.querySelector(tab === 'advisor' ? '#assistant-launcher' : '[data-od-id="tab-'+tab+'"]').click();
     return {ms:performance.now()-before,path:location.pathname,hidden:document.getElementById('content').hidden};
    },tab);
    times.push(t); assert.equal(t.hidden,false);assert.ok(t.ms<100);
@@ -227,6 +227,26 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  await selectTab('dashboard');
 
+ // Assistant is a header action; Lab occupies the third tab. Returning from
+ // Assistant must restore Lab, including its selected navigation state.
+ assert.deepEqual(await page.locator('.tabbar .tabitem').evaluateAll(tabs => tabs.map(el => el.getAttribute('href'))),
+   ['index.html', 'portfolio.html', 'lab.html', 'more.html']);
+ assert.equal(await page.locator('.tabbar a[href="advisor.html"]').count(), 0);
+ await selectTab('lab');
+ await page.waitForFunction(() => !document.getElementById('content').inert);
+ assert.equal(await page.locator('[data-od-id="tab-lab"]').getAttribute('aria-current'), 'page');
+ await page.locator('#assistant-launcher').click();
+ await page.waitForURL('**/advisor.html');
+ assert.equal(await page.locator('#assistant-back').isVisible(), true);
+ await page.locator('#assistant-back').click();
+ await page.waitForURL('**/lab.html');
+ assert.equal(await page.locator('[data-od-id="tab-lab"]').getAttribute('aria-current'), 'page');
+ await page.emulateMedia({reducedMotion:'reduce'});
+ assert.equal(await page.locator('#assistant-launcher').evaluate(el => getComputedStyle(el, '::before').animationName), 'none');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ assert.equal(await page.locator('#assistant-launcher').evaluate(el => getComputedStyle(el, '::before').animationName), 'assistant-halo');
+ await selectTab('dashboard');
+
  // More tools must switch synchronously even while their first reads are pending.
  await selectTab('more');
  const documentToken = await page.evaluate(() => window.navigationTestToken = crypto.randomUUID());
@@ -241,6 +261,31 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.equal(result.hidden, false); assert.equal(result.skeleton, false); assert.ok(result.ms < 100);
    times.push(result);
    await page.waitForFunction(() => !document.getElementById('content').inert);
+   assert.equal(await page.locator('.topnav #nav-status, #resource-status').count(), 0);
+   assert.equal(await page.locator('#conn-bar').isVisible(), false);
+   if (name === 'system') {
+     await page.waitForFunction(() => CT_API.isLive('health'));
+     await page.evaluate(() => {
+       CT_API.state.resources.researchJobs = { lastOkAt: 1, error: 'Diagnostic test: stale research jobs' };
+       document.dispatchEvent(new Event('ct:connection'));
+     });
+     assert.equal(await page.locator('#conn-bar').isVisible(), false, 'Stale-data details never appear above the page');
+     assert.equal(await page.locator('#sources-sheet').isVisible(), false);
+     await page.locator('#diagnostics > summary').click();
+     await page.locator('#diagnostics [data-open-sheet="sources-sheet"]').click();
+     assert.equal(await page.locator('#sources-sheet #nav-status').isVisible(), true);
+     assert.equal(await page.locator('#sources-sheet #conn-bar').isVisible(), true);
+     assert.match(await page.locator('#source-rows').innerText(), /Diagnostic test: stale research jobs/);
+     if (process.env.CT_UI_CAPTURE_DIR) {
+       await page.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'system-data-details.png'), animations:'disabled'});
+     }
+     await page.locator('[data-close-sheet="sources-sheet"]').click();
+     await page.waitForFunction(() => !document.getElementById('sources-sheet').open);
+     await page.locator('#diagnostics > summary').click();
+     if (process.env.CT_UI_CAPTURE_DIR) {
+       await page.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'system-clean-header.png'), animations:'disabled'});
+     }
+   }
    if (name === 'risk') {
      assert.equal(await page.locator('#page-loader').isVisible(), true);
      assert.equal(await page.locator('#page-loader .lightsaber').count(), 2);
@@ -254,6 +299,40 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    assert.equal(await page.locator('#page-loader').isVisible(), false);
    assert.equal(await page.locator('#startup, .page-skeleton').count(), 0);
  }
+ // Floating icon navigation stays reachable at small widths and above the
+ // home indicator, with translated accessible names despite hidden labels.
+ for (const [width, height] of [[320,568], [390,844], [440,956], [1280,900]]) {
+   await page.setViewportSize({width, height});
+   await page.evaluate(() => document.documentElement.style.setProperty('--tabbar-bottom', '34px'));
+   const layout = await page.evaluate(() => ({
+     bar: document.querySelector('.tabbar').getBoundingClientRect().toJSON(),
+     padding: parseFloat(getComputedStyle(document.body).paddingBottom),
+     tabs: [...document.querySelectorAll('.tabitem')].map(el => ({
+       rect: el.getBoundingClientRect().toJSON(),
+       label: el.querySelector('[data-nav-label]').textContent,
+       labelWidth: el.querySelector('[data-nav-label]').getBoundingClientRect().width,
+     })),
+   }));
+   assert.equal(layout.bar.height, 60);
+   assert.equal(layout.bar.bottom, height - 34);
+   assert.ok(layout.bar.left >= 16 && layout.bar.right <= width - 16);
+   assert.ok(Math.abs(layout.bar.left - (width - layout.bar.right)) < 1, 'Glass capsule stays centered');
+   assert.ok(layout.padding >= layout.bar.height + 34 + 16, 'Page content can scroll clear of the floating bar');
+   const launcher = await page.locator('#assistant-launcher').boundingBox();
+   assert.ok(launcher.width >= 44 && launcher.height >= 44 && launcher.x + launcher.width <= width - 8,
+     'The header assistant remains a reachable, unclipped touch target');
+   for (const tab of layout.tabs) {
+     assert.ok(tab.rect.width >= 44 && tab.rect.height >= 44);
+     assert.ok(Math.abs(tab.rect.width - layout.tabs[0].rect.width) < 1, 'Icons have even spacing');
+     assert.equal(tab.labelWidth, 1, 'Labels are clipped, not visually displayed');
+     assert.equal(await page.locator('.tabbar').getByRole('link', {name:tab.label, exact:true}).count(), 1);
+   }
+   if (process.env.CT_UI_CAPTURE_DIR) {
+     await page.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'glass-navigation-' + width + '.png'), animations:'disabled'});
+   }
+ }
+ await page.evaluate(() => document.documentElement.style.removeProperty('--tabbar-bottom'));
+ await page.setViewportSize({width:390, height:844});
  await page.locator('#content a[href="profile.html"]').click();
  await page.locator('#profile-notes').fill('Personal draft survives returning to More');
  await page.locator('#back-link').click(); await page.waitForURL('**/more.html');

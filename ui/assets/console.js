@@ -116,6 +116,7 @@
     cross: sv('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>', 2.6),
     info: sv('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.6v.01"/>'),
     lock: sv('<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 018 0v3.5"/>'),
+    assistant: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C13.3 8.2 15.8 10.7 22 12c-6.2 1.3-8.7 3.8-10 10C10.7 15.8 8.2 13.3 2 12c6.2-1.3 8.7-3.8 10-10Z" fill="currentColor"/></svg>',
     home: sv('<path d="M4 10.5L12 4l8 6.5V19a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 19z"/>'),
     portfolio: sv('<path d="M4 19.5V11M9.3 19.5V6M14.7 19.5v-5.5M20 19.5V8.5"/>', 2),
     approvals: sv('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-5"/>'),
@@ -145,8 +146,8 @@
     { href: 'index.html',     key: 'dashboard', icon: 'home',      tab: true },
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
-    { href: 'advisor.html',   key: 'advisor',   icon: 'research',  tab: true },
-    { href: 'lab.html',       key: 'lab',       icon: 'lab' },
+    { href: 'advisor.html',   key: 'advisor',   icon: 'assistant' },
+    { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
     { href: 'research.html',  key: 'research',  icon: 'research' },
     { href: 'risk.html',      key: 'risk',     icon: 'risk' },
     { href: 'activity.html',  key: 'activity', icon: 'activity' },
@@ -164,8 +165,7 @@
      be noise. */
   const PARENT = {
     approvals:  { href: 'index.html', key: 'dashboard' },
-    research:   { href: 'advisor.html', key: 'advisor' },
-    lab:        { href: 'research.html', key: 'research' },
+    research:   { href: 'lab.html', key: 'lab' },
     risk:       { href: 'more.html', key: 'more' },
     activity:   { href: 'more.html', key: 'more' },
     evaluation: { href: 'more.html', key: 'more' },
@@ -178,7 +178,7 @@
   function renderChrome(activeKey) {
     const open = openCount();
     const overflow = NAV.filter((n) => !n.tab);
-    const section = activeKey === 'approvals' ? 'dashboard' : ['research', 'lab'].includes(activeKey) ? 'advisor' : activeKey;
+    const section = activeKey === 'approvals' ? 'dashboard' : activeKey === 'research' ? 'lab' : activeKey;
     const inOverflow = overflow.some((n) => n.key === section);
 
     const tabs = NAV.filter((n) => n.tab).map((n) => {
@@ -186,12 +186,12 @@
       return '<a class="tabitem" href="' + n.href + '"' +
         (n.key === activeKey ? ' aria-current="page"' : n.key === section ? ' data-section-active="true"' : '') +
         ' data-od-id="tab-' + n.key + '">' + ICON[n.icon] + dot +
-        '<span data-nav-label="' + n.key + '">' + t('nav.' + n.key) + '</span></a>';
+        '<span class="sr-only" data-nav-label="' + n.key + '">' + t('nav.' + n.key) + '</span></a>';
     }).join('') +
       '<a class="tabitem" href="more.html" id="tab-more"' +
       (activeKey === 'more' ? ' aria-current="page"' : (inOverflow ? ' data-section-active="true"' : '')) +
       ' data-od-id="tab-more">' + ICON.more +
-      '<span data-nav-label="more">' + t('nav.more') + '</span></a>';
+      '<span class="sr-only" data-nav-label="more">' + t('nav.more') + '</span></a>';
 
     const parent = PARENT[activeKey];
     const head = parent
@@ -206,8 +206,9 @@
       '<header class="topnav" data-od-id="topnav"><div class="topnav-inner">' +
         head +
         '<span class="spacer"></span>' +
-        '<a class="nav-status" href="system.html" id="nav-status" data-od-id="nav-status">' +
-          '<span class="dot"></span><span>' + t('nav.status') + '</span></a>' +
+        (window.CT_DEMO ? '<span class="chip">' + t('rs.scope.demo') + '</span>' : '') +
+        '<a class="assistant-launcher" id="assistant-launcher" href="advisor.html" data-od-id="assistant-launcher">' +
+          ICON.assistant + '<span class="sr-only" data-nav-label="advisor">' + t('nav.advisor') + '</span></a>' +
       '</div></header>' +
       '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner">' + tabs + '</div></nav>';
   }
@@ -334,20 +335,6 @@
       bar.className = 'conn-bar';
       bar.hidden = true;
     }
-    let details = document.getElementById('resource-status');
-    if (!details) {
-      details = document.createElement('div'); details.id = 'resource-status'; details.className = 'container';
-      details.innerHTML = '<button class="sync-pill" data-open-sheet="sources-sheet" aria-haspopup="dialog"><span id="sync-dot" class="dot"></span><span id="sync-label"></span>' + CHEVRON + '</button>';
-      bar.after(details);
-      document.body.insertAdjacentHTML('beforeend', '<dialog id="sources-sheet" class="glass-sheet" data-sheet aria-labelledby="sources-title">' +
-        '<div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="sources-title"></h2>' +
-        '<button class="circle-control" data-close-sheet="sources-sheet" data-i18n-aria="common.close" aria-label="' + t('common.close') + '">' + ICON.cross + '</button></div><div id="source-rows"></div></dialog>');
-    }
-    /* One fact, one place. While signed out the bar already says it, so the
-       source pill would be a second, vaguer copy of the same message. */
-    details.hidden = !CT_API.authenticated;
-    document.getElementById('sync-label').textContent = t(loading ? 'ux.connecting' : missing.length ? 'ux.syncGap' : 'ux.synced');
-    document.getElementById('sync-dot').className = 'dot ' + (missing.length || !CT_API.authenticated || !CT_API.state.online ? 'dot-warn' : 'dot-ok');
     document.getElementById('sources-title').textContent = t('ux.sources');
     setHTML(document.getElementById('source-rows'), rows.map(([key, item]) => {
       const live = CT_API.isLive(key);
@@ -434,8 +421,13 @@
     }, true);
     document.body.insertAdjacentHTML('afterbegin', renderChrome(activeKey));
     document.body.insertAdjacentHTML('beforeend', renderFoot());
-    const header = document.querySelector('.topnav');
-    if (header) header.insertAdjacentHTML('afterend', '<div class="conn-bar" id="conn-bar" hidden></div>');
+    // Shared diagnostics stay mounted across routes, but only appear when
+    // explicitly opened from System or the Assistant's account/tools sheet.
+    document.body.insertAdjacentHTML('beforeend', '<dialog id="sources-sheet" class="glass-sheet" data-sheet aria-labelledby="sources-title">' +
+      '<div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="sources-title" data-i18n="ux.sources">' + t('ux.sources') + '</h2>' +
+      '<button class="circle-control" data-close-sheet="sources-sheet" data-i18n-aria="common.close" aria-label="' + t('common.close') + '">' + ICON.cross + '</button></div>' +
+      '<div class="nav-status" id="nav-status" data-od-id="nav-status"></div>' +
+      '<div class="conn-bar" id="conn-bar" hidden></div><div id="source-rows"></div></dialog>');
     window.I18N.applyStatic();
     if (window.CT_DEMO) document.addEventListener('click', event => {
       const link = event.target.closest('a[href]');
