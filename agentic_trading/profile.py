@@ -261,14 +261,27 @@ def _find_todos(obj: Any, path: str, out: list[str]) -> None:
         out.append(path)
 
 
+#: Each profile document as last parsed, with the exact bytes it was parsed from. The API
+#: loads the profiles several times per request and in every background pass, and parsing the
+#: 58 KB risk profile in pure-Python YAML took 26 ms each time: enough, under the GIL, to queue
+#: every read a page opens behind the others, static files included. Reading and comparing the
+#: bytes is enough to know the document has not moved, whatever the file's timestamps say.
+_parsed: dict[Path, tuple[bytes, dict[str, Any]]] = {}
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ProfileError(f"missing profile file: {path}")
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-    if not isinstance(data, dict):
-        raise ProfileError(f"profile file is not a mapping: {path}")
-    return data
+    raw = path.read_bytes()
+    known = _parsed.get(path)
+    if known is None or known[0] != raw:
+        data = yaml.safe_load(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ProfileError(f"profile file is not a mapping: {path}")
+        known = _parsed[path] = (raw, data)
+    # A copy per load: Profiles records defaults_used as values are read, and a caller may
+    # adjust its own copy, so no two loads may share a document.
+    return copy.deepcopy(known[1])
 
 
 def load_profiles(config_dir: str | Path = "config") -> Profiles:

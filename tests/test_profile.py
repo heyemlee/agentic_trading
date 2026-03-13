@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 
@@ -175,3 +176,24 @@ def test_every_risk_profile_top_level_key_has_a_reader(config_dir):
         "risk_profile.yaml top-level keys with no reader changed.\n"
         f"newly unread: {sorted(unread - set(UNREAD_RISK_KEYS))}\n"
         f"now read, drop from UNREAD_RISK_KEYS: {sorted(set(UNREAD_RISK_KEYS) - unread)}")
+
+
+def test_a_loaded_profile_is_never_shared_and_an_edit_is_seen_at_once(config_dir, tmp_path):
+    """The parse is kept between loads, which is what keeps a console read from costing 26 ms
+    per load; nothing else may be. An edit of the same size, in place and within the same
+    clock tick, must still be read, and a load's defaults_used and documents are its own."""
+    dst = tmp_path / "config"
+    shutil.copytree(config_dir, dst)
+    first = load_profiles(dst)
+    first.risk_cfg("buckets", "core", "position_limits_pct_of_core", "individual_stock")
+    first.risk["execution_policy"]["stage"] = 99
+    second = load_profiles(dst)
+    assert second.defaults_used == [] and second.risk["execution_policy"]["stage"] == 3
+    path = dst / "risk_profile.yaml"
+    text = path.read_text(encoding="utf-8")
+    edited = re.sub(r"(?m)^(  stage: )3\b", r"\g<1>4", text, count=1)
+    assert edited != text and len(edited) == len(text)
+    stamp = path.stat()
+    path.write_text(edited, encoding="utf-8")
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert load_profiles(dst).stage == 4
