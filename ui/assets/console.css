@@ -828,27 +828,45 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
   right: max(16px, env(safe-area-inset-right, 0px));
   bottom: var(--tabbar-bottom); height: var(--tabbar-h); max-width: 440px;
   margin-inline: auto; padding: 4px; border: 1px solid #ffffffd9; border-radius: 999px;
-  background: linear-gradient(135deg, #ffffffb8, #ffffff73);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  backdrop-filter: blur(24px) saturate(150%);
+  background: linear-gradient(135deg, #ffffff85, #ffffff38);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
   box-shadow: 0 8px 32px #00000012, 0 2px 8px #00000006,
     inset 0 1px 1px #fff, inset 0 -1px 1px #00000008;
 }
-.tabbar-inner { gap: 4px; max-width: none; }
+.tabbar-inner { position: relative; isolation: isolate; gap: 4px; max-width: none; }
+.tabbar, .tabbar .tabitem { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.tab-indicator {
+  position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none;
+  border-radius: 999px; opacity: 0;
+  background: linear-gradient(145deg, #ffffff85, #ffffff14 48%, #ffffff66);
+  border: 1px solid #ffffffd9;
+  box-shadow: 0 2px 8px #0000000b, inset 0 1px 2px #fff, inset 0 -1px 2px #ffffffb3;
+  -webkit-backdrop-filter: blur(3px) saturate(120%);
+  backdrop-filter: blur(3px) saturate(120%);
+  transition: transform 420ms cubic-bezier(.22, 1, .36, 1), width 420ms cubic-bezier(.22, 1, .36, 1);
+  will-change: transform;
+}
+.tab-indicator::after {
+  content: ''; position: absolute; inset: -1px; border-radius: inherit;
+  box-shadow: inset 1px 0 1px #c6e6ef80, inset -1px 0 1px #f3e2cf80;
+}
+.tab-indicator.is-ready { opacity: 1; }
+.tabbar.is-dragging .tab-indicator { transition: none; }
 .tabitem {
-  min-width: 44px; min-height: 44px; padding: 0; gap: 0; border-radius: 999px;
-  color: #697176; transition: background 180ms ease, color 180ms ease, transform 180ms var(--ease-spring);
+  z-index: 1; min-width: 44px; min-height: 44px; padding: 0; gap: 0; border-radius: 999px;
+  color: #697176; transition: color 180ms ease;
 }
 .tabitem svg { width: 32px; height: 32px; }
 .tabitem[aria-current="page"], .tabitem[aria-expanded="true"], .tabitem[data-section-active="true"] {
-  background: #18181b14; color: #111; box-shadow: inset 0 1px 1px #ffffffb3, 0 1px 3px #00000004;
+  background: transparent; color: #111; box-shadow: none;
 }
 .tabitem[aria-current="page"] svg { transform: none; }
-@media (hover: hover) {
-  .tabitem:hover { background: #18181b08; color: #111; }
-  .tabitem[aria-current="page"]:hover, .tabitem[data-section-active="true"]:hover { background: #18181b1a; }
-}
-.tabitem:active { transform: scale(.96); background: #18181b1a; color: #111; }
+@media (hover: hover) { .tabitem:hover { color: #111; } }
+.tabitem:active { color: #111; }
+.tabbar.is-dragging .tabitem { color: #697176; cursor: grabbing; }
+.tabbar.is-dragging .tabitem[data-drag-active="true"] { color: #111; }
+.tabbar.is-dragging .tabitem svg { transform: none; }
 .tabitem:focus-visible { outline: 2px solid #111; outline-offset: -3px; }
 .tabdot { top: 8px; margin-left: 9px; background: var(--danger); }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -914,6 +932,7 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 ::view-transition-new(root) { animation-duration: 180ms; }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .topnav, .tabbar { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none; border: 1px solid #667066; }
+  .tab-indicator { background: #ececec; border-color: #777; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }
 

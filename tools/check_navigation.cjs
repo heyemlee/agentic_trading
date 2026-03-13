@@ -247,6 +247,83 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#assistant-launcher').evaluate(el => getComputedStyle(el, '::before').animationName), 'assistant-halo');
  await selectTab('dashboard');
 
+ // One lens survives routing. Tap transitions pass through intermediate
+ // positions; dragging previews continuously and commits just once on release.
+ const lensAligned = () => page.waitForFunction(() => {
+   const lens = document.querySelector('.tab-indicator').getBoundingClientRect();
+   const tab = document.querySelector('.tabitem[aria-current], .tabitem[data-section-active]').getBoundingClientRect();
+   return Math.abs(lens.left - tab.left) < 1 && Math.abs(lens.width - tab.width) < 1;
+ });
+ await lensAligned();
+ const slide = await page.evaluate(async () => {
+   const lens = document.querySelector('.tab-indicator');
+   window.navigationLens = lens;
+   const from = lens.getBoundingClientRect().left;
+   document.querySelector('[data-od-id="tab-more"]').click();
+   await new Promise(resolve => setTimeout(resolve, 100));
+   return {same:lens === document.querySelector('.tab-indicator'), from,
+     middle:lens.getBoundingClientRect().left,
+     to:document.querySelector('[data-od-id="tab-more"]').getBoundingClientRect().left};
+ });
+ assert.equal(slide.same, true, 'Routing preserves the animated lens');
+ assert.ok(slide.middle > slide.from + 1 && slide.middle < slide.to - 1, 'Selection slides rather than jumping');
+ await selectTab('portfolio'); // Reverse while the previous animation is in flight.
+ await lensAligned();
+ assert.equal(await page.evaluate(() => window.navigationLens === document.querySelector('.tab-indicator')), true);
+ const portfolioTab = await page.locator('[data-od-id="tab-portfolio"]').boundingBox();
+ const labTab = await page.locator('[data-od-id="tab-lab"]').boundingBox();
+ const cx = box => box.x + box.width / 2;
+ const cy = portfolioTab.y + portfolioTab.height / 2;
+ const depthBeforeDrag = await page.evaluate(() => history.state.ctDepth);
+ await page.mouse.move(cx(portfolioTab), cy);
+ await page.mouse.down();
+ await page.mouse.move((cx(portfolioTab) + cx(labTab)) / 2, cy, {steps:4});
+ assert.ok(page.url().endsWith('portfolio.html'), 'A drag does not navigate before release');
+ const dragLeft = await page.locator('.tab-indicator').evaluate(el => el.getBoundingClientRect().left);
+ assert.ok(dragLeft > portfolioTab.x + 5 && dragLeft < labTab.x - 5, 'Lens tracks the finger between tabs');
+ await page.mouse.move(cx(labTab), cy, {steps:4});
+ await page.mouse.up();
+ await page.waitForURL('**/lab.html');
+ await lensAligned();
+ assert.equal(await page.evaluate(() => history.state.ctDepth), depthBeforeDrag + 1, 'Drag commits one route');
+ await page.goBack();
+ await page.waitForURL('**/portfolio.html');
+ await lensAligned();
+ // Exercise native touch panning as well as mouse pointer capture in Chrome.
+ if (!safari) {
+   const cdp = await context.newCDPSession(page);
+   await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{x:cx(portfolioTab),y:cy}]});
+   for (let step = 1; step <= 6; step++) {
+     await cdp.send('Input.dispatchTouchEvent', {type:'touchMove',
+       touchPoints:[{x:cx(portfolioTab) + (cx(labTab) - cx(portfolioTab)) * step / 6,y:cy}]});
+   }
+   assert.ok(page.url().endsWith('portfolio.html'));
+   await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
+   await page.waitForURL('**/lab.html');
+   await lensAligned();
+   await page.goBack();
+   await page.waitForURL('**/portfolio.html');
+   await lensAligned();
+   await cdp.detach();
+ }
+ // Pointer cancellation restores the current section without committing a route.
+ await page.mouse.move(cx(portfolioTab), cy);
+ await page.mouse.down();
+ await page.mouse.move(cx(labTab), cy, {steps:4});
+ await page.locator('.tabbar').dispatchEvent('pointercancel', {pointerId:1});
+ await page.mouse.up();
+ await lensAligned();
+ assert.ok(page.url().endsWith('portfolio.html'));
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await selectTab('lab');
+ await lensAligned();
+ assert.equal(await page.locator('.tab-indicator').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await selectTab('advisor');
+ await page.locator('#assistant-back').click();
+ await page.waitForURL('**/lab.html');
+ await lensAligned();
+
  // More tools must switch synchronously even while their first reads are pending.
  await selectTab('more');
  const documentToken = await page.evaluate(() => window.navigationTestToken = crypto.randomUUID());
@@ -303,6 +380,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  // home indicator, with translated accessible names despite hidden labels.
  for (const [width, height] of [[320,568], [390,844], [440,956], [1280,900]]) {
    await page.setViewportSize({width, height});
+   await lensAligned();
    await page.evaluate(() => document.documentElement.style.setProperty('--tabbar-bottom', '34px'));
    const layout = await page.evaluate(() => ({
      bar: document.querySelector('.tabbar').getBoundingClientRect().toJSON(),

@@ -210,7 +210,7 @@
         '<a class="assistant-launcher" id="assistant-launcher" href="advisor.html" data-od-id="assistant-launcher">' +
           ICON.assistant + '<span class="sr-only" data-nav-label="advisor">' + t('nav.advisor') + '</span></a>' +
       '</div></header>' +
-      '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner">' + tabs + '</div></nav>';
+      '<nav class="tabbar" aria-label="Sections"><div class="tabbar-inner"><span class="tab-indicator" aria-hidden="true"></span>' + tabs + '</div></nav>';
   }
 
 
@@ -387,14 +387,123 @@
     }
   }
 
+  // Keep one physical glass lens across routes, so even interrupted transitions
+  // continue from the currently painted position rather than replaying an entry.
+  let syncTabIndicator = () => {};
+  function wireTabIndicator() {
+    const bar = document.querySelector('.tabbar');
+    const track = bar.querySelector('.tabbar-inner');
+    const lens = bar.querySelector('.tab-indicator');
+    const tabs = [...bar.querySelectorAll('.tabitem')];
+    let gesture = null, suppressClickUntil = 0, placed = false;
+    const active = () => tabs.find(el => el.matches('[aria-current="page"], [data-section-active="true"]'));
+    const position = (left, width) => {
+      lens.style.width = width + 'px';
+      lens.style.transform = 'translate3d(' + left + 'px, 0, 0)';
+    };
+    const clearPreview = () => tabs.forEach(el => el.removeAttribute('data-drag-active'));
+    const finishGesture = () => {
+      const previous = gesture;
+      gesture = null;
+      bar.classList.remove('is-dragging');
+      clearPreview();
+      if (previous && bar.hasPointerCapture(previous.id)) bar.releasePointerCapture(previous.id);
+    };
+    syncTabIndicator = () => {
+      const target = active();
+      if (!target || !track.getBoundingClientRect().width) return;
+      finishGesture();
+      if (!placed) lens.style.transition = 'none';
+      position(target.offsetLeft, target.offsetWidth);
+      if (!placed) {
+        lens.getBoundingClientRect();
+        lens.style.removeProperty('transition');
+        placed = true;
+      }
+      lens.classList.add('is-ready');
+    };
+    const dragTo = clientX => {
+      const width = gesture.width;
+      const left = Math.max(0, Math.min(track.clientWidth - width,
+        clientX - track.getBoundingClientRect().left - gesture.grab));
+      position(left, width);
+      const center = left + width / 2;
+      gesture.target = tabs.reduce((nearest, el) =>
+        Math.abs(el.offsetLeft + el.offsetWidth / 2 - center) <
+        Math.abs(nearest.offsetLeft + nearest.offsetWidth / 2 - center) ? el : nearest);
+      tabs.forEach(el => el.setAttribute('data-drag-active', String(el === gesture.target)));
+    };
+    bar.addEventListener('pointerdown', event => {
+      if (!event.isPrimary || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey ||
+          !event.target.closest('.tabitem')) return;
+      suppressClickUntil = 0;
+      const rect = lens.getBoundingClientRect();
+      gesture = {id: event.pointerId, x: event.clientX, y: event.clientY,
+        width: rect.width, grab: event.clientX >= rect.left && event.clientX <= rect.right
+          ? event.clientX - rect.left : rect.width / 2, dragging: false};
+    });
+    bar.addEventListener('pointermove', event => {
+      if (!gesture || gesture.id !== event.pointerId) return;
+      const dx = Math.abs(event.clientX - gesture.x), dy = Math.abs(event.clientY - gesture.y);
+      if (!gesture.dragging) {
+        if (dy > dx && dy > 6) { finishGesture(); return; }
+        if (dx < 6) return;
+        gesture.dragging = true;
+        bar.classList.add('is-dragging');
+        bar.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+      dragTo(event.clientX);
+    });
+    bar.addEventListener('pointerup', event => {
+      if (!gesture || gesture.id !== event.pointerId) return;
+      if (!gesture.dragging) { finishGesture(); return; }
+      dragTo(event.clientX);
+      const target = gesture.target;
+      // The synthetic click uses the same routing path as taps and keyboards.
+      // Suppress only the browser's subsequent pointer click, never that click.
+      suppressClickUntil = performance.now() + 500;
+      finishGesture();
+      target.click();
+      syncTabIndicator();
+    });
+    const cancel = () => {
+      if (gesture?.dragging) suppressClickUntil = performance.now() + 500;
+      finishGesture(); syncTabIndicator();
+    };
+    bar.addEventListener('pointercancel', cancel);
+    // Touch starts with implicit capture on the icon. Its bubbling loss when
+    // we transfer capture to the bar is not a cancelled drag.
+    bar.addEventListener('lostpointercapture', event => {
+      if (event.target === bar && gesture) cancel();
+    });
+    bar.addEventListener('dragstart', event => event.preventDefault());
+    bar.addEventListener('click', event => {
+      if (event.detail && performance.now() < suppressClickUntil) {
+        event.preventDefault(); event.stopPropagation();
+      }
+    }, true);
+    window.addEventListener('blur', cancel);
+    if (window.ResizeObserver) new ResizeObserver(syncTabIndicator).observe(track);
+    else window.addEventListener('resize', syncTabIndicator);
+    syncTabIndicator();
+  }
+
   let chromeMounted = false;
   function mount(activeKey) {
     if (chromeMounted) {
       const template = document.createElement('div');
       template.innerHTML = renderChrome(activeKey);
-      for (const selector of ['.topnav', '.tabbar']) {
-        document.querySelector(selector).replaceWith(template.querySelector(selector));
-      }
+      document.querySelector('.topnav').replaceWith(template.querySelector('.topnav'));
+      const nextTabs = template.querySelectorAll('.tabitem');
+      document.querySelectorAll('.tabitem').forEach((tab, index) => {
+        for (const attr of ['aria-current', 'data-section-active']) {
+          const value = nextTabs[index].getAttribute(attr);
+          if (value === null) tab.removeAttribute(attr);
+          else tab.setAttribute(attr, value);
+        }
+      });
+      syncTabIndicator();
       window.I18N.applyStatic();
       paintNavStatus(); paintFoot(); paintConnection();
       return;
@@ -420,6 +529,7 @@
       if (event.target.matches?.('dialog[data-sheet]')) { event.preventDefault(); closeSheet(event.target.id); }
     }, true);
     document.body.insertAdjacentHTML('afterbegin', renderChrome(activeKey));
+    wireTabIndicator();
     document.body.insertAdjacentHTML('beforeend', renderFoot());
     // Shared diagnostics stay mounted across routes, but only appear when
     // explicitly opened from System or the Assistant's account/tools sheet.
