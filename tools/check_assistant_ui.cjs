@@ -59,7 +59,7 @@ const ui = path.resolve(__dirname, '../ui');
       const layout = await page.evaluate(() => {
         const input = document.getElementById('chat-input').getBoundingClientRect();
         const send = document.getElementById('chat-send').getBoundingClientRect();
-        const shell = document.body.getBoundingClientRect();
+        const shell = document.querySelector('.assistant-shell').getBoundingClientRect();
         const dock = document.querySelector('.composer-dock').getBoundingClientRect();
         return { input: input.toJSON(), send: send.toJSON(), height: innerHeight,
           width: innerWidth, scrollWidth: document.documentElement.scrollWidth, shell: shell.toJSON(), dock: dock.toJSON(),
@@ -82,6 +82,11 @@ const ui = path.resolve(__dirname, '../ui');
       await page.screenshot({ path: path.join(process.env.CT_UI_CAPTURE_DIR, name + '.png'), animations: 'disabled' });
     };
     await assertComposer();
+    assert.equal(await page.locator('.assistant-spark, .welcome-eyebrow, #assistant-intro, .composer-note, [data-i18n="ai.welcomeTitle"]').count(), 0);
+    assert.equal(await page.locator('#assistant-account-status').isVisible(), false);
+    assert.equal(await page.locator('#context-sheet #assistant-account-status').count(), 1);
+    await page.locator('.conn-bar').evaluate(el => { el.hidden = false; });
+    assert.equal(await page.locator('.conn-bar').isVisible(), false, 'No shared status banner in the assistant');
     await capture('assistant-welcome-phone');
     await page.locator('[data-open-sheet="conversation-sheet"]').click();
     await capture('assistant-history-phone');
@@ -220,8 +225,9 @@ const ui = path.resolve(__dirname, '../ui');
     });
     await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
     assert.equal(await page.locator('#assistant-back').isVisible(), true, 'Back remains available with the keyboard');
-    assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'fixed',
-      'Only the open-keyboard layout uses a visual-viewport-sized fixed shell');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'relative',
+      'Opening the keyboard must not change document positioning');
+    assert.equal(await page.locator('.assistant-shell').evaluate(el => getComputedStyle(el).position), 'fixed');
     assert.equal(await page.locator('.tabbar').isVisible(), false);
     assert.ok(await page.locator('#chat-send').evaluate(el => el.getBoundingClientRect().bottom <= 460));
     // iOS pans to a caret with a scroll-only event, even if the height is unchanged.
@@ -259,6 +265,46 @@ const ui = path.resolve(__dirname, '../ui');
       document.body.style.getPropertyValue('--chat-top') === '0px');
     await assertComposer();
     await capture('assistant-restored-viewport');
+    // Native WebKit can pan the root despite its overflow lock, then leave that
+    // scroll behind when the keyboard closes. Allow root overflow to reproduce
+    // that otherwise unavailable native behavior in a desktop browser engine.
+    // Dismissal need not blur the input. Repeated cycles must restore the same
+    // composer position without changing the draft or history reading position.
+    const beforeKeyboard = await page.locator('#chat-input').boundingBox();
+    const draftBeforeKeyboard = await page.locator('#chat-input').inputValue();
+    await page.locator('#chat-scroll').evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+    for (const blur of [false, true, false]) {
+      await page.locator('#chat-input').focus();
+      await page.evaluate(() => {
+        Object.defineProperty(visualViewport, 'height', { configurable: true, value: 460 });
+        Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 170 });
+        visualViewport.dispatchEvent(new Event('resize'));
+      });
+      await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
+      const panned = await page.evaluate(blur => {
+        document.documentElement.style.overflow = 'auto';
+        document.documentElement.style.minHeight = '200vh';
+        window.scrollTo(0, 150);
+        const panned = scrollY;
+        if (blur) document.getElementById('chat-input').blur();
+        Object.defineProperty(visualViewport, 'height', { configurable: true, value: innerHeight });
+        // Keep offsetTop stale on purpose; the closed keyboard must ignore it.
+        visualViewport.dispatchEvent(new Event('resize'));
+        return panned;
+      }, blur);
+      assert.ok(panned > 0, 'The regression must actually reproduce root scrolling');
+      await page.waitForFunction(() => scrollY === 0 && !document.body.classList.contains('assistant-keyboard'));
+      await page.evaluate(() => {
+        document.documentElement.style.removeProperty('overflow');
+        document.documentElement.style.removeProperty('min-height');
+        visualViewport.dispatchEvent(new Event('scroll'));
+      });
+      await assertComposer();
+      const restored = await page.locator('#chat-input').boundingBox();
+      assert.ok(Math.abs(restored.y - beforeKeyboard.y) < 1, 'Keyboard dismissal restores the exact input position');
+      assert.equal(await page.locator('#chat-input').inputValue(), draftBeforeKeyboard);
+      assert.equal(await page.locator('#chat-scroll').evaluate(el => el.scrollTop), 0);
+    }
     await page.evaluate(() => {
       window.scrollTo(0, 300);
       delete visualViewport.height;
@@ -273,6 +319,58 @@ const ui = path.resolve(__dirname, '../ui');
     await page.locator('#new-conversation').click();
     await assertComposer();
     await capture('assistant-desktop');
+    // Installed iPhone apps have nonzero safe areas. Desktop WebKit does not
+    // expose those insets or standalone mode, so substitute only these browser
+    // inputs in the shipped CSS. Also emulate dvh losing the top inset after
+    // keyboard dismissal (WebKit #254868); the full vh viewport stays unchanged.
+    await page.route('**/assets/*.css', async route => {
+      const file = path.join(ui, new URL(route.request().url()).pathname.slice('/ui/'.length));
+      const css = (await fs.readFile(file, 'utf8'))
+        .replace(/env\(safe-area-inset-top,\s*0px\)/g, '62px')
+        .replace(/env\(safe-area-inset-bottom,\s*0px\)/g, '34px')
+        .replace(/\(display-mode: standalone\)/g, '(min-width: 0px)')
+        .replace(/\b100dvh\b/g, 'calc(100vh - var(--test-dvh-loss, 0px))');
+      await route.fulfill({ contentType: 'text/css', body: css });
+    });
+    await page.setViewportSize({ width: 440, height: 956 });
+    await page.reload();
+    await page.waitForFunction(() => CT_API.isLive('assistant') && CT_API.isLive('accounts'));
+    const assertSafeArea = async () => {
+      const geometry = await page.evaluate(() => {
+        const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+        return { header: rect('.assistant-header'), tabs: rect('.assistant-subhead'),
+          shell: rect('.assistant-shell'), dock: rect('.composer-dock') };
+      });
+      assert.equal(geometry.header.top, 62, 'Top safe area must be applied exactly once');
+      assert.ok(geometry.tabs.top >= geometry.header.bottom, 'Header must not cover account/chat controls');
+      assert.equal(geometry.shell.height, 956, 'Standalone chat keeps the full screen height');
+      assert.equal(geometry.dock.bottom, 956 - 34, 'Composer keeps only the home-indicator inset');
+    };
+    await assertSafeArea();
+    await capture('assistant-iphone-safe-area');
+    const phoneInput = await page.locator('#chat-input').boundingBox();
+    for (const blur of [false, true, false]) {
+      await page.locator('#chat-input').focus();
+      await page.evaluate(() => {
+        Object.defineProperty(visualViewport, 'height', { configurable: true, value: 460 });
+        Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 130 });
+        visualViewport.dispatchEvent(new Event('resize'));
+      });
+      await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
+      assert.ok(await page.locator('#chat-input').evaluate(el => el.getBoundingClientRect().bottom <= 590));
+      await page.evaluate(blur => {
+        if (blur) document.getElementById('chat-input').blur();
+        document.documentElement.style.setProperty('--test-dvh-loss', '62px');
+        Object.defineProperty(visualViewport, 'height', { configurable: true, value: innerHeight - 62 });
+        Object.defineProperty(visualViewport, 'offsetTop', { configurable: true, value: 62 });
+        visualViewport.dispatchEvent(new Event('resize'));
+      }, blur);
+      await page.waitForFunction(() => !document.body.classList.contains('assistant-keyboard'));
+      await assertSafeArea();
+      assert.equal((await page.locator('#chat-input').boundingBox()).y, phoneInput.y,
+        'The input must not move up by the safe-area height after keyboard dismissal');
+    }
+    await capture('assistant-iphone-after-keyboard');
     assert.deepEqual(errors, []);
     console.log('Assistant browser check passed: isolated accounts, review receipts, prompt drafts, pending/completed replies, copy, send/reply following, independent history scroll, stale viewport restoration, 320px/keyboard-height/landscape/desktop layouts.');
   } catch (error) { console.error(await page?.evaluate(() => document.body.innerText.slice(-4000))); throw error; }

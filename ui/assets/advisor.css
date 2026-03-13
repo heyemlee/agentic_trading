@@ -66,7 +66,7 @@
 .assistant-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; flex-shrink: 0; padding-block: 8px; background: #fff; }
 .assistant-header .container { max-width: 720px; }
 .assistant-heading, .assistant-subhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.assistant-heading { display: grid; grid-template-columns: 92px minmax(0, 1fr) 92px; gap: 4px; min-height: 52px; }
+.assistant-heading { display: grid; grid-template-columns: 92px minmax(0, 1fr) 92px; gap: 4px; min-height: 44px; }
 .assistant-heading h1 { font-size: 18px; letter-spacing: -.03em; text-align: center; }
 .assistant-back { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #f5f5f5; color: #111; }
 .assistant-back svg { width: 24px; height: 24px; }
@@ -87,7 +87,20 @@
 html:has(body.advisor-page.chat-view) { height: 100%; overflow: hidden; overscroll-behavior: none; }
 /* The assistant is a separate full-screen view. Only its conversation scrolls;
    the header and composer remain visible, without bottom navigation. */
-body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; min-height: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); overflow: hidden; display: flex; flex-direction: column; }
+body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; min-height: 0; padding: 0; overflow: hidden; }
+/* Keep the same fixed shell through keyboard opening and dismissal. Never
+   switch the document body between fixed and normal flow: iOS retains its pan. */
+.chat-view .assistant-shell { position: fixed; top: var(--chat-top, 0px); left: 0; width: 100%; height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); overflow: hidden; display: flex; flex-direction: column; }
+/* The shell already owns the top safe area. Sticky top would add it again
+   inside this scroll container and cover the account/chat controls below. */
+.chat-view .assistant-header { position: relative; top: auto; }
+/* Installed iOS apps can lose a safe-area height from dynamic viewport units
+   after keyboard dismissal (WebKit #254868). Their browser chrome never
+   collapses, so use the full, stable viewport; JS still sizes an open keyboard. */
+@media (display-mode: standalone) {
+  body.advisor-page.chat-view { height: 100vh; }
+  .chat-view .assistant-shell { height: var(--app-height, 100vh); }
+}
 .chat-view .topnav { position: relative; top: auto; }
 .chat-view .topnav, .chat-view #resource-status, .chat-view .conn-bar { flex-shrink: 0; }
 .advisor-page .topnav { background: #fff; backdrop-filter: none; }
@@ -101,12 +114,7 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 .chat-view .utility-section { display: none; }
 .chat-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; scrollbar-width: thin; scrollbar-color: #dce1d7 transparent; }
 .chat-welcome { padding: clamp(24px, 5dvh, 56px) 0 22px; }
-.assistant-spark { color: #6d813c; width: 46px; height: 46px; margin-bottom: 22px; }
-.assistant-spark svg { width: 100%; height: 100%; }
-.welcome-eyebrow { color: #68715f; font-size: 11px; font-weight: 500; letter-spacing: .16em; margin-bottom: 10px; }
-.chat-welcome h2 { font-size: clamp(27px, 6vw, 38px); font-weight: 500; letter-spacing: -.055em; line-height: 1.25; margin: 0; }
-.welcome-description { max-width: 440px; color: #68715f; font-size: 13px; line-height: 1.8; margin-top: 12px; }
-.prompt-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 28px; }
+.prompt-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 0; }
 .prompt-card { position: relative; display: flex; flex-direction: column; text-align: left; gap: 22px; padding: 16px; border: 1px solid #e8ebdf; border-radius: 18px; background: #f7f8f2; color: #20271b; min-width: 0; transition: background 160ms, transform 160ms; }
 .prompt-card:hover { background: #eff2e5; }
 .prompt-card:active { transform: scale(.98); }
@@ -140,7 +148,6 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 #chat-send { background: #c5ee67; color: #20340c; box-shadow: none; }
 #chat-send:disabled { background: #edf0e7; color: #abb39c; opacity: 1; }
 #chat-send svg, .composer-context svg { width: 20px; height: 20px; }
-.composer-note { color: #68715f; font-size: 11px; line-height: 1.5; text-align: center; margin-top: 8px; }
 #advisor-status { font-size: 12px; line-height: 1.5; color: #68715f; margin: 0 4px 8px; overflow-wrap: anywhere; }
 #advisor-status:empty { display: none; }
 .latest-control { position: absolute; z-index: 1; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-height: 44px; white-space: nowrap; padding: 10px 16px; border: 1px solid #e5e8e0; border-radius: 24px; background: #fff; color: #59614f; box-shadow: 0 3px 14px #1c290e12; font-size: 12px; }
@@ -162,14 +169,12 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 .context-tool > span:nth-child(2) { flex: 1; }
 .advisor-page button:focus-visible, .advisor-page a:focus-visible { outline: 2px solid #587731; outline-offset: 3px; }
 @media (min-width: 700px) { .chat-welcome { padding-top: 48px; } .prompt-card { padding: 20px; gap: 30px; } }
-@media (max-height: 620px) { .chat-view .topnav, .chat-view #resource-status { display: none; } .chat-view .composer-note { display: none; } .chat-welcome { padding-top: 18px; } }
+@media (max-height: 620px) { .chat-view .topnav, .chat-view #resource-status { display: none; } .chat-welcome { padding-top: 18px; } }
 @media (max-width: 360px) { .prompt-card { padding: 12px; } .prompt-card strong { font-size: 12px; } }
 @media (prefers-reduced-motion: reduce) { .thinking-dot { animation: none; } .prompt-card { transition: none; } }
 
-/* The visual viewport shrinks above the software keyboard. */
-body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--chat-top, 0px); right: 0; bottom: auto; left: 0; height: var(--app-height); padding-top: env(safe-area-inset-top, 0px); padding-bottom: 0; }
-.advisor-page.assistant-keyboard .tabbar, .advisor-page.assistant-keyboard .topnav,
-.advisor-page.assistant-keyboard #resource-status, .advisor-page.assistant-keyboard .composer-note { display: none; }
+/* The shell follows the visible area above the software keyboard. */
+.chat-view.assistant-keyboard .assistant-shell { padding-bottom: 0; }
 
 /* Assistant palette: neutral surfaces with black primary actions. */
 .advisor-page {
@@ -187,7 +192,6 @@ body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--cha
 .advisor-page .btn-green:disabled:hover, .advisor-page .btn-primary:disabled:hover {
   background: #eee; color: #666; opacity: 1;
 }
-.assistant-spark { color: #111; }
 .prompt-card { border-color: #e5e5e5; background: #f7f7f7; color: #111; }
 .prompt-card:hover { background: #eee; }
 .prompt-icon, .prompt-arrow { color: #555; }
@@ -211,8 +215,7 @@ body.advisor-page.chat-view.assistant-keyboard { position: fixed; top: var(--cha
 .advisor-page .glass-editor:focus { outline-color: #555; }
 .advisor-page .context-tool { color: #333; border-top-color: #e5e5e5; }
 .advisor-page #assistant-account-status,
-.advisor-page .welcome-eyebrow, .advisor-page .welcome-description,
-.advisor-page .chat-message .eyebrow, .advisor-page .composer-note,
+.advisor-page .chat-message .eyebrow,
 .advisor-page #advisor-status, .advisor-page .chat-progress { color: #666; }
 .advisor-page .mini-orb, .advisor-page .utility-orb, .advisor-page .ticker-orb,
 .advisor-page .task-orb, .advisor-page .count-bubble, .advisor-page .action-badge,

@@ -162,12 +162,17 @@ window.Console.page('advisor', function (document) {
     // iOS may pan the visual viewport to the caret without a resize. Once the
     // keyboard closes, ignore a stale offsetTop instead of leaving a blank gap.
     const top = keyboard ? Math.max(0, viewport?.offsetTop || 0) : 0;
-    // After dismissal WebKit can retain a shortened visual viewport. Let CSS
-    // 100dvh fill the screen again; only keyboard geometry needs a pixel height.
+    // After dismissal WebKit can retain a shortened visual viewport. Restore
+    // the CSS full-screen height (stable vh in installed apps); only an open
+    // keyboard needs a measured pixel height.
     if (keyboard) document.body.style.setProperty('--app-height', height + 'px');
     else document.body.style.removeProperty('--app-height');
     document.body.style.setProperty('--chat-top', top + 'px');
     document.body.classList.toggle('assistant-keyboard', keyboard);
+    // WebKit may leave the layout viewport scrolled after hiding the keyboard,
+    // including when the textarea stays focused. Reset only the document; the
+    // conversation and textarea retain their own independent reading positions.
+    if (!keyboard && (window.scrollX || window.scrollY || viewport?.offsetTop)) window.scrollTo?.(0, 0);
     resizeComposer();
     followLatest();
   }
@@ -177,14 +182,16 @@ window.Console.page('advisor', function (document) {
   }
   function settleViewport() {
     scheduleViewport();
-    // WebKit can report intermediate geometry during keyboard/restore animation.
+    // Coalesce animation events, then measure again after WebKit settles.
+    viewportTimers.forEach(clearTimeout); viewportTimers.clear();
     for (const delay of [250, 700]) {
       const timer = setTimeout(() => { viewportTimers.delete(timer); scheduleViewport(); }, delay);
       viewportTimers.add(timer);
     }
   }
-  window.visualViewport?.addEventListener('resize', scheduleViewport);
+  window.visualViewport?.addEventListener('resize', settleViewport);
   window.visualViewport?.addEventListener('scroll', scheduleViewport);
+  window.addEventListener?.('scroll', scheduleViewport);
   window.addEventListener?.('resize', settleViewport);
   window.addEventListener?.('pageshow', settleViewport);
   document.addEventListener('visibilitychange', settleViewport);
@@ -228,7 +235,6 @@ window.Console.page('advisor', function (document) {
         ? t('rs.accountsPartial') : '';
     el('assistant-coverage').textContent = state.coverage_info?.note || state.coverage || '';
     el('assistant-research-link').href = scopeLink('research');
-    el('assistant-intro').textContent = t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.intro');
     el('assistant-chat-note').textContent = t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.scopedChatNote');
     el('view-discover').hidden = binding.scope !== 'personal';
     el('agentic-records-panel').hidden = binding.scope !== 'agentic';
