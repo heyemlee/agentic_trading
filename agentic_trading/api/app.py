@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 import os
 import re
@@ -31,7 +30,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
-from starlette.datastructures import Headers
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.middleware.gzip import GZipMiddleware
 
 from ..env import load_env
 from ..service import Service, ServiceConflict, ServiceError
@@ -206,7 +207,6 @@ async def security_boundary(request: Request, call_next):
                 or request.headers.get("x-ct-request") != "1"
                 or request.headers.get("content-type", "").split(";")[0] != "application/json"):
         response = JSONResponse({"detail": "same-origin JSON request required"}, status_code=403)
-    session = _auth.session(request.cookies.get(COOKIE)) if response is None else None
     # The app shell is static and says nothing the login page does not already say. It has to
     # be reachable unauthenticated or "Add to Home Screen" from the login screen gets no icon,
     # and iOS only delivers push to an app added from that icon.
@@ -214,6 +214,13 @@ async def security_boundary(request: Request, call_next):
                        "/ui/manifest.webmanifest", "/ui/sw.js")
               or path.startswith(("/ui/assets/", "/ui/icons/"))
               or (path.startswith("/ui/") and request.query_params.get("demo") == "1" and not unsafe))
+    # A read of something public needs no session, and /auth/session looks its own up. The
+    # lookup reads the auth file and the database, and once a minute writes to it; it used to
+    # run here, on the event loop, for every script and icon a page loads, and a write waiting
+    # on the database lock stalled every request in the process. It now runs in a thread.
+    session = None
+    if response is None and (unsafe or not public):
+        session = await run_in_threadpool(_auth.session, request.cookies.get(COOKIE))
     if response is None and not public and session is None:
         if path.startswith("/ui"):
             # Carry where they were going. A push notification about a waiting
@@ -883,12 +890,16 @@ class ConsoleFiles(StaticFiles):
     """The console's files, with every page's asset references stamped by release.
 
     Still no build step: the pages on disk name ``assets/console.js`` and nothing more, and
-    are rewritten on the way out so that the name carries the release it belongs to,
+    are rewritten on the way out so that the name carries the files it belongs to,
     ``assets/console.js?v=8f0c…``, which is what lets :func:`_cache_policy` hand that URL to
-    the browser as immutable. In a release the stamp comes from ``RELEASE.json``; in a checkout
-    run by hand it is a digest of the asset files' sizes and modification times, so an edit
-    shows on the next load without anyone remembering to bump anything. A page carries an ETag
-    over its rewritten body, so a page that has not changed costs one round trip and no bytes.
+    the browser as immutable. In a release the stamp is a digest of what the asset files
+    contain, taken once, since a release never changes: a release that changes no asset keeps
+    the stamp, so a phone keeps the console it has instead of downloading all of it again. It
+    was the release's name, and on a day of eleven releases every device fetched the whole
+    console eleven times. In a checkout run by hand it is a digest of the asset files' sizes and
+    modification times, so an edit shows on the next load without anyone remembering to bump
+    anything. A page carries an ETag over its rewritten body, so a page that has not changed
+    costs one round trip and no bytes.
     """
 
     def __init__(self, directory: Path):
@@ -900,22 +911,23 @@ class ConsoleFiles(StaticFiles):
 
     def stamp(self) -> str:
         if self._release_stamp is None:
-            self._release_stamp = ""
-            if self.release.is_file():
-                try:
-                    name = str(json.loads(self.release.read_text())["name"])
-                    self._release_stamp = hashlib.sha256(name.encode()).hexdigest()[:12]
-                except (OSError, ValueError, KeyError, TypeError):
-                    logger.warning("unreadable %s; stamping console assets by file instead", self.release)
-        if self._release_stamp:
-            return self._release_stamp
+            self._release_stamp = self._digest(contents=True) if self.release.is_file() else ""
+        return self._release_stamp or self._digest(contents=False)
+
+    def _digest(self, *, contents: bool) -> str:
         digest = hashlib.sha256()
         for folder in ("assets", "icons"):
             for base, dirs, files in os.walk(self.root / folder):
                 dirs.sort()
                 for name in sorted(files):
-                    info = os.stat(os.path.join(base, name))
-                    digest.update(f"{base}/{name}:{info.st_mtime_ns}:{info.st_size}\n".encode())
+                    path = os.path.join(base, name)
+                    if contents:
+                        with open(path, "rb") as handle:
+                            marker = hashlib.sha256(handle.read()).hexdigest()
+                    else:
+                        info = os.stat(path)
+                        marker = f"{info.st_mtime_ns}:{info.st_size}"
+                    digest.update(f"{os.path.relpath(path, self.root)}:{marker}\n".encode())
         return digest.hexdigest()[:12]
 
     def primary_templates(self, page: str, name: str) -> str:
@@ -974,7 +986,35 @@ class ConsoleFiles(StaticFiles):
         return Response(body, headers=headers, media_type="text/html")
 
 
+class _WeakTags:
+    """Marks the console's ETags weak.
+
+    A file goes out compressed or not depending on who asks, so its tag cannot name exact
+    bytes, and a HEAD, which is never compressed, must still carry the tag a GET would. A weak
+    tag is all a revalidation needs: :meth:`ConsoleFiles.file_response` and Starlette's static
+    files both compare weakly.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        async def sending(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(raw=message["headers"])
+                tag = headers.get("etag")
+                if tag and not tag.startswith("W/"):
+                    headers["etag"] = "W/" + tag
+            await send(message)
+
+        await self.app(scope, receive, sending)
+
+
 _UI_DIR = Path(__file__).resolve().parents[2] / "ui"
 if _UI_DIR.is_dir():
-    app.mount("/ui", ConsoleFiles(_UI_DIR), name="ui")
+    # Compressed, because a phone downloads the whole console again after a release: about
+    # 600 KB of script, style and page that gzip brings under 180 KB. Only the console's own
+    # files, never an API answer: those are small, and they carry the session's CSRF token.
+    app.mount("/ui", _WeakTags(GZipMiddleware(ConsoleFiles(_UI_DIR), minimum_size=1024,
+                                             compresslevel=6)), name="ui")
     logger.info("console mounted at /ui from %s", _UI_DIR)

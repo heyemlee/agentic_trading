@@ -2,6 +2,7 @@
 import re
 import time
 from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -527,3 +528,62 @@ def test_editing_an_embedded_layout_invalidates_the_host_page_etag(tmp_path):
         assert changed.status_code == 200
         assert changed.headers['etag'] != original.headers['etag']
         assert 'Updated holdings layout' in changed.text
+
+
+def test_a_release_that_changes_no_asset_keeps_the_stamp(tmp_path):
+    """A phone keeps the console it has until a release changes what the console contains.
+
+    The stamp was the release's name, so a release that touched nothing under ui/ still made
+    every device download the whole console again; on 2026-09-22 that was eleven times.
+    """
+    from agentic_trading.api.app import ConsoleFiles
+
+    def release(name, script):
+        root = tmp_path / name
+        (root / 'ui' / 'assets').mkdir(parents=True)
+        (root / 'ui' / 'icons').mkdir()
+        (root / 'ui' / 'assets' / 'console.js').write_text(script)
+        (root / 'RELEASE.json').write_text('{"name": "' + name + '"}')
+        return ConsoleFiles(root / 'ui').stamp()
+
+    assert release('20260922T181724Z-0b1366d', 'same') == release('20260922T183528Z-0259b32', 'same')
+    assert release('20260922T184454Z-d07cad4', 'same') != release('20260922T185511Z-e6578d1', 'edited')
+
+
+def test_console_files_are_compressed_and_api_answers_are_not(auth_client):
+    """After a release a phone downloads the whole console again; gzip cuts that to under a
+    third. An API answer is never compressed: they are small and carry the CSRF token."""
+    gzip = {'Accept-Encoding': 'gzip'}
+    page = auth_client.get('/ui/login.html', headers=gzip)
+    assert page.headers['content-encoding'] == 'gzip'
+    assert 'accept-encoding' in page.headers['vary'].lower()
+    assert page.headers['etag'].startswith('W/'), 'a compressed body is not the bytes a strong tag names'
+    assert auth_client.head('/ui/login.html', headers=gzip).headers['etag'] == page.headers['etag']
+    again = auth_client.get('/ui/login.html', headers={**gzip, 'If-None-Match': page.headers['etag']})
+    assert again.status_code == 304 and not again.content
+    stamp = re.search(r'assets/[^"?]+\?v=([0-9a-f]+)', page.text)[1]
+    script = auth_client.get('/ui/assets/console.js?v=' + stamp, headers=gzip)
+    assert script.headers['content-encoding'] == 'gzip'
+    assert script.headers['cache-control'] == 'max-age=31536000, immutable'
+    assert script.content == (Path(__file__).parents[1] / 'ui/assets/console.js').read_bytes()
+    unchanged = auth_client.get('/ui/assets/console.js?v=' + stamp,
+                                headers={**gzip, 'If-None-Match': script.headers['etag']})
+    assert unchanged.status_code == 304
+    schema = auth_client.get('/openapi.json', headers=gzip)
+    assert schema.status_code == 200 and len(schema.content) > 1024
+    assert 'content-encoding' not in schema.headers
+
+
+def test_public_reads_do_not_look_up_a_session(console_auth, monkeypatch):
+    """Every script and icon a page loads used to look the session up on the event loop."""
+    calls = []
+    real = console_auth.session
+    monkeypatch.setattr(console_auth, 'session', lambda token: calls.append(token) or real(token))
+    client = TestClient(app, base_url='https://testserver')
+    for path in ('/ui/login.html', '/ui/assets/console.js', '/ui/icons/mark.svg', '/ui/sw.js'):
+        assert client.get(path).status_code == 200, path
+    assert calls == []
+    assert client.get('/auth/session').json()['authenticated'] is False
+    assert len(calls) == 1, '/auth/session looks its own session up, and only once'
+    assert client.get('/portfolio').status_code == 401
+    assert len(calls) == 2
