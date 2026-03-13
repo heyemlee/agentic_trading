@@ -14,7 +14,7 @@
   const routeName = url => url.pathname.slice(base.pathname.length).replace(/\.html$/, '') || 'index';
   let active, revision = 0;
   history.scrollRestoration = 'manual';
-  history.replaceState({ ...history.state, ctDepth: 0 }, '');
+  history.replaceState({ ...history.state, ctDepth: 0, ctAssistantReturnDepth: null }, '');
 
   function eligible(url) {
     return url.origin === base.origin && url.pathname.startsWith(base.pathname) &&
@@ -137,7 +137,13 @@
     return task;
   }
   function show(view, url, historyMode) {
-    if (historyMode === 'push') history.pushState({ ctDepth: (history.state?.ctDepth || 0) + 1 }, '', url);
+    if (historyMode === 'push') {
+      const depth = history.state?.ctDepth || 0;
+      // Exit the whole assistant visit, including account changes within it.
+      const returnDepth = view.name === 'advisor'
+        ? (active.name === 'advisor' ? history.state?.ctAssistantReturnDepth : depth) : null;
+      history.pushState({ ctDepth: depth + 1, ctAssistantReturnDepth: returnDepth ?? null }, '', url);
+    }
     if (active !== view) {
       document.dispatchEvent(new CustomEvent('ct:leave', { detail: { name: active.name } }));
       document.querySelectorAll('dialog[open]').forEach(el => el.close());
@@ -196,6 +202,15 @@
     if (window.CT_DEMO && url.origin === base.origin && routes.has(routeName(url))) url.searchParams.set('demo', '1');
     if (!eligible(url)) return;
     event.preventDefault();
+    if (link.id === 'assistant-back') {
+      const depth = history.state?.ctDepth || 0;
+      const returnDepth = history.state?.ctAssistantReturnDepth;
+      if (Number.isInteger(returnDepth) && returnDepth >= 0 && returnDepth < depth) {
+        revision++;
+        history.go(returnDepth - depth);
+      } else navigate(url);
+      return;
+    }
     if (link.id === 'back-link' && history.state?.ctDepth > 0) {
       revision++;
       history.back();

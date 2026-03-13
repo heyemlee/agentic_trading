@@ -15,14 +15,18 @@
 <link rel="stylesheet" href="assets/advisor.css" />
 </head>
 <body class="advisor-page">
-<main id="content" hidden data-i18n-title="ai.title">
-  <section class="section pagehead"><div class="container">
-    <div class="assistant-heading"><h1 data-i18n="ai.title">投资助手</h1>
+<header class="assistant-header"><div class="container">
+    <div class="assistant-heading">
+      <a id="assistant-back" class="assistant-back" href="index.html" data-i18n-aria="common.back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 19.5l-7-7.5 7-7.5"/></svg></a>
+      <h1 data-i18n="nav.advisor">助手</h1>
       <div class="chat-tools">
         <button class="circle-control" data-open-sheet="conversation-sheet" data-i18n-aria="ai.history" aria-haspopup="dialog" data-icon="history"></button>
         <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" data-icon="plus"></button>
       </div>
     </div>
+  </div></header>
+<main id="content" hidden data-i18n-title="ai.title">
+  <section class="section pagehead"><div class="container">
     <div class="assistant-subhead">
       <button id="assistant-context" class="scope-pill" data-open-sheet="context-sheet" aria-haspopup="dialog"><span class="scope-dot" aria-hidden="true"></span><span id="assistant-account-label"></span><span class="scope-chevron" aria-hidden="true"></span></button>
       <div class="assistant-shortcuts" role="tablist" data-i18n-aria="ai.title">
@@ -105,6 +109,7 @@
   </details></div></section>
   <section class="section" id="agentic-records-panel" hidden><div class="container"><details class="card app-disclosure"><summary data-i18n="rs.runs">Research</summary><div id="agentic-records"></div></details></div></section>
   <div class="context-tools">
+    <button class="context-tool" data-open-sheet="sources-sheet"><span data-icon="info" aria-hidden="true"></span><span data-i18n="ux.sources">数据来源</span><span class="ux-chevron" aria-hidden="true"></span></button>
     <button class="context-tool" data-open-sheet="personal-sheet"><span data-icon="personal" aria-hidden="true"></span><span data-i18n="ai.personal">我的个人情况</span><span class="ux-chevron" aria-hidden="true"></span></button>
     <button class="context-tool" data-open-sheet="jobs-sheet"><span data-icon="activity" aria-hidden="true"></span><span data-i18n="ux.activity">任务动态</span><span class="ux-chevron" aria-hidden="true"></span></button>
     <a class="context-tool" id="assistant-research-link" href="research.html"><span data-icon="research" aria-hidden="true"></span><span data-i18n="nav.hint.research">完整研究与 Agent 报告</span><span class="ux-chevron" aria-hidden="true"></span></a>

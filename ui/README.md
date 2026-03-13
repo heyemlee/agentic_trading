@@ -300,10 +300,13 @@ checks remain Chromium-only). These are browser regressions, not a real iOS keyb
 `CT_UI_CAPTURE_DIR` saves synthetic-data previews of the welcome,
 conversation and waiting states.
 
-The chat shell is a full-height flex layout in normal document flow, with the bottom navigation
-fixed to the viewport. It deliberately does not fix the whole body: iOS can retain a stale visual
-viewport or source-page scroll position for a fixed body and suspend the navigation above an empty
-strip. The shared router still clears source-page scroll before restoring a retained chat.
+The Assistant hides the shared top and bottom navigation as soon as it opens, in both Chat
+and Discover. Its own header keeps a back control visible even while the keyboard is open
+or account data is unavailable. Back returns to the page that opened this visit, skipping
+account changes inside Assistant; a direct entry falls back to Home. Data-source details
+remain available from Account & tools.
+The chat shell fills the viewport in normal document flow, reserving only the device safe
+areas. The shared router clears source-page scroll before restoring a retained chat.
 Only an open software keyboard with a focused editor switches the shell to a pixel-height fixed layout; keyboard
 resize and scroll events apply its visual height and vertical offset. Route entry and page
 restoration refresh geometry even when the keyboard closed on another page. Composer height

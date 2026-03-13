@@ -36,6 +36,13 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    : await chromium.launch({channel:process.env.CT_BROWSER_CHANNEL || 'chrome',headless:true});
  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  const page = await context.newPage();
+ const selectTab = async tab => {
+   if (await page.locator('body').evaluate(el => el.classList.contains('advisor-page'))) {
+     await page.locator('#assistant-back').click();
+     await page.waitForFunction(() => !document.body.classList.contains('advisor-page'));
+   }
+   await page.locator('[data-od-id="tab-' + tab + '"]').click();
+ };
  const errors = [], calls=[];
  page.on('pageerror', e=> errors.push(e.message));
  page.on('console', e=> {if(e.type()==='error' && !e.text().includes('401 (Unauthorized)')) errors.push(e.text())});
@@ -112,12 +119,12 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  }
  await page.waitForTimeout(2400);
  await page.waitForSelector('#startup', {state:'detached'});
- assert.equal(await page.locator('.tabbar').isVisible(),true);
+ assert.equal(await page.locator('.tabbar').isVisible(),false);
  assert.equal(await page.locator('.tabitem:focus').count(), 0, 'startup must not leave a focus ring on the selected tab');
  if (!safari) assert.equal(await page.locator('#content').evaluate(el => el === document.activeElement), true);
- assert.match((await page.locator('.brand').innerText()).replace(/\s+/g, ' '), /Agentic Trading/);
+ assert.equal(await page.locator('#assistant-back').isVisible(), true);
  await page.locator('#chat-input').fill('Draft stays across tabs');
- await page.locator('[data-od-id="tab-portfolio"]').click();
+ await selectTab('portfolio');
  // iOS keeps a scrolled page's visual offset while the next view changes the
  // shared body to fixed positioning. Entering chat must clear it first.
  const previousScroll = await page.evaluate(() => {
@@ -134,12 +141,12 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    return window.scrollY;
  });
  assert.ok(previousScroll > 0, 'Navigation regression needs a scrolled source page');
- await page.locator('[data-od-id="tab-advisor"]').click();
+ await selectTab('advisor');
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  const enteredChat = await page.evaluate(() => {
    const body = document.body.getBoundingClientRect();
-   const tabs = document.querySelector('.tabbar').getBoundingClientRect();
-   return {scrollY, bodyTop: body.top, bodyBottom: body.bottom, tabBottom: tabs.bottom, innerHeight,
+   const dock = document.querySelector('.composer-dock').getBoundingClientRect();
+   return {scrollY, bodyTop: body.top, bodyBottom: body.bottom, dockBottom: dock.bottom, innerHeight,
      bodyPosition: getComputedStyle(document.body).position};
  });
  assert.equal(enteredChat.scrollY, 0);
@@ -155,10 +162,10 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(scrollOrder[0]?.fixed, false, 'Source scroll must clear before chat becomes fixed');
  assert.ok(Math.abs(enteredChat.bodyTop) < 2 && Math.abs(enteredChat.bodyBottom - enteredChat.innerHeight) < 2,
    'Chat shell must fill the viewport after bottom-tab navigation: ' + JSON.stringify(enteredChat));
- assert.ok(Math.abs(enteredChat.tabBottom - enteredChat.innerHeight) < 2,
-   'Assistant navigation must stay attached to the screen bottom: ' + JSON.stringify(enteredChat));
- assert.equal(await page.locator('.tabbar').evaluate(el => getComputedStyle(el).position), 'fixed',
-   'Assistant tab bar must stay anchored during mobile browser viewport changes');
+ assert.ok(Math.abs(enteredChat.dockBottom - enteredChat.innerHeight) < 2,
+   'Composer fills the space previously reserved for navigation: ' + JSON.stringify(enteredChat));
+ assert.equal(await page.locator('.tabbar').isVisible(), false);
+ assert.equal(await page.locator('#assistant-back').isVisible(), true);
  // Route transitions can leave a short visual viewport even with no focused
  // editor. Browser chrome alone must not hide the tab bar as if a keyboard opened.
  await page.evaluate(() => {
@@ -166,7 +173,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    visualViewport.dispatchEvent(new Event('resize'));
  });
  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
- assert.equal(await page.locator('.tabbar').isVisible(), true);
+ assert.equal(await page.locator('.tabbar').isVisible(), false);
  assert.equal(await page.evaluate(() => document.body.classList.contains('assistant-keyboard')), false);
  await page.evaluate(() => { delete visualViewport.height; visualViewport.dispatchEvent(new Event('resize')); });
  if (process.env.CT_UI_CAPTURE_DIR) {
@@ -174,6 +181,15 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    await fs.mkdir(folder, {recursive:true});
    await page.screenshot({path:path.join(folder, 'assistant-after-tab-navigation.png'), animations:'disabled'});
  }
+ // Account changes are part of one Assistant visit: Back exits to the source.
+ await page.evaluate(() => {
+   const link = document.createElement('a'); link.href = 'advisor.html?scope=personal';
+   document.body.append(link); link.click(); link.remove();
+ });
+ await page.locator('#assistant-back').click();
+ await page.waitForURL('**/portfolio.html');
+ assert.equal(await page.locator('.tabbar').isVisible(), true);
+ await selectTab('advisor');
  // Leave while the keyboard is open; close it on another page, then return
  // without a viewport resize event. A retained chat must not keep a short body.
  await page.evaluate(() => {
@@ -183,18 +199,20 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    visualViewport.dispatchEvent(new Event('resize'));
  });
  await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
- await page.evaluate(() => document.querySelector('[data-od-id="tab-portfolio"]').click());
+ await page.locator('#assistant-back').click();
+ await page.waitForURL('**/portfolio.html');
+ assert.equal(await page.locator('.tabbar').isVisible(), true);
  assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
  await page.evaluate(() => { delete visualViewport.height; delete visualViewport.offsetTop; });
- await page.locator('[data-od-id="tab-advisor"]').click();
+ await selectTab('advisor');
  await page.waitForFunction(() => !document.body.classList.contains('assistant-keyboard') &&
    Math.abs(document.body.getBoundingClientRect().height - visualViewport.height) < 2);
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  assert.ok(await page.evaluate(() => Math.abs(document.querySelector('.composer-dock').getBoundingClientRect().bottom -
-   document.querySelector('.tabbar').getBoundingClientRect().top) < 2));
+   innerHeight) < 2));
  await page.locator('#view-discover').click();
- await page.locator('[data-od-id="tab-more"]').click();
- await page.locator('[data-od-id="tab-advisor"]').click();
+ await selectTab('more');
+ await selectTab('advisor');
  assert.equal(await page.locator('#view-discover').getAttribute('aria-selected'),'true');
  await page.goBack();assert.ok(page.url().endsWith('more.html'));
  await page.goForward();assert.ok(page.url().endsWith('advisor.html'));
@@ -202,15 +220,15 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('.tabbar').count(),1);
  assert.equal(await page.locator('#content').count(),1);
  assert.equal(await page.locator('#startup').count(),0, 'route changes must not replay the startup');
- await page.locator('[data-od-id="tab-portfolio"]').click();
+ await selectTab('portfolio');
  await page.locator('a[href="advisor.html?prompt=holdings-risk"]').click();
  assert.ok(page.url().includes('prompt=holdings-risk'));
  // Typed text is preserved, including when opening an analysis deep link.
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
- await page.locator('[data-od-id="tab-dashboard"]').click();
+ await selectTab('dashboard');
 
  // More tools must switch synchronously even while their first reads are pending.
- await page.locator('[data-od-id="tab-more"]').click();
+ await selectTab('more');
  const documentToken = await page.evaluate(() => window.navigationTestToken = crypto.randomUUID());
  for (const name of ['risk', 'activity', 'evaluation', 'profile', 'notifications', 'system']) {
    const result = await page.evaluate(name => {
@@ -241,7 +259,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.locator('#back-link').click(); await page.waitForURL('**/more.html');
  await page.goForward(); await page.waitForURL('**/profile.html');
  assert.equal(await page.locator('#profile-notes').inputValue(), 'Personal draft survives returning to More');
- await page.locator('[data-od-id="tab-dashboard"]').click();
+ await selectTab('dashboard');
 
  assert.equal(calls.filter(c=>c.path==='/auth/session').length,1);
  assert.equal(calls.filter(c=>c.method==='POST').length,0);
@@ -249,17 +267,17 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  delay=0;denied=true;
  await page.evaluate(()=>CT_API.readOnce('portfolio'));
  assert.equal(await page.locator('#content').isVisible(),false);
- await page.locator('[data-od-id="tab-advisor"]').click();
+ await selectTab('advisor');
  assert.equal(await page.locator('#content').isVisible(),false);
  assert.equal(await page.locator('#chat-input').inputValue(),'');
- await page.locator('[data-od-id="tab-more"]').click();
+ await selectTab('more');
  await page.evaluate(() => document.querySelector('#content a[href="profile.html"]').click());
  assert.equal(await page.locator('#profile-notes').inputValue(), '');
  assert.equal(await page.locator('#content').isVisible(), false);
  calls.length = 0;
  await page.goto(origin + '/ui/index.html?demo=1');
  for (const tab of ['advisor', 'portfolio', 'more', 'dashboard']) {
-   await page.locator('[data-od-id="tab-' + tab + '"]').click();
+   await selectTab(tab);
    assert.ok(page.url().includes('demo=1'));
    assert.equal(await page.locator('#content').isVisible(), true);
  }
@@ -299,7 +317,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
      }
    }
  }
- await page.locator('[data-od-id="tab-more"]').click();
+ await selectTab('more');
  for (const ticker of ['VTI', 'VOO']) {
    await page.evaluate(ticker => {
      const link = document.createElement('a'); link.href = 'research.html?demo=1&ticker=' + ticker;
@@ -341,6 +359,11 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    if (directDelay) await new Promise(resolve => setTimeout(resolve, directDelay));
    return route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(apiPayload(url))});
  });
+ await direct.goto(origin + '/ui/advisor.html');
+ await direct.waitForSelector('#startup', {state:'detached'});
+ assert.equal(await direct.locator('.tabbar').isVisible(), false);
+ await direct.locator('#assistant-back').click(); await direct.waitForURL('**/index.html');
+ assert.equal(await direct.locator('.tabbar').isVisible(), true);
  await direct.goto(origin + '/ui/risk.html');
  await direct.waitForSelector('#startup', {state:'detached'});
  await direct.evaluate(() => window.coldEntryToken = 'same-document');

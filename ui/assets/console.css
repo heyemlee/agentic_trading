@@ -837,6 +837,7 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 .tabitem[aria-current="page"]:hover, .tabitem[aria-expanded="true"]:hover,
 .tabitem[data-section-active="true"]:hover { background: #222; color: #fff; }
 .tabitem:active { background: #e5e5e5; color: #111; }
+.advisor-page .topnav, .advisor-page .tabbar, .advisor-page #resource-status { display: none; }
 .pagefoot { display: none; }
 #resource-status { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .figure-lg { font-size: clamp(36px, 9vw, 50px); letter-spacing: -.045em; }

@@ -48,7 +48,7 @@
 @media (max-width: 360px) { .research-tile { flex-wrap: wrap; } .research-tile .action-badge { margin-left: 56px; } }
 
 /* Mobile-first chat, adapted from Chat02 to the console's build-free UI. */
-.advisor-page { background: #fff; }
+.advisor-page { background: #fff; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .advisor-page main .container { max-width: 720px; }
 .advisor-layout { display: block; }
 .advisor-layout > .stack { display: contents; }
@@ -63,8 +63,14 @@
 .advisor-decision dd { margin: 4px 0 0; white-space: pre-wrap; }
 .candidate-list { margin-block: 16px; }
 .advisor-page .pagehead { padding-block: 8px 0; }
+.assistant-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; flex-shrink: 0; padding-block: 8px; background: #fff; }
+.assistant-header .container { max-width: 720px; }
 .assistant-heading, .assistant-subhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.assistant-heading h1 { font-size: 22px; letter-spacing: -.04em; }
+.assistant-heading { display: grid; grid-template-columns: 92px minmax(0, 1fr) 92px; gap: 4px; min-height: 52px; }
+.assistant-heading h1 { font-size: 18px; letter-spacing: -.03em; text-align: center; }
+.assistant-back { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #f5f5f5; color: #111; }
+.assistant-back svg { width: 24px; height: 24px; }
+.assistant-back:hover { background: #e9e9e9; }
 .chat-tools { display: flex; gap: 4px; }
 .advisor-page .circle-control { background: transparent; border: 0; box-shadow: none; color: #252923; width: 44px; height: 44px; }
 .assistant-subhead { border-bottom: 1px solid #eceeeb; padding-bottom: 6px; }
@@ -79,10 +85,9 @@
 #assistant-account-status { color: #846324; font-size: 12px; line-height: 1.5; padding-top: 6px; }
 #assistant-account-status:empty { display: none; }
 html:has(body.advisor-page.chat-view) { height: 100%; overflow: hidden; overscroll-behavior: none; }
-/* Keep the normal chat shell in document flow. Fixing the whole body makes its
-   containing block depend on stale visual-viewport/scroll state in iOS Safari,
-   which can suspend the tab bar above an empty strip after a route change. */
-body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; min-height: 0; padding-bottom: calc(var(--tabbar-h) + 4px + env(safe-area-inset-bottom, 0px)); overflow: hidden; display: flex; flex-direction: column; }
+/* The assistant is a separate full-screen view. Only its conversation scrolls;
+   the header and composer remain visible, without bottom navigation. */
+body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; min-height: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); overflow: hidden; display: flex; flex-direction: column; }
 .chat-view .topnav { position: relative; top: auto; }
 .chat-view .topnav, .chat-view #resource-status, .chat-view .conn-bar { flex-shrink: 0; }
 .advisor-page .topnav { background: #fff; backdrop-filter: none; }
