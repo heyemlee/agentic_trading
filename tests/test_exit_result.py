@@ -32,7 +32,7 @@ AUTHORITY = "authority-under-test"
 
 
 @pytest.fixture(autouse=True)
-def offline_market(monkeypatch):
+def offline_market(monkeypatch, offline_market_reads):
     monkeypatch.setattr(execution, "assess_regime", lambda *args: regime("NORMAL"))
     monkeypatch.setattr(execution, "snapshot_from_broker",
                         lambda *args: snapshot_from_broker(*args, identity_lookup=identity_lookup))
