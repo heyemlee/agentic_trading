@@ -365,7 +365,7 @@ window.I18N = (function () {
       'ai.message': 'Your question', 'ai.send': 'Send',
       'ai.chatNote': 'Uses your saved profile, holdings and research. Formal trades go through research and approval.',
       'ai.refresh': 'Refresh accounts & candidates',
-      'ai.coverage': 'Stocks and ETFs only; the Agentic Account is shown below, with its own research path. Tap a holding to research it on its own.',
+      'ai.coverage': 'Stocks and ETFs only. Tap a holding to research it on its own.',
       'ai.candidates': 'Research candidates',
       'ai.sources': 'From Robinhood watchlists, saved scans and your existing ETF universe. Screened for personal fit.',
       'ai.shortlist': 'Find suitable candidates', 'ai.symbol': 'Or enter a stock / ETF symbol',
@@ -579,7 +579,9 @@ window.I18N = (function () {
       'home.noResult': 'no result',
 
       /* portfolio */
-      'pf.title': 'Assets', 'pf.totalAs': 'Total equity as of {d}',
+      'pf.title': 'Assets', 'pf.switchLabel': 'Switch account view', 'pf.robinhood': 'Robinhood', 'pf.accountCount': '{n} accounts', 'pf.accountDetails': 'Account details',
+      'pf.agenticBoundary': 'Strategy ledger · separate from your personal Robinhood accounts.',
+      'pf.totalAs': 'Total equity as of {d}',
       'pf.totalMixed': 'Demo and real money added together, as of {d}. '
                        + 'Compare each account below against its own high-water mark, never this figure.',
       'pf.allocation': 'Allocation across buckets', 'pf.ofTotal': '{p} of total',
@@ -655,10 +657,10 @@ window.I18N = (function () {
       'ap.result': 'Result',
 
       /* research */
-      'at.title': 'Current attention', 'at.item': 'Update', 'at.person': 'Needs you', 'at.information': 'For your information',
+      'at.title': 'Current attention', 'at.homeTitle': 'To-dos & notifications', 'at.systemNotice': 'System notice', 'at.item': 'Update', 'at.person': 'Needs you', 'at.information': 'For your information',
       'at.open': 'View details', 'at.unknown': 'Cannot confirm current attention.',
       'at.partial': 'The list may be incomplete or out of date.', 'at.clear': 'Nothing needs attention.',
-      'at.more': '{n} more items', 'at.count': '{n} current items', 'at.approvals': '{n} proposals need a decision',
+      'at.more': '{n} more items', 'at.collapse': 'Collapse', 'at.count': '{n} current items', 'at.approvals': '{n} proposals need a decision',
       'at.kind.order_unknown': 'Order status unknown', 'at.kind.reconciliation_error': 'Reconciliation problem',
       'at.kind.ledger_unconfirmed': 'Ledger needs checking', 'at.kind.credential_invalid': 'Connection needs attention',
       'at.kind.risk_halt': 'Risk halt', 'at.kind.autonomy_withdrawn': 'Autonomy withdrawn',
@@ -1190,7 +1192,7 @@ window.I18N = (function () {
       'ai.message': '你的问题', 'ai.send': '发送',
       'ai.chatNote': '回答会使用已保存的投资档案、持仓和研究记录。正式买卖仍从研究页进入审批。',
       'ai.refresh': '刷新账户与候选',
-      'ai.coverage': '只列出股票与 ETF；Agentic 账户见下方，走自己的研究链路。点一个持仓可单独研究它。',
+      'ai.coverage': '只列出股票与 ETF。点一个持仓可单独研究它。',
       'ai.candidates': '值得研究的候选',
       'ai.sources': '来自你的 Robinhood 自选、已保存的筛选器，以及现有 ETF 投资范围。按个人适合度筛选。',
       'ai.shortlist': '帮我筛选候选', 'ai.symbol': '或输入股票 / ETF 代码',
@@ -1400,7 +1402,9 @@ window.I18N = (function () {
       'home.ordersPending': '{n} 笔待核对或成交',
       'home.noResult': '无结果',
 
-      'pf.title': '资产', 'pf.totalAs': '总权益，截至 {d}',
+      'pf.title': '资产', 'pf.switchLabel': '切换账户视图', 'pf.robinhood': 'Robinhood', 'pf.accountCount': '{n} 个账户', 'pf.accountDetails': '账户明细',
+      'pf.agenticBoundary': '策略账本 · 与个人 Robinhood 账户分开显示。',
+      'pf.totalAs': '总权益，截至 {d}',
       'pf.totalMixed': '这是模拟资金与真实资金相加的结果，截至 {d}。'
                        + '请用下面每个账户各自的历史高点来判断，不要用这个合计数。',
       'pf.allocation': '资金桶分配', 'pf.ofTotal': '占总额 {p}',
@@ -1474,10 +1478,10 @@ window.I18N = (function () {
       'ap.seeActivity': '到流水页查看',
       'ap.result': '结果',
 
-      'at.title': '当前待办', 'at.item': '更新', 'at.person': '需要你处理', 'at.information': '信息提示',
+      'at.title': '当前待办', 'at.homeTitle': '待办与通知', 'at.systemNotice': '系统提示', 'at.item': '更新', 'at.person': '需要你处理', 'at.information': '信息提示',
       'at.open': '查看详情', 'at.unknown': '无法确认当前待办。',
       'at.partial': '列表可能不完整或已过期。', 'at.clear': '无需处理。',
-      'at.more': '另有 {n} 项', 'at.count': '当前 {n} 项', 'at.approvals': '{n} 条提案待决定',
+      'at.more': '另有 {n} 项', 'at.collapse': '收起', 'at.count': '当前 {n} 项', 'at.approvals': '{n} 条提案待决定',
       'at.kind.order_unknown': '订单状态不明', 'at.kind.reconciliation_error': '对账异常',
       'at.kind.ledger_unconfirmed': '账本待核对', 'at.kind.credential_invalid': '连接需要处理',
       'at.kind.risk_halt': '风控停机', 'at.kind.autonomy_withdrawn': '自主权限已撤回',

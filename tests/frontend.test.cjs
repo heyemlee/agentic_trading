@@ -356,6 +356,35 @@ test('portfolio keeps broker snapshots separate from strategy money and labels s
   assert.equal(c.element('broker-stamp').textContent, 'ai.empty');
 });
 
+test('portfolio account cards switch the entire visible view without mixing balances', async () => {
+  const advisor = { stale: true, jobs: [], snapshot: { fetched_at: '2026-09-09T12:00:00Z', accounts: [
+    { id: 'personal-1', label: 'Personal', equity_usd: 5052, cash_usd: 3737, complete: true, positions: [] }
+  ] } };
+  const open = scope => {
+    const c = context(true); c.location.search = '?scope=' + scope + '&demo=1'; c.run('console.js');
+    c.Console.mount = () => {};
+    c.Console.live = (keys, render) => { c.render = render; render(); };
+    c.CT.advisor = advisor;
+    c.posts = [];
+    c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => {},
+      post: async path => { c.posts.push(path); return { run_key: 'refresh' }; } };
+    c.run('pages/portfolio.js');
+    return c;
+  };
+  const personal = open('robinhood');
+  assert.equal(personal.element('robinhood-view').hidden, false);
+  assert.equal(personal.element('agentic-view').hidden, true);
+  assert.match(personal.element('portfolio-switch').innerHTML, /portfolio-switch-robinhood[^>]*aria-current="page"/);
+  assert.match(personal.element('broker-accounts').innerHTML, /5,052/);
+  const agentic = open('agentic'); await flush();
+  assert.equal(agentic.element('robinhood-view').hidden, true);
+  assert.equal(agentic.element('agentic-view').hidden, false);
+  assert.match(agentic.element('portfolio-switch').innerHTML, /portfolio-switch-agentic[^>]*aria-current="page"/);
+  assert.equal(agentic.element('pf-total').textContent, agentic.Console.usd(agentic.CT.portfolio.accounts.micro_live.equity_usd));
+  assert.doesNotMatch(agentic.element('account-cards').innerHTML, /5,052|conceptual/);
+  assert.deepEqual(agentic.posts, [], 'opening the Agentic view must not refresh personal holdings');
+});
+
 function portfolioPage(post, advisor) {
   const c = context(); c.run('console.js');
   c.Console.mount = () => {};
@@ -427,6 +456,7 @@ test('an unconfirmed ledger still reaches the page, and still cannot be approved
 
 function ledgerPage(post, portfolio, fetchJSON) {
   const c = context(); c.run('console.js');
+  c.location.search = '?scope=agentic';
   c.Console.mount = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
   c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => { c.reread = true; }, post,
@@ -466,7 +496,7 @@ test('the confirm button asks for the check and reports what it refused', async 
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], '/portfolio/confirm');
-  assert.equal(sent[0][1].ledger, 'all');
+  assert.equal(sent[0][1].ledger, 'micro_live');
   assert.match(c.element('confirm-status').textContent, /pf.confirmRefused.*cash mismatch/);
   assert.equal(c.element('ledger-notice').hidden, false, 'a refusal leaves the ledger where it was');
 
@@ -1109,6 +1139,7 @@ function withConceptual(src) {
 
 function homePage(portfolio, showConceptual = false) {
   const c = context(true); c.run('console.js', showConceptual ? withConceptual : null);
+  c.CT.health.warnings = [];
   if (portfolio) c.CT.portfolio = portfolio;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
@@ -1312,18 +1343,40 @@ function attentionItem(overrides = {}) {
     since: '2026-09-18T20:00:00Z', link: { page: 'approvals', params: { proposal: 'A' } }, ...overrides };
 }
 
-test('home only claims no attention when the collector is readable and current', () => {
+test('home hides the entire attention section only when the collector is readable, current and empty', () => {
   const c = homePage(); c.CT_DEMO = false;
   c.CT_API.watchRun = () => {};
   c.CT.attention = attentionPayload(); c.render();
-  assert.match(c.element('needs-you-slot').innerHTML, /at.clear/);
+  assert.equal(c.element('home-attention').hidden, true);
+  assert.equal(c.element('needs-you-slot').innerHTML, '');
   c.CT.attention = attentionPayload([], false); c.render();
   assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/);
+  assert.equal(c.element('home-attention').hidden, false);
   assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
   c.CT.attention = attentionPayload(); c.CT_API.isLive = () => false; c.render();
   assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/);
+  assert.equal(c.element('home-attention').hidden, false);
   c.CT.attention = null; c.render();
+  assert.equal(c.element('home-attention').hidden, false);
   assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
+});
+
+test('home puts system notices after actionable items in the same disclosure', () => {
+  const c = homePage();
+  c.CT.attention = attentionPayload([attentionItem()]);
+  c.CT.health.warnings = ['Optional data <source> unavailable'];
+  c.render();
+  const html = c.element('needs-you-slot').innerHTML;
+  assert.equal(c.element('home-attention').hidden, false);
+  assert.ok(html.indexOf('data-attention-id="waiting:A"') < html.indexOf('data-od-id="warning-0"'));
+  assert.match(html, /at.more 1/);
+  assert.match(html, /Optional data &lt;source&gt; unavailable/);
+  assert.doesNotMatch(html, /home-notices/);
+  c.CT.attention = attentionPayload(); c.render();
+  assert.equal(c.element('home-attention').hidden, false, 'a notice alone keeps the shared section visible');
+  assert.match(c.element('needs-you-slot').innerHTML, /warning-0/);
+  c.CT.health.warnings = []; c.render();
+  assert.equal(c.element('home-attention').hidden, true);
 });
 
 test('home preserves collector priority, displays partial items, and removes resolved items', () => {
@@ -1332,6 +1385,7 @@ test('home preserves collector priority, displays partial items, and removes res
     link: { page: 'activity', params: { subject: 'order A&1' } } });
   c.CT.attention = attentionPayload([critical, attentionItem()], false); c.render();
   const html = c.element('needs-you-slot').innerHTML;
+  assert.equal(c.element('home-attention').hidden, false);
   assert.match(html, /Unknown &lt;script&gt;/); assert.match(html, /activity.html\?subject=order\+A%261/);
   assert.ok(html.indexOf('data-attention-id="critical"') < html.indexOf('waiting:A'));
   assert.match(html, /at.more 1/); assert.match(html, /at.unknown/);
@@ -1339,7 +1393,10 @@ test('home preserves collector priority, displays partial items, and removes res
   c.CT.attention = attentionPayload([attentionItem()]); c.render();
   assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /Unknown/);
   c.CT.attention = attentionPayload(); c.render();
-  assert.match(c.element('needs-you-slot').innerHTML, /at.clear/);
+  assert.equal(c.element('home-attention').hidden, true);
+  assert.equal(c.element('needs-you-slot').innerHTML, '');
+  c.CT.attention = attentionPayload([attentionItem()]); c.render();
+  assert.equal(c.element('home-attention').hidden, false, 'a new item restores the section after an empty poll');
 });
 
 test('task links only allow known pages and parameter keys, encoding every value', () => {
@@ -1873,6 +1930,22 @@ test('every script and stylesheet a page loads is actually shipped', () => {
       assert.ok(fs.existsSync(path.join(root, 'ui', target)),
                 `${file} loads ${target}, which does not exist`);
     }
+});
+
+test('every console page off the tab bar has a back control and lights its section tab', () => {
+  /* The tab bar only returns you to a section root. A page missing from PARENT gets the brand
+     where its back control belongs, and one missing from NAV lights no tab: Settings shipped
+     with both. The assistant is full screen and has its own #assistant-back. */
+  const routes = [...uiFile('assets/navigation.js').match(/const routes = new Set\(\[([^\]]*)\]\)/)[1]
+    .matchAll(/'(\w+)'/g)].map(m => m[1]);
+  const c = context(); c.run('console.js');
+  const { NAV, PARENT } = c.Console;
+  assert.ok(routes.includes('settings'));
+  for (const route of routes.filter(route => route !== 'more')) {
+    const nav = NAV.find(n => n.href === route + '.html');
+    assert.ok(nav, `${route} is not in NAV`);
+    if (!nav.tab && route !== 'advisor') assert.ok(PARENT[route], `${route} has no back control`);
+  }
 });
 
 test('the product name is Agentic Trading across visible console branding', () => {

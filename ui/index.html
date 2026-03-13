@@ -17,19 +17,9 @@
 
 <main id="content" hidden data-i18n-title="home.title">
 
-  <!-- ── waiting on you ────────────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="needs-you">
+  <!-- ── attention and system notices ─────────────────────────────── -->
+  <section class="section home-attention" id="home-attention" data-od-id="needs-you" aria-labelledby="attention-heading" hidden>
     <div class="container" id="needs-you-slot"></div>
-  </section>
-
-  <!-- ── notices ───────────────────────────────────────────────────── -->
-  <section class="section" style="padding-block:0;" data-od-id="warnings" id="home-warnings" hidden>
-    <div class="container">
-      <details class="home-notices">
-        <summary><span data-i18n="home.notices">Notices</span> <span class="chip chip-warn" id="warn-count">—</span></summary>
-        <div class="stack stack-3" id="warning-list"></div>
-      </details>
-    </div>
   </section>
 
   <!-- ── equity and high-water mark, for one account at a time ─────── -->
@@ -48,7 +38,7 @@
 
       <div class="app-quick-actions">
         <a class="btn btn-green" href="advisor.html" data-i18n="app.ask">问问助手</a>
-        <a class="btn btn-secondary" href="portfolio.html" data-i18n="nav.portfolio">资产</a>
+        <a class="btn btn-secondary" href="portfolio.html?scope=agentic" data-i18n="nav.portfolio">资产</a>
       </div>
       <details class="app-disclosure">
       <summary data-i18n="app.details">账户明细</summary>

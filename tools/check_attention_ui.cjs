@@ -22,7 +22,7 @@ const ui = path.resolve(__dirname, '../ui');
   const expired = { ...data.proposalDetail, proposal_id: 'expired-attention', status: 'EXPIRED', created_at: now };
   const payload = {
     '/auth/session': { authenticated: true, username: 'preview', csrf_token: 'test-only' },
-    '/health': { ...data.health, checked_at: now }, '/portfolio': { ...data.portfolio, checked_at: now },
+    '/health': { ...data.health, warnings: [], checked_at: now }, '/portfolio': { ...data.portfolio, checked_at: now },
     '/micro-live': { ...data.microLive, checked_at: now }, '/advisor': data.advisor,
     '/proposals': [], ['/proposals/' + expired.proposal_id]: expired,
     '/config/authority': { version: 'preview', checked_at: now, actions: {} },
@@ -68,7 +68,7 @@ const ui = path.resolve(__dirname, '../ui');
     const screenshot = async name => {
       if (!process.env.CT_UI_CAPTURE_DIR) return;
       await fs.mkdir(process.env.CT_UI_CAPTURE_DIR, { recursive: true });
-      await page.screenshot({ path: path.join(process.env.CT_UI_CAPTURE_DIR, name) });
+      await page.screenshot({ path: path.join(process.env.CT_UI_CAPTURE_DIR, name), animations: 'disabled' });
     };
     await page.goto(origin + '/ui/index.html');
     await page.waitForFunction(() => document.querySelector('[data-attention-id]'));
@@ -84,18 +84,65 @@ const ui = path.resolve(__dirname, '../ui');
     await screenshot('attention-result-phone.png');
     await page.locator('#trace-close').click();
     await page.goBack();
-    await page.waitForFunction(() => document.querySelector('[data-od-id="empty-queue"]'));
+    await page.waitForFunction(() => document.getElementById('home-attention')?.hidden);
     assert.equal(await page.locator('[data-attention-id]').count(), 0);
+    await screenshot('attention-empty-phone.png');
     attention.readable = false; attention.unreadable = ['Synthetic unavailable source'];
     await page.evaluate(() => CT_API.readOnce('attention'));
     assert.equal(await page.locator('[data-od-id="empty-queue"]').count(), 0);
+    assert.equal(await page.locator('#home-attention').isVisible(), true);
     assert.match(await page.locator('#needs-you-slot').innerText(), /无法确认/);
+    await screenshot('attention-unavailable-phone.png');
+
+    // A collapsed deck never buries the highest priority item. Disclosure works
+    // by keyboard/touch, and a new poll preserves the user's expanded view.
+    attention.readable = true; attention.unreadable = [];
+    attention.items = [
+      { ...item, id: 'order', kind: 'order_unknown', severity: 'critical', requires_person: true,
+        title: '订单状态待核对', detail: '券商尚未返回最终成交状态，请核对后继续。',
+        link: { page: 'activity', params: { subject: 'order-preview' } } },
+      { ...item, id: 'proposal', kind: 'proposal_waiting', severity: 'high', requires_person: true,
+        title: 'VTI 买入提案待复核', detail: '研究已完成，等待你查看提案并作出决定。',
+        link: { page: 'approvals', params: { proposal: 'proposal-preview' } } },
+      { ...item, title: '持仓复查已完成', detail: '复查结果已准备好，点击查看完整报告。' },
+    ];
+    attention.top = attention.items[0];
+    payload['/health'].warnings = ['Optional market context is unavailable.'];
+    await page.evaluate(() => CT_API.readOnce('health'));
+    await page.evaluate(() => CT_API.readOnce('attention'));
+    assert.equal(await page.locator('[data-attention-id="order"]').isVisible(), true);
+    assert.equal(await page.locator('[data-attention-id="proposal"]').isVisible(), false);
+    assert.equal(await page.locator('#home-warnings').count(), 0);
+    assert.equal(await page.locator('[data-od-id="warning-0"]').isVisible(), false);
+    await screenshot('attention-stack-phone.png');
+    await page.locator('#attention-rest summary').focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('[data-attention-id="proposal"]').isVisible(), true);
+    assert.equal(await page.locator('[data-od-id="warning-0"]').isVisible(), true);
+    attention.items[1].detail += ' Test: ' + 'LongUnbrokenSourceDetail'.repeat(12);
+    await page.evaluate(() => CT_API.readOnce('attention'));
+    assert.equal(await page.locator('#attention-rest').evaluate(el => el.open), true);
+    for (const width of [320, 390, 1280]) {
+      await page.setViewportSize({ width, height: 1000 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+    await page.setViewportSize({ width: 390, height: 1000 });
+    attention.items[1].detail = '研究已完成，等待你查看提案并作出决定。';
+    await page.evaluate(() => CT_API.readOnce('attention'));
+    await screenshot('attention-expanded-phone.png');
+    await page.locator('#attention-rest summary').click();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await screenshot('attention-stack-desktop.png');
+    await page.evaluate(() => I18N.set('en'));
+    assert.match(await page.locator('#attention-rest summary').innerText(), /3 more items/);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await page.locator('[data-attention-id="order"]').evaluate(el => getComputedStyle(el).animationName), 'none');
     await page.goto(origin + '/ui/approvals.html?proposal=' + expired.proposal_id);
     await page.waitForFunction(() => document.getElementById('d-id').textContent === 'expired-attention');
     assert.equal(await page.locator('#btn-approve').isDisabled(), true);
     assert.equal(posts.length, 1, 'navigation and subsequent polls must not repeat the receipt');
     assert.deepEqual(errors, []);
-    console.log('Attention browser check passed: exact result, visible-only receipt, resolved item disappears, partial state, expired proposal, mobile layout.');
+    console.log('Attention browser check passed: result receipt, empty/partial states, stack disclosure, polling, responsive layout, languages, reduced motion, expired proposal.');
   } catch (error) {
     console.error(await page?.evaluate(() => ({ page: location.pathname, text: document.body.innerText.slice(-3000),
       resources: window.CT_API?.state.resources })));

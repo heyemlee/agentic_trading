@@ -5,7 +5,7 @@ asset layer, no build step.
 
 ```
 index.html       Home      equity vs high-water mark, the open proposal, buckets
-portfolio.html   Portfolio three buckets, sleeves, positions
+portfolio.html   Assets     switch between Robinhood snapshots and the Agentic ledger; sleeves and positions stay in their account view
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 research.html    Research  decision strength, run history, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
@@ -137,8 +137,11 @@ Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposal
 read only on pages that use it and opens no venue session. No websocket; the
 backend offers none and none is needed.
 
-Home and More read current attention from `/attention`, preserving server priority. Missing,
-stale or partially readable results say "cannot confirm", never "nothing to do". Links retain
+Home and More read current attention from `/attention`, preserving server priority. Home combines
+those items with `/health.warnings` in one persistent notification stack; actionable items come
+first, followed by system notices. It hides the stack after a current, readable empty attention
+result when there are no health warnings. A native disclosure shows additional cards. Missing, stale or partially
+readable results say "cannot confirm", never "nothing to do". Links retain
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
 a visible sheet; polling never marks it. Failed receipts offer an explicit retry and are not

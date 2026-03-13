@@ -20,6 +20,13 @@
   <section class="section pagehead" data-od-id="pagehead">
     <div class="container">
       <h1 data-i18n="pf.title">Assets</h1>
+      <nav class="portfolio-switch" id="portfolio-switch" aria-label="Account views"></nav>
+    </div>
+  </section>
+
+  <div id="robinhood-view" hidden>
+  <section class="section" style="padding-top:0;">
+    <div class="container">
       <p class="body-muted" data-i18n="ux.brokerScope">Robinhood accounts · saved read-only snapshot</p>
       <p id="broker-stamp" class="body-sm body-muted" role="status"></p>
       <div class="advisor-actions row row-wrap" style="margin-block:12px;gap:8px;">
@@ -27,12 +34,15 @@
         <button id="refresh-holdings" class="btn btn-secondary btn-sm" data-i18n="ai.refresh">刷新账户与候选</button>
       </div>
       <div id="broker-accounts" class="stack stack-4"></div>
-      <p class="body-sm body-muted" data-i18n="ai.coverage">只列出股票与 ETF；Agentic 账户见下方，走自己的研究链路。点一个持仓可单独研究它。</p>
+      <p class="body-sm body-muted" data-i18n="ai.coverage">Stocks and ETFs only. Tap a holding to research it.</p>
     </div>
   </section>
-  <section class="section"><div class="container">
-      <h2 data-i18n="ux.strategyFunds">Strategy-managed funds</h2>
-      <p class="body-sm body-muted" data-i18n="ux.strategyBoundary">Separate view of strategy funds, not your total Robinhood assets. Do not add these amounts to the accounts above.</p>
+  </div>
+
+  <div id="agentic-view" hidden>
+  <section class="section" style="padding-top:0;"><div class="container">
+      <h2 id="strategy-heading" data-i18n="acct.micro_live">Agentic Account</h2>
+      <p class="body-sm body-muted" data-i18n="pf.agenticBoundary">Strategy ledger · separate from your personal Robinhood accounts.</p>
       <div class="card" id="ledger-notice" style="margin-top:12px;" hidden>
         <p class="body-sm" id="ledger-held" data-i18n="pf.ledgerHeld">These figures are held back until the ledger is confirmed.</p>
         <p class="body-sm body-muted" style="margin-top:6px;" id="ledger-check"></p>
@@ -71,6 +81,7 @@
   <section class="section" data-od-id="buckets">
     <div class="container stack stack-4" id="bucket-cards"></div>
   </section>
+  </div>
 
 </main>
 

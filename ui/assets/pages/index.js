@@ -81,7 +81,7 @@ window.Console.page('index', function (document) {
       const a = A[key];
       return C.listRow({
         id: 'account-' + key,
-        href: 'portfolio.html',
+        href: 'portfolio.html?scope=' + (key === 'conceptual' ? 'demo' : 'agentic'),
         title: C.t('acct.' + key),
         sub: (a.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.t('acct.src.' + key),
         value: C.usd(a.equity_usd),
@@ -160,11 +160,18 @@ window.Console.page('index', function (document) {
     money.className = 'chip' + (on ? ' chip-accent' : '');
   }
 
-  /* Current conditions come from the same collector as notifications. A successful
-     poll with incomplete sources is still unknown, and old cached items are labelled. */
+  /* Keep actionable items and health notices in one place. Attention retains
+     server priority; a partial/stale collector never implies an empty inbox. */
   function renderAttention() {
     const { data, items, known } = C.attentionState();
     const h = C.escapeHtml;
+    const warnings = D.health.warnings || [];
+    const empty = known && !items.length && !warnings.length;
+    $('home-attention').hidden = empty;
+    if (empty) {
+      C.setHTML($('needs-you-slot'), '');
+      return;
+    }
     const card = item => {
       // Until the Assistant has a result deep link, open the exact finished review here.
       const link = item.kind === 'personal_task_done' && item.link?.page === 'advisor' && item.subject
@@ -172,21 +179,38 @@ window.Console.page('index', function (document) {
       const href = C.taskLink(link);
       const kindKey = 'at.kind.' + item.kind;
       const label = C.t(kindKey) === kindKey ? C.t('at.item') : C.t(kindKey);
-      return '<article class="card home-attention-item" data-attention-id="' + h(item.id) + '">' +
-        '<p class="eyebrow">' + h(label) + ' · ' + C.t(item.requires_person ? 'at.person' : 'at.information') + '</p>' +
+      const tone = ['critical', 'high', 'normal', 'info'].includes(item.severity) ? item.severity : 'normal';
+      const icon = item.kind === 'proposal_waiting' ? C.ICON.approvals
+        : item.kind === 'personal_task_done' ? C.ICON.check : C.ICON.info;
+      const meta = [item.account_label, item.since ? C.dateTime(item.since) : null].filter(Boolean).join(' · ');
+      return '<article class="home-attention-item attention-' + tone + '" data-attention-id="' + h(item.id) + '">' +
+        '<span class="attention-icon" aria-hidden="true">' + icon + '</span>' +
+        '<div class="attention-copy"><div class="attention-kicker"><span>' + h(label) + '</span>' +
+        '<span class="attention-state">' + C.t(item.requires_person ? 'at.person' : 'at.information') + '</span></div>' +
         '<h3>' + h(item.title) + '</h3>' +
-        (item.detail ? '<p class="body-sm">' + h(item.detail) + '</p>' : '') +
-        '<p class="body-sm body-muted">' + h([item.account_label, item.since ? C.dateTime(item.since) : null].filter(Boolean).join(' · ')) + '</p>' +
-        (href ? '<a class="btn btn-secondary btn-sm" href="' + h(href) + '">' + C.t('at.open') + '</a>' : '') + '</article>';
+        (item.detail ? '<p class="attention-detail">' + h(item.detail) + '</p>' : '') +
+        '<div class="attention-footer">' + (meta ? '<p class="attention-meta">' + h(meta) + '</p>' : '') +
+        (href ? '<a class="attention-action" href="' + h(href) + '">' + C.t('at.open') + C.CHEVRON + '</a>' : '') +
+        '</div></div></article>';
     };
+    const notice = (message, index) =>
+      '<article class="home-attention-item attention-notice" data-od-id="warning-' + index + '">' +
+        '<span class="attention-icon" aria-hidden="true">' + C.ICON.info + '</span>' +
+        '<div class="attention-copy"><div class="attention-kicker"><span>' + C.t('at.systemNotice') + '</span></div>' +
+        '<p class="attention-detail">' + h(message) + '</p></div></article>';
+    const cards = items.map(card).concat(warnings.map(notice));
     const expanded = $('attention-rest')?.open;
     C.setHTML($('needs-you-slot'),
-      '<h2 style="margin-bottom:12px;">' + C.t('at.title') + '</h2>' +
-      (!known ? '<div class="banner" role="status"><p>' + C.t('at.unknown') + ' ' + C.t('at.partial') +
-        '</p></div>' + (data?.unreadable?.length ? '<p class="body-sm body-muted">' + h(data.unreadable.join('; ')) + '</p>' : '') : '') +
-      (items.length ? card(items[0]) + (items.length > 1 ? '<details id="attention-rest" class="home-notices" style="margin-top:12px;">' +
-        '<summary>' + C.t('at.more', { n: items.length - 1 }) + '</summary><div class="stack stack-3">' + items.slice(1).map(card).join('') +
-        '</div></details>' : '') : known ? '<p class="body-sm body-muted" data-od-id="empty-queue">' + C.t('at.clear') + '</p>' : ''));
+      '<div class="attention-heading"><h2 id="attention-heading">' + C.t('at.homeTitle') + '</h2>' +
+      (cards.length ? '<span class="attention-count">' + h(C.t('at.count', { n: cards.length })) + '</span>' : '') + '</div>' +
+      (!known ? '<div class="attention-unavailable" role="status"><span class="attention-icon" aria-hidden="true">' + C.ICON.info +
+        '</span><div><p><strong>' + C.t('at.unknown') + '</strong> ' + C.t('at.partial') + '</p>' +
+        (data?.unreadable?.length ? '<p class="attention-meta">' + h(data.unreadable.join('; ')) + '</p>' : '') + '</div></div>' : '') +
+      (cards.length ? '<div class="attention-deck">' + cards[0] +
+        (cards.length > 1 ? '<details id="attention-rest" class="attention-rest">' +
+          '<summary><span class="attention-expand">' + C.t('at.more', { n: cards.length - 1 }) + '</span>' +
+          '<span class="attention-collapse">' + C.t('at.collapse') + '</span>' + C.CHEVRON + '</summary>' +
+          '<div class="attention-list">' + cards.slice(1).join('') + '</div></details>' : '') + '</div>' : ''));
     if ($('attention-rest')) $('attention-rest').open = !!expanded;
   }
 
@@ -228,17 +252,6 @@ window.Console.page('index', function (document) {
     C.setHTML($('latest-list'), rows.join(''));
   }
 
-  /* ── notices ─────────────────────────────────────────────────────── */
-  function renderNotices() {
-    const w = D.health.warnings || [];
-    $('home-warnings').hidden = !w.length;
-    $('warn-count').textContent = C.t('common.open', { n: w.length });
-    C.setHTML($('warning-list'), w.length
-      ? w.map(C.noticeCard).join('')
-      : '<div class="banner"><span class="banner-mark">' + C.ICON.check +
-        '</span><p>' + C.t('home.noNotices') + '</p></div>');
-  }
-
   document.addEventListener('ct:pause-changed', () => { renderChips(); renderAgent(); });
 
   /* Poll only what this screen reads; render on first paint and every tick. */
@@ -249,6 +262,5 @@ window.Console.page('index', function (document) {
       renderChips();
       renderAttention();
       renderLatest();
-      renderNotices();
     }, ['attention', 'microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
 });

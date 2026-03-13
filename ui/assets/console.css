@@ -184,16 +184,17 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
    Secondary pages are reached by a link, and the tab bar only returns you to
    a section root. These pages get a real back control in place of the brand
    mark — which is redundant once you are inside a section. It lives in the
-   chrome, so it is present before any data arrives, and stays if none does. */
+   chrome, so it is present before any data arrives, and stays if none does.
+   The arrow alone, on a 44px round target; the auto margin keeps everything
+   after it on the right once the phone layout hides the spacer. */
 .backlink {
-  flex: none; display: inline-flex; align-items: center; gap: 4px;
-  min-height: 44px; margin-left: -10px; padding-inline: 10px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-base); font-weight: 600; letter-spacing: -0.01em;
+  flex: none; display: inline-grid; place-items: center;
+  width: 44px; height: 44px; margin-left: -11px; margin-right: auto;
+  border-radius: 50%;
   color: var(--fg); -webkit-tap-highlight-color: transparent;
   transition: background var(--motion-fast) var(--ease);
 }
-.backlink svg { width: 21px; height: 21px; flex: none; }
+.backlink svg { width: 21px; height: 21px; }
 /* hover raises contrast, never lowers it: --fg stays, the surface steps in */
 .backlink:hover { background: var(--surface); color: var(--fg); }
 .backlink:active { transform: scale(0.96); transition: transform var(--motion-press) var(--ease); }
@@ -208,9 +209,8 @@ h3, .h3 { font-size: var(--text-lg); font-weight: 600; line-height: 1.3; letter-
 @media (max-width: 540px) {
   .topnav-inner { gap: 8px; }
   .topnav-inner .spacer { display: none; }
-  .brand, .backlink { flex: 1; min-width: 0; }
-  .brand > span:last-child,
-  .backlink > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand { flex: 1; min-width: 0; }
+  .brand > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 @media (max-width: 360px) {
   .brand { font-size: 16px; }
@@ -815,8 +815,6 @@ html { background: #f6f8f6; scroll-padding-bottom: calc(var(--tabbar-h) + var(--
 body { min-height: 100dvh; background: linear-gradient(160deg, #f3f8f0 0, #fff 420px); padding-bottom: calc(var(--tabbar-h) + var(--tabbar-bottom) + 20px); }
 button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 [hidden] { display: none !important; }
-.home-attention-item { display: grid; gap: 10px; overflow-wrap: anywhere; }
-.home-attention-item .btn { justify-self: start; }
 .topnav { background: rgba(250,252,249,.86); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); border: 0; padding-top: env(safe-area-inset-top, 0px); }
 .topnav-inner { min-height: 62px; }
 .brand { font-size: 20px; }
@@ -941,6 +939,15 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
 .account-glass { padding: 22px; margin-top: 18px; border-radius: 28px; border: 1px solid #e4ebdf; background: linear-gradient(135deg,#f4f8eff0,#fff); }
 .account-glass .list-row { gap: 12px; }
 .account-glass .list-sub { overflow-wrap: anywhere; }
+.portfolio-switch { display: flex; gap: 10px; overflow-x: auto; padding: 16px 2px 8px; scroll-snap-type: x proximity; scrollbar-width: none; }
+.portfolio-switch::-webkit-scrollbar { display: none; }
+.portfolio-switch-card { flex: 0 0 min(44vw, 220px); min-height: 126px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 16px; border: 1px solid var(--divider); border-radius: 18px; background: var(--bg); scroll-snap-align: start; transition: border-color var(--motion-base), background var(--motion-base), box-shadow var(--motion-base); }
+.portfolio-switch-card:hover { border-color: var(--muted); }
+.portfolio-switch-card.is-selected { border-color: var(--green-line); background: var(--green-tint); box-shadow: 0 4px 18px -12px #0003; }
+.portfolio-switch-label { font-size: 14px; font-weight: 650; }
+.portfolio-switch-card strong { font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.portfolio-switch-note { margin-top: auto; color: var(--muted); font-size: 11px; line-height: 1.4; }
+@media (max-width: 360px) { .portfolio-switch-card { flex-basis: min(48vw, 190px); padding: 13px; } .portfolio-switch-card strong { font-size: 19px; } }
 .settings-group { margin-block: 12px; }
 .settings-group > summary, .advanced-settings > summary { list-style: none; padding: 18px 20px; border: 1px solid #e3eadf; background: #f3f7ee; border-radius: 24px; min-height: 56px; font-weight: 600; cursor: pointer; }
 .settings-group > summary::-webkit-details-marker, .advanced-settings > summary::-webkit-details-marker { display: none; }
@@ -1032,7 +1039,62 @@ html:has(dialog[open]) { overflow: hidden; }
   *, *::before, *::after, dialog::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
-.home-page [data-od-id="needs-you"] { padding-top: 12px; }
+/* Persistent, inline notifications. Only decorative layers overlap: every real
+   item stays in normal flow, with native disclosure for touch and keyboard. */
+.home-page .home-attention { padding-block: 8px 20px; }
+.attention-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.attention-heading h2 { font-size: 13px; font-weight: 600; color: var(--muted); }
+.attention-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.attention-deck { isolation: isolate; }
+.home-attention-item {
+  --attention-ink: var(--fg); --attention-tint: var(--surface);
+  position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px;
+  padding: 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--bg);
+  box-shadow: 0 2px 4px #00000003, 0 8px 24px -12px #00000024;
+  overflow-wrap: anywhere; animation: attention-in .3s var(--ease) both;
+}
+.attention-critical { --attention-ink: var(--danger-ink); --attention-tint: var(--danger-tint); }
+.attention-high { --attention-ink: var(--warn-ink); --attention-tint: var(--warn-tint); }
+.attention-info { --attention-ink: var(--green-ink); --attention-tint: var(--green-tint); }
+.attention-notice { --attention-ink: var(--warn-ink); --attention-tint: var(--warn-tint); }
+.attention-notice .attention-detail { margin-top: 0; color: var(--fg); overflow-wrap: anywhere; }
+.attention-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: var(--attention-ink); background: var(--attention-tint); }
+.attention-icon svg { width: 19px; height: 19px; }
+.attention-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.attention-state { display: inline-flex; align-items: center; gap: 5px; color: var(--attention-ink); }
+.attention-state::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.attention-copy h3 { font-size: 15px; font-weight: 600; line-height: 1.5; text-wrap: pretty; }
+.attention-detail { margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.attention-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 10px; }
+.attention-meta { flex: 1 1 160px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.attention-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; margin: -6px -4px -6px auto; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; white-space: nowrap; transition: background var(--motion-base); }
+.attention-action:hover { background: var(--surface); }
+.attention-action .chevron { width: 6px; height: 10px; color: currentColor; }
+.attention-deck:has(.attention-rest:not([open])) > .home-attention-item { margin-bottom: 16px; }
+.attention-deck:has(.attention-rest:not([open])) > .home-attention-item::before,
+.attention-deck:has(.attention-rest:not([open])) > .home-attention-item::after {
+  content: ''; position: absolute; z-index: -1; height: 7px; border: 1px solid var(--divider); border-top: 0;
+  border-radius: 0 0 13px 13px; pointer-events: none;
+}
+.attention-deck:has(.attention-rest:not([open])) > .home-attention-item::before { bottom: -13px; left: 16px; right: 16px; background: var(--surface); }
+.attention-deck:has(.attention-rest:not([open])) > .home-attention-item::after { bottom: -7px; left: 8px; right: 8px; background: var(--bg); }
+.attention-rest > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: fit-content; margin: 2px auto 0; padding: 4px 14px; border-radius: 10px; list-style: none; cursor: pointer; color: var(--muted); font-size: 12px; }
+.attention-rest > summary::-webkit-details-marker { display: none; }
+.attention-rest > summary:hover { background: var(--surface); color: var(--fg); }
+.attention-rest > summary .chevron { width: 6px; height: 10px; transform: rotate(90deg); transition: transform var(--motion-base); }
+.attention-rest[open] > summary .chevron { transform: rotate(-90deg); }
+.attention-collapse, .attention-rest[open] .attention-expand { display: none; }
+.attention-rest[open] .attention-collapse { display: inline; }
+.attention-list { display: grid; gap: 10px; }
+.attention-unavailable { --attention-ink: var(--warn-ink); --attention-tint: var(--warn-tint); display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--divider); border-radius: 14px; background: var(--bg); font-size: 13px; overflow-wrap: anywhere; }
+.attention-unavailable .attention-icon { flex-shrink: 0; }
+.attention-unavailable .attention-meta { margin-top: 4px; }
+.attention-unavailable + .attention-deck { margin-top: 10px; }
+@keyframes attention-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 380px) {
+  .home-attention-item { padding: 14px; gap: 10px; grid-template-columns: 28px minmax(0, 1fr); }
+  .home-attention-item .attention-icon { width: 28px; height: 28px; border-radius: 9px; }
+}
 .home-page .agent-strip { display: flex; align-items: center; gap: 12px; color: inherit; }
 .home-page .agent-strip > div { flex: 1; }
 .home-page .pagehead { padding-block: 12px; }

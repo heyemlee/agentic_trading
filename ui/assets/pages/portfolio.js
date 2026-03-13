@@ -2,6 +2,14 @@ window.Console.page('portfolio', function (document) {
   const C = window.Console, D = C.D, API = window.CT_API;
   C.mount('portfolio');
 
+  /* The URL selects one account view and keeps direct links stable. */
+  const routeScope = () => {
+    const requested = new URLSearchParams(location.search).get('scope');
+    return requested === 'agentic' || (requested === 'demo' && C.SHOW_CONCEPTUAL)
+      ? requested : 'robinhood';
+  };
+  let scope = routeScope();
+
   let refreshing = false, refreshRequest = null;
 
   /* The Robinhood block is a saved snapshot, written by a refresh job, never
@@ -18,6 +26,7 @@ window.Console.page('portfolio', function (document) {
   document.addEventListener('visibilitychange', () => { if (document.hidden) armed = true; });
 
   async function askRefresh(saved, manual = false) {
+    if (scope !== 'robinhood') return;
     if (refreshing || (!armed && !manual) || document.hidden || !API.writesEnabled || !API.isLive('advisor')) return;
     if (refreshJobs(saved).some(ACTIVE) || (!manual && (!saved.stale || Date.now() - askedAt < 60000))) return;
     armed = false; askedAt = Date.now(); askError = ''; refreshing = true;
@@ -49,8 +58,9 @@ window.Console.page('portfolio', function (document) {
     if (confirming || !API.writesEnabled) return;
     confirming = true; confirmStatus = C.t('pf.confirming'); render();
     try {
-      const report = await API.post('/portfolio/confirm', { ledger: 'all' });
-      const refusals = [...(report.ledgers || []).filter(l => l.error).map(l => l.error),
+      const ledger = scope === 'demo' ? 'conceptual' : 'micro_live';
+      const report = await API.post('/portfolio/confirm', { ledger });
+      const refusals = [...(report.ledgers || []).filter(l => l.ledger === ledger && l.error).map(l => l.error),
                         ...(report.unsettled_orders || []).map(o => o.client_order_id)];
       confirmStatus = report.confirmed ? C.t('pf.confirmed')
         : C.t('pf.confirmRefused', { error: refusals.join(' · ') || report.detail || '' });
@@ -72,7 +82,8 @@ window.Console.page('portfolio', function (document) {
     try { check = (await API.fetchJSON('/portfolio/ledgers')) || {}; } catch (_) { check = {}; }
     render();
   }
-  const refusedRow = () => (check.ledgers || []).find((l) => l.error && l.cash_difference_usd != null);
+  const selectedLedger = () => scope === 'demo' ? 'conceptual' : 'micro_live';
+  const refusedRow = () => (check.ledgers || []).find((l) => l.ledger === selectedLedger() && l.error && l.cash_difference_usd != null);
   async function book(kind) {
     const row = refusedRow();
     if (!row || booking || !API.writesEnabled) return;
@@ -97,6 +108,34 @@ window.Console.page('portfolio', function (document) {
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
     const live = API.isLive('advisor');
+    const A = D.portfolio.accounts || {};
+    const money = value => value == null ? '—' : C.usd(value);
+    const personal = snapshot.accounts || [];
+    const personalValue = personal.length === 1 ? money(personal[0].equity_usd)
+      : personal.length ? C.t('pf.accountCount', { n: personal.length }) : '—';
+    const views = [
+      { key: 'robinhood', title: personal.length === 1 && personal[0].label
+          ? String(personal[0].label) : C.t('pf.robinhood'), value: personalValue,
+        note: personal.length === 1 && personal[0].cash_usd != null
+          ? C.t('pf.robinhood') + ' · ' + C.t('ai.cash') + ' ' + money(personal[0].cash_usd)
+          : C.t('ai.readOnly') },
+      { key: 'agentic', title: C.t('acct.micro_live'), value: money(A.micro_live?.equity_usd),
+        note: C.t('acct.src.micro_live') },
+    ];
+    if (C.SHOW_CONCEPTUAL) views.push({ key: 'demo', title: C.t('acct.conceptual'),
+      value: money(A.conceptual?.equity_usd), note: C.t('bucket.conceptual') });
+    document.getElementById('portfolio-switch').setAttribute('aria-label', C.t('pf.switchLabel'));
+    C.setHTML(document.getElementById('portfolio-switch'), views.map(view =>
+      '<a class="portfolio-switch-card' + (scope === view.key ? ' is-selected' : '') +
+      '" href="portfolio.html?scope=' + view.key + (window.CT_DEMO ? '&amp;demo=1' : '') +
+      '" data-od-id="portfolio-switch-' + view.key + '"' +
+      (scope === view.key ? ' aria-current="page"' : '') + '>' +
+      '<span class="portfolio-switch-label">' + C.escapeHtml(view.title) + '</span>' +
+      '<strong>' + C.escapeHtml(view.value) + '</strong>' +
+      '<span class="portfolio-switch-note">' + C.escapeHtml(view.note) + '</span></a>').join(''));
+    document.getElementById('robinhood-view').hidden = scope !== 'robinhood';
+    document.getElementById('agentic-view').hidden = scope === 'robinhood';
+    document.getElementById('strategy-heading').textContent = C.t(scope === 'demo' ? 'acct.conceptual' : 'acct.micro_live');
     /* Any active refresh affects this snapshot. Historical failures are shown
        only for the refresh requested from this page. */
     const mine = refreshJobs(saved).find(ACTIVE) || refreshJobs(saved).find((job) => job.run_key === askedFor);
@@ -108,7 +147,6 @@ window.Console.page('portfolio', function (document) {
       : snapshot.fetched_at ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) })
       : C.t('ai.empty');
     askRefresh(saved);
-    const money = value => value == null ? '—' : C.usd(value);
     C.setHTML(document.getElementById('broker-accounts'), (snapshot.accounts || []).map(a =>
       '<article class="account-glass"><div class="section-head"><h2>' + C.escapeHtml(a.label) + '</h2><span class="chip">' + C.t('ai.readOnly') + '</span></div>' +
       '<p class="figure">' + money(a.equity_usd) + '</p><p class="body-sm body-muted">' + C.t('ai.cash') + ' ' + money(a.cash_usd) + '</p>' +
@@ -120,23 +158,21 @@ window.Console.page('portfolio', function (document) {
       (!(a.positions || []).length && a.complete ? '<p class="body-sm">' + C.t('ai.noPositions') + '</p>' : '') + '</article>'
     ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + C.escapeHtml(snapshot.errors.join(' · ')) + '</p>' : ''));
 
-    const order = ['core', 'sandbox', 'micro_live'].filter(C.showsBucket);
+    const order = scope === 'demo' ? ['core', 'sandbox'] : ['micro_live'];
     const B = D.portfolio.buckets;
-    const A = D.portfolio.accounts || {};
-    const combined = D.portfolio.combined || { equity_usd: 0 };
-    /* The API's combined figure spans every bucket. With the paper book hidden
-       the header has to add up only what is on the page, or it states a total
-       the cards below cannot account for. */
-    const total = C.SHOW_CONCEPTUAL ? combined.equity_usd
-      : order.filter((k) => B[k]).reduce((sum, k) => sum + B[k].equity_usd, 0);
+    const accountKey = scope === 'demo' ? 'conceptual' : 'micro_live';
+    const total = A[accountKey]?.equity_usd ??
+      order.filter((k) => B[k]).reduce((sum, k) => sum + B[k].equity_usd, 0);
     /* Every bucket withheld and a reason given: the money is there, it is the ledger's
        claim about itself that expired, so the figure is a gap and the reason is printed
        verbatim as the API worded it. */
-    const failures = Object.values(D.portfolio.errors || {});
-    const withheld = failures.length > 0 && Object.keys(B).length === 0;
+    const failures = Object.entries(D.portfolio.errors || {})
+      .filter(([key]) => scope === 'demo' ? key !== 'micro_live' : key === 'micro_live')
+      .map(([, reason]) => reason);
+    const withheld = failures.length > 0 && !order.some((key) => B[key]);
     /* The card also carries the last check while it refused, before the ledger has expired:
        the figures are still on screen, and the reader can put the book right today. */
-    const refusals = (check.ledgers || []).filter((l) => l.error).map((l) => l.error);
+    const refusals = (check.ledgers || []).filter((l) => l.ledger === accountKey && l.error).map((l) => l.error);
     const notice = document.getElementById('ledger-notice');
     notice.hidden = !failures.length && !refusals.length;
     document.getElementById('ledger-held').hidden = !failures.length;
@@ -160,27 +196,16 @@ window.Console.page('portfolio', function (document) {
     document.getElementById('book-status').textContent = bookStatus;
     document.getElementById('confirm-ledger').disabled = confirming || !API.writesEnabled;
     document.getElementById('confirm-status').textContent = confirmStatus;
-    /* Nothing conceptual is on screen, so the mixed-money warning would be
-       describing a sum the reader cannot see. */
-    const mixed = C.SHOW_CONCEPTUAL && combined.mixes_real_and_conceptual;
-
     const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--green)' };
 
     /* the header is live data, not a value baked into the markup */
     C.tickValue(document.getElementById('pf-total'), withheld ? '—' : C.usd(total));
-    /* A combined figure spanning a paper book and a funded account is a sum of
-       two different kinds of money, so it says so rather than passing itself
-       off as one portfolio. Each account below carries its own high-water mark
-       and its own return, which is what any of these numbers can be compared
-       against. */
     document.getElementById('pf-asof').textContent =
-      C.t(mixed ? 'pf.totalMixed' : 'pf.totalAs',
-          { d: C.dateOnly(D.portfolio.as_of) });
+      C.t('pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
 
     /* ── per account: equity, funding, result, drawdown ──────────────── */
     C.setHTML(document.getElementById('account-cards'), Object.keys(A)
-      .filter(C.showsAccount)
-      .sort((a, b) => (a === 'conceptual' ? -1 : b === 'conceptual' ? 1 : a.localeCompare(b)))
+      .filter(key => key === accountKey)
       .map((key) => {
         const a = A[key];
         const kv = (k, v) => '<div class="kv-row"><dt>' + C.escapeHtml(k) + '</dt><dd>' +
@@ -193,8 +218,7 @@ window.Console.page('portfolio', function (document) {
                                            : C.t('bucket.conceptual')) + '</span>' +
             '<span class="body-sm body-muted">' + C.escapeHtml(C.t('acct.src.' + key)) + '</span>' +
           '</div>' +
-          '<h2>' + C.escapeHtml(C.t('acct.' + key)) + '</h2>' +
-          '<p class="figure" style="margin-top:6px;">' + C.usd(a.equity_usd) + '</p>' +
+          '<h2>' + C.t('pf.accountDetails') + '</h2>' +
           '<p class="body-sm body-muted" style="margin-top:4px;">' +
             C.escapeHtml(C.t('acct.asOf', { d: C.dateOnly(a.as_of), p: C.dateOnly(a.priced_for) })) + '</p>' +
           '<dl class="kv" style="margin-top:16px;">' +
@@ -257,6 +281,11 @@ window.Console.page('portfolio', function (document) {
     }).join(''));
   }
 
+  document.addEventListener('ct:route', () => {
+    const next = routeScope();
+    if (next !== scope) { armedKind = null; bookStatus = confirmStatus = ''; scope = next; }
+    render();
+  });
   C.live(['portfolio'], render, ['advisor']);
   loadCheck();
 });
