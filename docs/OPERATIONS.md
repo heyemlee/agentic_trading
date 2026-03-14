@@ -258,7 +258,7 @@ What changes when an account is named:
 
 | | |
 | --- | --- |
-| Subjects | A `holdings` review reads that account's own ledger: least recently researched first, and anything never researched before those, so the rotation cannot leave one holding unexamined for months. A `candidates` study keeps the configured universe. A holding that has since left the universe is still reviewed, because the two lists are read from different places. |
+| Subjects | A `holdings` review reads that account's own ledger: least recently researched first, and anything never researched before those, so the rotation cannot leave one holding unexamined for months. A `candidates` study keeps the configured universe, less whatever the account already holds: a held name is reviewed once, as a holding, and the study's cap reaches the next members of the universe instead. With `holdings` turned off, a held name is not scheduled at all. A holding that has since left the universe is still reviewed, because the two lists are read from different places. |
 | Order | Holdings before candidates, across every account. Risk already on the books comes before risk that is not. |
 | Budget | `reserve_for_exits` is the part of `max_analyses_per_day` a candidate study may not touch. A holdings review draws on the whole allowance, because a holdings review is how an exit is found. The day's count is re-read between tasks, so two tasks cannot together spend more than the subscription allows. |
 | Period keys | Each task claims its own: `daily:micro_live:holdings:2026-09-19`. One account's review can never mark another's as already run, nor a holdings review a candidate study. The single Core review keeps the unscoped key it has always had. |

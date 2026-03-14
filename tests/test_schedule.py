@@ -392,3 +392,71 @@ def test_every_configured_task_runs_and_the_two_share_one_days_allowance(
     # A repeat inside the same period starts nothing more.
     again = scheduled_review(service)
     assert again["started"] == [] and "already executed" in again["tasks"][0]["reason"]
+
+
+def test_a_held_name_is_reviewed_once_as_a_holding_and_not_studied_again_as_a_candidate(
+        tmp_path, monkeypatch, offline_market_reads):
+    """Holdings and candidates in one run: the candidate study sets aside what the book holds.
+
+    It read the universe without the book, so an account holding VTI and BND had both reviewed
+    as holdings and then asked for again as candidates. The queue folded each second request
+    into the first only while that one was still active, which spent the candidate study's cap
+    on names it never studied; once the first had finished, the same position was researched
+    twice on one day under two purposes, and could come back as a REDUCE and a BUY.
+    """
+    from agentic_trading.research_jobs import ResearchJobManager
+
+    monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "runs").mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state, "VTI", "BND")
+    # The universe, the caps and the allowance are named here: the copied config is the live
+    # one, and the console can change any of them.
+    accounts_config(cfg_dir, {"micro_live": {
+        "holdings": {"period": "weekly", "max_tickers_per_run": 3},
+        "candidates": {"period": "weekly", "max_tickers_per_run": 3}}},
+        tickers=["VTI", "VXUS", "BND", "VGIT", "SGOV"], max_tickers_per_run=3,
+        max_analyses_per_day=6, reserve_for_exits=0)
+
+    result = scheduled_review(Service(cfg_dir))
+    holdings, candidates = result["tasks"]
+    assert sorted(run["ticker"] for run in holdings["started"]) == ["BND", "VTI"]
+    assert {run["purpose"] for run in holdings["started"]} == {"review_holding"}
+    # The universe keeps its order, and the cap reaches past what is held instead of spending
+    # itself on names the holdings review has just asked for.
+    assert [run["ticker"] for run in candidates["started"]] == ["VXUS", "VGIT", "SGOV"]
+    assert {run["purpose"] for run in candidates["started"]} == {"candidate"}
+    # Five runs of their own: none is a request folded into another task's.
+    assert not any(run["deduplicated"] for run in result["started"])
+    assert len({run["run_key"] for run in result["started"]}) == 5
+
+
+def test_only_a_candidate_study_sets_the_book_aside_and_an_empty_one_says_why(tmp_path):
+    """The single review keeps every name, as it always has; a study left with none says so.
+
+    The single review is what a deployment runs until it names an account, and it reads no
+    book, so a held name stays in it. A candidate study left with nothing must not blame a
+    configuration that names plenty.
+    """
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state, "VTI", "BND")
+    profiles = accounts_config(cfg_dir, {}, tickers=["VTI", "BND"], max_tickers_per_run=3,
+                               max_analyses_per_day=6, reserve_for_exits=0)
+
+    single = schedule.Task(bucket="micro_live", kind=schedule.REVIEW, period="weekly",
+                           max_tickers=3, scoped=False)
+    assert schedule.subjects_for(profiles, single) == ["VTI", "BND"]
+
+    candidates = schedule.Task(bucket="micro_live", kind=schedule.CANDIDATES, period="weekly",
+                               max_tickers=3)
+    assert schedule.subjects_for(profiles, candidates) == []
+    decision = decide(profiles, task=candidates, subjects=[])
+    assert decision.run is False and "already holds everything" in decision.reason

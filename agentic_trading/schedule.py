@@ -12,6 +12,7 @@ state and returns a decision, which is what makes it testable without a model or
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -123,18 +124,29 @@ def subjects_for(profiles, task: Task, *, history: list[dict[str, Any]] = ()) ->
     used. The universe bounds what may be *researched*; what may then be *bought* is the
     authority's business, and a holding that has since left the universe must still be
     reviewable, which is why the two lists are read from different places.
+
+    It sets aside what the account already holds, before the cap, so the cap reaches the next
+    members of the universe. A held name is the holdings review's to examine: studied again as a
+    candidate it is the same research under another purpose -- the pipeline is told about the
+    position either way -- run twice on one day, and able to come back as a BUY beside the
+    review's REDUCE. The single review a deployment runs until it names an account is not a
+    candidate study; it reads no book and sets nothing aside, as before.
     """
     from .portfolio import PortfolioError, load_portfolio
 
-    if task.kind != HOLDINGS:
-        return default_tickers(profiles, settings(profiles))
+    cfg = settings(profiles)
+    if task.kind not in (HOLDINGS, CANDIDATES):
+        return default_tickers(profiles, cfg)
     try:
         ledger = load_portfolio(ledger_for(profiles, task.bucket))
     except (PortfolioError, OSError, ValueError):
-        # A book that cannot be read schedules nothing; the reason belongs to whatever reads
-        # the book for real, not to a decision about when to run.
-        return []
+        # A book that cannot be read schedules no holdings review, so a candidate study has
+        # nothing to repeat and sets nothing aside. Either way the reason belongs to whatever
+        # reads the book for real, not to a decision about when to run.
+        return default_tickers(profiles, cfg) if task.kind == CANDIDATES else []
     held = [position.symbol for position in ledger.positions if position.bucket == task.bucket]
+    if task.kind == CANDIDATES:
+        return default_tickers(profiles, cfg, exclude=held)
     seen: dict[str, str] = {}
     for row in history or ():
         symbol = str(row.get("ticker") or "").upper()
@@ -296,13 +308,20 @@ def session_for(cfg: dict[str, Any], now: datetime | None = None) -> tuple[str |
                                 f"analysing the previous session {previous_date}")
 
 
-def default_tickers(profiles, cfg: dict[str, Any]) -> list[str]:
+def default_tickers(profiles, cfg: dict[str, Any], *, exclude: Iterable[str] = ()) -> list[str]:
+    """The configured universe in its own order, less ``exclude``, cut to the run's cap.
+
+    What is excluded is taken out before the cut, so it makes room for the next member of the
+    universe rather than shortening the run.
+    """
     configured = [str(x).upper() for x in (cfg.get("tickers") or []) if str(x).strip()]
     if not configured:
         groups = profiles.investor_cfg("universe", "core", "etf_exposure_groups", default={}) or {}
         # One representative per exposure group, so a review never analyses overlapping funds.
         configured = [group[0] for group in groups.values() if group]
-    return configured[:max(1, int(cfg.get("max_tickers_per_run", 3)))]
+    skip = {str(symbol).upper() for symbol in exclude}
+    kept = [ticker for ticker in configured if str(ticker).upper() not in skip]
+    return kept[:max(1, int(cfg.get("max_tickers_per_run", 3)))]
 
 
 def analyses_today(jobs: list[dict[str, Any]], cfg: dict[str, Any],
@@ -379,6 +398,9 @@ def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, An
     if not tickers:
         if task.kind == HOLDINGS:
             return no(f"{task.bucket} holds nothing to review", trade_date)
+        if task.kind == CANDIDATES and not subjects and default_tickers(profiles, cfg):
+            # The universe names something and none of it is left: the account holds all of it.
+            return no(f"{task.bucket} already holds everything in the universe", trade_date)
         return no("no tickers are configured and no core exposure group has a representative",
                   trade_date)
     return Decision(True, why, key, trade_date, tickers, upcoming, task.bucket, task.kind)
