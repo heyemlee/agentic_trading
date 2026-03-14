@@ -30,12 +30,17 @@ window.Console.page('lab', function (document) {
                  portfolio: 'trade', risk: 'risk' };
   const RUNNING = ['QUEUED', 'RUNNING'];
   const BROKEN = ['FAILED', 'TIMED_OUT', 'CANCELLED', 'CLAUDE_LIMIT_REACHED'];
+  /* The instrument is the run's, never the reader's. Most jobs are queued as "auto", which
+     names none: the engine classifies the symbol when the run starts and says which it
+     chose in its start event and its record. Only those answers are an instrument. */
+  const INSTRUMENTS = ['etf', 'stock', 'crypto'];
+  const instrumentOf = (value) => (INSTRUMENTS.includes(value) ? value : null);
   const HANDOFF = { market: 'bull', news: 'bull', social: 'bull', fundamentals: 'bull',
                     bull: 'bear', bear: 'manager', manager: 'trader', trader: 'neutral',
                     aggressive: 'portfolio', neutral: 'portfolio', conservative: 'portfolio' };
 
   /* Reader's choices. None of these changes what the engine did. */
-  let chosenRun = null, chosenRole = null, cursor = null, preview = null;
+  let chosenRun = null, chosenRole = null, cursor = null;
   let ambientEnabled = true, fileTimer = null, epoch = 0;
   const traces = new Map();
   const walking = new Set();
@@ -73,7 +78,7 @@ window.Console.page('lab', function (document) {
       key: job ? job.run_key : record.run_id,
       ticker: source.ticker, bucket: source.bucket,
       date: job ? job.trade_date : record.trade_date,
-      instrument: (job && job.instrument_type) || (record && record.instrument_type) || null,
+      instrument: instrumentOf(job && job.instrument_type) || instrumentOf(record && record.instrument_type),
       state: job ? job.state : 'COMPLETE',
       live: !!job && RUNNING.includes(job.state),
       broken: !!job && BROKEN.includes(job.state),
@@ -129,24 +134,25 @@ window.Console.page('lab', function (document) {
     const trace = run && !run.live ? traceFor(run.key) : null;
     const loadedTrace = trace && !trace.failed ? trace : null;
 
-    /* Which desks this run seated. A run says so itself; only a preview of a different
-       instrument falls back to the configured selection. */
-    const instrument = preview || (run && run.instrument) || (loadedTrace && loadedTrace.instrument_type) || 'etf';
-    const configured = ((team && team.analysts) || {})[instrument] || [];
-    const analysts = preview ? configured
-      : (progress && progress.analysts.length ? progress.analysts
-        : loadedTrace ? loadedTrace.analysts : configured);
+    /* Which desks this run seated, in the run's own words: its start event while it runs,
+       its record once finished. The configured selection stands in only while a known
+       instrument's own list has not arrived. Until anything names the instrument — no run
+       yet, or a job the engine has not classified — no desk is marked as skipped. */
+    const instrument = instrumentOf(progress && progress.instrument_type)
+      || instrumentOf(loadedTrace && loadedTrace.instrument_type) || (run && run.instrument) || null;
+    const configured = instrument ? ((team && team.analysts) || {})[instrument] || [] : null;
+    const own = (progress || loadedTrace || {}).analysts || [];
+    const analysts = own.length ? own : configured;
 
     const steps = (loadedTrace && loadedTrace.steps || []).filter((s) => s.role);
     const position = cursor === null ? steps.length - 1 : Math.min(cursor, steps.length - 1);
 
     const desks = roles.map((role) => {
-      const seated = !role.analyst || analysts.includes(role.analyst);
+      const seated = !role.analyst || !analysts || analysts.includes(role.analyst);
       const desk = { ...role, seated,
                      name: label('lab.role.' + role.key, role.key),
                      zone: label('lab.zone.' + (ZONE[role.group] || role.group), role.group) };
       if (!seated) return { ...desk, state: 'disabled', reason: skipReason(role, instrument) };
-      if (preview) return { ...desk, state: 'waiting' };
       if (progress) return { ...desk, ...fromProgress(progress, role.key, run, team) };
       if (loadedTrace) return { ...desk, ...fromTrace(steps, position, role.key) };
       return { ...desk, state: 'waiting' };
@@ -154,11 +160,12 @@ window.Console.page('lab', function (document) {
 
     return { team, run, live, progress, trace, loadedTrace, steps, position,
              instrument, analysts, desks,
-             mode: preview ? 'preview' : !run ? 'none' : run.live ? 'live'
+             mode: !run ? 'none' : run.live ? 'live'
                    : run.broken ? 'broken' : cursor === null ? 'done' : 'replay' };
   }
 
   function skipReason(role, instrument) {
+    if (!instrument) return C.t('lab.notApplicable');
     const key = 'lab.skip.' + role.key + '.' + instrument;
     const generic = C.t('lab.skip.generic', { instrument: label('lab.' + instrument, instrument) });
     return label(key, generic);
@@ -240,10 +247,7 @@ window.Console.page('lab', function (document) {
     const schedule = D.schedule || {};
     const working = v.desks.find((d) => ['thinking', 'research'].includes(d.state));
     let title = '', caption = '';
-    if (v.mode === 'preview') {
-      title = C.t('lab.previewTitle', { instrument: label('lab.' + v.instrument, v.instrument) });
-      caption = C.t('lab.previewNote', { n: v.desks.filter((d) => d.seated).length });
-    } else if (!v.run) {
+    if (!v.run) {
       title = C.t('lab.noRuns');
       caption = schedule.next_run_at ? C.t('lab.nextAt', { at: C.dateTime(schedule.next_run_at) }) : '';
     } else if (working) {
@@ -275,10 +279,9 @@ window.Console.page('lab', function (document) {
   }
 
   function paintPicker(v) {
-    document.querySelectorAll('[data-instrument]').forEach((b) => {
-      b.setAttribute('aria-pressed', String(b.dataset.instrument === v.instrument));
-    });
     q('#symbol').textContent = v.run ? v.run.ticker : '—';
+    q('#instrument').hidden = !v.instrument;
+    q('#instrument').textContent = v.instrument ? label('lab.' + v.instrument, v.instrument) : '';
     q('#office-title').textContent = C.t('lab.officeTitle', { symbol: v.run ? v.run.ticker : '—' });
     q('#mode-badge').textContent = label('lab.mode.' + v.mode, v.mode);
 
@@ -348,7 +351,7 @@ window.Console.page('lab', function (document) {
     q('#scene-caption').textContent = C.t('lab.sceneHelp');
     /* A walk is a reader-triggered walkthrough of a handoff. During a live run it would
        read as the engine moving someone, so it is only offered once a run has settled. */
-    const walkable = v.run && !v.run.live && v.mode !== 'preview';
+    const walkable = v.run && !v.run.live;
     q('#walk').hidden = !walkable;
     window.labPixelScene.sync({ roles: seated, selected: chosenRole, active: canAnimate() });
   }
@@ -393,7 +396,7 @@ window.Console.page('lab', function (document) {
       meta = v.run && v.run.error ? v.run.error : C.t('lab.runState', { state: C.code(v.run ? v.run.state : '') });
       bubble = label('lab.description.error', state);
     } else {
-      meta = v.mode === 'preview' ? C.t('lab.previewSeat') : C.t('lab.notStarted');
+      meta = C.t('lab.notStarted');
       bubble = C.t('lab.bubbleWaiting');
     }
     q('#selected-meta').textContent = meta;
@@ -404,7 +407,8 @@ window.Console.page('lab', function (document) {
   function paintRoster(v) {
     const zones = [];
     v.desks.forEach((d) => { if (!zones.includes(d.zone)) zones.push(d.zone); });
-    q('#team-count').textContent = C.t('lab.enabledCount', { n: v.desks.filter((d) => d.seated).length });
+    q('#team-count').textContent = v.analysts
+      ? C.t('lab.enabledCount', { n: v.desks.filter((d) => d.seated).length }) : '';
     q('#roster').innerHTML = zones.map((zone) =>
       '<div class="roster-zone"><div class="zone-name">' + C.escapeHtml(zone) + '</div>' +
       v.desks.filter((d) => d.zone === zone).map((d) => {
@@ -564,20 +568,12 @@ window.Console.page('lab', function (document) {
   /* ── input ────────────────────────────────────────────────────────── */
   document.addEventListener('click', (event) => {
     const desk = event.target.closest && event.target.closest('[data-role]');
-    if (desk) { chosenRole = desk.dataset.role; render(); return; }
-    const instrument = event.target.closest && event.target.closest('[data-instrument]');
-    if (instrument) {
-      stopMotion();
-      const run = selectedRun();
-      /* Choosing the run's own instrument means "stop previewing", not "preview this". */
-      preview = run && run.instrument === instrument.dataset.instrument ? null : instrument.dataset.instrument;
-      render();
-    }
+    if (desk) { chosenRole = desk.dataset.role; render(); }
   });
   q('#mode').addEventListener('change', (e) => {
     stopMotion();
     chosenRun = e.target.value || null;
-    cursor = null; preview = null; chosenRole = null;
+    cursor = null; chosenRole = null;
     render();
   });
   q('#previous').addEventListener('click', () => step(-1));

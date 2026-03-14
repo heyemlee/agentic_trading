@@ -2145,6 +2145,45 @@ test('an empty deployment says so instead of drawing a run that never happened',
   assert.equal(c.element('#symbol').textContent, '—');
 });
 
+test('a run queued as "auto" names no instrument until the engine has classified it', () => {
+  // Scheduled, manual and reanalysis runs are all queued as "auto". Until the run starts
+  // nothing has said which analysts will sit, so none is drawn as skipped.
+  const job = { run_key: 'q1', ticker: 'VTI', trade_date: '2026-09-10', instrument_type: 'auto', state: 'QUEUED' };
+  const c = labPage({ jobs: [job] });
+  assert.ok(Object.values(deskStates(c)).every((s) => s === 'waiting'));
+  assert.equal(c.element('#instrument').hidden, true);
+  assert.equal(c.element('#team-count').textContent, '');
+
+  // The start event carries the engine's answer, and the room follows it.
+  job.state = 'RUNNING';
+  c.CT.researchRun = { run_key: 'q1', state: 'RUNNING', progress: {
+    instrument_type: 'etf', analysts: ['market', 'news'], desks: {}, result: null, events: [],
+    last_event_at: new Date().toISOString() } };
+  c.render();
+  const states = deskStates(c);
+  assert.equal(states.fundamentals, 'disabled');
+  assert.equal(states.market, 'waiting');
+  assert.equal(c.element('#instrument').hidden, false);
+  assert.equal(c.element('#instrument').textContent, 'etf');
+  assert.doesNotMatch(c.element('#roster').innerHTML, /auto/);
+});
+
+test('a finished run shows the instrument its record names, not the one its job asked for', async () => {
+  const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+                  policy_action: 'NO_TRADE', steps: [] };
+  const c = labPage({
+    jobs: [{ run_key: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'auto', state: 'COMPLETE' }],
+    research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                 policy_action: 'NO_TRADE' }],
+    fetchJSON: async () => trace });
+  await flush();
+  c.render();
+
+  assert.equal(c.element('#instrument').textContent, 'etf');
+  assert.match(c.element('#roster').innerHTML, /lab\.skip\.generic etf/);
+  assert.doesNotMatch(c.element('#roster').innerHTML, /auto/);
+});
+
 test('demo mode fills the room from the shipped recording and asks the API for nothing', () => {
   const c = labPage({ demo: true, fetchJSON: async () => { throw new Error('demo must not reach the API'); } });
 

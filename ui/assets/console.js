@@ -155,6 +155,7 @@
     { href: 'evaluation.html', key: 'evaluation', icon: 'evaluation' },
     { href: 'notifications.html', key: 'notifications', icon: 'notifications' },
     { href: 'profile.html',      key: 'profile',      icon: 'personal' },
+    { href: 'settings.html',     key: 'settings',     icon: 'settings' },
   ];
 
   /* ─── the way back ────────────────────────────────────────────────
@@ -162,16 +163,18 @@
      section root, never to the page you came from, so each one names its
      parent and the chrome renders a real back control for it. Pages with a
      tab are deliberately absent: a back button beside their own tab would
-     be noise. */
+     be noise. The control is the arrow alone; its accessible name is "Back",
+     not the parent's name, because in-app it returns to wherever you came from. */
   const PARENT = {
-    approvals:  { href: 'index.html', key: 'dashboard' },
-    research:   { href: 'lab.html', key: 'lab' },
-    risk:       { href: 'more.html', key: 'more' },
-    activity:   { href: 'more.html', key: 'more' },
-    evaluation: { href: 'more.html', key: 'more' },
-    system:     { href: 'more.html', key: 'more' },
-    notifications: { href: 'more.html', key: 'more' },
-    profile:       { href: 'more.html', key: 'more' },
+    approvals:  'index.html',
+    research:   'lab.html',
+    risk:       'more.html',
+    activity:   'more.html',
+    evaluation: 'more.html',
+    system:     'more.html',
+    notifications: 'more.html',
+    profile:       'more.html',
+    settings:      'more.html',
   };
   const openCount = () => D.proposals.filter((p) => p.status === 'WAITING_FOR_APPROVAL').length;
 
@@ -195,9 +198,8 @@
 
     const parent = PARENT[activeKey];
     const head = parent
-      ? '<a class="backlink" href="' + parent.href + '" id="back-link" data-od-id="back-link">' +
-          ICON.back + '<span data-nav-label="' + parent.key + '">' +
-          t('nav.' + parent.key) + '</span></a>'
+      ? '<a class="backlink" href="' + parent + '" id="back-link" data-od-id="back-link" ' +
+          'data-i18n-aria="common.back" aria-label="' + escapeHtml(t('common.back')) + '">' + ICON.back + '</a>'
       : '<a class="brand" href="index.html" data-od-id="brand">' +
           '<img class="brand-mark" src="icons/mark.svg" width="30" height="30" alt="" /><span>Agentic Trading</span></a>';
 
@@ -873,7 +875,7 @@
   }
   window.Console = {
     page: (name, init) => window.CT_NAV ? CT_NAV.register(name, init) : init(document),
-    D, ICON, CHEVRON, NAV, LEVEL_TONE, LADDER_STEPS,
+    D, ICON, CHEVRON, NAV, PARENT, LEVEL_TONE, LADDER_STEPS,
     SHOW_CONCEPTUAL, showsBucket, showsAccount,
     t, code, sysCopy, psCopy, bucket,
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
