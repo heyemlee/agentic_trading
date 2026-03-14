@@ -1,8 +1,14 @@
 /* Pixel Agents sprite conventions and frame loop adapted under MIT.
  * Copyright (c) 2026 Pablo De Lucca. See vendor/pixel-agents/LICENSE. */
 'use strict';
+/* The sprites carry this script's release stamp, so the browser keeps them for the release
+   instead of asking again for twenty of them on every first visit to Lab. */
+const labAssetVersion = (() => {
+  try { return new URL(document.currentScript.src).search; } catch (_) { return ''; }
+})();
 window.createLabPixelScene = function (document) {
-  const canvas = document.querySelector('#pixel-office'), ctx = canvas.getContext('2d');
+  const canvas = document.querySelector('#pixel-office');
+  let ctx = canvas.getContext('2d');
   const W = 320, H = 296, base = 'assets/lab/pixel-agents/';
   const seats = [
     [52,100,'up'],[108,100,'up'],[52,149,'up'],[108,149,'up'],
@@ -10,7 +16,7 @@ window.createLabPixelScene = function (document) {
     [52,247,'up'],[108,247,'up'],[202,244,'right'],[234,211,'down'],[266,244,'left'],
   ];
   const images = {}, jobs = [];
-  function load(key, path) { jobs.push(new Promise((resolve,reject) => { const img = new Image(); img.onload = () => { images[key] = img; resolve(); }; img.onerror = reject; img.src = base + path; })); }
+  function load(key, path) { jobs.push(new Promise((resolve,reject) => { const img = new Image(); img.onload = () => { images[key] = img; resolve(); }; img.onerror = reject; img.src = base + path + labAssetVersion; })); }
   for (let i=0;i<6;i++) load('char'+i, `characters/char_${i}.png`);
   ['DESK/DESK_FRONT','PC/PC_FRONT_ON_1','PC/PC_FRONT_ON_2','CUSHIONED_CHAIR/CUSHIONED_CHAIR_FRONT','BOOKSHELF/BOOKSHELF','DOUBLE_BOOKSHELF/DOUBLE_BOOKSHELF','LARGE_PLANT/LARGE_PLANT','PLANT/PLANT','CACTUS/CACTUS','COFFEE/COFFEE','BIN/BIN','CLOCK/CLOCK','SMALL_PAINTING/SMALL_PAINTING','WHITEBOARD/WHITEBOARD'].forEach(p => load(p.split('/')[1], 'furniture/'+p+'.png'));
   let roles=[], active=true, selected='', clock=0, last=0, ready=false, journey=null;
@@ -43,7 +49,11 @@ window.createLabPixelScene = function (document) {
     const back=[...outbound.slice(0,-1)].reverse();
     return [...outbound,[target[0],target[1],2.2],...back,home];
   }
+  let bubbleShown='';
   function bubble(text,x,y,waiting=false) {
+    const shown=text?[text,x,y,waiting].join('|'):'';
+    if(shown===bubbleShown)return;
+    bubbleShown=shown;
     const layer=document.querySelector('#ambient-bubbles');
     layer.replaceChildren();
     if(!text)return;
@@ -61,13 +71,26 @@ window.createLabPixelScene = function (document) {
     const row=dir==='up'?1:dir==='down'?0:2;
     ctx.save();ctx.translate(Math.round(x),Math.round(y));
     if(dir==='left')ctx.scale(-1,1);
-    if(i>=6)ctx.filter=`hue-rotate(${[25,-20,55,-30,30,60][i-6]}deg)`;
-    ctx.drawImage(images['char'+i%6],frame*16,row*32,16,32,-8,-32,16,32);
+    ctx.drawImage(images['char'+i],frame*16,row*32,16,32,-8,-32,16,32);
     ctx.restore();
   }
-  function render() {
-    if(!ready)return;
-    ctx.imageSmoothingEnabled=false;
+  /* Everything but the people, the screens and the selection is still life. It is drawn once,
+     into two layers either side of the screens, and each frame paints two images instead of
+     some four hundred rectangles. */
+  let backdrop=null, frontdrop=null;
+  function layer(draw) {
+    const surface=document.createElement('canvas');surface.width=W;surface.height=H;
+    const own=ctx;ctx=surface.getContext('2d');ctx.imageSmoothingEnabled=false;
+    try{draw();}finally{ctx=own;}
+    return surface;
+  }
+  /* A recoloured worker used to be a hue-rotate filter run on every frame for six people. */
+  function tint(sheet,degrees) {
+    const surface=document.createElement('canvas');surface.width=sheet.width;surface.height=sheet.height;
+    const pen=surface.getContext('2d');pen.filter=`hue-rotate(${degrees}deg)`;pen.drawImage(sheet,0,0);
+    return surface;
+  }
+  function stillLife() {
     rect(0,0,W,H,palette.floor);
     for(let y=32;y<H;y+=16)for(let x=8;x<W;x+=32){rect(x,y,31,1,palette.seam);rect(x+(y%32?16:0),y,1,16,palette.seam);}
     rect(0,0,W,35,palette.wall);rect(0,33,W,4,palette.trim);rect(0,0,6,H,palette.wall);rect(314,0,6,H,palette.wall);
@@ -82,11 +105,19 @@ window.createLabPixelScene = function (document) {
     // Back-facing workers sit in front of their monitors; no bitmap masks.
     // Continuous shared benches instead of six isolated square desks.
     [74,123,221].forEach(y=>table(28,y,104,17));
-    [0,1,2,3,7,8].forEach(i=>{const [x,y]=seats[i];image('PC_FRONT_ON_'+(active&&Math.floor(clock/2)%2?2:1),x-8,y-37);});
+  }
+  function stillLifeFront() {
     partition(28,105,104,4);
     table(228,89,40,39);table(214,207,40,39);
     paper(232,95,'#7b9c79');paper(253,109,'#bd8264');paper(218,213,'#bc7b61');paper(239,227,'#7b9c79');
     rect(245,102,5,6,palette.ink);rect(244,98,7,5,'#829969');rect(231,220,5,6,palette.ink);rect(230,216,7,5,'#829969');
+  }
+  function render() {
+    if(!ready)return;
+    ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(backdrop,0,0);
+    [0,1,2,3,7,8].forEach(i=>{const [x,y]=seats[i];image('PC_FRONT_ON_'+(active&&Math.floor(clock/2)%2?2:1),x-8,y-37);});
+    ctx.drawImage(frontdrop,0,0);
     seats.map((s,i)=>({s,i})).sort((a,b)=>a.s[1]-b.s[1]).forEach(({s,i})=>{if(journey&&i===journey.role)return;person(i,...s);});
     if(journey)person(journey.role,journey.x,journey.y,journey.dir,!journey.hold);
     const idx=roles.findIndex(r=>r.id===selected);
@@ -108,8 +139,8 @@ window.createLabPixelScene = function (document) {
     journey.dir=Math.abs(dx)>Math.abs(dy)?(dx>0?'right':'left'):(dy>0?'down':'up');
     if(d<=step){journey.x=target[0];journey.y=target[1];journey.path.shift();journey.hold=target[2]||0;}
     else{journey.x+=dx/d*step;journey.y+=dy/d*step;}
-    const hit=document.querySelector(`#people [data-role="${roles[journey.role].id}"]`);
-    if(hit){hit.style.left=journey.x/W*100+'%';hit.style.top=journey.y/H*100+'%';}
+    journey.hit=journey.hit?.isConnected?journey.hit:document.querySelector(`#people [data-role="${roles[journey.role].id}"]`);
+    if(journey.hit){journey.hit.style.left=journey.x/W*100+'%';journey.hit.style.top=journey.y/H*100+'%';}
   }
   function startNextJourney() {
     if(journey||!active||!walkQueue.length)return;
@@ -121,17 +152,44 @@ window.createLabPixelScene = function (document) {
   }
   window.labPixelScene={
     seats:seats.map(([x,y])=>({x:x/W*100,y:y/H*100})),
-    sync(data){roles=data.roles;selected=data.selected;active=data.active;if(!active)this.stop();render();},
+    sync(data){roles=data.roles;selected=data.selected;active=data.active;if(!active)this.stop();render();schedule();},
     stop(){journey=null;walkQueue.splice(0);bubble('');},
     walk(roleId,targetId,callbacks={}){
       if(!active)return 'reduced';
       if((journey&&roles[journey.role]?.id===roleId)||walkQueue.some(r=>r.roleId===roleId))return 'duplicate';
       walkQueue.push({roleId,targetId,...callbacks});
-      const queued=Boolean(journey);if(queued)callbacks.queued?.();startNextJourney();return queued?'queued':'started';
+      const queued=Boolean(journey);if(queued)callbacks.queued?.();startNextJourney();schedule();return queued?'queued':'started';
     },
     status(){return {active:journey?roles[journey.role]?.id:null,queued:walkQueue.map(r=>r.roleId),holding:Boolean(journey?.hold)};},
   };
-  // Adapted from upstream gameLoop.ts: capped delta, one rAF, no React rerenders.
-  function frame(time){const dt=last?Math.min((time-last)/1000,.1):0;last=time;if(!document.hidden&&active){tick(dt);render();}requestAnimationFrame(frame);}
-  Promise.all(jobs).then(()=>{ready=true;render();requestAnimationFrame(frame);}).catch(()=>{document.querySelector('#scene-caption').textContent='办公室素材加载失败，请刷新重试。';});
+  /* Adapted from upstream gameLoop.ts: capped delta, one rAF, no React rerenders.
+
+     The loop only runs while the office is on screen. It used to ask for the next frame
+     forever, from the first visit to Lab until the tab closed, on every page, and to repaint
+     the whole office sixty times a second although nobody moves more often than every 150 ms.
+     Now it stops as soon as this page is hidden or left, or motion is off; sync() and walk()
+     start it again. At rest it draws ten frames a second, enough for the typing loop; a walk
+     runs at the display's rate so the walker moves smoothly. */
+  const IDLE_MS=100;
+  let pending=0, resting=0;
+  const running=()=>ready&&active&&!document.hidden;
+  function schedule(){
+    if(!running())return;
+    if(journey&&resting){clearTimeout(resting);resting=0;}
+    if(pending||resting)return;
+    if(journey)pending=requestAnimationFrame(frame);
+    else resting=setTimeout(()=>{resting=0;if(!pending)pending=requestAnimationFrame(frame);},IDLE_MS);
+  }
+  function frame(time){
+    pending=0;
+    if(!running()){last=0;return;}
+    const dt=last?Math.min((time-last)/1000,.1):0;last=time;
+    tick(dt);render();schedule();
+  }
+  document.addEventListener('visibilitychange',schedule);
+  Promise.all(jobs).then(()=>{
+    for(let i=6;i<12;i++)images['char'+i]=tint(images['char'+i%6],[25,-20,55,-30,30,60][i-6]);
+    backdrop=layer(stillLife);frontdrop=layer(stillLifeFront);
+    ready=true;render();schedule();
+  }).catch(()=>{document.querySelector('#scene-caption').textContent='办公室素材加载失败，请刷新重试。';});
 };

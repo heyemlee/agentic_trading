@@ -874,7 +874,9 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
   .tabbar { background: Canvas; border-color: ButtonText; }
   .tabitem[aria-current="page"], .tabitem[data-section-active="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }
-.topnav { background: rgba(255,255,255,.94); border-bottom: 1px solid #e5e5e5; }
+/* Opaque, and so without the blur the glass rule above gives it: under a 94% white the blur
+   showed as nothing, yet it was recomputed on every scrolled frame. */
+.topnav { background: #fff; border-bottom: 1px solid #e5e5e5; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .brand-mark { filter: grayscale(1); }
 /* Quiet, decorative halo: this is an entry point, not a live-status signal. */
 .assistant-launcher {
@@ -897,6 +899,9 @@ button, a, summary { -webkit-tap-highlight-color: transparent; touch-action: man
   0%, 100% { opacity: .45; transform: scale(.98); }
   50% { opacity: 1; transform: scale(1.05); }
 }
+/* Behind an open sheet the halo is out of sight, and each of its frames made the sheet's
+   full-screen blurred backdrop render again. */
+html:has(dialog[open]) .assistant-launcher::before { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) {
   .assistant-launcher::before { animation: none; opacity: .65; transform: none; }
 }

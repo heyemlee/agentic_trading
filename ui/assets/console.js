@@ -218,7 +218,7 @@
 
   function paintNavStatus() {
     const badge = document.getElementById('home-badge');
-    if (badge) badge.hidden = !openCount();
+    if (badge && badge.hidden !== !openCount()) badge.hidden = !openCount();
     const el = document.getElementById('nav-status');
     if (!el) return;
     /* Before you sign in the app has not asked the engine anything, so it has
@@ -226,12 +226,12 @@
        happening — and repeats what the bar below already says. */
     const signedOut = !window.CT_DEMO && window.CT_API && !CT_API.authenticated;
     const pendingHealth = !window.CT_DEMO && CT_API.state.resources.health?.error === 'loading';
-    el.hidden = signedOut || pendingHealth;
+    if (el.hidden !== (signedOut || pendingHealth)) el.hidden = signedOut || pendingHealth;
     if (el.hidden) return;
     const s = systemStatus();
     const tone = s === 'READY' ? 'dot-ok' : (s === 'PAUSED' ? 'dot-warn' : 'dot-bad');
     setHTML(el, '<span class="dot ' + tone + '"></span><span>' + escapeHtml(code(s)) + '</span>');
-    el.title = sysCopy(s);
+    if (el.title !== sysCopy(s)) el.title = sysCopy(s);
   }
 
   function renderFoot() {
@@ -295,32 +295,39 @@
   function paintConnection() {
     const bar = document.getElementById('conn-bar');
     if (!bar || !window.CT_API) return;
-    bar.hidden = false;
-    bar.className = 'conn-bar is-offline';
+    /* Called every second. It used to reset the bar and rebuild it on each call, so a page
+       with nothing new still had its style recomputed once a second; now an unchanged bar is
+       left alone. */
+    let cls = 'conn-bar is-offline', hide = false;
+    const apply = () => {
+      if (bar.className !== cls) bar.className = cls;
+      if (bar.hidden !== hide) bar.hidden = hide;
+    };
     const zh = window.I18N.lang === 'zh';
     if (CT_API.state.demo) {
-      bar.textContent = zh ? '演示模式 · 全部为示例数据 · 所有操作关闭' : 'DEMO · Sample data only · All actions disabled';
+      setText(bar, zh ? '演示模式 · 全部为示例数据 · 所有操作关闭' : 'DEMO · Sample data only · All actions disabled');
+      apply();
       return;
     }
     const rows = Object.entries(CT_API.state.resources).filter(([key]) => CT_API.SOURCES[key].path());
     const missing = rows.filter(([key]) => !CT_API.isLive(key));
     const loading = CT_API.state.authPending || (CT_API.authenticated && missing.length && missing.every(([, item]) => item.error === 'loading'));
     if (CT_API.state.authError && !CT_API.state.authPending) {
-      bar.textContent = t('ux.sessionUnavailable');
+      setText(bar, t('ux.sessionUnavailable'));
     } else if (loading) {
-      bar.className = 'conn-bar is-loading';
-      bar.textContent = t('common.loading');
-      bar.hidden = !!window.CT_NAV || document.getElementById('content')?.hidden === true;
+      cls = 'conn-bar is-loading';
+      setText(bar, t('common.loading'));
+      hide = !!window.CT_NAV || document.getElementById('content')?.hidden === true;
     } else if (CT_API.state.authChecked && !CT_API.authenticated) {
       /* Being signed out is an ordinary state, not a fault — so this reads
          neutral, and carries the way in with this page as the return address. */
-      bar.className = 'conn-bar';
+      cls = 'conn-bar';
       const here = window.location.pathname.split('/').pop() + window.location.search;
-      bar.innerHTML = '<span class="conn-msg">' + escapeHtml(t('ux.notSignedIn')) + '</span>' +
+      setHTML(bar, '<span class="conn-msg">' + escapeHtml(t('ux.notSignedIn')) + '</span>' +
         '<a class="conn-signin" href="login.html?next=' + encodeURIComponent(here) + '">' +
-        escapeHtml(t('ux.signIn')) + '</a>';
+        escapeHtml(t('ux.signIn')) + '</a>');
     } else if (!rows.length) {
-      bar.textContent = zh ? '正在读取真实数据…' : 'Loading account data…';
+      setText(bar, zh ? '正在读取真实数据…' : 'Loading account data…');
     } else if (missing.length || !CT_API.state.online) {
       /* Name what is affected and what it costs. The why belongs in the
          sources sheet, one tap away, not in the reader's face. */
@@ -331,13 +338,14 @@
         ? ' <button type="button" class="btn btn-sm btn-accent" data-action="confirm-ledger" style="margin-left:8px;padding:3px 10px;font-size:12px;vertical-align:middle;">' +
           escapeHtml(t('pf.confirmLedger')) + '</button>'
         : '';
-      bar.innerHTML = '<span class="conn-msg">' +
-        escapeHtml(names ? t('ux.stale', { names }) : t('ux.offline')) + '</span>' + touchBtn;
+      setHTML(bar, '<span class="conn-msg">' +
+        escapeHtml(names ? t('ux.stale', { names }) : t('ux.offline')) + '</span>' + touchBtn);
     } else {
-      bar.className = 'conn-bar';
-      bar.hidden = true;
+      cls = 'conn-bar';
+      hide = true;
     }
-    document.getElementById('sources-title').textContent = t('ux.sources');
+    apply();
+    setText(document.getElementById('sources-title'), t('ux.sources'));
     setHTML(document.getElementById('source-rows'), rows.map(([key, item]) => {
       const live = CT_API.isLive(key);
       const why = live ? null : explainError(item.error);
@@ -670,7 +678,15 @@
     };
     draw();
     if (!window.CT_API) return;
-    document.addEventListener('ct:data', draw);
+    /* One draw per task, after the last data event in it: a tab switch sends two, and a poll
+       that changes the queue sends its own and its detail's. The draw still comes before the
+       next frame, so nothing is painted in between. */
+    let queued = false;
+    document.addEventListener('ct:data', () => {
+      if (queued) return;
+      queued = true;
+      Promise.resolve().then(() => { queued = false; draw(); });
+    });
     CT_API.start(wanted);
     paintConnection();
   }
@@ -832,6 +848,13 @@
     if (!element || markup.get(element) === html) return;
     markup.set(element, html);
     element.innerHTML = html;
+  }
+  /* setHTML's twin for plain text. The key cannot collide with any markup setHTML records. */
+  function setText(element, text) {
+    const key = '\u0000' + text;
+    if (!element || markup.get(element) === key) return;
+    markup.set(element, key);
+    element.textContent = text;
   }
   const sheetOrigins = new Map();
   function openSheet(id) {

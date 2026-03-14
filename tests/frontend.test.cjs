@@ -2795,3 +2795,119 @@ test('scoped assistant resource rejects old and mismatched data without repointi
   await c.CT_API.readOnce('advisor'); assert.equal(c.CT.advisor.notes.text, 'Portfolio source');
   assert.ok(calls.includes('/advisor'));
 });
+
+function labOffice() {
+  const frames = [], timers = [], sources = [], listeners = {};
+  const counts = { fills: 0, images: 0 };
+  const pen = () => ({ imageSmoothingEnabled: true, filter: 'none', fillStyle: '',
+    fillRect() { counts.fills++; }, drawImage() { counts.images++; },
+    save() {}, restore() {}, translate() {}, scale() {} });
+  const canvas = () => ({ width: 0, height: 0, getContext: pen });
+  const bubbles = { children: 0, replaceChildren() { this.children = 0; }, appendChild() { this.children++; } };
+  const document = { hidden: false,
+    currentScript: { src: 'https://console.test/ui/assets/lab/pixel-office.js?v=abc123' },
+    querySelector: selector => selector === '#pixel-office' ? canvas()
+      : selector === '#ambient-bubbles' ? bubbles : null,
+    createElement: tag => tag === 'canvas' ? canvas() : { style: {}, className: '', textContent: '' },
+    addEventListener(type, fn) { (listeners[type] ||= []).push(fn); } };
+  const ctx = vm.createContext({ document, URL, console,
+    Image: class { set src(value) { sources.push(value); setImmediate(() => this.onload()); } },
+    requestAnimationFrame: fn => frames.push(fn), setTimeout: fn => timers.push(fn), clearTimeout() {} });
+  ctx.window = ctx;
+  vm.runInContext(fs.readFileSync(path.join(root, 'ui/assets/lab/pixel-office.js'), 'utf8'), ctx);
+  ctx.createLabPixelScene(document);
+  const roles = Array.from({ length: 12 }, (_, i) => ({ id: 'r' + i, name: 'R' + i, state: 'idle' }));
+  return { ctx, document, frames, timers, sources, listeners, counts, roles, scene: () => ctx.labPixelScene };
+}
+
+test('the Lab office draws only while it is on screen, and slowly at rest', async () => {
+  const lab = labOffice(); await flush();
+  assert.ok(lab.sources.length > 10 && lab.sources.every(src => src.endsWith('?v=abc123')),
+    'sprites carry the release stamp, so they are kept rather than asked for again');
+  assert.equal(lab.frames.length, 0, 'at rest the office waits a tenth of a second between frames');
+  assert.equal(lab.timers.length, 1);
+  lab.timers.shift()();
+  assert.equal(lab.frames.length, 1);
+  const fills = lab.counts.fills;
+  lab.frames.shift()(1000);
+  assert.ok(lab.counts.fills - fills <= 1, 'the floor and furniture are drawn once, not every frame');
+  assert.equal(lab.timers.length, 1, 'and it keeps going while it is on screen');
+
+  lab.document.hidden = true;                  // another page, or the app in the background
+  lab.timers.shift()(); lab.frames.shift()(1100);
+  assert.deepEqual([lab.frames.length, lab.timers.length], [0, 0], 'off screen nothing is scheduled');
+  lab.document.hidden = false; lab.listeners.visibilitychange.forEach(fn => fn());
+  assert.equal(lab.timers.length, 1, 'coming back starts it again');
+
+  lab.scene().sync({ roles: lab.roles, selected: '', active: false });
+  lab.timers.shift()(); lab.frames.shift()(1200);
+  assert.deepEqual([lab.frames.length, lab.timers.length], [0, 0], 'motion off stops the loop');
+  lab.scene().sync({ roles: lab.roles, selected: '', active: true });
+  assert.equal(lab.timers.length, 1);
+  assert.equal(lab.scene().walk('r0', 'r4'), 'started');
+  assert.equal(lab.frames.length, 1, 'a walk runs at the display rate from its first step');
+});
+
+test('a poll that only moves checked_at does not draw the page again', async () => {
+  const c = context(); let draws = 0;
+  let health = { status: 'READY', checked_at: new Date(Date.now() - 1000).toISOString() };
+  c.fetch = async url => url === '/auth/session'
+    ? response({ authenticated: true, csrf_token: 'csrf' }) : response(health);
+  c.run('api.js'); c.document.addEventListener('ct:data', () => { draws++; });
+  c.CT_API.start(['health']); await flush();
+  draws = 0;
+  health = { ...health, checked_at: new Date().toISOString() };
+  await c.CT_API.readOnce('health');
+  assert.equal(draws, 0, 'a kept reading read again is not new data');
+  health = { ...health, status: 'PAUSED' };
+  await c.CT_API.readOnce('health');
+  assert.equal(draws, 1);
+});
+
+test('the loading animation and the chrome ask the main thread for nothing per frame', () => {
+  const startup = fs.readFileSync(path.join(root, 'ui/assets/startup.css'), 'utf8');
+  const bodies = [...startup.matchAll(/@keyframes\s+[\w-]+\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map(m => m[1]);
+  assert.ok(bodies.length >= 5);
+  for (const body of bodies) {
+    const moved = new Set([...body.matchAll(/([a-z-]+)\s*:/g)].map(m => m[1]));
+    assert.deepEqual([...moved].filter(name => !['transform', 'opacity'].includes(name)), [], body);
+  }
+  const lab = fs.readFileSync(path.join(root, 'ui/assets/lab.css'), 'utf8');
+  assert.doesNotMatch(lab.match(/\.lab-now\{[^}]*\}/)[0], /backdrop-filter/);
+  const chrome = fs.readFileSync(path.join(root, 'ui/assets/console.css'), 'utf8');
+  assert.match(chrome, /\.topnav \{ background: #fff;[^}]*backdrop-filter: none;/);
+  assert.match(chrome, /html:has\(dialog\[open\]\) \.assistant-launcher::before \{ animation-play-state: paused; \}/);
+});
+test('several data events in one task draw the page once, before the next frame', async () => {
+  const c = context(); let draws = 0;
+  c.CT_NAV = { bind() {} };
+  c.element('blank-state').remove = function () { this.removed = true; };
+  c.fetch = async url => response(url === '/auth/session' ? { authenticated: true, csrf_token: 'csrf' }
+    : url === '/proposals' ? [] : url === '/health' ? { status: 'READY' } : { accounts: {}, buckets: {} });
+  c.run('api.js'); c.run('console.js');
+  c.Console.live(['portfolio'], () => { draws++; });
+  await flush();
+  const before = draws;
+  assert.ok(before > 0);
+  for (let i = 0; i < 3; i++) c.document.dispatchEvent({ type: 'ct:data' });
+  assert.equal(draws, before, 'drawn after the task, not once per event inside it');
+  await flush();
+  assert.equal(draws, before + 1);
+});
+
+test('an unchanged connection tick writes nothing to the page', async () => {
+  const c = context();
+  c.fetch = async url => response(url === '/auth/session' ? { authenticated: true, csrf_token: 'csrf' } : []);
+  c.run('api.js'); c.run('console.js');
+  c.CT_API.start(['proposals']); await flush();
+  const bar = c.element('conn-bar'); let writes = 0;
+  for (const name of ['className', 'hidden', 'textContent', 'innerHTML']) {
+    let value = bar[name];
+    Object.defineProperty(bar, name, { get: () => value, set: next => { writes++; value = next; } });
+  }
+  c.Console.paintConnection();
+  const first = writes;
+  assert.equal(bar.hidden, true, 'every source is current, so the bar is out of the way');
+  c.Console.paintConnection(); c.Console.paintConnection();
+  assert.equal(writes, first, 'the one-second tick repaints only what changed');
+});

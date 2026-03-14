@@ -172,6 +172,13 @@ window.CT_API = (function () {
   }
   const fetchJSON = path => request(path);
 
+  /* What a page shows from a read, for telling whether the read changed anything. A kept
+     reading stamps checked_at every time it is read, so /health and /attention differed from
+     the last answer on every poll and every page was drawn again for nothing. Freshness is still
+     judged from checked_at (dataTime); only Evaluation prints it, so it keeps it here. */
+  const shown = (key, data) => JSON.stringify(data, key === 'evaluation' ? undefined
+    : (name, value) => (name === 'checked_at' ? undefined : value));
+
   async function readOnce(key) {
     const src = SOURCES[key];
     if (demo || !src) return;
@@ -185,7 +192,7 @@ window.CT_API = (function () {
     }
     const pending = (async () => {
       const epoch = authEpoch;
-      const previous = JSON.stringify(window.CT[key]);
+      const previous = shown(key, window.CT[key]);
       try {
         const data = await fetchJSON(path);
         // Never attach a late detail response to a newly selected proposal/run.
@@ -245,7 +252,7 @@ window.CT_API = (function () {
         if (epoch !== authEpoch || src.path() !== path) return;
         state.resources[key] = { ...(state.resources[key] || {}), error: error.message };
         state.lastError = error.message;
-      } finally { announce(previous !== JSON.stringify(window.CT[key])); }
+      } finally { announce(previous !== shown(key, window.CT[key])); }
     })();
     inFlight.set(key, pending);
     try { return await pending; }

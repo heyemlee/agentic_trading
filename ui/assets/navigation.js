@@ -163,16 +163,23 @@
       for (const node of view.nodes) document.body.insertBefore(node, foot);
       document.title = view.title;
       if (view.initialized) {
+        // mount() translates the whole document, and this page's nodes are in it by now.
         Console.mount(view.name === 'index' ? 'dashboard' : view.name);
         CT_API.start(view.keys);
-      } else initialize(view);
-      I18N.applyStatic();
+      } else {
+        initialize(view);
+        I18N.applyStatic();
+      }
       window.scrollTo(0, view.scroll);
     }
     document.dispatchEvent(new CustomEvent('ct:route'));
     document.dispatchEvent(new CustomEvent('ct:data'));
-    if (url.hash) document.getElementById(decodeURIComponent(url.hash.slice(1)))?.scrollIntoView();
-    performance.mark('ct:navigation-visible');
+    // A page draws once its data events of this task have settled (Console.live), so what an
+    // anchor names, and the moment the page is really on screen, come after that draw.
+    Promise.resolve().then(() => {
+      if (url.hash) document.getElementById(decodeURIComponent(url.hash.slice(1)))?.scrollIntoView();
+      performance.mark('ct:navigation-visible');
+    });
   }
   function navigate(url, historyMode = 'push') {
     const ticket = ++revision;
@@ -226,7 +233,20 @@
     else location.reload();
   });
   // Download page factories without mounting hidden pages or issuing business requests.
-  for (const name of routes) if (name !== active.name) prepare(name).catch(() => {});
+  // Only once the first screen is drawn: at a cold start thirteen scripts used to compete with
+  // the page being opened for the connection, the parser and the main thread. A tap on a tab
+  // before then still works; that page is prepared on demand.
+  let prefetched = false;
+  function prefetch() {
+    if (prefetched) return;
+    prefetched = true;
+    const later = window.requestIdleCallback || (fn => setTimeout(fn, 200));
+    later(() => { for (const name of routes) if (name !== active.name) prepare(name).catch(() => {}); });
+  }
+  document.addEventListener('ct:page-status', event => {
+    if (event.detail?.status === 'ready') prefetch();
+  });
+  setTimeout(prefetch, 4000);
   let warmed = false;
   document.addEventListener('ct:auth', () => {
     if (warmed || !CT_API.authenticated) return;
