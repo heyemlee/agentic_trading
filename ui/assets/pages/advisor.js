@@ -115,6 +115,19 @@ window.Console.page('advisor', function (document) {
   document.querySelectorAll('[data-icon]').forEach((el) => {
     el.innerHTML = C.ICON[el.dataset.icon] || '';
   });
+  /* Discover's search and filters stay under the header while the list scrolls. They
+     turn to glass only once rows pass beneath them, where the blur has something to show. */
+  let toolbarWatch = null;
+  function watchToolbar() {
+    if (!window.IntersectionObserver || !window.getComputedStyle) return;
+    const bar = el('dc-toolbar'), edge = parseFloat(getComputedStyle(bar).top) || 0;
+    toolbarWatch?.disconnect();
+    toolbarWatch = new IntersectionObserver(([entry]) => {
+      // A hidden panel reports an empty box; leave the bar as it was.
+      if (entry.boundingClientRect.width) bar.classList.toggle('is-stuck', !entry.isIntersecting && entry.boundingClientRect.top < edge);
+    }, { rootMargin: -Math.ceil(edge) + 'px 0px 0px 0px' });
+    toolbarWatch.observe(el('dc-sentinel'));
+  }
   const views = ['chat', 'discover'];
   function showView(view, focus = false) {
     if (binding.scope === 'agentic') view = 'chat';
@@ -132,7 +145,7 @@ window.Console.page('advisor', function (document) {
     el('panel-tools').hidden = view === 'chat' || binding.scope !== 'personal';
     if (focus) el('view-' + view).focus();
     if (view === 'chat') scheduleViewport();
-    else clearViewport();
+    else { clearViewport(); watchToolbar(); }
   }
   for (const [index, name] of views.entries()) {
     el('view-' + name).addEventListener('click', () => showView(name));
@@ -207,6 +220,9 @@ window.Console.page('advisor', function (document) {
   }
   document.addEventListener('ct:leave', clearViewport);
   const status = text => { el('advisor-status').textContent = text; };
+  const setText = (id, text) => { if (el(id).textContent !== text) el(id).textContent = text; };
+  // Chat's status line sits in its composer, out of sight on Discover; this one is Discover's own.
+  const discoverSay = text => setText('discover-status', text);
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
   function updateAccountLink() {
     const value = el('assistant-account').value;
@@ -268,6 +284,78 @@ window.Console.page('advisor', function (document) {
       } catch (error) { if (epoch === scopeEpoch) status(t('rs.openedFailed', { err: error.message })); }
     }
   });
+  /* Discover lists the candidate pool from the last snapshot. A source reads
+     "watchlists:<list>", "scans:<screener>" or "profile:<group>" (advisor.fetch_snapshot);
+     the list or group name is the owner's own text and renders verbatim. A row starts
+     research only from its own button: a full review spends the day's research budget. */
+  const SOURCE_KINDS = ['watchlists', 'scans', 'profile'];
+  const CANDIDATE_PAGE = 24;
+  const SYMBOL = /^[A-Z][A-Z0-9.-]{0,19}$/;      // the service's own rule, advisor.SYMBOL
+  let candidateFilter = 'all', candidateQuery = '', candidateLimit = CANDIDATE_PAGE;
+  const sourceKind = source => {
+    const kind = String(source).split(':')[0];
+    return SOURCE_KINDS.includes(kind) ? kind : 'other';
+  };
+  const sourceName = source => String(source).slice(String(source).indexOf(':') + 1);
+  const isDay = day => /^\d{4}-\d{2}-\d{2}$/.test(day || '');
+  const shortDate = day => isDay(day)
+    ? new Date(day + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '';
+  const matchRank = symbol => symbol === candidateQuery ? 2 : symbol.startsWith(candidateQuery) ? 1 : 0;
+  function candidateRow(c, held, running, latest) {
+    const sources = (c.sources || []).map(source => sourceKind(source) === 'other' ? '<span>' + h(source) + '</span>'
+      : '<span><b>' + h(t('dc.kind.' + sourceKind(source))) + '</b> ' + h(sourceName(source)) + '</span>').join('<i aria-hidden="true"> · </i>');
+    const last = latest.get(c.symbol);
+    const tags = (held.has(c.symbol) ? '<span class="dc-tag is-held">' + h(t('dc.held')) + '</span>' : '') +
+      (last ? '<span class="dc-tag">' + h(t('dc.last', { action: C.code(last.action), date: shortDate(last.trade_date) || '—' })) + '</span>' : '');
+    const action = running.has(c.symbol)
+      ? '<span class="dc-running"><span class="dc-pulse" aria-hidden="true"></span>' + h(t('dc.researching')) + '</span>'
+      : '<button type="button" class="dc-go" data-research="' + h(c.symbol) + '" aria-label="' + h(t('dc.researchSymbol', { symbol: c.symbol })) + '">' + h(t('ux.review')) + '</button>';
+    return '<div class="dc-row' + (held.has(c.symbol) ? ' is-held' : '') + '" role="listitem"><span class="dc-mono" aria-hidden="true">' + h(c.symbol.slice(0, 1)) +
+      '</span><div class="dc-main"><p class="dc-line"><strong class="dc-symbol">' + h(c.symbol) + '</strong>' + tags + '</p><p class="dc-sources">' + sources + '</p></div>' + action + '</div>';
+  }
+  // Ranking an empty pool would still spend one of the day's assistant replies.
+  const shortlistOff = () => busy || chatWorking || conversationBlocked || binding.scope !== 'personal' || !available() ||
+    !(currentState()?.snapshot?.candidates || []).length;
+  function syncResearchButtons() {
+    const off = busy || binding.scope !== 'personal' || !available();
+    document.querySelectorAll('[data-research]').forEach(button => { button.disabled = off; });
+    document.querySelectorAll('#symbol-form button').forEach(button => { button.disabled = off || !el('symbol-input').value.trim(); });
+  }
+  function renderDiscover(state) {
+    const snapshot = state.snapshot || {}, candidates = snapshot.candidates || [], loaded = !!currentState();
+    const counts = { all: candidates.length };
+    candidates.forEach(c => new Set((c.sources || []).map(sourceKind)).forEach(kind => { counts[kind] = (counts[kind] || 0) + 1; }));
+    const kinds = ['all', ...SOURCE_KINDS, 'other'].filter(kind => kind === 'all' || counts[kind]);
+    if (!kinds.includes(candidateFilter)) candidateFilter = 'all';
+    paint('dc-pool', !loaded ? '' : !candidates.length ? '<span>' + h(t('dc.poolEmpty')) + '</span>'
+      : '<span>' + h(t('dc.pool', { n: candidates.length })) + '</span>' +
+        (snapshot.fetched_at ? '<span>' + h(t('ai.fresh', { date: C.dateTime(snapshot.fetched_at) })) + '</span>' : ''));
+    paint('discover-filters', candidates.length ? kinds.map(kind => '<button type="button" class="dc-chip" data-filter="' + kind + '" aria-pressed="' +
+      (kind === candidateFilter && !candidateQuery) + '">' + h(t(kind === 'all' ? 'dc.all' : 'dc.kind.' + kind)) +
+      '<span class="dc-chip-n">' + counts[kind] + '</span></button>').join('') : '');
+    // A search looks through the whole pool; a source filter narrows it only while nothing is typed.
+    const shown = candidateQuery
+      ? candidates.filter(c => c.symbol.includes(candidateQuery)).sort((a, b) => matchRank(b.symbol) - matchRank(a.symbol))
+      : candidateFilter === 'all' ? candidates : candidates.filter(c => (c.sources || []).some(source => sourceKind(source) === candidateFilter));
+    const visible = candidateQuery ? shown : shown.slice(0, candidateLimit);
+    const held = new Set((snapshot.accounts || []).flatMap(account => (account.positions || []).map(p => p.symbol)));
+    const running = new Set((state.jobs || []).filter(j => active(j) && (j.task?.kind || 'analysis') === 'analysis').map(j => j.ticker));
+    const latest = new Map();
+    (state.decisions || []).forEach(d => { if (d.ticker && !latest.has(d.ticker)) latest.set(d.ticker, d); });
+    paint('candidate-list', !loaded ? '<div class="dc-skeleton"></div><div class="dc-skeleton"></div><div class="dc-skeleton"></div>'
+      : !candidates.length ? '<p class="dc-empty">' + h(t('dc.noSnapshot')) + '</p>'
+        : !shown.length ? '<p class="dc-empty">' + h(candidateQuery ? t('dc.noMatch', { q: candidateQuery }) : t('dc.noneInFilter')) + '</p>'
+          : visible.map(c => candidateRow(c, held, running, latest)).join(''));
+    const rest = shown.length - visible.length;
+    el('candidate-more').hidden = rest <= 0;
+    setText('candidate-more', rest > 0 ? t('dc.more', { n: Math.min(rest, CANDIDATE_PAGE * 2) }) : '');
+    setText('dc-count', loaded && candidates.length ? String(shown.length) : '');
+    const gaps = snapshot.errors || [];
+    el('dc-gaps').hidden = !gaps.length;
+    setText('dc-gaps-title', gaps.length ? t('dc.gaps', { n: gaps.length }) : '');
+    paint('dc-gaps-list', gaps.map(gap => '<li>' + h(gap) + '</li>').join(''));
+    syncResearchButtons();
+  }
   function researchButton(symbol, account) {
     if (binding.scope === 'agentic') return '<a class="btn btn-secondary btn-sm" href="' + h(scopeLink('research', { ticker: symbol })) + '">' + t('ai.research') + '</a>';
     return '<button type="button" class="btn btn-secondary btn-sm" data-research="' + h(symbol) + '"' +
@@ -308,7 +396,7 @@ window.Console.page('advisor', function (document) {
       conversationSignature = signature;
       paintMessages();
     } catch (err) { if (epoch === conversationEpoch) { conversationBlocked = true; status(t('ai.error', { error: err.message })); } }
-    finally { if (epoch === conversationEpoch) { conversationLoading = false; updateSend(); el('shortlist').disabled = conversationBlocked || busy || binding.scope !== 'personal' || !available(); } }
+    finally { if (epoch === conversationEpoch) { conversationLoading = false; updateSend(); el('shortlist').disabled = shortlistOff(); } }
   }
   function render() {
     restoreSession();
@@ -319,9 +407,7 @@ window.Console.page('advisor', function (document) {
     const state = currentState() || {}, snapshot = state.snapshot || {}, jobs = state.jobs || [];
     renderScope(state);
     const decisions = state.decisions || [];
-    paint('candidate-list', (snapshot.candidates || []).map(c =>
-      '<div class="advisor-row"><div><strong>' + h(c.symbol) + '</strong><p class="body-sm body-muted">' +
-      h(c.sources.join(' · ')) + '</p></div>' + researchButton(c.symbol) + '</div>').join(''));
+    renderDiscover(state);
     // Newest completed analysis per account/symbol. Historical conditions always carry a date.
     const seen = new Set();
     decisionDetails = new Map();
@@ -341,11 +427,14 @@ window.Console.page('advisor', function (document) {
         detail('ai.exit', p.exit_logic) + detail('ai.risks', [...(p.primary_risks || []), ...(p.missing_information || [])].join('\n')) +
         '</dl><div class="advisor-actions"><a class="btn btn-secondary btn-sm" href="' + h(scopeLink('research', { run: d.run_id, account: binding.scope === 'personal' && d.account_scope_kind !== 'all_personal' ? d.account_id : '', include_all_personal: d.account_scope_kind === 'all_personal' ? 'true' : '' })) +
         '">' + t('ai.fullReport') + '</a>' + researchButton(d.ticker, d.account_id) + '</div>');
-      return '<button class="research-tile" data-decision="' + h(d.run_id) + '" aria-haspopup="dialog"><span class="ticker-orb" aria-hidden="true">' + h(d.ticker) +
-        '</span><span class="utility-copy"><strong>' + h(d.ticker) + '</strong><span>' + h(scope) + ' · ' + h(d.trade_date) +
-        '</span></span><span class="action-badge">' + h(C.code(d.action)) + '</span><span class="ux-chevron"></span></button>';
+      // Ink for an entry, an outline for an exit, grey for standing still: the word says which.
+      const tone = ['BUY', 'ADD'].includes(d.action) ? ' is-entry' : ['REDUCE', 'SELL'].includes(d.action) ? ' is-exit' : '';
+      return '<button class="research-tile" data-decision="' + h(d.run_id) + '" aria-haspopup="dialog"><span class="rt-symbol">' + h(d.ticker) +
+        '</span><span class="action-badge' + tone + '">' + h(C.code(d.action)) + '</span><span class="rt-meta">' + h([scope, isDay(d.trade_date) ? C.dateOnly(d.trade_date) : d.trade_date].filter(Boolean).join(' · ')) +
+        '</span>' + (p.investment_thesis ? '<span class="rt-thesis">' + h(p.investment_thesis) + '</span>' : '') + '</button>';
     }).join('');
     paint('holding-decisions', decisionCards); paint('agentic-records', decisionCards);
+    el('dc-recent').hidden = !decisionCards;
     const activeJobs = jobs.filter(active);
     el('jobs-preview').textContent = activeJobs.length ? t('ux.activeJobs', { n: activeJobs.length }) : t('ux.recentJobs', { n: jobs.length });
     el('jobs-count').textContent = String(activeJobs.length || jobs.length);
@@ -389,20 +478,22 @@ window.Console.page('advisor', function (document) {
     el('chat-progress').hidden = !chatting;
     el('chat-welcome').hidden = shownMessages.length > 0 || chatting;
     resizeComposer(); updateSend();
-    el('shortlist').disabled = busy || chatting || conversationBlocked || binding.scope !== 'personal' || !available();
+    el('shortlist').disabled = shortlistOff();
     el('review-start').disabled = busy || binding.scope !== 'personal' || !available() || jobs.some(j => active(j) && j.task?.kind === 'portfolio_review');
-    document.querySelectorAll('[data-research], #symbol-form button').forEach(button => { button.disabled = busy || binding.scope !== 'personal' || !available(); });
+    syncResearchButtons();
     const signature = conversation + JSON.stringify(jobs.filter(j => j.task?.conversation_id === conversation).map(j => [j.run_key, j.state]));
     if (currentState() && signature !== conversationSignature) loadConversation(signature);
     paintMessages();
-    if (window.CT_DEMO) status(t('ai.demo'));
+    if (window.CT_DEMO) { status(t('ai.demo')); discoverSay(t('ai.demo')); }
     updateSend();
   }
   async function send(kind, extra = {}) {
     if (busy || kind === 'chat' && chatWorking || !available() || binding.scope === 'agentic' && kind !== 'chat' ||
         ['chat', 'shortlist'].includes(kind) && conversationBlocked || binding.account && extra.account_id && extra.account_id !== binding.account) return;
     if (['chat', 'shortlist'].includes(kind)) followingLatest = true;
-    busy = true; status(t('ai.running')); render();
+    const fromDiscover = kind === 'analysis' && !el('panel-discover').hidden;
+    const report = text => { status(text); if (fromDiscover) discoverSay(text); };
+    busy = true; report(t('ai.running')); render();
     const payload = { kind, language: window.I18N.lang, conversation_id: conversation, ...extra,
       scope: binding.scope, account_id: binding.scope === 'agentic' ? null : extra.account_id || binding.account || null };
     const fingerprint = JSON.stringify(payload);
@@ -415,7 +506,7 @@ window.Console.page('advisor', function (document) {
     try {
       const result = await A.post('/advisor/jobs', { ...payload, request_id: request.request_id });
       if (session !== sendSession) return;
-      if (result.blocked) { status(t('ai.demo')); return; }
+      if (result.blocked) { report(t('ai.demo')); return; }
       if (pendingRequest === request) pendingRequest = null;
       const saved = entryFor(selected);
       if (kind === 'chat') {
@@ -426,9 +517,10 @@ window.Console.page('advisor', function (document) {
         else if (saved?.draft === sentText) saved.draft = '';
       }
       remember();
-      status(t('ai.queued')); conversationSignature = '';
+      report(kind === 'analysis' ? t('dc.queued', { symbol: payload.ticker }) : t('ai.queued')); conversationSignature = '';
       await A.readOnce('assistant');
-    } catch (err) { if (session === sendSession) { if (err.status === 409) status(t('ai.conflict') + ' ' + err.message); else status(t('ai.error', { error: err.message })); } }
+      return true;
+    } catch (err) { if (session === sendSession) { if (err.status === 409) report(t('ai.conflict') + ' ' + err.message); else report(t('ai.error', { error: err.message })); } }
     finally { busy = false; render(); }
   }
   el('chat-form').addEventListener('submit', e => {
@@ -459,8 +551,38 @@ window.Console.page('advisor', function (document) {
   el('ask-scenario').addEventListener('click', () => usePrompt('ai.askScenario'));
   el('shortlist').addEventListener('click', () => { showView('chat'); send('shortlist', { message: t('ai.shortlistPrompt') }); });
   el('review-start').addEventListener('click', () => send('portfolio_review'));
-  el('symbol-form').addEventListener('submit', e => {
-    e.preventDefault(); send('analysis', { ticker: el('symbol-input').value.trim().toUpperCase() });
+  el('symbol-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const typed = el('symbol-input').value, ticker = typed.trim().toUpperCase();
+    // The service answers a malformed symbol with a generic refusal; say which rule it broke here.
+    if (!SYMBOL.test(ticker)) { discoverSay(t('dc.badSymbol')); return; }
+    if (await send('analysis', { ticker }) && el('symbol-input').value === typed) {
+      el('symbol-input').value = ''; candidateQuery = '';
+      renderDiscover(currentState() || {});
+    }
+  });
+  // Typing narrows the list to matching symbols; the button still researches exactly what was typed.
+  el('symbol-input').addEventListener('input', () => {
+    const query = el('symbol-input').value.trim().toUpperCase();
+    if (query === candidateQuery) { syncResearchButtons(); return; }
+    candidateQuery = query; candidateLimit = CANDIDATE_PAGE;
+    renderDiscover(currentState() || {});
+  });
+  el('symbol-input').addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !el('symbol-input').value) return;
+    el('symbol-input').value = ''; candidateQuery = '';
+    renderDiscover(currentState() || {});
+  });
+  el('discover-filters').addEventListener('click', e => {
+    const chip = e.target.closest?.('[data-filter]');
+    if (!chip) return;
+    candidateFilter = chip.dataset.filter; candidateLimit = CANDIDATE_PAGE;
+    if (candidateQuery) { candidateQuery = ''; el('symbol-input').value = ''; }
+    renderDiscover(currentState() || {});
+  });
+  el('candidate-more').addEventListener('click', () => {
+    candidateLimit += CANDIDATE_PAGE * 2;
+    renderDiscover(currentState() || {});
   });
   el('new-conversation').addEventListener('click', () => {
     chooseConversation(crypto.randomUUID());
@@ -567,6 +689,8 @@ window.Console.page('advisor', function (document) {
       followingLatest = true;
       notesLoaded = false; notesDirty = false; notesRevision = 0;
       el('chat-input').value = ''; el('personal-notes').value = ''; status('');
+      candidateFilter = 'all'; candidateQuery = ''; candidateLimit = CANDIDATE_PAGE;
+      el('symbol-input').value = ''; discoverSay('');
       ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet'].forEach(id => el(id).close());
       document.querySelectorAll('#review-panel details, #agentic-records-panel details').forEach(node => { node.open = false; });
       paintMessages();

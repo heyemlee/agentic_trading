@@ -348,15 +348,30 @@ window.CT_API = (function () {
     if (path === '/auth/logout') { unauthorized(); announce(); }
     return result;
   }
+  /* The demo has one assistant fixture, CT.advisor, and narrows it the way the service narrows
+     /advisor (service/assistant.py, advisor_state): one account keeps its own holdings, jobs and
+     records plus the all-accounts ones that covered it, and Agentic carries no personal snapshot. */
+  function demoAssistant(next) {
+    const scoped = { scope: next.scope, account_scope_kind: next.scope === 'agentic' || next.account ? 'single' : 'all_personal',
+      account_id: next.scope === 'agentic' ? 'micro_live' : next.account || null, account_label: next.scope === 'agentic' ? 'Agentic' : '' };
+    const base = next.scope === 'personal' && window.CT.advisor;
+    if (!base) return { ...scoped, jobs: [], decisions: [], conversation_summaries: [], latest_review: null };
+    const covers = task => !next.account || task?.account_id === next.account ||
+      task?.account_scope_kind === 'all_personal' && (task.account_ids || []).includes(next.account);
+    const jobs = (base.jobs || []).filter(job => covers(job.task));
+    const review = base.latest_review;
+    return { ...base, ...scoped, jobs,
+      snapshot: { ...base.snapshot, accounts: (base.snapshot?.accounts || []).filter(account => !next.account || account.id === next.account) },
+      decisions: (base.decisions || []).filter(d => !next.account || d.account_id === next.account || d.account_scope_kind === 'all_personal'),
+      latest_review: review && (!next.account || jobs.some(job => job.run_key === review.run_key)) ? review : null };
+  }
   // Clear the previous account before starting a scoped read. Late responses are rejected above.
   function selectAssistant(filter) {
     if (!['personal', 'agentic'].includes(filter.scope)) return false;
     const next = { scope: filter.scope, account: filter.scope === 'personal' ? String(filter.account || '') : '' };
     if (JSON.stringify(next) === JSON.stringify(assistantFilter) && state.resources.assistant) return true;
     assistantFilter = next;
-    window.CT.assistant = demo ? { scope: next.scope, account_scope_kind: next.scope === 'agentic' || next.account ? 'single' : 'all_personal',
-      account_id: next.scope === 'agentic' ? 'micro_live' : next.account || null, account_label: next.scope === 'agentic' ? 'Agentic' : '',
-      jobs: [], decisions: [], conversation_summaries: [], latest_review: null } : null;
+    window.CT.assistant = demo ? demoAssistant(next) : null;
     state.resources.assistant = { lastOkAt: null, error: null };
     announce(true);
     if (!demo) readOnce('assistant');

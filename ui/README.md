@@ -317,6 +317,19 @@ changes only with its text or width, so background polls do not disturb the care
 See the [VisualViewport API](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)
 for the difference between visual and layout viewport position.
 
+Discover lists the candidate pool of the last Robinhood snapshot (`snapshot.candidates`):
+watchlists, saved screeners and the profile's ETF groups, filtered by source kind and
+searchable across the whole pool, 24 rows at a time. A row marks a held symbol and the
+newest research verdict with its date, and shows "Researching" in place of its button while
+an analysis of that symbol is queued or running. Research starts only from that button or
+the search field, whose symbol is checked against the service's rule before any request;
+the shortlist call is off for an empty pool, since ranking nothing still spends a reply.
+Discover reports its own requests in its own status line, out of Chat's composer. Its look
+is liquid glass in ink on white, and the glass is only for controls: the search field and
+filters stick under the header and frost only while rows pass beneath them; rows, verdicts
+and research cards stay opaque. In the demo, the assistant reads the one `CT.advisor`
+fixture, narrowed per account the way the service narrows `/advisor`.
+
 Leaked `research_candidates` serialization is cleaned in the assistant service for both
 new and historical answers. Valid embedded ideas remain readable prose; only the separately
 stored, filtered candidate field creates research buttons. Stored records are not rewritten.

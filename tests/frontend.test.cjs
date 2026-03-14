@@ -292,6 +292,102 @@ test('candidate screening returns to the conversation where the answer arrives',
   assert.equal(c.element('panel-discover').hidden, true);
 });
 
+const discoverSymbols = c => [...c.element('candidate-list').innerHTML.matchAll(/class="dc-symbol">([^<]+)</g)].map(m => m[1]);
+const pickFilter = (c, filter) => c.element('discover-filters').events.click({
+  target: { closest: selector => selector === '[data-filter]' ? { dataset: { filter } } : null } });
+
+test('Discover filters the pool by where a symbol came from, and a search looks through all of it', () => {
+  const c = advisorPage(async () => ({}));
+  c.CT.advisor.snapshot.candidates = [{ symbol: 'AMD', sources: ['watchlists:Semis', 'scans:Momentum'] },
+    { symbol: 'VTI', sources: ['profile:us_broad_equity'] }, { symbol: 'AVGO', sources: ['watchlists:Semis'] }];
+  c.render();
+  const chips = c.element('discover-filters').innerHTML;
+  assert.match(chips, /data-filter="all" aria-pressed="true">dc.all<span class="dc-chip-n">3</);
+  assert.match(chips, /data-filter="watchlists" aria-pressed="false">dc.kind.watchlists<span class="dc-chip-n">2</);
+  assert.ok(!chips.includes('data-filter="other"'), 'a kind nothing came from offers no filter');
+  pickFilter(c, 'scans');
+  assert.deepEqual(discoverSymbols(c), ['AMD']);
+  c.element('symbol-input').value = 'v'; c.element('symbol-input').events.input();
+  assert.deepEqual(discoverSymbols(c), ['VTI', 'AVGO'], 'a search ignores the filter and puts a prefix first');
+  assert.ok(!c.element('discover-filters').innerHTML.includes('aria-pressed="true"'));
+  c.element('symbol-input').value = 'zzz'; c.element('symbol-input').events.input();
+  assert.match(c.element('candidate-list').innerHTML, /dc.noMatch ZZZ/);
+  c.element('symbol-input').events.keydown({ key: 'Escape' });
+  assert.deepEqual(discoverSymbols(c), ['AMD'], 'clearing the search returns to the chosen source');
+});
+
+test('a candidate under review offers no second review, and says what is held and was last decided', () => {
+  const c = advisorPage(async () => ({}));
+  Object.assign(c.CT.advisor, {
+    snapshot: { accounts: [{ id: 'a'.repeat(20), positions: [{ symbol: 'NVDA', quantity: 2 }] }],
+      candidates: [{ symbol: 'NVDA', sources: ['watchlists:Semis'] }, { symbol: 'AVGO', sources: ['watchlists:Semis'] }] },
+    jobs: [{ run_key: 'r1', ticker: 'AVGO', state: 'RUNNING', task: { kind: 'analysis' } }],
+    decisions: [{ run_id: 'd2', ticker: 'NVDA', action: 'HOLD', trade_date: '2026-09-03', bucket: 'advisory', policy: { proposal: {} } },
+      { run_id: 'd1', ticker: 'NVDA', action: 'BUY', trade_date: '2026-08-01', bucket: 'advisory', policy: { proposal: {} } }] });
+  c.render();
+  const html = c.element('candidate-list').innerHTML;
+  assert.ok(!html.includes('data-research="AVGO"'), 'a running review is not offered again');
+  assert.match(html, /dc-running.*dc.researching/);
+  assert.match(html, /data-research="NVDA"/);
+  assert.match(html, /dc-row is-held/);
+  assert.match(html, /dc.last Hold Sep 3/, 'the newest verdict, with its date');
+  assert.ok(!html.includes('Buy'));
+  c.CT.advisor.jobs[0].state = 'COMPLETE'; c.render();
+  assert.match(c.element('candidate-list').innerHTML, /data-research="AVGO"/);
+});
+
+test('Discover refuses a malformed symbol before asking, and reports a queued review where it was asked for', async () => {
+  const sent = [];
+  const c = advisorPage(async (url, body) => { sent.push(body); return { run_key: 'advisor_x' }; });
+  c.element('view-discover').events.click();
+  const submit = () => c.element('symbol-form').events.submit({ preventDefault() {} });
+  c.element('symbol-input').value = '1bad!'; await submit();
+  assert.equal(sent.length, 0);
+  assert.equal(c.element('discover-status').textContent, 'dc.badSymbol');
+  c.element('symbol-input').value = 'brk.b'; c.element('symbol-input').events.input(); await submit();
+  assert.deepEqual([sent.length, sent[0].kind, sent[0].ticker], [1, 'analysis', 'BRK.B']);
+  assert.equal(c.element('discover-status').textContent, 'dc.queued BRK.B');
+  assert.equal(c.element('symbol-input').value, '', 'a queued symbol leaves the field');
+});
+
+test('a long candidate pool shows a page at a time', () => {
+  const c = advisorPage(async () => ({}));
+  c.CT.advisor.snapshot.candidates = Array.from({ length: 30 }, (_, i) => ({ symbol: 'S' + i, sources: ['profile:core'] }));
+  c.render();
+  assert.equal(discoverSymbols(c).length, 24);
+  assert.equal(c.element('candidate-more').hidden, false);
+  assert.equal(c.element('candidate-more').textContent, 'dc.more 6');
+  c.element('candidate-more').events.click();
+  assert.equal(discoverSymbols(c).length, 30);
+  assert.equal(c.element('candidate-more').hidden, true);
+  assert.equal(c.element('shortlist').disabled, false);
+  c.CT.advisor.snapshot.candidates = []; c.render();
+  assert.equal(c.element('shortlist').disabled, true, 'an empty pool has nothing to rank, and a reply would still be spent');
+  assert.match(c.element('candidate-list').innerHTML, /dc.noSnapshot/);
+});
+
+test('the demo assistant is the one advisor fixture, narrowed to an account the way the service narrows it', () => {
+  const c = context(true); c.run('api.js');
+  const A = 'a'.repeat(20), B = 'b'.repeat(20);
+  c.CT.advisor = { scope: 'personal', account_scope_kind: 'all_personal', stale: false, coverage: 'demo',
+    snapshot: { accounts: [{ id: A, positions: [] }, { id: B, positions: [] }], candidates: [{ symbol: 'VTI', sources: ['profile:core'] }] },
+    jobs: [{ run_key: 'mine', task: { kind: 'analysis', account_id: A, account_scope_kind: 'single' } },
+      { run_key: 'all', task: { kind: 'analysis', account_id: null, account_scope_kind: 'all_personal', account_ids: [A, B] } },
+      { run_key: 'review', task: { kind: 'portfolio_review', account_id: B, account_scope_kind: 'single' } }],
+    decisions: [{ run_id: 'da', account_id: A, account_scope_kind: 'single' }, { run_id: 'db', account_id: B, account_scope_kind: 'single' }],
+    latest_review: { run_key: 'review' } };
+  c.CT_API.selectAssistant({ scope: 'personal', account: A });
+  const scoped = c.CT.assistant;
+  assert.equal(c.CT_API.matchesAssistant(scoped), true);
+  assert.deepEqual(scoped.snapshot.accounts.map(a => a.id), [A]);
+  assert.deepEqual(scoped.snapshot.candidates.map(x => x.symbol), ['VTI'], 'the candidate pool belongs to no one account');
+  assert.deepEqual(scoped.jobs.map(j => j.run_key), ['mine', 'all']);
+  assert.deepEqual(scoped.decisions.map(d => d.run_id), ['da']);
+  assert.equal(scoped.latest_review, null, "another account's review stays with it");
+  c.CT_API.selectAssistant({ scope: 'agentic' });
+  assert.equal(c.CT.assistant.snapshot, undefined, 'Agentic carries no personal snapshot');
+});
+
 test('assistant retries an uncertain request with the same id and keeps failed text', async () => {
   const ids = []; let calls = 0;
   const c = advisorPage(async (url, body) => {
