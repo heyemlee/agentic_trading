@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import datetime, timedelta
 
 import pytest
 import yaml
@@ -269,3 +270,38 @@ def test_a_check_leaves_its_report_and_only_agreement_counts_as_the_activity(pro
     assert load_portfolio(project / "state" / "micro_live_portfolio.yaml").as_of == TRADE_DATE
     assert "conceptual as_of" in operations.heartbeats(db)["ledger_confirm"]["detail"], \
         "a refusal leaves the last agreement's heartbeat where it was"
+
+
+def test_a_ledger_that_cannot_be_priced_says_which_side_is_out_of_date(tmp_path):
+    """Confirming is the remedy for one of these and not the other, so the console must be told
+    which it is. On 2026-09-23 the vendor's bars for the 22nd came without a close, the priced
+    session fell back to the 21st, and a ledger confirmed that morning refused as "after the trade
+    date" while the console offered confirming again, which could only stamp the same date."""
+    from agentic_trading.portfolio import (
+        LedgerAhead,
+        LedgerStale,
+        PricesUnavailable,
+        build_snapshot,
+    )
+    from agentic_trading.risk_scenarios import price_lookup
+
+    profiles = _profiles(tmp_path)
+    state = load_portfolio(stale_ledger(tmp_path, positions=[
+        {"symbol": "VTI", "bucket": "core", "quantity": 4.0, "cost_basis_per_share": PRICES["VTI"]}]))
+    day = lambda offset: str((datetime.fromisoformat(TRADE_DATE) + timedelta(days=offset)).date())
+
+    with pytest.raises(LedgerStale) as stale:
+        build_snapshot(state, profiles, day(30), price_lookup, identity_lookup)
+    assert stale.value.code == "ledger_stale" and "days older" in str(stale.value)
+
+    with pytest.raises(LedgerAhead) as ahead:
+        build_snapshot(state, profiles, day(-2), price_lookup, identity_lookup)
+    assert ahead.value.code == "ledger_ahead" and "after the trade date" in str(ahead.value)
+    # One day ahead is the ordinary morning: confirmed today, priced for yesterday's close.
+    assert build_snapshot(state, profiles, day(-1), price_lookup, identity_lookup).trade_date == day(-1)
+
+    with pytest.raises(PricesUnavailable) as unpriced:
+        build_snapshot(state, profiles, TRADE_DATE, lambda symbol, _d: (1.0, day(-30)), identity_lookup)
+    assert unpriced.value.code == "prices_unavailable"
+    # Each is still a PortfolioError, so everything that already fails closed on one still does.
+    assert all(isinstance(e.value, PortfolioError) for e in (stale, ahead, unpriced))

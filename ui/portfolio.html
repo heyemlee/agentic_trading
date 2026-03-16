@@ -55,7 +55,25 @@
   <div id="agentic-view" class="pf-view" hidden>
   <section class="section pf-body" data-od-id="agentic">
     <div class="container">
-      <article class="pf-card pf-hero" data-od-id="agentic-hero">
+      <article class="pf-card pf-hero pf-live" id="live-card" data-od-id="agentic-live" hidden>
+        <div class="pf-card-head">
+          <p class="pf-eyebrow" data-i18n="acct.micro_live">Agentic Account</p>
+          <span class="pf-live-stamp" id="live-stamp"></span>
+        </div>
+        <p class="pf-figure" id="live-total">—</p>
+        <p class="pf-fine" id="live-caption" data-i18n="pf.liveEquity">Total equity at Robinhood</p>
+        <p class="pf-warn" id="live-note" role="status" hidden></p>
+        <dl class="pf-stats pf-stats-flat" id="live-stats"></dl>
+      </article>
+      <article class="pf-card" id="live-holdings" data-od-id="agentic-holdings" hidden>
+        <div class="pf-card-head">
+          <p class="pf-eyebrow" data-i18n="pf.liveHoldings">Holdings, live</p>
+          <span class="pf-fine" id="live-count"></span>
+        </div>
+        <div id="live-rows"></div>
+        <p class="pf-fine pf-card-foot" id="live-foot"></p>
+      </article>
+      <article class="pf-card pf-hero" id="ledger-card" data-od-id="agentic-hero">
         <div class="pf-card-head">
           <p class="pf-eyebrow" id="strategy-heading" data-i18n="acct.micro_live">Agentic Account</p>
           <span class="pf-badge" id="strategy-badge"></span>

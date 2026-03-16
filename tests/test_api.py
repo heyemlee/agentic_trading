@@ -622,8 +622,10 @@ def test_openapi_schema_is_published_for_frontend_generation(auth_client):
     # is how this schema stood when the test was first written. Each route that declares a
     # response model belongs here, so the claim in this test's name stays true as they land.
     for route, model, named in (
-            ("/micro-live", "MicroLive", {"status", "preflight_ready", "checks", "blocking"}),
-            ("/portfolio", "Portfolio", {"as_of", "buckets", "accounts", "errors", "combined"}),
+            ("/micro-live", "MicroLive", {"status", "preflight_ready", "checks", "blocking",
+                                          "holdings", "holdings_error"}),
+            ("/portfolio", "Portfolio", {"as_of", "buckets", "accounts", "errors", "error_codes",
+                                         "combined"}),
             ("/proposals/{proposal_id}", "ProposalDetail",
              {"proposal_id", "version", "status", "freshness", "research", "hard_risk"}),
             ("/orders", "Orders", {"fills", "tracked_orders"}),
@@ -734,6 +736,17 @@ def test_a_deposit_is_funding_and_never_a_return(sandbox_service):
         record_cash_flow(ledger, bucket="core", amount_usd=1.0, kind="gift")
 
 
+def test_portfolio_says_when_the_prices_are_behind_the_ledger(sandbox_service, monkeypatch):
+    """The failure of 2026-09-23: a ledger confirmed that morning, priced for a session two days
+    back because the vendor's bars for the one between had no close. Confirming it again would
+    stamp the same date, so the code tells the console not to offer it."""
+    monkeypatch.setattr("agentic_trading.service.books._last_session", lambda: "2000-01-03")
+    portfolio = sandbox_service.portfolio()
+    assert portfolio.error_codes == {"conceptual": "ledger_ahead", "micro_live": "ledger_ahead"}
+    assert "after the trade date" in portfolio.errors["micro_live"]
+    assert portfolio.buckets == {} and portfolio.accounts == {}
+
+
 def test_portfolio_reports_the_book_it_read_and_names_the_one_it_could_not(
         auth_client, monkeypatch, sandbox_service):
     """One unreadable ledger must not blank the screen that shows the other.
@@ -750,6 +763,7 @@ def test_portfolio_reports_the_book_it_read_and_names_the_one_it_could_not(
     body = result.json()
 
     assert "not found" in body["errors"]["micro_live"]
+    assert body["error_codes"] == {"micro_live": "unreadable"}
     assert set(body["buckets"]) == {"core", "sandbox"}        # the readable book still reports
     assert set(body["accounts"]) == {"conceptual"}
     assert body["combined"]["complete"] is False

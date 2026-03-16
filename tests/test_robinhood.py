@@ -1069,3 +1069,58 @@ def test_an_account_the_venue_would_not_read_is_reported_from_the_reading(
     assert [n for n, _ in fake.calls].count("get_portfolio") == 1
     # Raised from a copy each time: the kept error served to every poll gathers no tracebacks.
     assert depth(kept.__traceback__) == frames
+
+
+def test_the_agentic_holdings_are_valued_at_live_quotes_on_the_kept_reading(
+        profiles_with_state, tmp_path, monkeypatch):
+    """The Assets screen shows the real-money account as the venue has it now, not as the ledger
+    was priced at a close. On 2026-09-23 a vendor's missing bar blanked the ledger's figures for
+    a day while the account itself was plainly readable. The holdings ride the reading the
+    account is read in, and a quote that cannot be read leaves a gap, never the cost."""
+    profiles = profiles_with_state
+    profiles.risk["micro_live_execution"]["enabled"] = True
+    positions = {"data": {"positions": [
+        {"symbol": "BND", "quantity": "0.5", "average_buy_price": "71.00", "account_number": "999"},
+        {"symbol": "VTI", "quantity": "0.25", "average_buy_price": "376.00", "account_number": "999"},
+    ]}}
+
+    def quotes(arguments):
+        return quotes_now() if arguments["symbols"] == ["VTI"] else {"data": {"quotes": []}}
+
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO,
+                                   "get_equity_positions": positions, "get_equity_quotes": quotes})
+    service, opened = _kept_micro_live(profiles, tmp_path, monkeypatch, fake)
+
+    status = service.micro_live()
+    assert status.account.equity == 100.0
+    vti, bnd = status.holdings                                   # priced first, unpriced last
+    assert (vti.symbol, vti.quantity, vti.average_cost, vti.price) == ("VTI", 0.25, 376.0, 376.88)
+    assert vti.market_value_usd == round(0.25 * 376.88, 2)
+    assert vti.unrealized_pct == round((376.88 / 376.0 - 1) * 100, 2) and vti.price_at
+    assert (bnd.symbol, bnd.average_cost) == ("BND", 71.0)
+    assert (bnd.price, bnd.market_value_usd, bnd.unrealized_pct) == (None, None, None)
+    assert status.holdings_error == "no usable quote for BND"
+
+    # One reading, one session: a second poll inside the minute asks the venue nothing new.
+    service.micro_live()
+    assert len(opened) == 1
+    assert [n for n, _ in fake.calls].count("get_equity_quotes") == 2
+
+
+def test_holdings_the_venue_would_not_list_are_absent_not_empty(profiles_with_state, tmp_path,
+                                                                monkeypatch):
+    profiles = profiles_with_state
+    profiles.risk["micro_live_execution"]["enabled"] = True
+    fake = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO},
+                   error_tools={"get_equity_positions"})
+    service, _opened = _kept_micro_live(profiles, tmp_path, monkeypatch, fake)
+    status = service.micro_live()
+    assert status.account.equity == 100.0, "the account is still read and still gates preflight"
+    assert status.holdings is None and status.holdings_error
+    assert [n for n, _ in fake.calls].count("get_equity_quotes") == 0
+
+    empty = FakeMCP(CURRENT_TOOLS, {"get_accounts": ACCOUNTS, "get_portfolio": PORTFOLIO,
+                                    "get_equity_positions": EMPTY_POSITIONS})
+    service, _opened = _kept_micro_live(profiles, tmp_path, monkeypatch, empty)
+    status = service.micro_live()
+    assert status.holdings == [] and status.holdings_error is None

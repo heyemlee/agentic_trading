@@ -442,6 +442,7 @@ test('portfolio keeps broker snapshots separate from strategy money and labels s
   ] } };
   c.run('pages/portfolio.js');
   assert.equal(optional[0], 'advisor');
+  assert.ok(optional.includes('microLive'), 'the Agentic account is read live from the venue');
   assert.match(c.element('broker-accounts').innerHTML, /Account &lt;img&gt;/);
   assert.match(c.element('broker-accounts').innerHTML, /5,000/);
   assert.match(c.element('broker-accounts').innerHTML, /ux.incompleteAccount/);
@@ -746,6 +747,80 @@ test('a reader who cannot write is not offered the check', () => {
   const c = ledgerPage(async () => ({}), heldBack);
   c.CT_API.writesEnabled = false; c.render();
   assert.equal(c.element('confirm-ledger').disabled, true);
+});
+
+/* The Agentic account is real money, so its balance is the venue's own figure, read live; the
+   ledger the risk rules run on follows with its own date. On 2026-09-23 a vendor's missing bar
+   held the ledger back for a day, and the page showed nothing of an account that read fine. */
+const readableLedger = { ...heldBack, errors: {},
+  buckets: { micro_live: { equity_usd: 100, allocation_usd: 100, cash_usd: 100, positions_value_usd: 0,
+                           positions: [], position_count: 0, sleeves_pct: {}, account: 'micro_live',
+                           is_real_money: true, venue: 'robinhood' } } };
+const liveVenue = () => ({ connected: true, checked_at: '2026-09-23T16:41:00+00:00',
+  account: { account_id_masked: '••••4118', cash: 12.5, equity: 101.84, buying_power: 12.5, type: 'individual' },
+  holdings: [
+    { symbol: 'VTI', quantity: 0.25, average_cost: 376, price: 381.4, price_at: '2026-09-23T16:40:58+00:00',
+      market_value_usd: 95.35, unrealized_pct: 1.44 },
+    { symbol: 'BND', quantity: 0.5, average_cost: 71, price: null, price_at: null, market_value_usd: null, unrealized_pct: null }],
+  holdings_error: 'no usable quote for BND' });
+
+test('the Agentic view leads with the venue’s live balance and holdings; the ledger keeps its own date', () => {
+  const c = ledgerPage(async () => ({}), readableLedger);
+  c.CT.microLive = liveVenue(); c.render();
+  assert.equal(c.element('live-card').hidden, false);
+  assert.equal(c.element('live-total').textContent, c.Console.usd(101.84));
+  assert.match(c.element('live-stamp').textContent, /pf.liveStamp/);
+  assert.match(c.element('live-stats').innerHTML, /pf.cash[\s\S]*\$12\.50[\s\S]*pf.buyingPower/);
+  assert.equal(c.element('live-note').hidden, true);
+  assert.equal(c.element('live-holdings').hidden, false);
+  const rows = c.element('live-rows').innerHTML;
+  assert.match(rows, /VTI[\s\S]*\$95\.35[\s\S]*BND/, 'largest first, as the service ordered them');
+  assert.match(rows, /BND[\s\S]*pf-row-value">—/, 'a holding without a quote is a gap');
+  assert.doesNotMatch(rows, /35\.50/, 'and never valued at its cost of 0.5 × $71');
+  assert.match(c.element('live-foot').textContent, /no usable quote for BND/);
+  assert.equal(c.element('bucket-cards').hidden, true, 'the same holdings are not listed twice');
+  assert.equal(c.element('pf-total').textContent, c.Console.usd(100), 'the ledger keeps its own figure');
+  assert.match(c.element('pf-asof').textContent, /pf.ledgerPriced/);
+  assert.equal(c.element('strategy-heading').textContent, 'pf.ledgerTitle');
+});
+
+test('a venue that cannot be read shows a gap and leaves the ledger standing', () => {
+  const c = ledgerPage(async () => ({}), readableLedger);
+  c.CT.microLive = { connected: false, connect_error: 'no Robinhood OAuth token', checked_at: '2026-09-23T16:41:00+00:00',
+                     account: null, holdings: null, holdings_error: null };
+  c.render();
+  assert.equal(c.element('live-total').textContent, '—', 'an unread balance is never drawn as $0');
+  assert.match(c.element('live-note').textContent, /pf.liveOff.*no Robinhood OAuth token/);
+  assert.equal(c.element('live-holdings').hidden, true);
+  assert.equal(c.element('bucket-cards').hidden, false, 'the ledger’s own positions stand in');
+  assert.equal(c.element('pf-total').textContent, c.Console.usd(100));
+
+  const unlisted = ledgerPage(async () => ({}), readableLedger);
+  unlisted.CT.microLive = { ...liveVenue(), holdings: null, holdings_error: 'BrokerUnavailable: positions' };
+  unlisted.render();
+  assert.equal(unlisted.element('live-total').textContent, unlisted.Console.usd(101.84));
+  assert.match(unlisted.element('live-note').textContent, /pf.liveHoldingsOff/);
+  assert.equal(unlisted.element('bucket-cards').hidden, false);
+});
+
+test('when the market data is behind the ledger the notice says so and does not offer confirming', () => {
+  const behind = ledgerPage(async () => ({}), { ...heldBack,
+    errors: { micro_live: 'portfolio state as_of 2026-09-23 is after the trade date 2026-09-21' },
+    error_codes: { micro_live: 'ledger_ahead' } });
+  behind.CT.microLive = liveVenue(); behind.render();
+  assert.equal(behind.element('pf-total').textContent, '—');
+  assert.equal(behind.element('ledger-held').textContent, 'pf.heldPricesBehind');
+  assert.equal(behind.element('confirm-ledger').hidden, true, 'confirming would only stamp the same date');
+  assert.match(behind.element('ledger-reason').textContent, /after the trade date/);
+  assert.equal(behind.element('live-total').textContent, behind.Console.usd(101.84), 'the money is still shown');
+
+  const unpriced = ledgerPage(async () => ({}), { ...heldBack, error_codes: { micro_live: 'prices_unavailable' } });
+  assert.equal(unpriced.element('ledger-held').textContent, 'pf.heldPricesMissing');
+  assert.equal(unpriced.element('confirm-ledger').hidden, true);
+
+  const stale = ledgerPage(async () => ({}), { ...heldBack, error_codes: { micro_live: 'ledger_stale' } });
+  assert.equal(stale.element('ledger-held').textContent, 'pf.ledgerHeld');
+  assert.equal(stale.element('confirm-ledger').hidden, false, 'a ledger nobody confirmed is offered the check');
 });
 
 /* The daily job's refusal over cash carries the figure. The card shows it before the ledger

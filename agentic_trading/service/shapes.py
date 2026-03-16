@@ -56,6 +56,27 @@ class MicroLiveAccount(BaseModel):
     type: str
 
 
+class MicroLiveHolding(BaseModel):
+    """One position in the real-money account as the venue reports it, at a live quote.
+
+    Read in the same kept venue reading as the account, so it is as fresh as ``checked_at``. A
+    figure the venue did not give stays None: a holding whose quote could not be read has no
+    price and no value, rather than being valued at cost, which would be a claim about money the
+    venue never made. Valuation for a screen only; nothing prices an order from this.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    quantity: float
+    average_cost: float | None = None
+    price: float | None = None
+    #: The quote's own market time, when the venue gave one.
+    price_at: str | None = None
+    market_value_usd: float | None = None
+    unrealized_pct: float | None = None
+
+
 class MicroLive(BaseModel):
     """Real-money workflow status, the preflight gates, and the capital boundary.
 
@@ -83,6 +104,11 @@ class MicroLive(BaseModel):
     #: are evaluated on every request; the account and the venue gates are as of this moment,
     #: which the service keeps within a couple of minutes while the status is being read.
     checked_at: str | None = None
+    #: What the account holds, largest first, as of ``checked_at``. None when the venue's
+    #: positions could not be read, which is different from an empty list: see
+    #: ``holdings_error``, which also names any holding whose quote could not be read.
+    holdings: list[MicroLiveHolding] | None = None
+    holdings_error: str | None = None
 
 
 class PortfolioPosition(BaseModel):
@@ -179,6 +205,12 @@ class Portfolio(BaseModel):
     buckets: dict[str, PortfolioBucket] = Field(default_factory=dict)
     accounts: dict[str, PortfolioAccount] = Field(default_factory=dict)
     errors: dict[str, str] = Field(default_factory=dict)
+    #: Beside ``errors``, keyed the same, what kind of failure each one is, so a screen can say
+    #: what would clear it instead of offering the one remedy it has for every case:
+    #: ``ledger_stale`` (unconfirmed too long; confirming can clear it), ``ledger_ahead`` (the
+    #: market data is behind the ledger; it clears when prices catch up), ``prices_unavailable``
+    #: (a held symbol has no usable price) and ``unreadable`` (anything else).
+    error_codes: dict[str, str] = Field(default_factory=dict)
     combined: PortfolioCombined
     #: When the books were read and priced. ``as_of`` is the session they were priced for; this
     #: is the moment the reading was taken, which the console judges freshness by.

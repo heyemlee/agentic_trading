@@ -621,6 +621,18 @@ window.I18N = (function () {
       /* portfolio */
       'pf.title': 'Assets', 'pf.switchLabel': 'Switch account view', 'pf.robinhood': 'Robinhood', 'pf.accountCount': '{n} accounts', 'pf.accountDetails': 'Account details',
       'pf.agenticBoundary': 'Strategy ledger · separate from your personal Robinhood accounts.',
+      /* The Agentic account, live from Robinhood, above the risk ledger */
+      'pf.liveEquity': 'Total equity at Robinhood', 'pf.liveStamp': 'Live · {time}',
+      'pf.buyingPower': 'Buying power', 'pf.liveLoading': 'Reading the account at Robinhood…',
+      'pf.liveOff': 'Robinhood cannot be read right now: {reason}',
+      'pf.liveUnread': 'Robinhood did not return this account’s balance.',
+      'pf.liveStale': 'This is the reading from {time}; Robinhood has not answered since.',
+      'pf.liveHoldings': 'Holdings, live', 'pf.liveEmpty': 'No positions.',
+      'pf.liveHoldingsNote': 'Valued at Robinhood’s live quotes.',
+      'pf.liveHoldingsOff': 'Robinhood did not list the holdings; the ledger’s own are shown below.',
+      'pf.ledgerTitle': 'Risk ledger', 'pf.ledgerPriced': 'Priced at the {d} close',
+      'pf.heldPricesBehind': 'Market data has not caught up with the ledger’s date, so these figures are paused. They come back on their own once prices update; confirming the ledger will not help.',
+      'pf.heldPricesMissing': 'A holding has no usable price right now, so these figures are paused until market data returns.',
       'pf.totalAs': 'Total equity as of {d}',
       'pf.totalMixed': 'Demo and real money added together, as of {d}. '
                        + 'Compare each account below against its own high-water mark, never this figure.',
@@ -1517,6 +1529,18 @@ window.I18N = (function () {
 
       'pf.title': '资产', 'pf.switchLabel': '切换账户视图', 'pf.robinhood': 'Robinhood', 'pf.accountCount': '{n} 个账户', 'pf.accountDetails': '账户明细',
       'pf.agenticBoundary': '策略账本 · 与个人 Robinhood 账户分开显示。',
+      /* Agentic 账户：上面是 Robinhood 实时数，下面是风控账本 */
+      'pf.liveEquity': 'Robinhood 总权益', 'pf.liveStamp': '实时 · {time}',
+      'pf.buyingPower': '购买力', 'pf.liveLoading': '正在读取 Robinhood 账户…',
+      'pf.liveOff': '暂时读不到 Robinhood：{reason}',
+      'pf.liveUnread': 'Robinhood 没有返回这个账户的余额。',
+      'pf.liveStale': '这是 {time} 的读数，之后 Robinhood 没有再回应。',
+      'pf.liveHoldings': '实时持仓', 'pf.liveEmpty': '目前没有持仓。',
+      'pf.liveHoldingsNote': '按 Robinhood 实时报价估值。',
+      'pf.liveHoldingsOff': 'Robinhood 没有返回持仓，下面显示账本里的持仓。',
+      'pf.ledgerTitle': '风控账本', 'pf.ledgerPriced': '按 {d} 收盘价估值',
+      'pf.heldPricesBehind': '行情数据还没追上账本日期，这里的数字暂停显示。行情更新后会自动恢复，不需要确认账本。',
+      'pf.heldPricesMissing': '有持仓暂时拿不到可用行情，这里的数字暂停显示，行情恢复后会自动恢复。',
       'pf.totalAs': '总权益，截至 {d}',
       'pf.totalMixed': '这是模拟资金与真实资金相加的结果，截至 {d}。'
                        + '请用下面每个账户各自的历史高点来判断，不要用这个合计数。',

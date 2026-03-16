@@ -308,7 +308,7 @@ window.Console.page('portfolio', function (document) {
   }
 
   /* ── the strategy ledger ───────────────────────────────────────── */
-  function renderLedger() {
+  function renderLedger(liveShown) {
     const A = D.portfolio.accounts || {};
     const order = scope === 'demo' ? ['core', 'sandbox'] : ['micro_live'];
     const B = D.portfolio.buckets;
@@ -322,12 +322,21 @@ window.Console.page('portfolio', function (document) {
       .filter(([key]) => scope === 'demo' ? key !== 'micro_live' : key === 'micro_live')
       .map(([, reason]) => reason);
     const withheld = failures.length > 0 && !order.some((key) => B[key]);
+    /* Confirming is the remedy for a ledger nobody has confirmed lately, and for nothing else.
+       When the market data is what is behind (error_codes, from the service), it clears on its
+       own once prices arrive, and offering the button only invites stamping the same date. */
+    const codes = Object.entries(D.portfolio.error_codes || {})
+      .filter(([key]) => scope === 'demo' ? key !== 'micro_live' : key === 'micro_live').map(([, code]) => code);
+    const pricesBehind = failures.length > 0 && codes.length > 0 &&
+      codes.every((code) => code === 'ledger_ahead' || code === 'prices_unavailable');
     /* The card also carries the last check while it refused, before the ledger has expired:
        the figures are still on screen, and the reader can put the book right today. */
     const refusals = (check.ledgers || []).filter((l) => l.ledger === accountKey && l.error).map((l) => l.error);
     const notice = $('ledger-notice');
     notice.hidden = !failures.length && !refusals.length;
     $('ledger-held').hidden = !failures.length;
+    $('ledger-held').textContent = C.t(!pricesBehind ? 'pf.ledgerHeld'
+      : codes.includes('ledger_ahead') ? 'pf.heldPricesBehind' : 'pf.heldPricesMissing');
     $('ledger-check').textContent = check.date
       ? C.t('pf.lastCheck', { date: C.dateOnly(check.date),
                               result: C.t(check.confirmed ? 'pf.checkAgreed' : 'pf.checkRefused') })
@@ -347,12 +356,14 @@ window.Console.page('portfolio', function (document) {
     }
     $('book-status').textContent = bookStatus;
     $('confirm-ledger').disabled = confirming || !API.writesEnabled;
+    $('confirm-ledger').hidden = pricesBehind;
     $('confirm-status').textContent = confirmStatus;
 
     /* the header is live data, not a value baked into the markup */
     const a = A[accountKey];
     C.tickValue($('pf-total'), withheld ? '—' : C.usd(total));
-    $('pf-asof').textContent = C.t('pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
+    $('pf-asof').textContent = scope === 'agentic' && withheld ? ''
+      : C.t(scope === 'agentic' ? 'pf.ledgerPriced' : 'pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
     $('strategy-badge').textContent = !a ? '' : a.is_real_money
       ? C.t('bucket.real', { venue: C.titleise(a.venue || '—') }) : C.t('bucket.conceptual');
     C.setHTML($('pf-result'), withheld || !a || a.investment_pnl_usd == null ? '' :
@@ -383,6 +394,7 @@ window.Console.page('portfolio', function (document) {
 
     /* ── positions, per bucket ─────────────────────────────────────── */
     const shown = order.filter((k) => B[k]);
+    $('bucket-cards').hidden = liveShown;
     C.setHTML($('bucket-cards'), shown.map((key) => {
       const b = B[key];
       const rows = b.positions.map((pos) =>
@@ -422,6 +434,49 @@ window.Console.page('portfolio', function (document) {
     ).join(''));
   }
 
+  /* ── the Agentic account as Robinhood has it now ─────────────────────
+     The money in the real account is the venue's own figure, from the kept reading /micro-live
+     serves: a minute old at most while someone is looking, and the same reading preflight gates
+     on. It does not wait on the ledger. On 2026-09-23 a vendor's missing bar held the ledger's
+     figures back for a day while the account itself read perfectly well. The ledger, which the
+     risk rules run on, follows below with its own date. A figure the venue did not give stays
+     a gap: no balance is ever drawn as $0, and no holding is valued at its cost. */
+  function liveRow(p) {
+    return '<div class="pf-row" data-od-id="live-' + h(p.symbol) + '"><span class="pf-orb" aria-hidden="true">' + orb(p.symbol) + '</span>' +
+      '<span class="pf-row-main"><span class="pf-row-title">' + h(p.symbol) + '</span>' +
+        '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) }) + (p.price == null ? '' : ' @ ' + C.usd(p.price))) + '</span></span>' +
+      '<span class="pf-row-side"><span class="pf-row-value">' + money(p.market_value_usd) + '</span>' +
+        (p.unrealized_pct == null ? '<span class="pf-delta">—</span>' : delta(p.unrealized_pct, signedPct(p.unrealized_pct))) + '</span></div>';
+  }
+  function renderLive() {
+    const agentic = scope === 'agentic';
+    $('live-card').hidden = !agentic;
+    if (!agentic) { $('live-holdings').hidden = true; return false; }
+    // The demo has no venue to fall silent: its fixture is the reading, under the demo banner.
+    const m = D.microLive || {}, acct = m.account || null, fresh = window.CT_DEMO || API.isLive('microLive');
+    const failure = API.state?.resources?.microLive?.error;
+    C.tickValue($('live-total'), acct ? C.usd(acct.equity) : '—');
+    $('live-stamp').textContent = acct && m.checked_at ? C.t('pf.liveStamp', { time: C.dateTime(m.checked_at) }) : '';
+    $('live-stamp').classList.toggle('is-stale', !fresh);
+    C.setHTML($('live-stats'), !acct ? '' : stat(C.t('pf.cash'), C.usd(acct.cash)) + stat(C.t('pf.buyingPower'), C.usd(acct.buying_power)));
+    const holdings = acct && Array.isArray(m.holdings) ? m.holdings : null;
+    const note = !m.checked_at ? (failure ? C.t('pf.liveOff', { reason: failure }) : C.t('pf.liveLoading'))
+      : m.connected === false ? C.t('pf.liveOff', { reason: m.connect_error || C.t('rs.unknown') })
+      : !acct ? C.t('pf.liveUnread')
+      : [!fresh ? C.t('pf.liveStale', { time: C.dateTime(m.checked_at) }) : '',
+         holdings == null ? C.t('pf.liveHoldingsOff') : ''].filter(Boolean).join(' ');
+    $('live-note').textContent = note;
+    $('live-note').hidden = !note;
+    $('live-holdings').hidden = holdings == null;
+    $('live-count').textContent = holdings ? C.t('pf.positions', { n: holdings.length }) : '';
+    C.setHTML($('live-rows'), !holdings ? '' : holdings.length
+      ? '<div class="pf-rows pf-holdings">' + holdings.map(liveRow).join('') + '</div>'
+      : '<p class="pf-fine pf-empty-line">' + h(C.t('pf.liveEmpty')) + '</p>');
+    $('live-foot').textContent = !holdings || !holdings.length ? ''
+      : [C.t('pf.liveHoldingsNote'), m.holdings_error].filter(Boolean).join(' · ');
+    return holdings != null;
+  }
+
   /* Everything below is re-run on every poll cycle. */
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
@@ -444,7 +499,8 @@ window.Console.page('portfolio', function (document) {
     $('holding-view').hidden = !holding;
     $('robinhood-view').hidden = scope !== 'robinhood';
     $('agentic-view').hidden = scope === 'robinhood';
-    $('strategy-heading').textContent = C.t(scope === 'demo' ? 'acct.conceptual' : 'acct.micro_live');
+    $('strategy-heading').textContent = C.t(scope === 'demo' ? 'acct.conceptual' : 'pf.ledgerTitle');
+    $('ledger-card').classList.toggle('is-ledger', scope === 'agentic');
 
     /* Any active refresh affects this snapshot. Historical failures are shown
        only for the refresh requested from this page. */
@@ -468,7 +524,7 @@ window.Console.page('portfolio', function (document) {
         '<ul class="pf-bullets">' + notes.map(note => '<li class="pf-verbatim">' + h(note) + '</li>').join('') + '</ul></details>'));
 
     if (holding) renderHolding(holding);
-    renderLedger();
+    renderLedger(renderLive());
   }
 
   /* Opening a holding starts at its top, and Back returns to the same place in the list.
@@ -496,6 +552,6 @@ window.Console.page('portfolio', function (document) {
     render();
     if (scrollTo !== null && window.scrollTo) window.scrollTo(0, scrollTo);
   });
-  C.live(['portfolio'], render, ['advisor']);
+  C.live(['portfolio'], render, ['advisor', 'microLive']);
   loadCheck();
 });

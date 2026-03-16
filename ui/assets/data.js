@@ -144,6 +144,10 @@ window.CT = (function () {
       short_selling: false, margin: false, extended_hours: false,
     },
     execution_mode: "human_approval",
+    checked_at: "2026-09-04T20:32:16+00:00",
+    // The demo ledger holds cash only, so the venue lists nothing either.
+    holdings: [],
+    holdings_error: null,
   };
 
   const authorityVersion = "a11ce" + "0".repeat(59);

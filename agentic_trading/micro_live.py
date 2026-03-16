@@ -66,6 +66,37 @@ class VenueReading:
     #: when the read failed, which is different from an empty book: see positions_error.
     positions: dict[str, float] | None = None
     positions_error: str | None = None
+    #: The same positions with the venue's average cost and a live quote each, for the screen
+    #: that shows the account. None exactly when ``positions`` is None.
+    holdings: list[dict[str, Any]] | None = None
+    #: Which holdings have no usable quote, when some were read and some were not.
+    holdings_error: str | None = None
+
+
+def _quoted_holdings(broker: Any, rows: list[Any]) -> tuple[list[dict[str, Any]], str | None]:
+    """Each position with its average cost and a live quote, for display.
+
+    One quote per held symbol, on the session the reading already holds; the account holds a
+    handful at most. A quote that cannot be read leaves that holding's price empty instead of
+    valuing it at cost, and never fails the reading: the account and preflight's gates come
+    first. Nothing prices an order from this.
+    """
+    holdings, unquoted = [], []
+    for row in rows:
+        symbol = str(row.symbol).upper()
+        cost = float(row.average_entry_price or 0.0)
+        holding = {"symbol": symbol, "quantity": float(row.quantity),
+                   "average_cost": cost if cost > 0 else None, "price": None, "price_at": None}
+        try:
+            quote = broker.get_quote(symbol)
+            if not quote.price or quote.price <= 0:
+                raise ValueError("no positive price")
+            holding["price"] = float(quote.price)
+            holding["price_at"] = quote.as_of.isoformat() if quote.as_of else None
+        except Exception:  # noqa: BLE001 - a missing quote is a gap in one row, not a failed read
+            unquoted.append(symbol)
+        holdings.append(holding)
+    return holdings, ("no usable quote for " + ", ".join(unquoted))[:200] if unquoted else None
 
 
 def read_venue(broker: Any, checked_at: str) -> VenueReading:
@@ -75,6 +106,7 @@ def read_venue(broker: Any, checked_at: str) -> VenueReading:
     (docs/SELL_CONTRACT_2026-09-19.md), and asking here keeps them on the one reading the
     console already keeps between polls instead of opening a session per request. A failure to
     read them is kept as text and never raised: it must not cost preflight its account gates.
+    So are a quote per holding, for the Assets screen's real-time view of the account.
     """
     try:
         account = broker.get_account()
@@ -82,15 +114,19 @@ def read_venue(broker: Any, checked_at: str) -> VenueReading:
         error = None
     except Exception as exc:  # noqa: BLE001 - kept, and raised where preflight reads the account
         account, agentic, error = None, None, exc
-    positions, positions_error = None, None
+    positions, positions_error, holdings, holdings_error = None, None, None, None
     try:
-        positions = {str(p.symbol).upper(): float(p.quantity) for p in broker.get_positions()}
+        rows = list(broker.get_positions())
+        positions = {str(p.symbol).upper(): float(p.quantity) for p in rows}
     except Exception as exc:  # noqa: BLE001 - an unreadable book is reported, never guessed at
         positions_error = f"{type(exc).__name__}: {exc}"[:200]
+    else:
+        holdings, holdings_error = _quoted_holdings(broker, rows)
     return VenueReading(checked_at=checked_at, connected=True, account=account,
                         agentic_account=agentic, account_error=error,
                         tools=dict(getattr(broker, "tools", {}) or {}),
-                        positions=positions, positions_error=positions_error)
+                        positions=positions, positions_error=positions_error,
+                        holdings=holdings, holdings_error=holdings_error)
 
 
 class _AnsweredFrom:

@@ -21,6 +21,7 @@ from .shapes import (
     Fill,
     MicroLive,
     MicroLiveAccount,
+    MicroLiveHolding,
     Orders,
     Portfolio,
     PortfolioAccount,
@@ -64,6 +65,7 @@ class BooksMixin:
         buckets_out: dict[str, PortfolioBucket] = {}
         accounts_out: dict[str, PortfolioAccount] = {}
         errors: dict[str, str] = {}
+        error_codes: dict[str, str] = {}
         for account, sample, buckets, real, venue, ladder_key in self.ACCOUNTS:
             try:
                 snap, ladders, _regime, _text = portfolio_context(profiles, trade_date, sample,
@@ -72,6 +74,7 @@ class BooksMixin:
                 # One unreadable book must not take the other down with it: the reason is
                 # reported beside whatever was readable, and `combined.complete` says so.
                 errors[account] = str(exc)
+                error_codes[account] = exc.code if isinstance(exc, PortfolioError) else "unreadable"
                 continue
             views = {name: view for name, view in snap.buckets.items() if name in buckets}
             if not views:
@@ -132,6 +135,7 @@ class BooksMixin:
             buckets=buckets_out,
             accounts=accounts_out,
             errors=errors,
+            error_codes=error_codes,
             combined=PortfolioCombined(
                 equity_usd=round(sum(a.equity_usd for a in accounts_out.values()), 2),
                 accounts=sorted(accounts_out),
@@ -264,6 +268,8 @@ class BooksMixin:
             permissions=dict(micro.get("permissions") or {}),
             execution_mode=str(micro.get("execution_mode", "human_approval")),
             checked_at=reading.checked_at,
+            holdings=None if reading.holdings is None else _holdings(reading.holdings),
+            holdings_error=reading.holdings_error or reading.positions_error,
         )
 
     # ---------------------------------------------------------------- orders
@@ -342,3 +348,20 @@ class BooksMixin:
         return {"ledger": str(ledger.name), "bucket": bucket,
                 "cash_usd": state.buckets[bucket].cash_usd,
                 "net_deposits": cash_flow_summary(state)}
+
+
+def _holdings(rows: list[dict[str, Any]]) -> list[MicroLiveHolding]:
+    """The venue's positions at their quotes, largest first; an unpriced one sorts last.
+
+    Value and gain are worked out here, once, so no screen does money arithmetic of its own, and
+    only from figures the venue gave: no quote means no value, and no cost means no gain.
+    """
+    out = []
+    for row in rows:
+        quantity, price, cost = float(row["quantity"]), row.get("price"), row.get("average_cost")
+        out.append(MicroLiveHolding(
+            symbol=row["symbol"], quantity=quantity, average_cost=cost, price=price,
+            price_at=row.get("price_at"),
+            market_value_usd=None if price is None else round(quantity * price, 2),
+            unrealized_pct=None if price is None or not cost else round((price / cost - 1) * 100, 2)))
+    return sorted(out, key=lambda h: (h.market_value_usd is None, -(h.market_value_usd or 0.0)))

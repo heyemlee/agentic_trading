@@ -33,6 +33,35 @@ INCOME_KINDS = ("income", "fee")
 class PortfolioError(ValueError):
     """Portfolio state is missing, malformed, stale or inconsistent: fail closed."""
 
+    #: What kind of failure this is, for a screen that has to say what would clear it. The
+    #: subclasses below narrow it; everything else stays "unreadable".
+    code = "unreadable"
+
+
+class LedgerStale(PortfolioError):
+    """Nothing has confirmed the ledger within max_age_days. Confirming it can clear this."""
+
+    code = "ledger_stale"
+
+
+class LedgerAhead(PortfolioError):
+    """The ledger is dated after the session it would be priced for.
+
+    What is behind is the market data, not the book: the valuation session is the latest one the
+    data vendor has a usable bar for, while a confirmation dates the ledger by the calendar. On
+    2026-09-23 the vendor's bars for the 22nd came without a close, the session fell back to the
+    21st, and a ledger confirmed that morning refused to price. Confirming it again changes
+    nothing; it clears once a newer session's prices arrive.
+    """
+
+    code = "ledger_ahead"
+
+
+class PricesUnavailable(PortfolioError):
+    """A held symbol has no usable price for the session: a gap in market data, not the book."""
+
+    code = "prices_unavailable"
+
 
 class CashMismatch(PortfolioError):
     """The venue's cash and the ledger's disagree by more than the tolerance.
@@ -192,7 +221,7 @@ def upstream_price_lookup(symbol: str, as_of: str) -> tuple[float, str]:
 
     df = load_ohlcv(symbol, as_of)
     if df is None or df.empty:
-        raise PortfolioError(f"no price data for {symbol}")
+        raise PricesUnavailable(f"no price data for {symbol}")
     last = df.iloc[-1]
     return float(last["Close"]), str(pd.to_datetime(last["Date"]).date())
 
@@ -364,9 +393,9 @@ def build_snapshot(
     max_price_age = int(ps.get("max_price_age_trading_days", 3))
     age_days = (pd.to_datetime(trade_date) - pd.to_datetime(state.as_of)).days
     if age_days > max_age_days:
-        raise PortfolioError(f"portfolio state as_of {state.as_of} is {age_days} days older than {trade_date} (limit {max_age_days})")
+        raise LedgerStale(f"portfolio state as_of {state.as_of} is {age_days} days older than {trade_date} (limit {max_age_days})")
     if age_days < -1:
-        raise PortfolioError(f"portfolio state as_of {state.as_of} is after the trade date {trade_date}")
+        raise LedgerAhead(f"portfolio state as_of {state.as_of} is after the trade date {trade_date}")
 
     buckets: dict[str, BucketView] = {}
     for name, cash in state.buckets.items():
@@ -380,7 +409,7 @@ def build_snapshot(
         age = trading_days_between(price_date, trade_date)
         max_price_age_seen = max(max_price_age_seen, age)
         if age > max_price_age:
-            raise PortfolioError(f"price for {p.symbol} is {age} trading days old (limit {max_price_age})")
+            raise PricesUnavailable(f"price for {p.symbol} is {age} trading days old (limit {max_price_age})")
         cls = classify_instrument(p.symbol, profiles, identity_lookup)
         mv = price * p.quantity
         cost = p.cost_basis_per_share * p.quantity

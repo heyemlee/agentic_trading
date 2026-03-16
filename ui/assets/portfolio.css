@@ -318,6 +318,29 @@ div.pf-row .pf-chevron { display: none; }
 }
 @keyframes pf-pulse { 0% { transform: scale(1); opacity: .4; } 80%, 100% { transform: scale(2.8); opacity: 0; } }
 
+/* ─── the Agentic account, live from Robinhood, above its risk ledger ─
+   The live card leads: the venue's own balance, a minute old at most. The ledger follows as
+   a smaller second card with its own date, since it is what the risk rules run on and not
+   what the account holds this minute. The stamp's dot is ink, not green: colour on this page
+   means a gain or a loss, and being current is neither. */
+.pf-live-stamp {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 3px 11px 3px 9px;
+  border-radius: 999px; background: var(--pf-fill); color: var(--pf-ink-2);
+  font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.pf-live-stamp:empty { display: none; }
+.pf-live-stamp::before {
+  content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pf-ink); box-shadow: 0 0 0 3px rgba(13, 13, 13, .08);
+}
+.pf-live-stamp.is-stale::before { background: var(--pf-ink-3); box-shadow: none; }
+#live-holdings { margin-top: 16px; }
+.pf-live:not([hidden]) ~ #ledger-card { margin-top: 16px; }
+.pf-card.is-ledger .pf-figure { font-size: 28px; letter-spacing: -.035em; }
+/* Cash and buying power close the live card, flush with its edge rather than above a blank band. */
+.pf-live .pf-stats-flat { margin-bottom: -20px; border-bottom: 0; }
+.pf-live .pf-stats-flat:empty { display: none; }
+
 /* ─── arriving: a view settles in rather than popping ──────────────── */
 #robinhood-view, #agentic-view, #holding-view { animation: pf-arrive 360ms var(--pf-settle) both; }
 @keyframes pf-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
