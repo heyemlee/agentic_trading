@@ -532,6 +532,146 @@ test('a current snapshot, and one already being refreshed elsewhere, are left al
   assert.match(busy.element('broker-stamp').textContent, /ux.refreshing/);
 });
 
+/* Tapping a Robinhood holding used to open the Research page, which with no scope in the link
+   came up in the Agentic scope with the strategy form prefilled: a personal holding one tap from
+   a real-money candidate run, and none of its own analyses on the screen. It has a view of its
+   own now, drawn from the /advisor state the page already polls. */
+const holdingAccount = 'a'.repeat(20), otherAccount = 'b'.repeat(20);
+function holdingPage(advisor, { post, writes = true,
+                                search = '?scope=robinhood&account=' + holdingAccount + '&ticker=NVDA' } = {}) {
+  const c = context(); c.location.search = search; c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.posts = []; c.reread = 0;
+  c.CT_API = { isLive: () => true, writesEnabled: writes, readOnce: async () => { c.reread++; },
+    post: post || (async (path, body) => { c.posts.push([path, body]); return { run_key: 'advisor_new' }; }) };
+  c.CT.advisor = advisor;
+  c.run('pages/portfolio.js');
+  return c;
+}
+const nvda = { symbol: 'NVDA', quantity: 40, average_cost: 98.5, price: 131.4, market_value_usd: 5256,
+               unrealized_pct: 33.401, quote_at: '2026-09-04T20:00:00Z', weight_pct: 11.6 };
+const holdingSnapshot = (positions = [nvda], complete = true) => ({ fetched_at: '2026-09-04T20:31:00Z', accounts: [
+  { id: holdingAccount, label: '••••1111', complete, equity_usd: 45249.5, cash_usd: 3737, positions },
+  { id: otherAccount, label: '••••2222', complete: true, equity_usd: 12480.4, cash_usd: 612.4,
+    positions: [{ ...nvda, quantity: 1 }] }] });
+const decided = (run_id, account_id, kind, action, created_at, thesis) => ({ run_id, ticker: 'NVDA', account_id,
+  account_scope_kind: kind, trade_date: created_at.slice(0, 10), created_at, action,
+  policy: { confidence: 54, proposal: { investment_thesis: thesis, entry_logic: 'Entry', exit_logic: 'Exit',
+                                        primary_risks: ['Risk'], missing_information: [] } } });
+
+test('a Robinhood holding opens its own view, never the strategy research form', () => {
+  const c = holdingPage({ stale: false, jobs: [], decisions: [],
+    snapshot: { ...holdingSnapshot(), errors: ['Scan <b>: only the first candidate page was read.'] } }, { search: '' });
+  const list = c.element('broker-accounts').innerHTML;
+  assert.match(list, /href="portfolio\.html\?scope=robinhood&amp;account=a{20}&amp;ticker=NVDA"/);
+  assert.doesNotMatch(list, /research\.html/);
+  assert.match(list, /<details class="pf-card pf-more pf-notes"><summary>pf\.readNotes 1<\/summary>/,
+               'what the read could not do is kept, one tap away');
+  assert.match(list, /Scan &lt;b&gt;: only the first/);
+  assert.equal(c.element('pf-overview').hidden, false);
+  assert.equal(c.element('holding-view').hidden, true);
+});
+
+test('a holding shows its position and only the analyses bound to its account', () => {
+  const c = holdingPage({ stale: false, jobs: [], snapshot: holdingSnapshot(), decisions: [
+    decided('mine_new', holdingAccount, 'single', 'HOLD', '2026-09-04T01:00:00Z', 'Hold <b>this</b>'),
+    decided('other_account', otherAccount, 'single', 'SELL', '2026-09-04T02:00:00Z', 'Another account'),
+    decided('unbound', null, 'unknown', 'SELL', '2026-09-04T03:00:00Z', 'Never said which account'),
+    decided('everyone', null, 'all_personal', 'NO_TRADE', '2026-09-02T01:00:00Z', 'All accounts'),
+    decided('mine_old', holdingAccount, 'single', 'ADD', '2026-08-20T01:00:00Z', 'Older') ] });
+  assert.equal(c.element('holding-view').hidden, false);
+  assert.equal(c.element('pf-overview').hidden, true);
+  assert.equal(c.element('holding-symbol').textContent, 'NVDA');
+  assert.equal(c.element('holding-value').textContent, c.Console.usd(5256));
+  assert.match(c.element('holding-return').innerHTML, /\+\$1,316\.00 \(\+33\.40%\)/);
+  assert.match(c.element('holding-stats').innerHTML, /\$3,940\.00/, 'cost basis from average cost and quantity');
+  const latest = c.element('holding-analysis').innerHTML, earlier = c.element('holding-history').innerHTML;
+  assert.match(latest, /data-od-id="analysis-mine_new"/);
+  assert.match(latest, /Hold &lt;b&gt;this&lt;\/b&gt;/, 'the engine text is escaped, never markup');
+  assert.match(earlier, /run=everyone/);
+  assert.match(earlier, /run=mine_old/);
+  assert.doesNotMatch(latest + earlier, /other_account|unbound/);
+  assert.equal(c.element('holding-robinhood').href, 'https://robinhood.com/stocks/NVDA');
+  assert.equal(c.element('holding-analyze').disabled, false);
+});
+
+test('analysing a holding sends the assistant request bound to its account, once per tap', async () => {
+  let fail = true; const sent = [];
+  const c = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot() }, {
+    post: async (path, body) => { sent.push([path, body]); if (fail) throw Error('network lost'); return { run_key: 'advisor_new' }; } });
+  c.element('holding-analyze').events.click();
+  c.element('holding-analyze').events.click(); await flush();
+  assert.equal(sent.length, 1, 'a second tap while the first is in flight sends nothing');
+  assert.equal(sent[0][0], '/advisor/jobs');
+  assert.equal(JSON.stringify({ ...sent[0][1], request_id: 'id' }), JSON.stringify({ kind: 'analysis', scope: 'personal',
+    ticker: 'NVDA', account_id: holdingAccount, request_id: 'id', language: 'en' }));
+  assert.match(c.element('holding-analyze-note').textContent, /hd.requestFailed network lost/);
+  fail = false;
+  c.element('holding-analyze').events.click(); await flush();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1][1].request_id, sent[0][1].request_id, 'an explicit retry is the same request');
+  assert.match(c.element('holding-analyze-note').textContent, /hd.requested/);
+  assert.equal(c.reread, 1, 'the queue is read again so the run shows up');
+});
+
+test('an analysis in flight holds the button and can be stopped; another account\'s run cannot', async () => {
+  const running = { run_key: 'advisor_running', ticker: 'NVDA', state: 'RUNNING', created_at: '2026-09-04T20:40:00Z',
+                    task: { kind: 'analysis', account_scope_kind: 'single', account_id: holdingAccount } };
+  const c = holdingPage({ stale: false, decisions: [], snapshot: holdingSnapshot(), jobs: [
+    { ...running, run_key: 'elsewhere', task: { ...running.task, account_id: otherAccount } }, running] });
+  assert.equal(c.element('holding-analyze').disabled, true);
+  assert.match(c.element('holding-job').innerHTML, /data-stop="advisor_running"/);
+  assert.doesNotMatch(c.element('holding-job').innerHTML, /elsewhere/);
+  await c.element('holding-job').events.click({ target: { closest: () => ({ getAttribute: () => 'advisor_running' }) } });
+  await flush();
+  assert.deepEqual(c.posts.map(([path]) => path), ['/research/advisor_running/cancel']);
+});
+
+test('a failed run is reported until a newer analysis replaces it', () => {
+  const failed = { run_key: 'advisor_failed', ticker: 'NVDA', state: 'FAILED', error: 'Claude limit <reached>',
+                   created_at: '2026-09-05T01:00:00Z', task: { kind: 'analysis', account_scope_kind: 'single', account_id: holdingAccount } };
+  const c = holdingPage({ stale: false, snapshot: holdingSnapshot(), jobs: [failed],
+    decisions: [decided('mine', holdingAccount, 'single', 'HOLD', '2026-09-04T01:00:00Z', 'Older result')] });
+  assert.match(c.element('holding-job').innerHTML, /Claude limit &lt;reached&gt;/);
+  c.CT.advisor.decisions.unshift(decided('newer', holdingAccount, 'single', 'HOLD', '2026-09-05T02:00:00Z', 'Newer'));
+  c.render();
+  assert.equal(c.element('holding-job').innerHTML, '');
+});
+
+test('a holding that left the snapshot keeps its history and offers no analysis', () => {
+  const c = holdingPage({ stale: false, jobs: [], snapshot: holdingSnapshot([]),
+    decisions: [decided('mine', holdingAccount, 'single', 'HOLD', '2026-09-04T01:00:00Z', 'Kept')] });
+  assert.equal(c.element('holding-missing').hidden, false);
+  assert.equal(c.element('holding-stats').hidden, true);
+  assert.equal(c.element('holding-value').hidden, true, 'no figure is drawn for a position that is not there');
+  assert.equal(c.element('holding-analyze').hidden, true);
+  assert.match(c.element('holding-analysis').innerHTML, /Kept/);
+});
+
+test('an incomplete account, or a session that cannot write, cannot start an analysis', () => {
+  const incomplete = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot([nvda], false) });
+  assert.equal(incomplete.element('holding-analyze').disabled, true);
+  assert.match(incomplete.element('holding-analyze-note').textContent, /hd.incomplete/);
+  const readOnly = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot() }, { writes: false });
+  assert.equal(readOnly.element('holding-analyze').disabled, true);
+  assert.match(readOnly.element('holding-analyze-note').textContent, /hd.unavailable/);
+  readOnly.element('holding-analyze').events.click();
+  assert.equal(readOnly.posts.length, 0);
+});
+
+test('the portfolio review speaks about a holding only when it covered that account', () => {
+  const review = { account_scope_kind: 'single', account_id: otherAccount, analysed_at: '2026-09-04T02:00:00Z',
+                   run_key: 'advisor_review', priorities: [{ symbol: 'NVDA', recommendation: 'consider_change',
+                                                             rationale: 'Trim it', missing: [] }] };
+  const other = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot(), latest_review: review });
+  assert.equal(other.element('holding-review-block').hidden, true);
+  const covering = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot(),
+    latest_review: { ...review, account_scope_kind: 'all_personal', account_id: null, account_ids: [holdingAccount, otherAccount] } });
+  assert.equal(covering.element('holding-review-block').hidden, false);
+  assert.match(covering.element('holding-review').innerHTML, /Trim it/);
+});
+
 /* The ledger fails closed once nothing has confirmed it for max_age_days, and the API then
    answers 200 with its buckets emptied and the reason in errors. Throwing that payload away
    left the reader on a blank screen: no figure, no reason, and no way to fix it from the one

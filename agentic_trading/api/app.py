@@ -956,6 +956,8 @@ class ConsoleFiles(StaticFiles):
             page = page.replace('</head>', '<link rel="stylesheet" href="assets/advisor.css" />\n</head>')
         if 'href="assets/lab.css"' not in page:
             page = page.replace('</head>', '<link rel="stylesheet" href="assets/lab.css" />\n</head>')
+        if 'href="assets/portfolio.css"' not in page:
+            page = page.replace('</head>', '<link rel="stylesheet" href="assets/portfolio.css" />\n</head>')
         startup = self.root / 'assets' / 'startup.html'
         if startup.is_file():
             page = re.sub(r'<html\b', '<html data-ct-starting', page, count=1)

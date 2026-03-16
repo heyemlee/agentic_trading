@@ -1,0 +1,336 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Assets — liquid glass, ink on white.
+ *
+ * The page opts in with <body class="theme-mono pf-glass">: theme-mono (console.css)
+ * turns the shared components ink on white, and this file draws the page's own. Every
+ * rule is scoped to a .pf- class or to body.pf-glass, because the server ships this sheet
+ * with every console page (api/app.py, primary_templates) so a tap from another tab can
+ * show Assets before any stylesheet has to be fetched.
+ *
+ * Glass here is a material, not a blur. A card is a translucent white body over a soft
+ * grey field, with a lit top edge, a darker bottom edge and a long soft shadow. That
+ * reads as glass without backdrop-filter, which would have to be recomputed on every
+ * scrolled frame for every card on screen (the cost that made the Lab's status bar solid,
+ * f44292c). Only the small controls that float over content blur what is behind them.
+ *
+ * Colour says one thing only: a gain is green and a loss is red. They are resolved on
+ * :root, before theme-mono turns --green into ink for decoration, and mixed from the
+ * brand values the way console.css derives everything else. --green-ink (44% black) read
+ * as black at 13px; 30% keeps the hue and still clears AA: 5.5:1 on white and 5.0:1 on
+ * the grey fill, measured. The red is darkened to the same weight (5.8:1).
+ * ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  --pf-up: color-mix(in oklab, var(--green), black 30%);
+  --pf-down: color-mix(in oklab, var(--danger-base), black 10%);
+}
+
+body.pf-glass {
+  --pf-ink: #0d0d0d;
+  --pf-ink-2: #5d5d5d;
+  --pf-ink-3: #8f8f8f;
+  --pf-line: rgba(13, 13, 13, .08);
+  --pf-fill: rgba(13, 13, 13, .045);
+  --pf-radius: 28px;
+  --pf-glass: linear-gradient(180deg, rgba(255, 255, 255, .86) 0%, rgba(255, 255, 255, .64) 100%);
+  --pf-edge: rgba(255, 255, 255, .96);
+  --pf-lift: 0 1px 2px rgba(13, 13, 13, .04), 0 18px 44px -24px rgba(13, 13, 13, .26);
+  --pf-lit: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(13, 13, 13, .045);
+  --pf-spring: cubic-bezier(.34, 1.4, .5, 1);
+  --pf-settle: cubic-bezier(.22, 1, .36, 1);
+  /* The field the glass sits on: three soft greys near the top of the page, where the
+     cards are. It scrolls with the document, so nothing is recomputed while scrolling. */
+  background:
+    radial-gradient(760px 420px at 12% -60px, #ebebee 0%, rgba(235, 235, 238, 0) 70%),
+    radial-gradient(620px 460px at 100% 180px, #f0f0f2 0%, rgba(240, 240, 242, 0) 70%),
+    radial-gradient(700px 520px at 0% 720px, #f2f2f4 0%, rgba(242, 242, 244, 0) 70%),
+    #fbfbfc;
+  color: var(--pf-ink);
+}
+html:has(> body.pf-glass) { background: #fbfbfc; }
+
+/* ─── type ──────────────────────────────────────────────────────────── */
+.pf-eyebrow { font-size: 13px; font-weight: 600; letter-spacing: -.005em; color: var(--pf-ink-2); }
+.pf-fine { font-size: 13px; line-height: 1.5; color: var(--pf-ink-2); }
+.pf-fine:empty { display: none; }
+.pf-foot { margin-top: 14px; text-align: center; }
+.pf-verbatim { overflow-wrap: anywhere; white-space: pre-line; }
+.pf-figure {
+  margin-top: 6px; font-size: clamp(34px, 9.4vw, 44px); font-weight: 700; line-height: 1.05;
+  letter-spacing: -.045em; font-variant-numeric: tabular-nums; color: var(--pf-ink);
+}
+.pf-figure-sm { font-size: 24px; letter-spacing: -.03em; }
+.pf-result { margin-top: 8px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pf-result:empty { display: none; }
+.pf-delta { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--pf-ink-2); white-space: nowrap; }
+.pf-result .pf-delta { font-size: inherit; }
+.pf-delta.is-up { color: var(--pf-up); }
+.pf-delta.is-down { color: var(--pf-down); }
+.pf-delta-label { font-weight: 500; color: var(--pf-ink-2); }
+.pf-warn { margin-top: 10px; font-size: 13px; line-height: 1.5; color: var(--warn-ink); }
+
+/* ─── the glass card ───────────────────────────────────────────────── */
+.pf-card {
+  position: relative; isolation: isolate; display: block;
+  padding: 20px; border-radius: var(--pf-radius);
+  background: var(--pf-glass); border: 1px solid var(--pf-edge);
+  box-shadow: var(--pf-lift), var(--pf-lit);
+}
+/* the sheen: light caught on the upper-left of the glass */
+.pf-card::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(128deg, rgba(255, 255, 255, .8) 0%, rgba(255, 255, 255, 0) 42%);
+}
+.pf-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.pf-card-foot { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--pf-line); }
+.pf-stack { display: flex; flex-direction: column; gap: 16px; }
+.pf-body { padding-top: 0; }
+.pf-head { padding-bottom: 16px; }
+.pf-badge {
+  display: inline-flex; align-items: center; min-height: 26px; padding: 3px 11px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--pf-ink-2); background: var(--pf-fill);
+}
+.pf-badge:empty { display: none; }
+
+/* ─── the account switch: a glass track and one lens that slides ──── */
+.pf-switch {
+  --n: 2; --i: 0;
+  position: relative; margin-top: 16px; padding: 4px; border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .38));
+  border: 1px solid rgba(255, 255, 255, .92);
+  box-shadow: 0 10px 30px -14px rgba(13, 13, 13, .22), 0 1px 2px rgba(13, 13, 13, .05),
+    inset 0 1px 1px #fff, inset 0 -1px 1px rgba(13, 13, 13, .05);
+  -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
+}
+.pf-switch[data-count="3"] { --n: 3; }
+.pf-switch[data-index="1"] { --i: 1; }
+.pf-switch[data-index="2"] { --i: 2; }
+.pf-switch-lens {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n));
+  border-radius: 999px; pointer-events: none;
+  background: linear-gradient(150deg, #fff 0%, rgba(255, 255, 255, .82) 55%, rgba(255, 255, 255, .95) 100%);
+  border: 1px solid rgba(255, 255, 255, .98);
+  box-shadow: 0 3px 12px rgba(13, 13, 13, .10), 0 1px 2px rgba(13, 13, 13, .06),
+    inset 0 1px 1px #fff, inset 0 -1px 2px rgba(13, 13, 13, .06);
+  transform: translateX(calc(100% * var(--i)));
+  transition: transform 460ms var(--pf-settle);
+  will-change: transform;
+}
+.pf-switch-items { position: relative; z-index: 1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.pf-seg {
+  display: grid; place-items: center; min-height: 44px; padding: 0 12px; border-radius: 999px;
+  font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--pf-ink-3);
+  -webkit-tap-highlight-color: transparent; transition: color 200ms ease, transform 260ms var(--pf-spring);
+}
+.pf-seg.is-selected { color: var(--pf-ink); }
+@media (hover: hover) { .pf-seg:not(.is-selected):hover { color: var(--pf-ink-2); } }
+.pf-seg:active { transform: scale(.96); }
+.pf-seg:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -3px; }
+
+/* ─── round glass controls: refresh, back ─────────────────────────── */
+.pf-round {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border-radius: 50%; color: var(--pf-ink);
+  background: linear-gradient(140deg, rgba(255, 255, 255, .9), rgba(255, 255, 255, .55));
+  border: 1px solid rgba(255, 255, 255, .96);
+  box-shadow: 0 6px 18px -8px rgba(13, 13, 13, .28), inset 0 1px 1px #fff, inset 0 -1px 1px rgba(13, 13, 13, .06);
+  -webkit-backdrop-filter: blur(12px) saturate(140%); backdrop-filter: blur(12px) saturate(140%);
+  -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--pf-spring), opacity 160ms ease;
+}
+.pf-round svg { width: 20px; height: 20px; }
+.pf-round:active:not(:disabled) { transform: scale(.92); }
+.pf-round:disabled { cursor: default; opacity: .45; }
+.pf-round:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
+.pf-round.is-busy { opacity: 1; }
+.pf-round.is-busy svg { animation: pf-spin 900ms linear infinite; }
+@keyframes pf-spin { to { transform: rotate(360deg); } }
+
+.pf-sync { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.pf-sync .pf-fine { flex: 1; min-width: 0; }
+
+/* ─── rows: a holding, an earlier analysis, a bucket ───────────────── */
+.pf-rows { display: flex; flex-direction: column; }
+.pf-holdings { margin: 14px -10px -8px; }
+.pf-row {
+  position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px;
+  border-radius: 18px; color: inherit; -webkit-tap-highlight-color: transparent;
+  transition: background 200ms ease, transform 280ms var(--pf-spring);
+}
+.pf-row + .pf-row::before {
+  content: ''; position: absolute; top: 0; left: 62px; right: 10px; height: 1px; background: var(--pf-line);
+}
+.pf-card.pf-rows { padding: 6px; }
+.pf-card.pf-rows .pf-row + .pf-row::before { left: 10px; }
+a.pf-row:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
+@media (hover: hover) { a.pf-row:hover { background: var(--pf-fill); } }
+a.pf-row:active { background: rgba(13, 13, 13, .07); transform: scale(.985); }
+a.pf-row:hover::before, a.pf-row:active::before, a.pf-row:hover + .pf-row::before, a.pf-row:active + .pf-row::before { opacity: 0; }
+.pf-row-main { flex: 1 1 auto; min-width: 0; }
+.pf-row-title { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.012em; line-height: 1.3; }
+.pf-row-sub { display: block; margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--pf-ink-2); overflow-wrap: anywhere; }
+.pf-row-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.pf-row-value { font-size: 16px; font-weight: 600; letter-spacing: -.012em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-chevron {
+  flex: none; width: 7px; height: 7px; margin: 0 4px 0 -2px;
+  border-top: 1.75px solid var(--pf-ink-3); border-right: 1.75px solid var(--pf-ink-3); transform: rotate(45deg);
+}
+div.pf-row .pf-chevron { display: none; }
+
+/* a glass bead with the symbol's initial: company logos would be a request elsewhere */
+.pf-orb {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  font-size: 16px; font-weight: 650; line-height: 1; color: var(--pf-ink);
+  background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f2f2f3 52%, #e2e2e4 100%);
+  box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(13, 13, 13, .07), 0 1px 2px rgba(13, 13, 13, .08);
+}
+.pf-orb-lg { width: 52px; height: 52px; font-size: 21px; }
+
+.pf-empty-line { margin-top: 14px; }
+/* what the last read could not do, one tap away rather than loose between the accounts */
+.pf-card.pf-notes { margin-top: 0; padding: 2px 18px; border-radius: 20px; border-top-color: var(--pf-edge); }
+.pf-notes > summary { min-height: 46px; font-size: 14px; color: var(--pf-ink-2); }
+.pf-notes .pf-bullets { font-size: 13px; color: var(--pf-ink-2); }
+
+/* ─── calls to action: a glass row, and the ink button ─────────────── */
+.pf-cta {
+  display: flex; align-items: center; gap: 14px; margin-top: 16px; padding: 16px 18px;
+  border-radius: 22px; color: inherit; background: var(--pf-glass); border: 1px solid var(--pf-edge);
+  box-shadow: 0 10px 30px -22px rgba(13, 13, 13, .3), var(--pf-lit);
+  -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring);
+}
+.pf-cta:active { transform: scale(.985); }
+.pf-cta:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
+.pf-cta-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: #fff; background: var(--pf-ink); }
+.pf-cta-icon svg { width: 18px; height: 18px; }
+.pf-cta-copy { flex: 1; min-width: 0; }
+.pf-cta-copy strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.pf-cta-copy span { display: block; margin-top: 2px; font-size: 13px; line-height: 1.45; color: var(--pf-ink-2); }
+.pf-out { flex: none; width: 20px; height: 20px; color: var(--pf-ink-2); }
+
+.pf-btn {
+  display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px;
+  margin-top: 14px; padding: 14px 22px; border: 0; border-radius: 999px;
+  font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -.01em;
+  color: #fff; background: var(--pf-ink);
+  box-shadow: 0 12px 26px -14px rgba(13, 13, 13, .6), inset 0 1px 0 rgba(255, 255, 255, .16);
+  -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring), background 160ms ease;
+}
+@media (hover: hover) { .pf-btn:hover:not(:disabled) { background: #2a2a2a; } }
+.pf-btn:active:not(:disabled) { transform: scale(.98); }
+.pf-btn:disabled { cursor: not-allowed; color: #a3a3a3; background: #ececec; box-shadow: none; }
+.pf-btn:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
+.pf-btn-note { margin-top: 10px; text-align: center; }
+.pf-quiet {
+  flex: none; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 999px;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--pf-ink); background: rgba(255, 255, 255, .85);
+  box-shadow: inset 0 0 0 1px var(--pf-line);
+}
+.pf-quiet:disabled { color: var(--pf-ink-3); }
+.pf-text-link {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 6px;
+  font-size: 15px; font-weight: 600; color: var(--pf-ink);
+}
+.pf-text-link .pf-chevron { margin: 0; }
+
+/* ─── the ledger ───────────────────────────────────────────────────── */
+.pf-hero .pf-figure { margin-top: 10px; }
+.pf-hero .pf-fine { margin-top: 4px; }
+.pf-stats { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 0; overflow: hidden; }
+.pf-stats-flat { margin: 18px -20px 0; border-block: 1px solid var(--pf-line); }
+.pf-hero .pf-more { margin: 0 0 -8px; border-top: 0; }
+.pf-stat { min-width: 0; padding: 14px 18px; }
+.pf-stats-flat .pf-stat { padding-inline: 20px; }
+.pf-stat:nth-child(odd) { border-right: 1px solid var(--pf-line); }
+.pf-stat:nth-child(n + 3) { border-top: 1px solid var(--pf-line); }
+.pf-stat dt { font-size: 13px; color: var(--pf-ink-2); }
+.pf-stat dd { margin: 4px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -.015em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pf-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 16px; }
+.pf-notice-title { font-size: 15px; font-weight: 600; line-height: 1.45; letter-spacing: -.01em; }
+.pf-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 10px 4px; }
+.pf-notice .btn { width: auto; }
+.pf-sleeve { margin-top: 14px; }
+#pf-allocation { margin-top: 16px; }
+#pf-allocation .pf-rows { margin: 8px -10px -8px; }
+
+/* ─── one holding ──────────────────────────────────────────────────── */
+.pf-detail { padding-top: 12px; }
+.pf-detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-left: -6px; }
+.pf-detail-hero { margin-top: 18px; }
+.pf-detail-name { display: flex; align-items: center; gap: 12px; }
+.pf-detail-name h1 { font-size: 30px; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
+.pf-detail-hero .pf-figure { margin-top: 18px; }
+.pf-detail-hero .pf-fine { margin-top: 6px; }
+.pf-detail .pf-stats { margin-top: 22px; }
+.pf-missing { margin-top: 20px; }
+.pf-block { margin-top: 32px; }
+.pf-block-title { margin-bottom: 12px; font-size: 20px; font-weight: 650; letter-spacing: -.025em; }
+
+.pf-meta { margin-top: 10px; }
+.pf-verdict {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 3px 13px; border-radius: 999px;
+  font-size: 13px; font-weight: 650; letter-spacing: .005em; white-space: nowrap; color: #fff; background: var(--pf-ink);
+}
+.pf-verdict-soft { color: var(--pf-ink); background: rgba(13, 13, 13, .07); }
+.pf-row .pf-verdict { min-height: 26px; font-size: 12px; }
+.pf-thesis { margin-top: 14px; font-size: 16px; line-height: 1.62; letter-spacing: -.005em; }
+.pf-aside { margin-top: 10px; }
+.pf-more { margin-top: 14px; border-top: 1px solid var(--pf-line); }
+.pf-more + .pf-more { margin-top: 0; }
+.pf-more > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px;
+  list-style: none; cursor: pointer; font-size: 15px; font-weight: 600; letter-spacing: -.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+.pf-more > summary::-webkit-details-marker { display: none; }
+.pf-more > summary::after {
+  content: ''; flex: none; width: 7px; height: 7px; margin: 0 4px 4px 0;
+  border-right: 1.75px solid var(--pf-ink-3); border-bottom: 1.75px solid var(--pf-ink-3);
+  transform: rotate(45deg); transition: transform 240ms var(--pf-settle);
+}
+.pf-more[open] > summary::after { margin-bottom: -3px; transform: rotate(-135deg); }
+.pf-more > summary:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 2px; border-radius: 8px; }
+.pf-pairs { margin: 0 0 12px; }
+.pf-pairs > div + div { margin-top: 12px; }
+.pf-pairs dt { font-size: 13px; font-weight: 600; color: var(--pf-ink-2); }
+.pf-pairs dd { margin: 3px 0 0; font-size: 15px; line-height: 1.6; }
+.pf-pairs-row > div { display: flex; justify-content: space-between; gap: 16px; }
+.pf-pairs-row > div + div { margin-top: 0; padding-top: 10px; }
+.pf-pairs-row dt { font-weight: 500; }
+.pf-pairs-row dd { margin: 0; text-align: right; font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.pf-bullets { margin: 0 0 12px; padding-left: 20px; font-size: 15px; line-height: 1.6; }
+.pf-bullets li + li { margin-top: 6px; }
+
+.pf-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 22px; text-align: center; }
+.pf-empty-inline { margin-top: 12px; padding: 22px 16px; border-radius: 20px; background: var(--pf-fill); }
+.pf-empty-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 6px; border-radius: 50%; color: var(--pf-ink); background: var(--pf-fill); }
+.pf-empty-mark svg { width: 20px; height: 20px; }
+
+.pf-job { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 14px 16px; border-radius: 20px; background: var(--pf-fill); }
+.pf-job-copy { flex: 1; min-width: 0; }
+.pf-job-copy strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.pf-job-copy span { display: block; margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--pf-ink-2); }
+.pf-job.is-failed { background: var(--danger-tint); }
+.pf-job.is-failed strong { color: var(--danger-ink); }
+.pf-pulse { position: relative; flex: none; width: 10px; height: 10px; margin-inline: 4px; border-radius: 50%; background: var(--pf-ink); }
+.pf-pulse::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--pf-ink);
+  animation: pf-pulse 1.7s ease-out infinite;
+}
+@keyframes pf-pulse { 0% { transform: scale(1); opacity: .4; } 80%, 100% { transform: scale(2.8); opacity: 0; } }
+
+/* ─── arriving: a view settles in rather than popping ──────────────── */
+#robinhood-view, #agentic-view, #holding-view { animation: pf-arrive 360ms var(--pf-settle) both; }
+@keyframes pf-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ─── when the material cannot be trusted, it is opaque ────────────── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .pf-card, .pf-cta, .pf-switch, .pf-round { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none; border-color: #c9c9c9; }
+  .pf-card::before { display: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .pf-switch, .pf-round { background: #fff; }
+}
+@media (forced-colors: active) {
+  .pf-card, .pf-switch, .pf-switch-lens, .pf-round, .pf-cta { border-color: CanvasText; }
+  .pf-seg.is-selected { outline: 2px solid Highlight; outline-offset: -3px; }
+}

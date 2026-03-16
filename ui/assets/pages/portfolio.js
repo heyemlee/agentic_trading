@@ -1,14 +1,25 @@
 window.Console.page('portfolio', function (document) {
   const C = window.Console, D = C.D, API = window.CT_API;
   C.mount('portfolio');
+  const $ = id => document.getElementById(id);
+  const h = C.escapeHtml;
 
-  /* The URL selects one account view and keeps direct links stable. */
+  /* The URL selects one account view and keeps direct links stable. A Robinhood holding is
+     one more level of the same address — portfolio.html?scope=robinhood&account=<id>&ticker=<symbol>
+     — so it has a link of its own, Back returns to the list, and a reload lands on it again. */
   const routeScope = () => {
     const requested = new URLSearchParams(location.search).get('scope');
     return requested === 'agentic' || (requested === 'demo' && C.SHOW_CONCEPTUAL)
       ? requested : 'robinhood';
   };
-  let scope = routeScope();
+  const routeHolding = () => {
+    const query = new URLSearchParams(location.search);
+    const account = query.get('account') || '', ticker = (query.get('ticker') || '').toUpperCase();
+    return routeScope() === 'robinhood' && /^[0-9a-f]{20}$/.test(account) && /^[A-Z][A-Z0-9.-]{0,19}$/.test(ticker)
+      ? { account, ticker } : null;
+  };
+  const sameHolding = (a, b) => !!a && !!b && a.account === b.account && a.ticker === b.ticker;
+  let scope = routeScope(), holding = routeHolding();
 
   let refreshing = false, refreshRequest = null;
 
@@ -42,10 +53,7 @@ window.Console.page('portfolio', function (document) {
     finally { refreshing = false; render(); }
   }
 
-  document.getElementById('refresh-holdings').addEventListener('click', () => askRefresh(D.advisor || {}, true));
-  /* Research is started one holding at a time, from the holding's own row. A button that
-     queued every holding at once was as many full runs as there were holdings, each thirteen
-     model calls, all drawn from the same daily budget as the trading system's own research. */
+  $('refresh-holdings').addEventListener('click', () => askRefresh(D.advisor || {}, true));
 
   /* The strategy figures come from the ledgers, and a ledger fails closed once nothing
      has confirmed it for max_age_days. The API then answers with its buckets emptied and
@@ -54,7 +62,7 @@ window.Console.page('portfolio', function (document) {
      refuse, the same one ct-state confirm makes, so this button is a request to run it,
      not an override of it. */
   let confirming = false, confirmStatus = '';
-  document.getElementById('confirm-ledger').addEventListener('click', async () => {
+  $('confirm-ledger').addEventListener('click', async () => {
     if (confirming || !API.writesEnabled) return;
     confirming = true; confirmStatus = C.t('pf.confirming'); render();
     try {
@@ -101,63 +109,207 @@ window.Console.page('portfolio', function (document) {
     } catch (error) { bookStatus = C.t('pf.bookFailed', { error: error.message }); }
     finally { booking = false; await loadCheck(); }
   }
-  document.getElementById('book-transfer').addEventListener('click', () => book('transfer'));
-  document.getElementById('book-income').addEventListener('click', () => book('income'));
+  $('book-transfer').addEventListener('click', () => book('transfer'));
+  $('book-income').addEventListener('click', () => book('income'));
 
-  /* Everything below is re-run on every poll cycle. */
-  function render() {
+  /* Analysing a holding is the Assistant's own request: the whole research team on one
+     position, read-only, bound by the server to the account it is about. It spends one of
+     the day's full analyses, so a second tap while the first is in flight sends nothing, and
+     the request id is kept for an explicit retry of the same request after a lost response. */
+  let analyzing = false, analyzeRequest = null, analyzeStatus = '';
+  async function analyze() {
+    const target = holding;
+    if (!target || analyzing || !holdingState(target).canAnalyze) return;
+    const key = target.account + ':' + target.ticker;
+    if (!analyzeRequest || analyzeRequest.key !== key) analyzeRequest = { key, id: crypto.randomUUID() };
+    analyzing = true; analyzeStatus = ''; render();
+    try {
+      const job = await API.post('/advisor/jobs', { kind: 'analysis', scope: 'personal', ticker: target.ticker,
+        account_id: target.account, request_id: analyzeRequest.id, language: window.I18N.lang });
+      if (job.blocked) { analyzeStatus = C.t('hd.demo'); return; }
+      analyzeRequest = null; analyzeStatus = C.t('hd.requested');
+      await API.readOnce('advisor');
+    } catch (error) { analyzeStatus = C.t('hd.requestFailed', { error: error.message }); }
+    finally { analyzing = false; render(); }
+  }
+  $('holding-analyze').addEventListener('click', analyze);
+  /* Stopping is the server's decision to make: a run that finished in the meantime answers
+     with a conflict, which is reported rather than swallowed. */
+  let stopping = null;
+  $('holding-job').addEventListener('click', async (event) => {
+    const button = event.target.closest && event.target.closest('[data-stop]');
+    if (!button || stopping) return;
+    stopping = button.getAttribute('data-stop'); render();
+    try {
+      const result = await API.post('/research/' + encodeURIComponent(stopping) + '/cancel', {});
+      if (result.blocked) analyzeStatus = C.t('hd.demo');
+      else await API.readOnce('advisor');
+    } catch (error) { analyzeStatus = C.t('hd.stopFailed', { error: error.message }); }
+    finally { stopping = null; render(); }
+  });
+
+  /* ── shared formatting ──────────────────────────────────────────── */
+  const money = value => value == null ? '—' : C.usd(value);
+  const tone = n => n > 0 ? ' is-up' : n < 0 ? ' is-down' : '';
+  const signedUsd = n => (n > 0 ? '+' : '') + C.usd(n);
+  const signedPct = (n, digits) => (n > 0 ? '+' : '') + C.pct(n, digits);
+  const shares = q => Number(q).toLocaleString('en-US', { maximumFractionDigits: 6 });
+  const orb = symbol => h(String(symbol || '?').charAt(0));
+  const link = params => 'portfolio.html?' + new URLSearchParams(params) + (window.CT_DEMO ? '&demo=1' : '');
+  const reportLink = (runId, account) => 'research.html?' + new URLSearchParams({ scope: 'personal', account,
+    include_all_personal: 'true', run: runId }) + (window.CT_DEMO ? '&demo=1' : '');
+  const stat = (label, value) => '<div class="pf-stat"><dt>' + h(label) + '</dt><dd>' + h(value) + '</dd></div>';
+  const delta = (n, text, label) => n == null ? '' : '<span class="pf-delta' + tone(n) + '">' + h(text) + '</span>' +
+    (label ? ' <span class="pf-delta-label">' + h(label) + '</span>' : '');
+
+  /* ── one Robinhood account: its figure, then its holdings by value ─── */
+  function holdingRow(account, p) {
+    return '<a class="pf-row" href="' + h(link({ scope: 'robinhood', account: account.id, ticker: p.symbol })) +
+      '" data-od-id="holding-' + h(p.symbol) + '">' +
+      '<span class="pf-orb" aria-hidden="true">' + orb(p.symbol) + '</span>' +
+      '<span class="pf-row-main"><span class="pf-row-title">' + h(p.symbol) + '</span>' +
+        '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) })) + '</span></span>' +
+      '<span class="pf-row-side"><span class="pf-row-value">' + money(p.market_value_usd) + '</span>' +
+        (p.unrealized_pct == null ? '<span class="pf-delta">—</span>' : delta(p.unrealized_pct, signedPct(p.unrealized_pct))) +
+      '</span><span class="pf-chevron" aria-hidden="true"></span></a>';
+  }
+  function accountCard(a) {
+    const positions = [...(a.positions || [])].sort((x, y) => (y.market_value_usd ?? -1) - (x.market_value_usd ?? -1));
+    return '<article class="pf-card pf-account" data-od-id="account-' + h(a.id || a.label) + '">' +
+      '<div class="pf-card-head"><p class="pf-eyebrow">' + h(C.t('pf.accountLabel', { label: a.label })) + '</p>' +
+        '<span class="pf-badge">' + h(C.t('ai.readOnly')) + '</span></div>' +
+      '<p class="pf-figure">' + money(a.equity_usd) + '</p>' +
+      '<p class="pf-fine">' + h(C.t('ai.cash') + ' ' + money(a.cash_usd) + ' · ' + C.t('pf.positions', { n: positions.length })) + '</p>' +
+      (!a.complete ? '<p class="pf-warn">' + h(C.t('ux.incompleteAccount')) + '</p>' : '') +
+      (positions.length ? '<div class="pf-rows pf-holdings">' + positions.map(p => holdingRow(a, p)).join('') + '</div>'
+        : a.complete ? '<p class="pf-fine pf-empty-line">' + h(C.t('ai.noPositions')) + '</p>' : '') +
+    '</article>';
+  }
+
+  /* ── one holding: the position, and what the research concluded about it ─
+     Everything here is read from the /advisor state this page already polls: the snapshot
+     for the position, the recorded decisions for the analyses, the queue for a run in
+     flight, the latest portfolio review for its line about this symbol. Records that never
+     said which account they were about are left out, as the research page leaves them out
+     of a single-account view; an all-accounts analysis of the same symbol is kept and says so. */
+  function holdingState(target) {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
-    const live = API.isLive('advisor');
-    const A = D.portfolio.accounts || {};
-    const money = value => value == null ? '—' : C.usd(value);
-    const personal = snapshot.accounts || [];
-    const personalValue = personal.length === 1 ? money(personal[0].equity_usd)
-      : personal.length ? C.t('pf.accountCount', { n: personal.length }) : '—';
-    const views = [
-      { key: 'robinhood', title: personal.length === 1 && personal[0].label
-          ? String(personal[0].label) : C.t('pf.robinhood'), value: personalValue,
-        note: personal.length === 1 && personal[0].cash_usd != null
-          ? C.t('pf.robinhood') + ' · ' + C.t('ai.cash') + ' ' + money(personal[0].cash_usd)
-          : C.t('ai.readOnly') },
-      { key: 'agentic', title: C.t('acct.micro_live'), value: money(A.micro_live?.equity_usd),
-        note: C.t('acct.src.micro_live') },
-    ];
-    if (C.SHOW_CONCEPTUAL) views.push({ key: 'demo', title: C.t('acct.conceptual'),
-      value: money(A.conceptual?.equity_usd), note: C.t('bucket.conceptual') });
-    document.getElementById('portfolio-switch').setAttribute('aria-label', C.t('pf.switchLabel'));
-    C.setHTML(document.getElementById('portfolio-switch'), views.map(view =>
-      '<a class="portfolio-switch-card' + (scope === view.key ? ' is-selected' : '') +
-      '" href="portfolio.html?scope=' + view.key + (window.CT_DEMO ? '&amp;demo=1' : '') +
-      '" data-od-id="portfolio-switch-' + view.key + '"' +
-      (scope === view.key ? ' aria-current="page"' : '') + '>' +
-      '<span class="portfolio-switch-label">' + C.escapeHtml(view.title) + '</span>' +
-      '<strong>' + C.escapeHtml(view.value) + '</strong>' +
-      '<span class="portfolio-switch-note">' + C.escapeHtml(view.note) + '</span></a>').join(''));
-    document.getElementById('robinhood-view').hidden = scope !== 'robinhood';
-    document.getElementById('agentic-view').hidden = scope === 'robinhood';
-    document.getElementById('strategy-heading').textContent = C.t(scope === 'demo' ? 'acct.conceptual' : 'acct.micro_live');
-    /* Any active refresh affects this snapshot. Historical failures are shown
-       only for the refresh requested from this page. */
-    const mine = refreshJobs(saved).find(ACTIVE) || refreshJobs(saved).find((job) => job.run_key === askedFor);
-    document.getElementById('refresh-holdings').disabled = refreshing || !!(mine && ACTIVE(mine)) || !API.writesEnabled || !live;
-    document.getElementById('broker-stamp').textContent =
-      askError ? C.t('ux.refreshFailed', { error: askError })
-      : refreshing || mine && ACTIVE(mine) ? C.t('ux.refreshing')
-      : mine && mine.state !== 'COMPLETE' ? C.t('ux.refreshFailed', { error: mine.error || C.code(mine.state) })
-      : snapshot.fetched_at ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) })
-      : C.t('ai.empty');
-    askRefresh(saved);
-    C.setHTML(document.getElementById('broker-accounts'), (snapshot.accounts || []).map(a =>
-      '<article class="account-glass"><div class="section-head"><h2>' + C.escapeHtml(a.label) + '</h2><span class="chip">' + C.t('ai.readOnly') + '</span></div>' +
-      '<p class="figure">' + money(a.equity_usd) + '</p><p class="body-sm body-muted">' + C.t('ai.cash') + ' ' + money(a.cash_usd) + '</p>' +
-      (!a.complete ? '<p class="body-sm">' + C.t('ux.incompleteAccount') + '</p>' : '') +
-      (a.positions || []).map(p => C.listRow({ title: p.symbol,
-        sub: C.t('ai.cost') + ' ' + money(p.average_cost) + ' · ' + p.quantity,
-        value: money(p.market_value_usd), note: p.unrealized_pct == null ? '—' : C.pct(p.unrealized_pct),
-        href: 'research.html?ticker=' + encodeURIComponent(p.symbol) })).join('') +
-      (!(a.positions || []).length && a.complete ? '<p class="body-sm">' + C.t('ai.noPositions') + '</p>' : '') + '</article>'
-    ).join('') + ((snapshot.errors || []).length ? '<p class="body-sm">' + C.escapeHtml(snapshot.errors.join(' · ')) + '</p>' : ''));
+    const account = (snapshot.accounts || []).find(a => a.id === target.account) || null;
+    const position = account && (account.positions || []).find(p => p.symbol === target.ticker) || null;
+    const analyses = (saved.decisions || []).filter(d => d.ticker === target.ticker &&
+      (d.account_scope_kind === 'single' ? d.account_id === target.account : d.account_scope_kind === 'all_personal'));
+    const jobs = (saved.jobs || []).filter(j => j.ticker === target.ticker && (j.task || {}).kind === 'analysis' &&
+      ((j.task.account_scope_kind || 'single') === 'single' ? j.task.account_id === target.account
+        : (j.task.account_ids || []).includes(target.account)));
+    const running = jobs.find(ACTIVE) || null;
+    const latest = analyses[0] || null;
+    const failed = !running && jobs[0] && jobs[0].state !== 'COMPLETE' &&
+      (!latest || String(jobs[0].created_at) > String(latest.created_at)) ? jobs[0] : null;
+    const review = saved.latest_review;
+    const covered = review && (review.account_scope_kind === 'single' ? review.account_id === target.account
+      : review.account_scope_kind === 'all_personal' && (review.account_ids || []).includes(target.account));
+    const reviewItem = covered ? (review.priorities || []).find(p => String(p.symbol).toUpperCase() === target.ticker) || null : null;
+    const reason = !D.advisor ? 'loading' : !position ? 'missing' : !account.complete ? 'incomplete'
+      : running ? 'running' : !API.writesEnabled || !API.isLive('advisor') ? 'unavailable' : null;
+    return { saved, account, position, analyses, latest, running, failed, review: reviewItem && review, reviewItem,
+             reason, canAnalyze: !reason };
+  }
 
+  function analysisCard(d, target) {
+    const p = (d.policy || {}).proposal || {};
+    const strength = (d.policy || {}).confidence ?? p.confidence;
+    const meta = [C.t(d.account_scope_kind === 'all_personal' ? 'hd.allAccounts' : 'hd.thisAccount'),
+      strength == null ? null : C.t('hd.strength', { n: strength })].filter(Boolean).join(' · ');
+    const conditions = [['ai.entry', p.entry_logic], ['ai.exit', p.exit_logic]].filter(([, v]) => v);
+    const risks = [...(p.primary_risks || []), ...(p.missing_information || [])];
+    return '<article class="pf-card pf-analysis" data-od-id="analysis-' + h(d.run_id) + '">' +
+      '<div class="pf-card-head"><span class="pf-verdict">' + h(d.action ? C.code(d.action) : C.t('ac.incomplete')) + '</span>' +
+        '<span class="pf-fine">' + h(d.trade_date ? C.dateOnly(d.trade_date) : '') + '</span></div>' +
+      '<p class="pf-fine pf-meta">' + h(meta) + '</p>' +
+      (p.investment_thesis ? '<p class="pf-thesis pf-verbatim">' + h(p.investment_thesis) + '</p>' : '') +
+      (conditions.length ? '<details class="pf-more"><summary>' + h(C.t('hd.conditions')) + '</summary><dl class="pf-pairs">' +
+        conditions.map(([k, v]) => '<div><dt>' + h(C.t(k)) + '</dt><dd class="pf-verbatim">' + h(v) + '</dd></div>').join('') +
+        '</dl></details>' : '') +
+      (risks.length ? '<details class="pf-more"><summary>' + h(C.t('ai.risks')) + '</summary><ul class="pf-bullets">' +
+        risks.map(r => '<li class="pf-verbatim">' + h(r) + '</li>').join('') + '</ul></details>' : '') +
+      '<a class="pf-text-link" href="' + h(reportLink(d.run_id, target.account)) + '">' + h(C.t('ai.fullReport')) +
+        '<span class="pf-chevron" aria-hidden="true"></span></a>' +
+    '</article>';
+  }
+
+  function renderHolding(target) {
+    const x = holdingState(target), pos = x.position;
+    $('holding-symbol').textContent = target.ticker;
+    $('holding-orb').textContent = String(target.ticker).charAt(0);
+    $('holding-where').textContent = x.account ? C.t('pf.accountLabel', { label: x.account.label }) : C.t('pf.robinhood');
+    $('holding-robinhood').href = 'https://robinhood.com/stocks/' + encodeURIComponent(target.ticker);
+
+    /* The position. A figure the venue did not give stays a gap; the cost basis and the
+       gain are only drawn when every figure they rest on is there. */
+    C.tickValue($('holding-value'), money(pos?.market_value_usd));
+    $('holding-value').hidden = !pos && !!D.advisor;
+    const basis = pos && pos.average_cost != null ? pos.average_cost * pos.quantity : null;
+    const gain = basis != null && pos.market_value_usd != null ? pos.market_value_usd - basis : null;
+    C.setHTML($('holding-return'), gain == null ? '' :
+      delta(gain, signedUsd(gain) + (pos.unrealized_pct == null ? '' : ' (' + signedPct(pos.unrealized_pct, 2) + ')'), C.t('hd.totalReturn')));
+    $('holding-quote').textContent = pos?.price == null ? '' : C.t('hd.quote', { price: C.usd(pos.price),
+      time: pos.quote_at ? C.dateTime(pos.quote_at) : C.t('rs.unknown') });
+    $('holding-missing').hidden = !!pos || !D.advisor;
+    $('holding-stats').hidden = !pos;
+    C.setHTML($('holding-stats'), !pos ? '' :
+      stat(C.t('hd.shares'), shares(pos.quantity)) + stat(C.t('ai.cost'), money(pos.average_cost)) +
+      stat(C.t('hd.weight'), pos.weight_pct == null ? '—' : C.pct(pos.weight_pct)) + stat(C.t('hd.costBasis'), money(basis)));
+
+    /* What is happening now, then the newest conclusion, then the way to ask for another. */
+    const job = x.running || x.failed;
+    C.setHTML($('holding-job'), !job ? '' : x.running
+      ? '<div class="pf-job is-running"><span class="pf-pulse" aria-hidden="true"></span><div class="pf-job-copy"><strong>' +
+          h(C.t('hd.running')) + '</strong><span>' + h(C.t('hd.runningMeta', { state: C.code(job.state),
+          time: C.dateTime(job.created_at) })) + '</span></div>' +
+          '<button class="pf-quiet" type="button" data-stop="' + h(job.run_key) + '"' +
+          (stopping || !API.writesEnabled ? ' disabled' : '') + '>' + h(C.t('ai.cancel')) + '</button></div>'
+      : '<div class="pf-job is-failed"><div class="pf-job-copy"><strong>' + h(C.t('hd.failed')) + '</strong><span class="pf-verbatim">' +
+          h(job.error || C.code(job.state)) + '</span></div></div>');
+    C.setHTML($('holding-analysis'), x.latest ? analysisCard(x.latest, target)
+      : '<div class="pf-card pf-empty"><span class="pf-empty-mark" aria-hidden="true">' + C.ICON.assistant + '</span>' +
+          '<p class="pf-notice-title">' + h(C.t('hd.notAnalyzed')) + '</p><p class="pf-fine">' + h(C.t('hd.notAnalyzedBody')) + '</p></div>');
+    const button = $('holding-analyze');
+    button.textContent = C.t(analyzing ? 'hd.starting' : x.running ? 'hd.analyzing' : x.latest ? 'hd.analyzeAgain' : 'hd.analyze');
+    button.disabled = analyzing || !x.canAnalyze;
+    button.hidden = x.reason === 'missing';
+    $('holding-analyze-note').textContent = analyzeStatus || ({
+      loading: '', missing: '', running: '', incomplete: C.t('hd.incomplete'),
+      unavailable: C.t(window.CT_DEMO ? 'hd.demo' : 'hd.unavailable'),
+    }[x.reason] ?? C.t('hd.analyzeNote'));
+
+    /* The portfolio review's line about this symbol, only when the review covered this account. */
+    $('holding-review-block').hidden = !x.reviewItem;
+    C.setHTML($('holding-review'), !x.reviewItem ? '' :
+      '<article class="pf-card pf-analysis"><div class="pf-card-head"><span class="pf-verdict pf-verdict-soft">' +
+        h(C.t('hd.rec.' + x.reviewItem.recommendation) === 'hd.rec.' + x.reviewItem.recommendation
+          ? C.titleise(x.reviewItem.recommendation) : C.t('hd.rec.' + x.reviewItem.recommendation)) + '</span>' +
+        '<span class="pf-fine">' + h(x.review.analysed_at ? C.dateOnly(x.review.analysed_at) : '') + '</span></div>' +
+        '<p class="pf-thesis pf-verbatim">' + h(x.reviewItem.rationale || '') + '</p>' +
+        ((x.reviewItem.missing || []).length ? '<p class="pf-fine pf-aside pf-verbatim">' + h(C.t('rs.meta.missing') + ': ' +
+          x.reviewItem.missing.join('; ')) + '</p>' : '') +
+        (x.review.stale ? '<p class="pf-fine pf-aside">' + h(C.t('ai.reviewOld')) + '</p>' : '') +
+        (x.review.run_key ? '<a class="pf-text-link" href="' + h(reportLink(x.review.run_key, target.account)) + '">' +
+          h(C.t('ai.fullReport')) + '<span class="pf-chevron" aria-hidden="true"></span></a>' : '') +
+      '</article>');
+
+    const earlier = x.analyses.slice(1, 6);
+    $('holding-history-block').hidden = !earlier.length;
+    C.setHTML($('holding-history'), earlier.map(d =>
+      '<a class="pf-row" href="' + h(reportLink(d.run_id, target.account)) + '">' +
+        '<span class="pf-row-main"><span class="pf-row-title">' + h(d.trade_date ? C.dateOnly(d.trade_date) : C.t('rs.unknown')) + '</span>' +
+        '<span class="pf-row-sub">' + h(C.t(d.account_scope_kind === 'all_personal' ? 'hd.allAccounts' : 'hd.thisAccount')) + '</span></span>' +
+        '<span class="pf-verdict pf-verdict-soft">' + h(d.action ? C.code(d.action) : C.t('ac.incomplete')) + '</span>' +
+        '<span class="pf-chevron" aria-hidden="true"></span></a>').join(''));
+  }
+
+  /* ── the strategy ledger ───────────────────────────────────────── */
+  function renderLedger() {
+    const A = D.portfolio.accounts || {};
     const order = scope === 'demo' ? ['core', 'sandbox'] : ['micro_live'];
     const B = D.portfolio.buckets;
     const accountKey = scope === 'demo' ? 'conceptual' : 'micro_live';
@@ -173,118 +325,176 @@ window.Console.page('portfolio', function (document) {
     /* The card also carries the last check while it refused, before the ledger has expired:
        the figures are still on screen, and the reader can put the book right today. */
     const refusals = (check.ledgers || []).filter((l) => l.ledger === accountKey && l.error).map((l) => l.error);
-    const notice = document.getElementById('ledger-notice');
+    const notice = $('ledger-notice');
     notice.hidden = !failures.length && !refusals.length;
-    document.getElementById('ledger-held').hidden = !failures.length;
-    document.getElementById('ledger-check').textContent = check.date
+    $('ledger-held').hidden = !failures.length;
+    $('ledger-check').textContent = check.date
       ? C.t('pf.lastCheck', { date: C.dateOnly(check.date),
                               result: C.t(check.confirmed ? 'pf.checkAgreed' : 'pf.checkRefused') })
       : '';
-    document.getElementById('ledger-reason').textContent = (failures.length ? failures : refusals).join(' · ');
+    $('ledger-reason').textContent = (failures.length ? failures : refusals).join(' · ');
     const row = refusedRow();
-    document.getElementById('ledger-diff').hidden = !row;
+    $('ledger-diff').hidden = !row;
     if (row) {
       const more = row.cash_difference_usd > 0, amount = C.usd(Math.abs(row.cash_difference_usd));
-      document.getElementById('diff-text').textContent = C.t(more ? 'pf.cashMore' : 'pf.cashLess', { amount });
-      const transfer = document.getElementById('book-transfer'), income = document.getElementById('book-income');
+      $('diff-text').textContent = C.t(more ? 'pf.cashMore' : 'pf.cashLess', { amount });
+      const transfer = $('book-transfer'), income = $('book-income');
       transfer.textContent = armedKind === 'transfer' ? C.t('pf.tapAgain')
         : C.t('pf.bookTransfer', { kind: C.t(more ? 'cf.deposit' : 'cf.withdrawal'), amount });
       income.textContent = armedKind === 'income' ? C.t('pf.tapAgain')
         : C.t('pf.bookIncome', { kind: C.t(more ? 'cf.income' : 'cf.fee'), amount });
       transfer.disabled = income.disabled = booking || !API.writesEnabled;
     }
-    document.getElementById('book-status').textContent = bookStatus;
-    document.getElementById('confirm-ledger').disabled = confirming || !API.writesEnabled;
-    document.getElementById('confirm-status').textContent = confirmStatus;
-    const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--green)' };
+    $('book-status').textContent = bookStatus;
+    $('confirm-ledger').disabled = confirming || !API.writesEnabled;
+    $('confirm-status').textContent = confirmStatus;
 
     /* the header is live data, not a value baked into the markup */
-    C.tickValue(document.getElementById('pf-total'), withheld ? '—' : C.usd(total));
-    document.getElementById('pf-asof').textContent =
-      C.t('pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
+    const a = A[accountKey];
+    C.tickValue($('pf-total'), withheld ? '—' : C.usd(total));
+    $('pf-asof').textContent = C.t('pf.totalAs', { d: C.dateOnly(D.portfolio.as_of) });
+    $('strategy-badge').textContent = !a ? '' : a.is_real_money
+      ? C.t('bucket.real', { venue: C.titleise(a.venue || '—') }) : C.t('bucket.conceptual');
+    C.setHTML($('pf-result'), withheld || !a || a.investment_pnl_usd == null ? '' :
+      delta(a.investment_pnl_usd, signedUsd(a.investment_pnl_usd) + (a.return_pct == null ? '' : ' (' + signedPct(a.return_pct, 2) + ')'),
+        C.t('home.pnl')));
 
-    /* ── per account: equity, funding, result, drawdown ──────────────── */
-    C.setHTML(document.getElementById('account-cards'), Object.keys(A)
+    /* ── the account: four figures up front, the rest of the ledger on request ── */
+    C.setHTML($('account-cards'), Object.keys(A)
       .filter(key => key === accountKey)
       .map((key) => {
-        const a = A[key];
-        const kv = (k, v) => '<div class="kv-row"><dt>' + C.escapeHtml(k) + '</dt><dd>' +
-          C.escapeHtml(v) + '</dd></div>';
-        return '<div class="card' + (a.is_real_money ? ' card-real' : '') +
-            '" data-od-id="account-' + C.escapeHtml(key) + '">' +
-          '<div class="section-head">' +
-            '<span class="chip' + (a.is_real_money ? ' chip-accent' : '') + '">' +
-              C.escapeHtml(a.is_real_money ? C.t('bucket.real', { venue: C.titleise(a.venue || '—') })
-                                           : C.t('bucket.conceptual')) + '</span>' +
-            '<span class="body-sm body-muted">' + C.escapeHtml(C.t('acct.src.' + key)) + '</span>' +
-          '</div>' +
-          '<h2>' + C.t('pf.accountDetails') + '</h2>' +
-          '<p class="body-sm body-muted" style="margin-top:4px;">' +
-            C.escapeHtml(C.t('acct.asOf', { d: C.dateOnly(a.as_of), p: C.dateOnly(a.priced_for) })) + '</p>' +
-          '<dl class="kv" style="margin-top:16px;">' +
-            kv(C.t('home.funded'), C.usd(a.net_deposits_usd)) +
-            kv(C.t('acct.opening'), C.usd(a.opening_allocation_usd)) +
-            kv(C.t('acct.flows'), (a.recorded_flows_usd >= 0 ? '+' : '') + C.usd(a.recorded_flows_usd)) +
-            kv(C.t('home.pnl'), (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd)) +
-            kv(C.t('home.return'), a.return_pct == null ? '—' : C.pct(a.return_pct, 2)) +
-            kv(C.t('acct.hwm'), a.high_water_mark_usd == null ? '—' : C.usd(a.high_water_mark_usd)) +
-            kv(C.t('acct.drawdown'), C.pct(a.drawdown_pct || 0) + ' · ' + C.code(a.ladder_level)) +
-          '</dl></div>';
+        const acct = A[key];
+        const kv = (k, v) => '<div><dt>' + h(k) + '</dt><dd>' + h(v) + '</dd></div>';
+        const cash = order.filter((k) => B[k]).reduce((sum, k) => sum + (B[k].cash_usd || 0), 0);
+        return '<dl class="pf-stats pf-stats-flat" data-od-id="account-' + h(key) + '">' +
+            stat(C.t('home.funded'), C.usd(acct.net_deposits_usd)) +
+            stat(C.t('pf.cash'), order.some((k) => B[k]) ? C.usd(cash) : '—') +
+            stat(C.t('acct.hwm'), acct.high_water_mark_usd == null ? '—' : C.usd(acct.high_water_mark_usd)) +
+            stat(C.t('acct.drawdown'), C.pct(acct.drawdown_pct || 0) + ' · ' + C.code(acct.ladder_level)) +
+          '</dl>' +
+          '<details class="pf-more"><summary>' + h(C.t('pf.accountDetails')) + '</summary><dl class="pf-pairs pf-pairs-row">' +
+            kv(C.t('acct.opening'), C.usd(acct.opening_allocation_usd)) +
+            kv(C.t('acct.flows'), (acct.recorded_flows_usd >= 0 ? '+' : '') + C.usd(acct.recorded_flows_usd)) +
+            kv(C.t('home.return'), acct.return_pct == null ? '—' : C.pct(acct.return_pct, 2)) +
+            kv(C.t('pf.sourceLabel'), C.t('acct.src.' + key)) +
+            kv(C.t('pf.ledgerDates'), C.t('acct.asOf', { d: C.dateOnly(acct.as_of), p: C.dateOnly(acct.priced_for) })) +
+          '</dl></details>';
       }).join(''));
 
-    /* ── allocation ──────────────────────────────────────────────────── */
-    C.setHTML(document.getElementById('alloc-bar'), order.filter((k) => B[k]).map((k) =>
+    /* ── positions, per bucket ─────────────────────────────────────── */
+    const shown = order.filter((k) => B[k]);
+    C.setHTML($('bucket-cards'), shown.map((key) => {
+      const b = B[key];
+      const rows = b.positions.map((pos) =>
+        '<div class="pf-row"><span class="pf-orb" aria-hidden="true">' + orb(pos.symbol) + '</span>' +
+          '<span class="pf-row-main"><span class="pf-row-title">' + h(pos.symbol) + '</span>' +
+          '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(pos.quantity) }) + ' @ ' + C.usd(pos.price) +
+            (pos.classification ? ' · ' + pos.classification : '')) + '</span></span>' +
+          '<span class="pf-row-side"><span class="pf-row-value">' + C.usd(pos.market_value_usd) + '</span>' +
+          delta(pos.unrealized_pct, signedPct(pos.unrealized_pct)) + '</span></div>').join('');
+      /* A single sleeve is the whole bucket, which the cash and positions figures already say. */
+      const sleeves = Object.keys(b.sleeves_pct || {}).length < 2 ? []
+        : Object.entries(b.sleeves_pct).map(([k, v]) => C.titleise(k) + ' ' + C.pct(v));
+      return '<article class="pf-card" data-od-id="portfolio-' + h(key) + '">' +
+        '<div class="pf-card-head"><p class="pf-eyebrow">' + h(shown.length > 1 ? C.bucket(key) : C.t('pf.positionsTitle')) + '</p>' +
+          '<span class="pf-fine">' + h(C.t('pf.positions', { n: b.position_count })) + '</span></div>' +
+        (shown.length > 1 ? '<p class="pf-figure pf-figure-sm">' + C.usd(b.equity_usd) + '</p>' : '') +
+        (b.positions.length ? '<div class="pf-rows pf-holdings">' + rows + '</div>'
+          : '<div class="pf-empty pf-empty-inline" data-od-id="empty-' + h(key) + '"><p class="pf-notice-title">' + h(C.t('pf.noPositions')) +
+              '</p><p class="pf-fine">' + h(C.t('pf.noPositionsBody')) + '</p></div>') +
+        '<p class="pf-fine pf-card-foot">' + h([C.t('pf.cash') + ' ' + C.usd(b.cash_usd),
+          C.t('pf.positionsValue') + ' ' + C.usd(b.positions_value_usd),
+          C.t('bucket.ofAllocation', { v: C.usd(b.allocation_usd, 0) }), ...sleeves].join(' · ')) + '</p>' +
+      '</article>';
+    }).join(''));
+
+    /* ── allocation, only where there is more than one bucket to divide between ── */
+    const SHADE = { core: 'var(--fg)', sandbox: 'var(--muted)', micro_live: 'var(--fg)' };
+    $('pf-allocation').hidden = shown.length < 2;
+    C.setHTML($('alloc-bar'), shown.length < 2 ? '' : shown.map((k) =>
       '<span style="width:' + (total ? (B[k].equity_usd / total) * 100 : 0).toFixed(2) +
       '%;background:' + SHADE[k] + ';"></span>').join(''));
-    C.setHTML(document.getElementById('alloc-legend'), order.filter((k) => B[k]).map((k) =>
-      C.listRow({
-        title: C.bucket(k),
-        sub: C.t('acct.' + B[k].account),
-        value: C.usd(B[k].equity_usd),
-        note: C.t('pf.ofTotal', { p: C.pct(total ? (B[k].equity_usd / total) * 100 : 0) }),
-      })).join(''));
-
-    /* ── bucket cards ────────────────────────────────────────────────── */
-    C.setHTML(document.getElementById('bucket-cards'), order.filter((k) => B[k]).map((key) => {
-      const b = B[key];
-      const real = b.is_real_money;
-      const positions = b.positions.length
-        ? '<div class="list list-inset" style="margin-top:16px;">' + b.positions.map((pos) =>
-            C.listRow({
-              title: pos.symbol, sub: pos.classification || '',
-              value: C.usd(pos.market_value_usd),
-              note: pos.quantity + ' @ ' + C.usd(pos.price) + ' · ' + C.pct(pos.unrealized_pct),
-            })).join('') + '</div>'
-        : '<div class="empty" style="margin-top:16px;" data-od-id="empty-' + key + '">' +
-            '<p class="empty-title">' + C.t('pf.noPositions') + '</p>' +
-            '<p>' + C.t('pf.noPositionsBody') + '</p></div>';
-
-      return '<div class="card' + (real ? ' card-real' : '') + '" data-od-id="portfolio-' + key + '">' +
-        '<div class="section-head">' +
-          '<span class="chip' + (real ? ' chip-accent' : '') + '">' +
-            (real ? C.escapeHtml(C.t('bucket.real', { venue: C.titleise(b.venue || '—') }))
-                  : C.t('bucket.conceptual')) + '</span>' +
-          '<span class="body-sm body-muted">' +
-            C.escapeHtml(C.t('pf.positions', { n: b.position_count })) + '</span>' +
-        '</div>' +
-        '<h2>' + C.bucket(key) + '</h2>' +
-        '<p class="figure" style="margin-top:6px;">' + C.usd(b.equity_usd) + '</p>' +
-        '<p class="body-sm body-muted" style="margin-top:4px;">' +
-          C.t('bucket.ofAllocation', { v: C.usd(b.allocation_usd, 0) }) + '</p>' +
-        '<dl class="kv" style="margin-top:16px;">' +
-          '<div class="kv-row"><dt>' + C.t('pf.cash') + '</dt><dd>' + C.usd(b.cash_usd) + '</dd></div>' +
-          '<div class="kv-row"><dt>' + C.t('pf.positionsValue') + '</dt><dd>' + C.usd(b.positions_value_usd) + '</dd></div>' +
-          Object.entries(b.sleeves_pct).map(([k, v]) =>
-            '<div class="kv-row"><dt>' + C.escapeHtml(C.t('pf.sleeve', { k: C.titleise(k) })) + '</dt><dd>' + C.pct(v) + '</dd></div>').join('') +
-        '</dl>' + positions +
-      '</div>';
-    }).join(''));
+    C.setHTML($('alloc-legend'), shown.length < 2 ? '' : shown.map((k) =>
+      '<div class="pf-row"><span class="pf-row-main"><span class="pf-row-title">' + h(C.bucket(k)) + '</span>' +
+        '<span class="pf-row-sub">' + h(C.t('acct.' + B[k].account)) + '</span></span>' +
+        '<span class="pf-row-side"><span class="pf-row-value">' + C.usd(B[k].equity_usd) + '</span>' +
+        '<span class="pf-delta">' + h(C.t('pf.ofTotal', { p: C.pct(total ? (B[k].equity_usd / total) * 100 : 0) })) + '</span></span></div>'
+    ).join(''));
   }
 
+  /* Everything below is re-run on every poll cycle. */
+  function render() {
+    const saved = D.advisor || {}, snapshot = saved.snapshot || {};
+    const live = API.isLive('advisor');
+
+    /* The switch between accounts: one lens that slides to the chosen one. */
+    const views = [{ key: 'robinhood', title: C.t('pf.robinhood') }, { key: 'agentic', title: C.t('bucket.micro_live') }];
+    if (C.SHOW_CONCEPTUAL) views.push({ key: 'demo', title: C.t('acct.conceptual') });
+    const shell = $('pf-switch');
+    shell.dataset.count = String(views.length);
+    shell.dataset.index = String(Math.max(0, views.findIndex(view => view.key === scope)));
+    $('portfolio-switch').setAttribute('aria-label', C.t('pf.switchLabel'));
+    C.setHTML($('portfolio-switch'), views.map(view =>
+      '<a class="pf-seg' + (scope === view.key ? ' is-selected' : '') +
+      '" href="portfolio.html?scope=' + view.key + (window.CT_DEMO ? '&amp;demo=1' : '') +
+      '" data-od-id="portfolio-switch-' + view.key + '"' +
+      (scope === view.key ? ' aria-current="page"' : '') + '>' + h(view.title) + '</a>').join(''));
+
+    $('pf-overview').hidden = !!holding;
+    $('holding-view').hidden = !holding;
+    $('robinhood-view').hidden = scope !== 'robinhood';
+    $('agentic-view').hidden = scope === 'robinhood';
+    $('strategy-heading').textContent = C.t(scope === 'demo' ? 'acct.conceptual' : 'acct.micro_live');
+
+    /* Any active refresh affects this snapshot. Historical failures are shown
+       only for the refresh requested from this page. */
+    const mine = refreshJobs(saved).find(ACTIVE) || refreshJobs(saved).find((job) => job.run_key === askedFor);
+    const busy = refreshing || !!(mine && ACTIVE(mine));
+    const refresh = $('refresh-holdings');
+    refresh.disabled = busy || !API.writesEnabled || !live;
+    refresh.classList.toggle('is-busy', busy);
+    $('broker-stamp').textContent =
+      askError ? C.t('ux.refreshFailed', { error: askError })
+      : busy ? C.t('ux.refreshing')
+      : mine && mine.state !== 'COMPLETE' ? C.t('ux.refreshFailed', { error: mine.error || C.code(mine.state) })
+      : snapshot.fetched_at ? C.t(saved.stale || !live ? 'ai.stale' : 'ai.fresh', { date: C.dateTime(snapshot.fetched_at) })
+      : C.t('ai.empty');
+    askRefresh(saved);
+    /* The read's own notes are verbatim and one tap away. An account it could not read
+       completely already says so on its card. */
+    const notes = snapshot.errors || [];
+    C.setHTML($('broker-accounts'), (snapshot.accounts || []).map(accountCard).join('') + (!notes.length ? '' :
+      '<details class="pf-card pf-more pf-notes"><summary>' + h(C.t('pf.readNotes', { n: notes.length })) + '</summary>' +
+        '<ul class="pf-bullets">' + notes.map(note => '<li class="pf-verbatim">' + h(note) + '</li>').join('') + '</ul></details>'));
+
+    if (holding) renderHolding(holding);
+    renderLedger();
+  }
+
+  /* Opening a holding starts at its top, and Back returns to the same place in the list.
+     A holding reached from another screen has no list behind it, so its back control goes to
+     the list instead of leaving the section. */
+  let away = false, fromList = false, listScroll = 0;
+  document.addEventListener('ct:leave', () => { away = true; });
+  $('holding-back').addEventListener('click', (event) => {
+    if (!fromList || !((window.history && window.history.state && window.history.state.ctDepth) > 0)) return;
+    event.preventDefault();
+    window.history.back();
+  });
   document.addEventListener('ct:route', () => {
-    const next = routeScope();
-    if (next !== scope) { armedKind = null; bookStatus = confirmStatus = ''; scope = next; }
+    const next = routeScope(), nextHolding = routeHolding(), entered = away;
+    away = false;
+    if (next !== scope) { armedKind = null; bookStatus = confirmStatus = ''; }
+    let scrollTo = null;
+    if (nextHolding && !sameHolding(holding, nextHolding)) {
+      if (!holding && !entered) listScroll = window.scrollY || 0;
+      fromList = !holding && !entered;
+      analyzeStatus = ''; scrollTo = 0;
+      delete $('holding-value').dataset.prev;       /* another holding's figure, not a move */
+    } else if (!nextHolding && holding) scrollTo = listScroll;
+    scope = next; holding = nextHolding;
     render();
+    if (scrollTo !== null && window.scrollTo) window.scrollTo(0, scrollTo);
   });
   C.live(['portfolio'], render, ['advisor']);
   loadCheck();

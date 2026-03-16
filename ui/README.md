@@ -5,7 +5,7 @@ asset layer, no build step.
 
 ```
 index.html       Home      equity vs high-water mark, the open proposal, buckets
-portfolio.html   Assets     switch between Robinhood snapshots and the Agentic ledger; sleeves and positions stay in their account view
+portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 research.html    Research  decision strength, run history, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
@@ -21,6 +21,7 @@ settings.html    Settings  schedule, watchlist, calendar, cash flows, every conf
 login.html       Sign in   owner passphrase; the one page served without a session
 
 assets/console.css   tokens, components, motion
+assets/portfolio.css Assets only: liquid glass, ink on white
 assets/console.js    chrome, formatting, live() binding
 assets/api.js        polling layer
 assets/i18n.js       interface language (EN / 中文)
@@ -221,6 +222,26 @@ most once a minute. The wait and any failure are written into the timestamp
 line above the accounts. Nothing else in the console posts without a click,
 and this one reaches no order, proposal or approval.
 
+A Robinhood holding opens its own view on the same page,
+`portfolio.html?scope=robinhood&account=<id>&ticker=<symbol>`, so it has a link, Back returns
+to the same place in the list, and a reload lands on it again. It used to open Research,
+which with no scope in the link came up in the Agentic scope with the strategy form filled
+in. Everything on it comes from the `/advisor` read the page already polls:
+
+- the position from the snapshot. Cost basis and gain are drawn only when every figure they
+  rest on is present;
+- the recorded analyses of that symbol bound to that account, plus all-account ones, which
+  say so. A record whose account binding is unknown is left out, as it is on Research;
+- a queued or running analysis, with Stop, and the newest failure until a newer analysis
+  replaces it;
+- the latest portfolio review's line for the symbol, only when that review covered the
+  account.
+
+Analyze sends the Assistant's own `POST /advisor/jobs {kind: 'analysis', ticker, account_id}`.
+A second tap while one is in flight sends nothing, and an explicit retry after a lost response
+reuses its request id. Charts, news and trading stay in Robinhood, which the view links to
+rather than repeats.
+
 ## Agent trace
 
 `GET /research/{run_id}/trace` returns the run's decision record plus every
@@ -261,6 +282,10 @@ render verbatim; only the plain-language gloss beside them switches.
 every neutral is a `color-mix()` of them. `--danger` is a local choice, not a
 brand value. Pure green never carries text (1.9:1 on white) — green text uses
 `--green-ink`.
+
+Assets opts out of the green (`<body class="theme-mono pf-glass">`, `assets/portfolio.css`):
+ink on white over a soft grey field, glass cards drawn without blur, and colour only for a
+gain or a loss, both mixed from the brand values and measured above 5:1.
 
 
 Assistant uses `assistant` (5s, stale after 5 minutes) for

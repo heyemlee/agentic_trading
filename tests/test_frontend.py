@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from agentic_trading.service.shapes import (
     AccountScopes,
+    AdvisorState,
     Attention,
     Authority,
     Evaluation,
@@ -35,6 +36,7 @@ DEMO_SHAPES = {
     "authority": Authority,                   # GET /config/authority
     "attention": Attention,                   # GET /attention
     "accounts": AccountScopes,                # GET /accounts
+    "advisor": AdvisorState,                  # GET /advisor
     "researchJobs": list[ResearchJob],        # GET /research/jobs
     "evaluation": Evaluation,                 # GET /evaluation?scope=demo
 }

@@ -886,6 +886,155 @@ window.CT = (function () {
     launchd_managed: true,
   };
 
+  /* GET /advisor with no account: the saved Robinhood snapshot and what the assistant has
+     recorded about it. One fixture for every screen that reads it: Assets draws the accounts
+     and each holding's analyses; the Assistant's Discover reads the candidates and jobs.
+     Every figure inside a holding agrees with the others: value = quantity x price, weight
+     = value / the account's equity, return = price / average cost - 1. */
+  const quoteAt = "2026-09-04T20:00:00+00:00";
+  const holding = (symbol, quantity, average_cost, price, market_value_usd, unrealized_pct, weight_pct) =>
+    ({ symbol, quantity, average_cost, price, market_value_usd, unrealized_pct, quote_at: quoteAt, weight_pct });
+  const personalAll = { scope: "personal", account_scope_kind: "all_personal", account_id: null,
+                        account_ids: [personalAccountA, personalAccountB] };
+  const personalTask = (kind, account_id) => account_id
+    ? { kind, language: "zh", scope: "personal", account_scope_kind: "single", account_id, account_ids: [] }
+    : { kind, language: "zh", ...personalAll };
+  const analysis = (run_id, ticker, account_id, trade_date, created_at, action, confidence, proposal, superseded_by = null) => ({
+    run_id, ticker, bucket: "advisory", account_id, created_at, trade_date, action, advisory: true, proposal_id: null,
+    policy: { final_action: action, size_hint: "none", pm_rating: { ADD: "Overweight", HOLD: "Hold", REDUCE: "Underweight", NO_TRADE: "Hold" }[action],
+              llm_action: action, confidence, reasons: [], error: null,
+              proposal: { ticker, recommended_action: action, confidence, market_risk_level: "NORMAL", data_quality: "partial",
+                          expected_holding_period: "multi-year, reviewed each earnings season", ...proposal } },
+    scope: "personal", account_scope_kind: account_id ? "single" : "all_personal",
+    account_label: account_id === personalAccountA ? "••••1111" : account_id === personalAccountB ? "••••2222" : "all personal accounts",
+    task_type: "analysis", superseded_by });
+  const nvdaRun = "advisor_2f6c1d8e4b7a49c3a1e0d5b8c7f6e3a2";
+  const tslaRun = "advisor_9a4e7c2b1d8f4e6a8b3c5d7e9f1a2b4c";
+  const advisor = {
+    snapshot: {
+      fetched_at: "2026-09-04T20:31:00+00:00", complete: true,
+      accounts: [
+        { id: personalAccountA, label: "••••1111", agentic: false, complete: true, equity_usd: 45249.5, cash_usd: 3737.0, positions: [
+          holding("VOO", 30, 412.1, 548.2, 16446.0, 33.026, 36.3452),
+          holding("AAPL", 25, 182.3, 226.8, 5670.0, 24.4103, 12.5305),
+          holding("NVDA", 40, 98.5, 131.4, 5256.0, 33.401, 11.6156),
+          holding("MSFT", 12, 402.0, 431.5, 5178.0, 7.3383, 11.4432),
+          holding("SCHD", 150, 26.4, 27.95, 4192.5, 5.8712, 9.2653),
+          holding("AMZN", 20, 186.0, 178.9, 3578.0, -3.8172, 7.9073),
+          holding("TSLA", 5, 262.0, 238.4, 1192.0, -9.0076, 2.6343) ] },
+        { id: personalAccountB, label: "••••2222", agentic: false, complete: true, equity_usd: 12480.4, cash_usd: 612.4, positions: [
+          holding("VTI", 20, 238.0, 281.3, 5626.0, 18.1933, 45.0787),
+          holding("QQQ", 10, 402.0, 478.6, 4786.0, 19.0547, 38.3481),
+          holding("BND", 20, 73.1, 72.8, 1456.0, -0.4104, 11.6663) ] },
+      ],
+      candidates: [
+        ["NVDA", "watchlists:AI & chips", "scans:52-week highs"], ["AVGO", "watchlists:AI & chips", "scans:52-week highs"],
+        ["AMD", "watchlists:AI & chips"], ["TSM", "watchlists:AI & chips"], ["ARM", "watchlists:AI & chips"],
+        ["META", "scans:52-week highs"], ["NFLX", "scans:52-week highs"], ["COST", "scans:52-week highs", "watchlists:Quality compounders"],
+        ["SCHD", "watchlists:Dividend income", "profile:defensive_equity_optional"], ["VYM", "watchlists:Dividend income"],
+        ["JNJ", "watchlists:Dividend income"], ["KO", "watchlists:Dividend income"], ["PG", "watchlists:Dividend income", "watchlists:Quality compounders"],
+        ["V", "watchlists:Quality compounders"], ["MA", "watchlists:Quality compounders"], ["LLY", "scans:Top analyst upgrades"],
+        ["UNH", "scans:Top analyst upgrades"], ["VOO", "profile:us_broad_equity"], ["VTI", "profile:us_broad_equity"],
+        ["VXUS", "profile:international_equity"], ["BND", "profile:us_total_bond"], ["VGIT", "profile:us_treasury_intermediate"],
+        ["SGOV", "profile:cash_like_tbill"], ["IAU", "profile:gold_optional"],
+      ].map(([symbol, ...sources]) => ({ symbol, sources })),
+      errors: ["Top analyst upgrades: only the first candidate page was read."],
+    },
+    stale: false,
+    notes: { text: "Long-term investor, 15+ year horizon. Keep single stocks under 15% each; no leverage or options.",
+             revision: 3, updated_at: "2026-09-01T16:20:00+00:00" },
+    jobs: [
+      { run_key: "advisor_5d1f3a9c7e2b4d6f8a0c2e4f6a8b0d2e", ticker: "ASSISTANT", state: "COMPLETE", error: null,
+        created_at: "2026-09-04T20:30:12+00:00", task: personalTask("refresh") },
+      { run_key: "advisor_4b7e0d1c9a2f4e8b8c5d6e7f8a9b0c1d", ticker: "AVGO", state: "RUNNING", error: null,
+        created_at: "2026-09-04T20:25:40+00:00", task: personalTask("analysis") },
+      { run_key: "advisor_8e2d4c6b0a1f4e3d9c7b5a3f1e0d2c4b", ticker: "ASSISTANT", state: "COMPLETE", error: null,
+        created_at: "2026-09-04T02:05:00+00:00", task: personalTask("portfolio_review", personalAccountA) },
+      { run_key: nvdaRun, ticker: "NVDA", state: "COMPLETE", error: null,
+        created_at: "2026-09-04T00:52:10+00:00", task: personalTask("analysis", personalAccountA) },
+      { run_key: "advisor_1c3e5a7b9d0f4a2c8e6b4d2f0a8c6e4a", ticker: "AMD", state: "COMPLETE", error: null,
+        created_at: "2026-09-03T23:40:05+00:00", task: personalTask("analysis") },
+      { run_key: tslaRun, ticker: "TSLA", state: "COMPLETE", error: null,
+        created_at: "2026-08-29T01:02:44+00:00", task: personalTask("analysis", personalAccountA) },
+    ],
+    conversations: [],
+    decisions: [
+      analysis(nvdaRun, "NVDA", personalAccountA, "2026-09-03", "2026-09-04T01:10:22+00:00", "HOLD", 54, {
+        investment_thesis: "Data-centre demand still carries the story: the last two quarters beat on revenue and guided higher, and the position is already up about a third from cost. At roughly 12% of this account it is a meaningful weight, so adding more would concentrate one theme further while the next guidance is unknown.",
+        bull_case: "Hyperscaler capex plans for next year were raised again.", bear_case: "Valuation assumes several more years of above-trend growth.",
+        primary_risks: ["Export restrictions on advanced chips widen", "Hyperscaler capex slows after the current build-out", "Valuation leaves little room for a guidance miss"],
+        what_could_make_this_thesis_wrong: "A guidance cut at the next report, or a second quarter of falling gross margin.",
+        entry_logic: "No addition at this weight. Revisit after the next earnings report if guidance holds and the position is below 10% of the account.",
+        exit_logic: "Trim toward 8% of the account if it closes more than 25% below its 200-day average, or if data-centre revenue guidance is cut.",
+        maximum_acceptable_loss: "A 30% drawdown from here before the thesis is re-examined in full.",
+        reason_this_improves_the_portfolio: "Keeps growth exposure without adding to an already large single-theme weight.",
+        alternative_why_doing_nothing_may_be_preferable: "Holding is already the decision; the position reflects the thesis.",
+        missing_information: ["No options-implied volatility was available", "Next earnings date not confirmed from a primary source"] }),
+      analysis("advisor_1c3e5a7b9d0f4a2c8e6b4d2f0a8c6e4a", "AMD", null, "2026-09-03", "2026-09-04T00:21:47+00:00", "NO_TRADE", 41, {
+        investment_thesis: "A credible second source for AI accelerators, but the case for share gains still rests on guidance rather than shipped revenue. Your accounts already hold NVDA and QQQ, so a new position would add to the same semiconductor exposure.",
+        bull_case: "New accelerator generation is sampling with two hyperscalers.", bear_case: "Share gains have been promised before and arrived late.",
+        primary_risks: ["Accelerator roadmap slips a generation", "PC and gaming segments stay weak"],
+        what_could_make_this_thesis_wrong: "Two consecutive quarters of reported data-centre GPU revenue growth above 40%.",
+        entry_logic: "Consider a starter position only after two quarters of reported data-centre GPU revenue growth.",
+        exit_logic: "Not applicable until a position exists.",
+        maximum_acceptable_loss: "Not applicable.", reason_this_improves_the_portfolio: "It would not, at current overlap.",
+        alternative_why_doing_nothing_may_be_preferable: "Existing NVDA and QQQ holdings already carry this exposure.",
+        missing_information: ["Customer-level accelerator orders are not disclosed"] }),
+      analysis("advisor_6f8a0c2e4b1d4f3a9e7c5b3d1f0e2a4c", "QQQ", personalAccountB, "2026-08-25", "2026-08-26T02:14:09+00:00", "HOLD", 58, {
+        investment_thesis: "A low-cost growth core for a long-horizon account. Nothing in the evidence argues for changing it; note that it overlaps with NVDA and MSFT held in your other account.",
+        bull_case: "Earnings growth of the largest holdings remains above the market's.", bear_case: "Top ten names are over half the fund.",
+        primary_risks: ["Concentration in a handful of mega-cap names", "Rate-driven de-rating of growth stocks"],
+        what_could_make_this_thesis_wrong: "A multi-year stretch in which the largest names lag the broad market.",
+        entry_logic: "Add only through regular contributions, not in a lump sum.",
+        exit_logic: "No price-based exit; rebalance if it exceeds half of this account.",
+        maximum_acceptable_loss: "Index-level drawdowns are expected and tolerated.", reason_this_improves_the_portfolio: "Growth tilt for the long horizon.",
+        alternative_why_doing_nothing_may_be_preferable: "Holding is the plan.", missing_information: [] }),
+      analysis(tslaRun, "TSLA", personalAccountA, "2026-08-28", "2026-08-29T01:31:52+00:00", "REDUCE", 61, {
+        investment_thesis: "Deliveries have fallen year over year for three quarters and price cuts are compressing margins. The position is small, under 3% of the account and 9% below cost; the thesis that made it a buy has weakened more than the price has.",
+        bull_case: "Energy storage is growing quickly.", bear_case: "Automotive margins keep falling with each price cut.",
+        primary_risks: ["Further price cuts", "Key-person risk", "Regulatory review of driver-assistance claims"],
+        what_could_make_this_thesis_wrong: "A return to delivery growth with stable automotive gross margin.",
+        entry_logic: "No additions while deliveries are falling.",
+        exit_logic: "Reduce by half; exit the rest if next quarter's automotive gross margin is below 15%.",
+        maximum_acceptable_loss: "The remaining half is small enough to hold through the next report.",
+        reason_this_improves_the_portfolio: "Frees capital from a weakening thesis.",
+        alternative_why_doing_nothing_may_be_preferable: "The position is too small to move the account either way.",
+        missing_information: ["No reliable timeline for robotaxi revenue"] }),
+      analysis("advisor_3a5c7e9b1d2f4a6c8e0b2d4f6a8c0e2b", "NVDA", personalAccountA, "2026-08-20", "2026-08-21T01:48:33+00:00", "ADD", 63, {
+        investment_thesis: "Before the last report: data-centre revenue growth and a position under 10% of the account made a measured addition reasonable.",
+        bull_case: "Order visibility extends into next year.", bear_case: "Expectations are already high.",
+        primary_risks: ["Guidance disappointment at the next report", "Export restrictions"],
+        what_could_make_this_thesis_wrong: "A guidance cut.",
+        entry_logic: "Add up to 10 shares below $125.", exit_logic: "Reassess after the next earnings report.",
+        maximum_acceptable_loss: "25% from the addition price.", reason_this_improves_the_portfolio: "Brings a winning position toward its target weight.",
+        alternative_why_doing_nothing_may_be_preferable: "The position was already profitable.",
+        missing_information: ["Next earnings date not confirmed from a primary source"] }, nvdaRun),
+    ],
+    coverage: "All Robinhood brokerage accounts, stocks/ETFs only; analysis is read-only.",
+    ...personalAll, account_label: "all personal accounts",
+    latest_review: {
+      priorities: [
+        { symbol: "TSLA", recommendation: "consider_change",
+          rationale: "The Aug 28 analysis recommended reducing: deliveries are falling and the position is below cost. Nothing since then contradicts it.",
+          citations: [{ kind: "run", run_id: tslaRun, as_of: "2026-08-28" }], missing: ["No analysis since the Q3 delivery report"] },
+        { symbol: "VOO", recommendation: "hold",
+          rationale: "At 36% of the account it is the core, and it diversifies the single-stock positions rather than adding to them.",
+          citations: [{ kind: "snapshot", run_id: null, as_of: "2026-09-04T01:58:00+00:00" }], missing: [] },
+        { symbol: "NVDA", recommendation: "wait_for_evidence",
+          rationale: "The Sep 3 analysis says hold at this weight; the next earnings report is the evidence that would change it.",
+          citations: [{ kind: "run", run_id: nvdaRun, as_of: "2026-09-03" }], missing: ["Next earnings date not confirmed"] },
+      ],
+      limitations: ["Prices are last trades from the snapshot, not real-time quotes.", "Tax lots and holding periods were not available."],
+      scope: "personal", account_scope_kind: "single", account_id: personalAccountA, account_ids: [], account_label: "••••1111",
+      snapshot_at: "2026-09-04T01:58:00+00:00", analysed_at: "2026-09-04T02:06:31+00:00",
+      route: { name: "assistant", package_version: null, models: { quick: "sample-model" } },
+      run_key: "advisor_8e2d4c6b0a1f4e3d9c7b5a3f1e0d2c4b", stale: true,
+    },
+    coverage_info: { scope: "personal", instruments: "stocks_and_etfs",
+                     note: "All Robinhood brokerage accounts, stocks/ETFs only; analysis is read-only." },
+    conversation_summaries: [],
+  };
+
   const orders = { fills: [], tracked_orders: [] };
   research.forEach(row => Object.assign(row, { scope: row.bucket === 'micro_live' ? 'agentic' : 'demo',
     account_scope_kind: 'single', account_id: row.bucket === 'micro_live' ? 'micro_live' : 'conceptual',
@@ -895,6 +1044,6 @@ window.CT = (function () {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
-    pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts,
+    pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts, advisor,
   };
 })();
