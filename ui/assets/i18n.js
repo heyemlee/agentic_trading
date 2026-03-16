@@ -771,6 +771,8 @@ window.I18N = (function () {
 
       /* system */
       'sy.title': 'System', 'sy.market': 'Market · {cal}',
+      'sy.intro': 'The kill switch, what needs your attention, and the work that keeps the system running.',
+      'sy.sourcesHint': 'When each source was last read, and any error',
       'sy.schedule': 'Scheduled research', 'sy.scheduleOn': 'Scheduled', 'sy.scheduleOff': 'Off',
       'sy.scheduleUnavailable': 'The schedule could not be read from the server.',
       'sy.unknown': 'Unknown', 'sy.never': 'Never',
@@ -1604,6 +1606,8 @@ window.I18N = (function () {
       'ac.incomplete': '未完成',
 
       'sy.title': '系统', 'sy.market': '市场 · {cal}',
+      'sy.intro': '急停开关、需要你留意的通知，以及让系统持续运转的后台任务。',
+      'sy.sourcesHint': '每个数据源的最近读取时间与错误',
       'sy.schedule': '定时研究', 'sy.scheduleOn': '已排期', 'sy.scheduleOff': '已关闭',
       'sy.scheduleUnavailable': '无法从服务端读取排期。',
       'sy.unknown': '未知', 'sy.never': '从未',

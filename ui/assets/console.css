@@ -402,6 +402,9 @@ dialog.sheet[open]::backdrop { animation: fade-in var(--motion-base) var(--ease)
 .more-action:last-child { border-bottom: 0; }
 .more-action .more-link-icon { background: var(--bg); }
 .more-action .chevron { margin-left: auto; }
+.more-now { margin-top: var(--space-3); }
+/* a hidden last row must not leave the one above it with a divider */
+.more-actions > .more-action:has(+ .more-action[hidden]:last-child) { border-bottom: 0; }
 
 /* ─── blocks — the app groups with whitespace, not borders ──────────── */
 /* .card is a plain grouping block: no border, no fill, no padding. */
@@ -1130,3 +1133,158 @@ html:has(dialog[open]) { overflow: hidden; }
 .settings-inline .btn { flex: 0 0 auto; width: auto; }
 button.list-row { width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 button.list-row .list-main { flex: 1; }
+
+/* ─── Ink on white: the Me section, and any page that opts in ──────────
+   Home keeps the brand green. The Me tab and every page it opens are drawn in
+   black and white instead, the way ChatGPT's settings are; the Lab keeps its
+   own palette in lab.css. A page opts in with <body class="theme-mono">,
+   which navigation.js swaps along with the page.
+
+   Only decoration changes. Green that says something keeps saying it: the dot
+   for a ready system, a gain, a line a diff adds. Amber and red keep their
+   meaning everywhere. --ok carries the brand green past the override below,
+   because a custom property is resolved where it is declared. */
+:root { --ok: var(--green); --ok-ink: var(--green-ink); --ok-tint: var(--green-tint); }
+body.theme-mono {
+  --fg: #0d0d0d; --muted: #5d5d5d; --meta: #767676;
+  --surface: #f7f7f7; --surface-2: #ececec; --divider: #ececec; --line: #e0e0e0;
+  --green: #0d0d0d; --green-ink: #0d0d0d; --green-contrast: #fff;
+  --green-tint: #f3f3f3; --green-line: #d9d9d9; --green-press: #333;
+  background: #fff;
+}
+html:has(> body.theme-mono) { background: #fff; }
+.theme-mono .dot-ok { background: var(--ok); }
+.theme-mono .pos { color: var(--ok-ink); }
+.theme-mono .diffview .diff-add { color: var(--ok-ink); background: var(--ok-tint); }
+
+/* type and page heads */
+.theme-mono .pagehead { padding-block: 20px; }
+.theme-mono .pagehead h1 { font-size: 30px; letter-spacing: -0.035em; }
+.theme-mono .pagehead h1 + p { margin-top: 8px; font-size: 15px; line-height: 1.55; color: var(--muted); }
+.theme-mono .section-head { align-items: center; margin-bottom: 10px; }
+.theme-mono .section-head h2 { font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+.theme-mono .eyebrow { font-size: 13px; color: var(--muted); }
+.theme-mono .kv-row { padding-block: 11px; }
+.theme-mono .kv-row dt, .theme-mono .kv-row dd { font-size: 15px; }
+/* A long value wraps inside itself; it never squeezes its label into a column. */
+.theme-mono .kv-row dt { flex: none; max-width: 50%; }
+.theme-mono .kv-row dd { min-width: 0; overflow-wrap: anywhere; }
+/* config keys and file paths are long unbroken words; they wrap rather than slide under a button */
+.theme-mono .list-title, .theme-mono .list-sub { overflow-wrap: anywhere; }
+
+/* surfaces: a white card with a hairline groups; grey is kept for asides */
+.theme-mono .card { background: var(--bg); border: 1px solid var(--divider); border-radius: 20px; padding: 18px; }
+.theme-mono .card-quiet, .theme-mono .card-tinted { background: var(--surface); border: 0; border-radius: 20px; padding: 18px; }
+/* real money reads as a firmer outline, not a colour */
+.theme-mono .card-real { background: var(--bg); border: 1px solid #c9c9c9; border-radius: 20px; padding: 18px; }
+.theme-mono .empty { border-radius: 20px; }
+/* tabs become a segmented control: nothing to measure, so nothing to get wrong
+   when the page is laid out while hidden */
+.theme-mono .tabs { display: inline-flex; gap: 2px; max-width: 100%; margin-bottom: 12px; padding: 3px;
+  border: 0; border-radius: var(--radius-pill); background: #f0f0f0; }
+.theme-mono .tab-ink { display: none; }
+.theme-mono .tab { min-height: 38px; padding: 7px 16px; border-radius: var(--radius-pill); color: var(--muted);
+  font-size: 14px; font-weight: 500; white-space: nowrap;
+  transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+.theme-mono .tab:hover { color: var(--fg); }
+.theme-mono .tab[aria-selected="true"] { background: var(--bg); color: var(--fg); box-shadow: 0 1px 3px #0000001f, 0 0 0 .5px #0000000f; }
+.theme-mono .tabs:not(.has-ink) .tab[aria-selected="true"]::after { display: none; }
+.theme-mono .card > .tabpanel { padding-top: 0; }
+.theme-mono .card > .tabpanel > .gate:first-child { padding-top: 4px; }
+.theme-mono .banner { border-radius: 16px; }
+
+/* chips: state is quiet; a chosen filter is solid ink */
+.theme-mono .chip { padding: 4px 10px; background: #f3f3f3; color: var(--muted); font-size: 13px; }
+.theme-mono .chip-accent { background: var(--bg); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.theme-mono .chip-ink { background: var(--fg); color: #fff; }
+/* the base rule above outranks the global tones, so meaning is restated here */
+.theme-mono .chip-warn { background: var(--warn-tint); color: var(--warn-ink); }
+.theme-mono .chip-danger { background: var(--danger-tint); color: var(--danger-ink); }
+.theme-mono .chip:empty { display: none; }
+.theme-mono button.chip, .theme-mono a.chip { border: 0; cursor: pointer; }
+.theme-mono #audit-filters, .theme-mono #evaluation-scopes { scrollbar-width: none; }
+.theme-mono #audit-filters::-webkit-scrollbar { display: none; }
+.theme-mono #audit-filters .chip, .theme-mono #evaluation-scopes .chip {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px;
+  background: var(--bg); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 14px; font-weight: 500;
+  transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
+}
+.theme-mono #audit-filters .chip:hover, .theme-mono #evaluation-scopes .chip:hover { background: var(--surface); }
+.theme-mono #audit-filters .chip-accent, .theme-mono #evaluation-scopes .chip-accent,
+.theme-mono #audit-filters .chip-accent:hover, .theme-mono #evaluation-scopes .chip-accent:hover {
+  background: var(--fg); color: #fff; box-shadow: none;
+}
+
+/* buttons: solid ink leads, an outline follows */
+.theme-mono .btn { font-size: 16px; }
+.theme-mono .btn-green, .theme-mono .btn-primary, .theme-mono .btn-dark { background: var(--fg); color: #fff; }
+.theme-mono .btn-green:hover, .theme-mono .btn-primary:hover, .theme-mono .btn-dark:hover { background: #2f2f2f; color: #fff; }
+.theme-mono .btn-green:disabled, .theme-mono .btn-primary:disabled, .theme-mono .btn-dark:disabled,
+.theme-mono .btn-green:disabled:hover, .theme-mono .btn-primary:disabled:hover, .theme-mono .btn-dark:disabled:hover {
+  opacity: 1; background: #ececec; color: #a3a3a3;
+}
+.theme-mono .btn-secondary, .theme-mono .btn-outline { background: var(--bg); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+.theme-mono .btn-secondary:hover, .theme-mono .btn-outline:hover { background: var(--surface); }
+.theme-mono .btn-secondary:disabled:hover, .theme-mono .btn-outline:disabled:hover { background: var(--bg); }
+.theme-mono .btn-ghost { color: var(--fg); }
+
+/* fields: white, outlined, a darker ring when focused */
+.theme-mono .input, .theme-mono .textarea, .theme-mono .select {
+  min-height: 48px; padding: 12px 14px; border-radius: 14px;
+  background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); font-size: 16px;
+}
+.theme-mono .input:focus, .theme-mono .textarea:focus, .theme-mono .select:focus {
+  background: var(--bg); box-shadow: inset 0 0 0 1px var(--fg), 0 0 0 3px #0d0d0d12;
+}
+.theme-mono .textarea-code { font-size: 12px; }
+.theme-mono .field label { font-size: 13px; }
+
+/* disclosures: one card whose header opens it, a chevron instead of + and − */
+.theme-mono .settings-group {
+  margin-block: 10px; overflow: hidden;
+  border: 1px solid var(--divider); border-radius: 20px; background: var(--bg);
+}
+.theme-mono .settings-group > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 58px; padding: 16px 18px; border: 0; border-radius: 0; background: none;
+  font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
+  transition: background var(--motion-fast) var(--ease);
+}
+@media (hover: hover) { .theme-mono .settings-group > summary:hover { background: var(--surface); } }
+.theme-mono .settings-group > summary:focus-visible { outline-offset: -3px; border-radius: 20px; }
+.theme-mono .settings-group > summary::after,
+.theme-mono .settings-group[open] > summary::after {
+  content: ''; float: none; flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
+  border-right: 1.75px solid var(--meta); border-bottom: 1.75px solid var(--meta);
+  transform: rotate(45deg); transition: transform var(--motion-base) var(--ease);
+}
+.theme-mono .settings-group[open] > summary::after { margin-bottom: -4px; transform: rotate(-135deg); }
+.theme-mono .settings-group[open] > summary { margin-bottom: 0; }
+/* inside the card every block is a band, divided by a hairline */
+.theme-mono .settings-group > :not(summary) { border-top: 1px solid var(--divider); }
+.theme-mono .settings-group > .card { border-radius: 0; border-width: 1px 0 0; padding: 18px; }
+.theme-mono .settings-group > .card-real { background: var(--surface); }
+.theme-mono .settings-group > .list .list-row,
+.theme-mono .settings-group > .list-row { margin: 0; padding-inline: 18px; border-radius: 0; }
+@media (hover: hover) { .theme-mono .settings-group button.list-row:hover { background: var(--surface); } }
+
+/* notices, the audit timeline and sheets lose their green tint */
+.theme-mono .notice-card { border: 1px solid var(--divider); border-radius: 20px; background: var(--bg); box-shadow: none; padding: 18px; }
+.theme-mono .notice-icon { border-radius: 10px; color: var(--warn-ink); background: var(--warn-tint); }
+.theme-mono .notice-card .notice-label { color: var(--meta); }
+.theme-mono .notice-card p:not(.notice-label) { color: var(--fg); }
+.theme-mono .event-card { border-left-color: var(--divider); }
+.theme-mono .event-card::before { background: #c4c4c4; box-shadow: 0 0 0 3px var(--bg); }
+.theme-mono .event-card summary { background: var(--bg); border: 1px solid var(--divider); border-radius: 16px; transition: background var(--motion-fast) var(--ease); }
+@media (hover: hover) { .theme-mono .event-card summary:hover { background: var(--surface); } }
+.theme-mono .event-card[open] summary { background: var(--surface); }
+.theme-mono .gate.is-pass .gate-mark { background: var(--surface-2); color: var(--fg); }
+.theme-mono .conn-bar.is-loading { background: var(--surface); color: var(--muted); }
+.theme-mono .circle-control { border-color: transparent; background: #f3f3f3; color: var(--fg); box-shadow: none; }
+.theme-mono .sync-pill { border-color: var(--line); background: var(--bg); color: var(--muted); }
+.theme-mono .ux-chevron { border-color: var(--meta); }
+.theme-mono dialog.glass-sheet { border-color: var(--bg); background: var(--bg); box-shadow: 0 -12px 48px #0000001f; }
+.theme-mono dialog.glass-sheet::backdrop { background: #00000052; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.theme-mono #decision-sheet .glass-sheet-head { background: #fffffff2; }
+.theme-mono .sheet-description, .theme-mono .sheet-fineprint, .theme-mono .editor-label { color: var(--muted); }

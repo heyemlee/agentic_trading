@@ -13,22 +13,23 @@
 <meta name="theme-color" content="#111318" />
 <link rel="stylesheet" href="assets/console.css" />
 </head>
-<body>
+<body class="theme-mono">
 
 <main id="content" hidden data-i18n-title="sy.title">
 
   <section class="section pagehead" data-od-id="pagehead">
     <div class="container">
       <h1 data-i18n="sy.title">System</h1>
+      <p data-i18n="sy.intro">The kill switch, what needs your attention, and the work that keeps the system running.</p>
     </div>
   </section>
 
   <!-- ── kill switch ───────────────────────────────────────────────── -->
   <section class="section" style="padding-top:0;" data-od-id="kill-switch">
     <div class="container">
-      <div class="card" id="switch-card">
+      <div class="card sy-switch" id="switch-card">
         <span class="chip" id="switch-pill">—</span>
-        <h2 style="margin-top:12px;" id="switch-title">—</h2>
+        <h2 style="margin-top:14px;" id="switch-title">—</h2>
         <p class="body-sm body-muted" style="margin-top:6px;" id="switch-copy"></p>
         <div class="btn-row" style="margin-top:20px;">
           <button class="btn btn-dark" id="switch-btn" data-od-id="cta-kill-switch">—</button>
@@ -38,96 +39,93 @@
   </section>
 
   <!-- ── health ────────────────────────────────────────────────────── -->
-  <section class="section" data-od-id="warnings"><div class="container">
+  <section class="section" style="padding-top:8px;" data-od-id="warnings"><div class="container">
     <div class="section-head"><h2 data-i18n="sy.notices">Notices</h2><span class="chip" id="warn-count">—</span></div>
     <div class="stack stack-3" id="warning-list"></div>
   </div></section>
-  <details class="container settings-group" id="diagnostics"><summary data-i18n="ux.diagnostics">System diagnostics & schedules</summary>
-  <div class="container" style="padding-bottom:24px;"><button class="btn btn-secondary btn-sm" type="button" data-open-sheet="sources-sheet" aria-haspopup="dialog" data-i18n="ux.sources">Data sources</button></div>
-  <section class="section" style="padding-top:0;" data-od-id="health">
-    <div class="container grid-3">
-      <div class="card" data-od-id="health-market">
-        <p class="eyebrow" id="mk-label">—</p>
-        <p class="figure figure-sm" style="margin-top:4px;" id="mk-state">—</p>
-        <dl class="kv" style="margin-top:12px;">
-          <div class="kv-row"><dt data-i18n="sy.nextOpen">Next open</dt><dd id="mk-open">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.nextClose">Next close</dt><dd id="mk-close">—</dd></div>
-        </dl>
-      </div>
 
-      <div class="card" data-od-id="health-claude">
-        <p class="eyebrow" data-i18n="sy.runtime">Research runtime</p>
-        <p class="figure figure-sm" style="margin-top:4px;" id="cl-state">—</p>
-        <dl class="kv" style="margin-top:12px;">
-          <div class="kv-row"><dt data-i18n="sy.billing">Billing</dt><dd id="cl-billing">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.callsToday">Calls today</dt><dd id="cl-calls">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.lastCall">Last call</dt><dd id="cl-last">—</dd></div>
-        </dl>
-      </div>
-
-      <div class="card card-real" data-od-id="health-money">
-        <p class="eyebrow" data-i18n="sy.realMoney">Real money</p>
-        <p class="figure figure-sm" style="margin-top:4px;" id="ml-state">—</p>
-        <dl class="kv" style="margin-top:12px;">
-          <div class="kv-row"><dt data-i18n="sy.connected">Connected</dt><dd id="ml-conn">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.account">Account</dt><dd id="ml-acct">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.blockingGate">Blocking gate</dt><dd id="ml-block">—</dd></div>
-        </dl>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── schedule and background work ──────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="schedule">
+  <!-- ── diagnostics: one card, closed until asked for ─────────────── -->
+  <section class="section" style="padding-top:8px;" data-od-id="diagnostics">
     <div class="container">
-      <div class="card">
-        <div class="section-head">
-          <p class="eyebrow" data-i18n="sy.schedule">Scheduled research</p>
-          <span class="chip" id="sc-state">—</span>
+      <details class="settings-group" id="diagnostics"><summary data-i18n="ux.diagnostics">System diagnostics & schedules</summary>
+        <button class="list-row sy-sources" type="button" data-open-sheet="sources-sheet" aria-haspopup="dialog">
+          <span class="list-main"><span class="list-title" data-i18n="ux.sources">Data sources</span>
+            <span class="list-sub" data-i18n="sy.sourcesHint">When each source was last read, and any error</span></span>
+          <svg class="chevron" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+
+        <div class="card" data-od-id="health-market">
+          <p class="eyebrow" id="mk-label">—</p>
+          <p class="figure figure-sm" style="margin-top:4px;" id="mk-state">—</p>
+          <dl class="kv" style="margin-top:12px;">
+            <div class="kv-row"><dt data-i18n="sy.nextOpen">Next open</dt><dd id="mk-open">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.nextClose">Next close</dt><dd id="mk-close">—</dd></div>
+          </dl>
         </div>
-        <p class="figure figure-sm" style="margin-top:4px;" id="sc-next">—</p>
-        <p class="body-sm body-muted" style="margin-top:4px;" id="sc-reason">—</p>
-        <dl class="kv" style="margin-top:16px;">
-          <div class="kv-row"><dt data-i18n="sy.period">Period</dt><dd id="sc-period">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.watching">Watching</dt><dd id="sc-tickers">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.budget">Analyses today</dt><dd id="sc-budget">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.scheduleMode">Scheduling</dt><dd id="sc-mode">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.triggerCadence">Job fires</dt><dd id="sc-fires">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.exitReserve">Reserved for holding and exit reviews</dt><dd id="sc-reserve">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.lastRun">Last run</dt><dd id="sc-last">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.lastSkip">Last skip</dt><dd id="sc-skip">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.whilePaused">While paused</dt><dd id="sc-paused">—</dd></div>
-        </dl>
-        <div id="sc-task-section" style="margin-top:20px;" hidden>
-          <p class="eyebrow" data-i18n="sy.tasks">Account tasks</p>
-          <div class="list list-inset" id="sc-tasks" style="margin-top:8px;"></div>
-          <p class="body-sm body-muted" style="margin-top:10px;" data-i18n="sy.exitReserveHint">Candidate research cannot spend the capacity reserved for holding and exit reviews.</p>
+
+        <div class="card" data-od-id="health-claude">
+          <p class="eyebrow" data-i18n="sy.runtime">Research runtime</p>
+          <p class="figure figure-sm" style="margin-top:4px;" id="cl-state">—</p>
+          <dl class="kv" style="margin-top:12px;">
+            <div class="kv-row"><dt data-i18n="sy.billing">Billing</dt><dd id="cl-billing">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.callsToday">Calls today</dt><dd id="cl-calls">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.lastCall">Last call</dt><dd id="cl-last">—</dd></div>
+          </dl>
         </div>
-      </div>
+
+        <div class="card card-real" data-od-id="health-money">
+          <p class="eyebrow" data-i18n="sy.realMoney">Real money</p>
+          <p class="figure figure-sm" style="margin-top:4px;" id="ml-state">—</p>
+          <dl class="kv" style="margin-top:12px;">
+            <div class="kv-row"><dt data-i18n="sy.connected">Connected</dt><dd id="ml-conn">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.account">Account</dt><dd id="ml-acct">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.blockingGate">Blocking gate</dt><dd id="ml-block">—</dd></div>
+          </dl>
+        </div>
+
+        <!-- ── schedule and background work ──────────────────────────── -->
+        <div class="card" data-od-id="schedule">
+          <div class="section-head">
+            <p class="eyebrow" data-i18n="sy.schedule">Scheduled research</p>
+            <span class="chip" id="sc-state">—</span>
+          </div>
+          <p class="figure figure-sm" style="margin-top:4px;" id="sc-next">—</p>
+          <p class="body-sm body-muted" style="margin-top:4px;" id="sc-reason">—</p>
+          <dl class="kv" style="margin-top:16px;">
+            <div class="kv-row"><dt data-i18n="sy.period">Period</dt><dd id="sc-period">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.watching">Watching</dt><dd id="sc-tickers">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.budget">Analyses today</dt><dd id="sc-budget">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.scheduleMode">Scheduling</dt><dd id="sc-mode">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.triggerCadence">Job fires</dt><dd id="sc-fires">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.exitReserve">Reserved for holding and exit reviews</dt><dd id="sc-reserve">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.lastRun">Last run</dt><dd id="sc-last">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.lastSkip">Last skip</dt><dd id="sc-skip">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.whilePaused">While paused</dt><dd id="sc-paused">—</dd></div>
+          </dl>
+          <div id="sc-task-section" style="margin-top:20px;" hidden>
+            <p class="eyebrow" data-i18n="sy.tasks">Account tasks</p>
+            <div class="list list-inset" id="sc-tasks" style="margin-top:8px;"></div>
+            <p class="body-sm body-muted" style="margin-top:10px;" data-i18n="sy.exitReserveHint">Candidate research cannot spend the capacity reserved for holding and exit reviews.</p>
+          </div>
+        </div>
+
+        <!-- ── background work: the loops nobody watches ─────────────── -->
+        <div class="card" data-od-id="operations">
+          <div class="section-head">
+            <p class="eyebrow" data-i18n="sy.operations">Background work</p>
+            <span class="chip" id="op-state">—</span>
+          </div>
+          <div class="list list-inset" style="margin-top:12px;" id="op-list"></div>
+          <p class="body-sm body-muted" style="margin-top:12px;" id="op-disk">—</p>
+          <dl class="kv" style="margin-top:16px;">
+            <div class="kv-row"><dt data-i18n="sy.notifyChannel">Notifications</dt><dd id="nt-channel">—</dd></div>
+            <div class="kv-row"><dt data-i18n="sy.notifyWatcher">External watcher</dt><dd id="nt-watch">—</dd></div>
+          </dl>
+          <p class="body-sm body-muted" style="margin-top:8px;" id="nt-detail">—</p>
+        </div>
+      </details>
     </div>
   </section>
-
-  <!-- ── background work: the loops nobody watches ─────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="operations">
-    <div class="container">
-      <div class="card">
-        <div class="section-head">
-          <p class="eyebrow" data-i18n="sy.operations">Background work</p>
-          <span class="chip" id="op-state">—</span>
-        </div>
-        <div class="list list-inset" style="margin-top:12px;" id="op-list"></div>
-        <p class="body-sm body-muted" style="margin-top:12px;" id="op-disk">—</p>
-        <dl class="kv" style="margin-top:16px;">
-          <div class="kv-row"><dt data-i18n="sy.notifyChannel">Notifications</dt><dd id="nt-channel">—</dd></div>
-          <div class="kv-row"><dt data-i18n="sy.notifyWatcher">External watcher</dt><dd id="nt-watch">—</dd></div>
-        </dl>
-        <p class="body-sm body-muted" style="margin-top:8px;" id="nt-detail">—</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── signed-in devices ─────────────────────────────────────────── -->
-  </details>
 
 </main>
 
