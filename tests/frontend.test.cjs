@@ -1854,6 +1854,133 @@ test('the device list survives an endpoint that has not answered yet', () => {
   assert.equal(c.element('dev-revoke-others').hidden, true);
 });
 
+function profilePage(saved, options = {}) {
+  const c = context(); c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  const words = { 'pc.topic.goals': 'Goals', 'pc.topic.timeline': 'Timeline', 'pc.topicSep': ': ' };
+  const t = c.I18N.t;
+  c.I18N.t = (key, vars) => words[key] || t(key, vars);
+  c.CT.advisor = { notes: saved };
+  c.posted = [];
+  c.CT_API = { authenticated: true, writesEnabled: true, reads: 0,
+    readOnce: async () => { c.CT_API.reads++; },
+    post: options.post || (async (url, body) => {
+      c.posted.push({ url, body });
+      return { text: body.text.trim(), revision: body.revision + 1, updated_at: '2026-09-23T10:00:00+00:00' };
+    }) };
+  const notes = c.element('profile-notes');
+  notes.focus = () => { notes.focused = true; };
+  notes.setSelectionRange = (from, to) => { notes.caret = [from, to]; };
+  c.run('pages/profile.js');
+  c.type = (value) => { notes.value = value; notes.events.input(); };
+  c.tap = (topic) => c.element('profile-topics').events.click({ target: { closest: () => ({ dataset: { topic } }) } });
+  return c;
+}
+
+test('personal context saves only a change, then shows what the server stored', async () => {
+  const c = profilePage({ text: 'Saved plan', revision: 3, updated_at: '2026-09-20T14:32:00+00:00' });
+  const notes = c.element('profile-notes'), save = c.element('profile-save');
+  assert.equal(notes.value, 'Saved plan');
+  assert.equal(save.disabled, true, 'nothing to save');
+  assert.equal(c.element('profile-discard').hidden, true);
+  assert.equal(c.element('profile-state').textContent, 'pc.saved');
+  assert.match(c.element('profile-saved-at').textContent, /Sep 20/);
+  c.type('Saved plan');
+  assert.equal(save.disabled, true, 'typing back to the saved text is not a change');
+  c.type('Saved plan, revised  \n');
+  assert.equal(save.disabled, false);
+  assert.equal(c.element('profile-state').textContent, 'pc.unsaved');
+  assert.equal(c.element('profile-discard').hidden, false);
+  assert.match(c.element('profile-count').textContent, / 22 4,000$/);
+  await save.events.click();
+  assert.equal(JSON.stringify(c.posted), JSON.stringify([{ url: '/advisor/notes', body: { text: 'Saved plan, revised  \n', revision: 3 } }]));
+  assert.equal(notes.value, 'Saved plan, revised', 'the trimmed text the server stored');
+  assert.equal(save.disabled, true);
+  assert.equal(c.element('profile-state').textContent, 'pc.saved');
+  assert.equal(c.element('profile-status').textContent, 'ai.saved');
+  assert.equal(c.CT_API.reads, 1);
+  // A poll that left before the save answered still carries revision 3.
+  c.render();
+  assert.equal(notes.value, 'Saved plan, revised', 'an older reading never restores the text it replaced');
+  assert.equal(c.element('profile-status').textContent, 'ai.saved', 'nor reads as another device');
+  c.type('Saved plan, revised again');
+  c.render();
+  assert.equal(c.element('profile-status').textContent, '', 'not even while a new draft is open');
+  assert.equal(notes.value, 'Saved plan, revised again');
+});
+
+test('a newer save from another device never replaces a draft; discarding loads it', async () => {
+  const c = profilePage({ text: 'Old', revision: 2 });
+  const notes = c.element('profile-notes');
+  c.type('Old, with my edit');
+  c.CT.advisor.notes = { text: 'From the phone', revision: 3 };
+  c.render();
+  assert.equal(notes.value, 'Old, with my edit');
+  assert.equal(c.element('profile-status').textContent, 'pc.newer');
+  await c.element('profile-discard').events.click();
+  assert.equal(notes.value, 'From the phone');
+  assert.equal(c.element('profile-save').disabled, true);
+  assert.equal(c.element('profile-status').textContent, '');
+  assert.equal(c.CT_API.reads, 1, 'and asks for anything newer still');
+  c.CT.advisor.notes = { text: 'Newest', revision: 4 };
+  c.render();
+  assert.equal(notes.value, 'Newest', 'without a draft, a newer save simply shows');
+});
+
+test('a refused save keeps the draft, quotes the API and says how to recover', async () => {
+  const c = profilePage({ text: 'Old', revision: 2 }, { post: async () => {
+    throw Object.assign(new Error('Personal notes changed on another device; reload before saving.'), { status: 409 });
+  } });
+  c.type('Mine');
+  await c.element('profile-save').events.click();
+  const status = c.element('profile-status');
+  assert.equal(c.element('profile-notes').value, 'Mine');
+  assert.match(status.textContent, /changed on another device/);
+  assert.match(status.textContent, /pc\.conflictHint/);
+  assert.match(status.className, /is-error/);
+  c.type('Mine, still');
+  assert.match(status.textContent, /pc\.conflictHint/, 'an error stays until it is acted on');
+  assert.equal(c.element('profile-save').disabled, false, 'and the save can be tried again');
+});
+
+test('a topic writes its heading on a new line once, then only goes to it', () => {
+  const c = profilePage({ text: 'Goals: a house deposit', revision: 1 });
+  const notes = c.element('profile-notes');
+  c.tap('timeline');
+  assert.equal(notes.value, 'Goals: a house deposit\nTimeline: ');
+  assert.deepEqual(notes.caret, [notes.value.length, notes.value.length]);
+  assert.equal(notes.focused, true);
+  assert.equal(c.element('profile-hint').hidden, false);
+  assert.match(c.element('profile-hint').innerHTML, /pc\.hint\.timeline/);
+  assert.equal(c.element('profile-save').disabled, false);
+  c.tap('goals');
+  assert.equal(notes.value, 'Goals: a house deposit\nTimeline: ', 'already written: nothing is added');
+  assert.deepEqual(notes.caret, [22, 22], 'the caret goes to the end of that line');
+  const other = profilePage({ text: '  GOALS：稳', revision: 1 });
+  other.tap('goals');
+  assert.equal(other.element('profile-notes').value, '  GOALS：稳', 'any case, either colon');
+  const full = profilePage({ text: 'x'.repeat(3995), revision: 1 });
+  full.tap('timeline');
+  assert.equal(full.element('profile-notes').value.length, 3995, 'a heading never pushes past the limit');
+  assert.equal(full.element('profile-status').textContent, 'pc.full');
+});
+
+test('signing out empties the personal context and cannot save it', () => {
+  const c = profilePage({ text: 'Private', revision: 1 });
+  c.type('Private, edited');
+  c.CT.advisor.notes = { text: 'Private, from the phone', revision: 2 };
+  c.render();
+  assert.match(c.element('profile-status').className, /is-error/);
+  Object.assign(c.CT_API, { authenticated: false, writesEnabled: false });
+  c.render();
+  assert.equal(c.element('profile-notes').value, '');
+  assert.equal(c.element('profile-save').disabled, true);
+  assert.equal(c.element('profile-state').textContent, '');
+  assert.equal(c.element('profile-status').textContent, '');
+  assert.equal(c.element('profile-status').className, 'pc-status', 'no warning is left behind for the next sign-in');
+});
+
 test('sign-out is hidden when this is the only device', () => {
   const c = systemPage({ authSessions: { max_age_days: 30, sessions: [
     { session_id: 'only', label: 'Mac · Chrome', current: true, days_left: 30,

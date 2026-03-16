@@ -1288,3 +1288,59 @@ html:has(> body.theme-mono) { background: #fff; }
 .theme-mono dialog.glass-sheet::backdrop { background: #00000052; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .theme-mono #decision-sheet .glass-sheet-head { background: #fffffff2; }
 .theme-mono .sheet-description, .theme-mono .sheet-fineprint, .theme-mono .editor-label { color: var(--muted); }
+
+/* ─── My personal context ───────────────────────────────────────────
+   One free-text record the assistant reads. The editor is a single card —
+   label and save state on top, the text, a row of topics to start from —
+   so everything the page is for sits in one place, with what the record
+   is and is not for listed beneath it. */
+.pc-editor {
+  border: 1px solid var(--line); border-radius: 22px; background: var(--bg);
+  transition: border-color var(--motion-fast) var(--ease), box-shadow var(--motion-fast) var(--ease);
+}
+.pc-editor:focus-within { border-color: #b8b8b8; box-shadow: 0 0 0 4px #0d0d0d0a; }
+.pc-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px 0; }
+.pc-editor-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.pc-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--meta); white-space: nowrap; }
+.pc-state:empty { display: none; }
+.pc-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pc-state.is-saved::before { background: var(--ok); }
+.pc-state.is-dirty { color: var(--fg); }
+.pc-textarea {
+  display: block; width: 100%; min-height: 216px; resize: none; overflow-y: auto;
+  padding: 10px 18px 16px; border: 0; background: none; color: var(--fg);
+  font: inherit; font-size: 16px; line-height: 1.7; letter-spacing: 0;
+}
+.pc-textarea:focus { outline: none; }
+.pc-textarea::placeholder { color: #a3a3a3; }
+.pc-hint { margin: 0 18px 14px; padding: 10px 12px; border-radius: 12px; background: var(--surface); color: var(--muted); font-size: 13px; line-height: 1.55; }
+.pc-hint strong { color: var(--fg); font-weight: 600; }
+/* All five stay in view, so the row also reads as a checklist of what is covered. */
+.pc-topics { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px 14px; border-top: 1px solid var(--divider); }
+.pc-topic {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 38px; padding: 6px 12px 6px 10px;
+  border: 0; border-radius: var(--radius-pill); background: var(--bg); color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line); font-size: 13px; font-weight: 500; white-space: nowrap;
+  transition: background var(--motion-fast) var(--ease), transform var(--motion-lift) var(--ease-spring);
+}
+@media (hover: hover) { .pc-topic:hover { background: var(--surface); } }
+.pc-topic:active { transform: scale(.96); transition: transform var(--motion-press) var(--ease); }
+.pc-topic-mark { display: grid; place-items: center; width: 14px; height: 14px; }
+.pc-topic-mark svg { width: 14px; height: 14px; }
+.pc-topic.is-covered { background: var(--surface); color: var(--muted); box-shadow: none; }
+.pc-topic.is-covered .pc-topic-mark { color: var(--fg); }
+.pc-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; padding-inline: 6px; color: var(--meta); font-size: 12px; }
+.pc-count.is-near { color: var(--warn-ink); }
+.pc-count.is-full { color: var(--danger-ink); }
+.pc-actions { margin-top: 20px; }
+.pc-status { margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.pc-status:empty { display: none; }
+.pc-status.is-error { color: var(--danger-ink); }
+.pc-facts { margin: 0; padding: 0; list-style: none; border: 1px solid var(--divider); border-radius: 20px; }
+.pc-fact { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; }
+.pc-fact + .pc-fact { border-top: 1px solid var(--divider); }
+.pc-fact-icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: var(--surface); color: var(--fg); }
+.pc-fact-icon svg { width: 18px; height: 18px; }
+.pc-fact strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.pc-fact p { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+@media (prefers-reduced-motion: reduce) { .pc-topic, .pc-editor { transition: none; } }
