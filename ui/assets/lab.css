@@ -1,7 +1,447 @@
-.lab-page{--lab-bg:#f4f3ee;--lab-surface:#fffefa;--lab-muted:#667369;--lab-line:#dce1d7;--lab-accent:#315a45;--lab-tint:#e5ecdf;--lab-warning:#8d5926;--lab-error:#a2443e;padding:24px 0 48px;background:var(--lab-bg);min-height:calc(100vh - var(--nav-h))}.lab-page button,.lab-page select{font:inherit;color:inherit}.lab-page button{border:0}.lab-page h1,.lab-page h2,.lab-page p{margin:0}.lab-container{width:min(1200px,calc(100% - 40px));margin:auto}.lab-now{position:sticky;top:calc(var(--chrome-offset) + 8px);z-index:20;display:flex;align-items:center;gap:18px;padding:14px 22px;border:1px solid var(--lab-line);border-radius:14px;background:var(--lab-tint);box-shadow:0 12px 36px #2038240b}.lab-now-label{font-size:12px;color:var(--lab-accent);letter-spacing:2px;border-right:1px solid var(--lab-line);padding-right:18px}.lab-now-copy{display:flex;align-items:baseline;gap:14px;flex:1;flex-wrap:wrap}.lab-now-copy strong{font-weight:650}.lab-now-copy span{font-size:13px;color:var(--lab-muted)}.lab-budget{display:flex;align-items:center;gap:9px}.lab-budget strong{font:20px var(--font-mono)}.lab-budget strong span,.lab-budget small{font-size:12px;color:var(--lab-muted)}.lab-workbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 0}.lab-run-choice{display:flex;align-items:center;gap:10px;min-width:0}.lab-run-choice>#symbol{font:16px var(--font-mono)}.lab-run-choice select{min-width:0;min-height:42px;border:0;background:transparent}.lab-workspace{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}.lab-office,.lab-panel{background:var(--lab-surface);border:1px solid var(--lab-line);box-shadow:0 12px 36px #20382408}.lab-office{min-width:0;border-radius:18px;overflow:hidden}.lab-scene-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:22px 24px 0}.lab-scene-head .eyebrow,.lab-section-top .eyebrow{font:11px/1.5 var(--font-mono);letter-spacing:1.4px;color:var(--lab-muted)}.lab-scene-head h1{font-size:22px;font-weight:600;margin-top:5px}.lab-mode-badge,.lab-state-tag,.lab-instrument-tag{padding:4px 8px;border-radius:6px;background:var(--lab-tint);color:var(--lab-accent);font-size:12px;white-space:nowrap}.lab-scene{position:relative;isolation:isolate;aspect-ratio:320/296;margin:20px 16px 0;overflow:hidden;border:1px solid var(--lab-line);background:#e9e5da}.lab-scene-canvas{position:absolute;inset:0;min-width:0;max-width:100%;aspect-ratio:320/296}.lab-scene canvas{display:block;width:100%;height:100%;max-width:100%;image-rendering:pixelated}.lab-people,.lab-office-labels,.lab-ambient-bubbles{position:absolute;inset:0}.lab-office-labels{pointer-events:none;z-index:2}.lab-office-labels span{position:absolute;color:#52614f;font-size:12px;font-weight:600;white-space:nowrap}.lab-people{z-index:3}.lab-people .person{position:absolute;width:10%;height:9%;min-height:44px;transform:translate(-50%,-100%);background:transparent;padding:0}.lab-people .desk-label{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);padding:3px 7px;background:#fffefa;color:#283e32;border:1px solid #d9ded4;border-radius:5px;box-shadow:0 2px 5px #20382410;font-size:11px;line-height:1.35;white-space:nowrap;opacity:0;pointer-events:none}.lab-people .person:hover .desk-label,.lab-people .person:focus-visible .desk-label,.lab-people .person[aria-pressed=true] .desk-label,.lab-people .person[data-state=thinking] .desk-label{opacity:1}.lab-people .person[data-state=disabled]{pointer-events:auto}.lab-people .person[data-state=stalled] .desk-label{color:var(--lab-warning);opacity:1}.lab-people .person[data-state=error] .desk-label{color:var(--lab-error);opacity:1}.thinking-dots{display:inline-flex;gap:3px;margin-left:5px}.thinking-dots i{width:3px;height:3px;border-radius:50%;background:currentColor;animation:lab-dot 1.5s ease-in-out infinite}.thinking-dots i:nth-child(2){animation-delay:.2s}.thinking-dots i:nth-child(3){animation-delay:.4s}.lab-ambient-bubbles{pointer-events:none;z-index:8}.ambient-bubble{position:absolute;transform:translate(-50%,-100%);max-width:210px;padding:5px 9px;background:#fffefa;color:#283e32;border:1px solid #d9ded4;border-radius:6px;box-shadow:0 3px 10px #29372c22;font-size:11px;line-height:1.45;white-space:nowrap}.walk-bubble:after{content:'';position:absolute;left:12px;bottom:-5px;width:8px;height:8px;background:#fffefa;border-right:1px solid #d9ded4;border-bottom:1px solid #d9ded4;transform:rotate(45deg)}.lab-flying-file{position:absolute;z-index:7;transition:left 1.3s ease,top 1.3s ease;color:var(--lab-accent);font-size:20px}.lab-scene-bottom,.lab-ambience{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:12px;color:var(--lab-muted)}.lab-ambience{padding-top:0}.lab-text-button{min-height:36px;padding:4px;background:transparent;color:var(--lab-accent);font-size:12px}.lab-demo-note{margin:0 24px 12px;padding:8px 10px;border-radius:8px;background:#f3f1e9;color:var(--lab-muted);font-size:12px}.lab-replay-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 24px;background:#edeee7;border-top:1px solid var(--lab-line)}.lab-replay-controls>div{text-align:center;flex:1 1 auto;min-width:0}.lab-replay-controls .btn{width:auto;flex:0 0 auto;white-space:nowrap}.lab-replay-controls span{display:block;font-size:13px}.lab-replay-controls small{font-size:11px;color:var(--lab-muted)}.lab-rest-note{padding:14px 24px;background:#edeee7;color:var(--lab-muted);font-size:13px}.lab-sidebar{display:flex;flex-direction:column;gap:14px}.lab-panel{padding:18px;border-radius:14px}.lab-section-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}.lab-section-top h2,.lab-selected-title h2{font-size:16px}.lab-selected-title{display:flex;align-items:center;gap:12px}.lab-portrait{width:56px;height:56px;flex:none;border-radius:10px;background-color:#edeee7;background-repeat:no-repeat;image-rendering:pixelated}.lab-selected-title p,.lab-muted,.lab-caption,.lab-reason{font-size:12px;color:var(--lab-muted)}.lab-panel blockquote{margin:12px 0 0;padding:12px 0 0;border-top:1px solid var(--lab-line);font-size:14px;line-height:1.7}.lab-reason{margin-top:7px}.roster-zone+.roster-zone{margin-top:10px}.zone-name{margin-bottom:4px;color:var(--lab-muted);font-size:11px;letter-spacing:.6px}.role-button{display:flex;width:100%;min-height:36px;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border-radius:7px;background:transparent;text-align:left;font-size:13px}.role-button[aria-pressed=true]{background:var(--lab-tint)}.role-status{color:var(--lab-muted);font-size:11px;white-space:nowrap}.role-summary{display:block;margin-top:4px;color:var(--lab-muted);font-size:12px;font-weight:400}.lab-rule-label{font-size:11px;color:var(--lab-muted)}#gate-result{font-size:14px}.gate-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.gate-grid span{display:block;color:var(--lab-muted);font-size:12px}.gate-grid strong{font:15px var(--font-mono)}.lab-approval{width:100%;min-height:42px;margin-top:13px;border:1px solid var(--lab-line)!important;border-radius:8px;background:#edeee7;color:var(--lab-muted)}.lab-caption{margin-top:9px}.lab-events{list-style:none;margin:0;padding:0}.lab-events li{position:relative;padding:0 0 12px 13px;border-left:1px solid var(--lab-line);font-size:13px}.lab-events li:before{content:'';position:absolute;left:-3px;top:7px;width:5px;height:5px;border-radius:50%;background:var(--lab-line)}.lab-events li:first-child:before{background:var(--lab-accent)}.lab-events time{display:block;color:var(--lab-muted);font:11px var(--font-mono)}.lab-page [hidden]{display:none!important}@keyframes lab-dot{50%{opacity:.25;transform:translateY(-1px)}}
-@media(max-width:850px){.lab-container{width:min(100% - 24px,700px)}.lab-workspace{grid-template-columns:1fr}.lab-sidebar{display:grid;grid-template-columns:1fr 1fr}.lab-sidebar .lab-panel:first-child{grid-column:1/-1}.lab-now{top:calc(var(--chrome-offset) + 6px)}.lab-scene-head{padding:18px 18px 0}}
-@media(max-width:520px){.lab-page{padding-top:12px}.lab-container{width:calc(100% - 20px)}.lab-now{gap:10px;padding:11px 13px}.lab-now-label{padding-right:9px}.lab-now-copy{display:block}.lab-now-copy strong{display:block;font-size:13px}.lab-now-copy span{font-size:12px}.lab-budget{display:block;text-align:right}.lab-budget small{display:block}.lab-workbar,.lab-scene-bottom,.lab-ambience{flex-wrap:wrap}.lab-run-choice{gap:8px}.lab-run-choice select{font-size:12px}.lab-scene-head{padding:15px 14px 0}.lab-scene-head h1{font-size:19px}.lab-scene{width:calc(100% - 8px);margin:15px 4px 0}.lab-office-labels span{font-size:10px}.lab-people .desk-label{max-width:150px;white-space:normal;font-size:10px}.lab-scene-bottom,.lab-ambience{padding-inline:14px}.lab-scene-bottom>span,.lab-ambience>span{flex:1 1 170px}.lab-demo-note{margin-inline:14px}.lab-replay-controls{padding:12px 14px}.lab-sidebar{display:flex}.lab-panel{padding:16px}}
-@media(prefers-reduced-motion:reduce){.lab-page *, .lab-page *:before,.lab-page *:after{animation:none!important;transition:none!important}.lab-ambient-bubbles{display:none!important}}
+/* ─────────────────────────────────────────────────────────────────────────
+ * Lab — liquid glass, with the room's own colours.
+ *
+ * The owner's rule for this page: words and buttons are ink on white, as on the rest of
+ * the console; everything else keeps the Lab's own colours. The pixel office and its
+ * people are drawn as they always were, the agents' portraits are theirs, and the paper,
+ * sage and green around them are the palette the room was painted with. Nothing is
+ * turned grey to match the type.
+ *
+ * The page opts in with <body class="theme-mono lab-glass">: theme-mono (console.css)
+ * turns the shared components' words and buttons ink, and this file draws the rest. The
+ * server ships this sheet with every console page (api/app.py, primary_templates), so
+ * every rule is scoped to .lab-page or to body.lab-glass.
+ *
+ * The glass is the material Assets and Discover use: a translucent card over a soft
+ * field, with a lit top edge and a long soft shadow, which reads as glass without a
+ * blur. Only the two controls that float over the office blur what is behind them,
+ * because only there is something behind them to blur, and both are small: the motion
+ * switch and the stage stepper. Nothing sticky blurs (f44292c).
+ * ───────────────────────────────────────────────────────────────────── */
+
+body.lab-glass {
+  /* words and buttons */
+  --lab-ink: #0d0d0d;
+  --lab-ink-2: #5d5d5d;
+  --lab-ink-3: #8f8f8f;
+  /* the room's own colours */
+  --lab-paper: #f4f3ee;
+  --lab-surface: #fffefa;
+  --lab-line: #dce1d7;
+  --lab-tint: #e5ecdf;
+  --lab-accent: #315a45;
+  --lab-warn: #8d5926;
+  --lab-error: #a2443e;
+  --lab-glass: linear-gradient(180deg, rgba(255, 254, 250, .9) 0%, rgba(255, 254, 250, .68) 100%);
+  --lab-edge: rgba(255, 255, 255, .96);
+  --lab-lift: 0 1px 2px rgba(32, 56, 36, .05), 0 18px 44px -24px rgba(32, 56, 36, .3);
+  --lab-lit: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(32, 56, 36, .05);
+  --lab-spring: cubic-bezier(.34, 1.4, .5, 1);
+  --lab-settle: cubic-bezier(.22, 1, .36, 1);
+  /* The field the glass sits on: the room's paper, with soft pools of sage and cream near
+     the top. It scrolls with the page, so nothing is recomputed while scrolling. */
+  background:
+    radial-gradient(760px 420px at 12% -60px, #e7ece1 0%, rgba(231, 236, 225, 0) 70%),
+    radial-gradient(620px 460px at 100% 260px, #efede4 0%, rgba(239, 237, 228, 0) 70%),
+    radial-gradient(700px 520px at 0% 820px, #ecefe6 0%, rgba(236, 239, 230, 0) 70%),
+    var(--lab-paper);
+  color: var(--lab-ink);
+}
+html:has(> body.lab-glass) { background: #f4f3ee; }
+
+.lab-page button, .lab-page select { font: inherit; color: inherit; }
+.lab-page button { border: 0; }
+.lab-page [hidden] { display: none !important; }
+.lab-container { max-width: var(--column); margin-inline: auto; padding-inline: var(--gutter); }
+.lab-fine { font-size: 13px; line-height: 1.5; color: var(--lab-ink-2); }
+.lab-fine:empty { display: none; }
+.lab-count { font-size: 13px; color: var(--lab-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lab-tag {
+  display: inline-flex; align-items: center; min-height: 22px; padding: 2px 9px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--lab-ink-2); background: var(--lab-tint);
+}
+
+/* ─── the head: the page's name, and what today's budget has left ──── */
+.lab-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 0 16px; }
+.lab-head h1 { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -.035em; }
+.lab-budget {
+  display: inline-flex; align-items: baseline; gap: 6px; min-height: 36px; padding: 7px 14px;
+  border-radius: 999px; background: var(--lab-glass); border: 1px solid var(--lab-edge);
+  box-shadow: 0 8px 22px -14px rgba(32, 56, 36, .35), var(--lab-lit);
+  font-size: 13px; color: var(--lab-ink-2); white-space: nowrap;
+}
+.lab-budget:empty { visibility: hidden; }
+.lab-budget strong { font-size: 15px; font-weight: 650; color: var(--lab-ink); font-variant-numeric: tabular-nums; }
+.lab-budget strong span { font-weight: 500; color: var(--lab-ink-3); }
+.lab-budget small { font-size: 13px; }
+
+.lab-workspace { display: flex; flex-direction: column; gap: 16px; animation: lab-arrive 360ms var(--lab-settle) both; }
+@keyframes lab-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ─── which run: a glass capsule over the native picker ────────────── */
+.lab-pick { display: flex; flex-direction: column; gap: 10px; }
+.lab-run {
+  position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 22px 8px 8px;
+  border-radius: 999px; background: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 255, 255, .72));
+  border: 1px solid var(--lab-edge); box-shadow: var(--lab-lift), var(--lab-lit);
+  -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--lab-spring);
+}
+.lab-run:active { transform: scale(.985); }
+.lab-run:focus-within { box-shadow: 0 0 0 2px var(--lab-ink), var(--lab-lift), var(--lab-lit); }
+.lab-run select {
+  position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: inherit; opacity: 0; cursor: pointer; font-size: 16px;
+  -webkit-appearance: none; appearance: none;
+}
+.lab-run select:disabled { cursor: default; }
+.lab-run:has(select:disabled) .lab-chevron { display: none; }
+/* a glass bead with the symbol's initial, as on Assets */
+.lab-orb {
+  flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
+  font-size: 18px; font-weight: 650; line-height: 1; color: var(--lab-ink);
+  background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f2f2f3 52%, #e2e2e4 100%);
+  box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(13, 13, 13, .07), 0 1px 2px rgba(13, 13, 13, .08);
+}
+.lab-run-copy { flex: 1; min-width: 0; }
+.lab-run-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lab-run #symbol { font-size: 17px; font-weight: 650; letter-spacing: -.02em; }
+.lab-run-sub { display: block; margin-top: 1px; overflow: hidden; font-size: 13px; color: var(--lab-ink-2); white-space: nowrap; text-overflow: ellipsis; }
+.lab-run-sub:empty { display: none; }
+.lab-chevron {
+  flex: none; width: 8px; height: 8px; margin: -5px 2px 0;
+  border-right: 1.75px solid var(--lab-ink-3); border-bottom: 1.75px solid var(--lab-ink-3); transform: rotate(45deg);
+}
+.lab-demo-note { display: flex; gap: 8px; padding: 0 8px; font-size: 13px; line-height: 1.5; color: var(--lab-ink-2); overflow-wrap: anywhere; }
+.lab-demo-note::before { content: ''; flex: none; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; background: var(--lab-accent); opacity: .55; }
+.lab-demo-note[data-kind="error"] { color: var(--lab-error); }
+.lab-demo-note[data-kind="error"]::before { background: var(--lab-error); opacity: 1; }
+
+/* ─── now: sage glass, with light caught in two still pools ────────── */
+.lab-now {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: flex; flex-direction: column; align-items: flex-start; min-height: 136px;
+  padding: 20px 22px; border-radius: 28px; color: var(--lab-ink);
+  background: linear-gradient(180deg, rgba(229, 236, 223, .96) 0%, rgba(229, 236, 223, .78) 100%);
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: var(--lab-lift), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(32, 56, 36, .06);
+}
+.lab-now::before, .lab-now::after { content: ''; position: absolute; z-index: -1; border-radius: 50%; pointer-events: none; }
+.lab-now::before { width: 320px; height: 320px; top: -190px; right: -110px; background: radial-gradient(closest-side, rgba(255, 255, 255, .75), rgba(255, 255, 255, .2) 55%, rgba(255, 255, 255, 0)); }
+.lab-now::after { width: 360px; height: 220px; bottom: -140px; left: -110px; background: radial-gradient(closest-side, rgba(255, 255, 255, .45), rgba(255, 255, 255, 0)); }
+.lab-mode {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 12px 4px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: var(--lab-ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .86), rgba(255, 255, 255, .6));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .9), 0 4px 12px -8px rgba(32, 56, 36, .4);
+}
+.lab-mode:empty { display: none; }
+.lab-mode::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--lab-accent); }
+.lab-mode[data-mode="live"]::before { animation: lab-pulse 1.6s ease-in-out infinite; }
+.lab-mode[data-mode="broken"]::before { background: var(--lab-error); }
+.lab-mode[data-mode="none"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--lab-accent); }
+.lab-now #now-title { display: block; margin-top: 16px; font-size: 24px; font-weight: 650; line-height: 1.22; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.lab-now #now-title:empty::before { content: '\2014'; color: var(--lab-ink-3); }
+.lab-now #now-caption { display: block; margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--lab-ink-2); overflow-wrap: anywhere; }
+.lab-now #now-caption:empty { display: none; }
+.lab-rest-note {
+  align-self: stretch; margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(49, 90, 69, .14);
+  font-size: 13px; line-height: 1.5; color: var(--lab-ink-2);
+}
+
+/* ─── the office, in its own colours ───────────────────────────────── */
+.lab-office {
+  padding: 8px; border-radius: 30px; background: var(--lab-glass); border: 1px solid var(--lab-edge);
+  box-shadow: var(--lab-lift), var(--lab-lit);
+}
+.lab-scene { position: relative; isolation: isolate; overflow: hidden; aspect-ratio: 320 / 296; border-radius: 22px; background: #e9e5da; }
+.lab-scene-canvas { position: absolute; inset: 0; }
+.lab-scene canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.lab-people, .lab-office-labels, .lab-ambient-bubbles { position: absolute; inset: 0; }
+.lab-office-labels { z-index: 2; pointer-events: none; }
+.lab-office-labels span {
+  position: absolute; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  font-size: 11px; font-weight: 600; line-height: 1.45; color: var(--lab-ink-2);
+  background: rgba(255, 254, 250, .82); box-shadow: 0 0 0 1px rgba(32, 56, 36, .08);
+  transition: opacity 160ms ease;
+}
+/* A zone's sign steps aside while a desk in its row shows its name above it. */
+.lab-scene:has(.person[data-zone="trade"]:is(:hover, :focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="trade"],
+.lab-scene:has(.person[data-zone="risk"]:is(:hover, :focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="risk"] { opacity: 0; }
+
+/* A desk is a button over its chair. Its name shows while it is working, picked, pointed
+   at, or in trouble; otherwise the room is left to speak for itself. */
+.lab-people { z-index: 3; }
+.lab-people .person {
+  position: absolute; width: 10%; height: 9%; min-height: 44px; padding: 0; border-radius: 12px;
+  transform: translate(-50%, -100%); background: transparent; -webkit-tap-highlight-color: transparent;
+}
+.lab-people .person:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 2px; }
+.lab-people .desk-label {
+  position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+  width: max-content; max-width: 150px; padding: 4px 9px; border-radius: 10px; pointer-events: none;
+  font-size: 11px; font-weight: 600; line-height: 1.35; color: var(--lab-ink);
+  background: var(--lab-surface); box-shadow: 0 0 0 1px #d9ded4, 0 6px 16px -8px rgba(32, 56, 36, .4);
+  visibility: hidden; opacity: 0; transition: opacity 160ms ease, visibility 0s linear 160ms;
+}
+.lab-people .person:hover .desk-label,
+.lab-people .person:focus-visible .desk-label,
+.lab-people .person[aria-pressed="true"] .desk-label,
+.lab-people .person[data-state="thinking"] .desk-label,
+.lab-people .person[data-state="research"] .desk-label,
+.lab-people .person[data-state="stalled"] .desk-label,
+.lab-people .person[data-state="error"] .desk-label { visibility: visible; opacity: 1; transition: opacity 160ms ease; }
+.lab-people .person[aria-pressed="true"] .desk-label { background: var(--lab-tint); box-shadow: 0 0 0 1.5px var(--lab-accent), 0 6px 16px -8px rgba(32, 56, 36, .45); }
+.lab-people .person[data-state="stalled"] .desk-label { color: var(--lab-warn); }
+.lab-people .person[data-state="error"] .desk-label { color: var(--lab-error); }
 /* The label sits above its desk, which the top row has no room for: the scene clips at
-   its own edge. Those desks hang it underneath instead. */
-.lab-people .person[data-label=below] .desk-label{bottom:auto;top:100%}
+   its own edge. Those desks hang it underneath instead. By the side walls it runs inward
+   from the desk rather than out past the wall. */
+.lab-people .person[data-label="below"] .desk-label { bottom: auto; top: 100%; }
+.lab-people .person[data-edge="start"] .desk-label { left: 0; transform: none; }
+.lab-people .person[data-edge="end"] .desk-label { left: auto; right: 0; transform: none; }
+.lab-page .thinking-dots { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: middle; }
+.lab-page .thinking-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: lab-dot 1.5s ease-in-out infinite; }
+.lab-page .thinking-dots i:nth-child(2) { animation-delay: .2s; }
+.lab-page .thinking-dots i:nth-child(3) { animation-delay: .4s; }
+
+/* What the people say on a walk, and the report that crosses the room, belong to the
+   room's drawing and keep its colours. */
+.lab-ambient-bubbles { z-index: 8; pointer-events: none; }
+.lab-page .ambient-bubble {
+  position: absolute; max-width: 210px; padding: 5px 9px; border-radius: 6px; transform: translate(-50%, -100%);
+  font-size: 11px; line-height: 1.45; white-space: nowrap; color: var(--lab-ink);
+  background: var(--lab-surface); border: 1px solid #d9ded4; box-shadow: 0 3px 10px #29372c22;
+}
+.lab-page .walk-bubble::after {
+  content: ''; position: absolute; left: 12px; bottom: -5px; width: 8px; height: 8px;
+  background: var(--lab-surface); border-right: 1px solid #d9ded4; border-bottom: 1px solid #d9ded4; transform: rotate(45deg);
+}
+.lab-flying-file { position: absolute; z-index: 7; color: var(--lab-accent); font-size: 20px; transition: left 1.3s ease, top 1.3s ease; }
+
+/* ─── glass buttons that float over the office ─────────────────────── */
+.lab-float {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(255, 255, 255, .52));
+  border: 1px solid rgba(255, 255, 255, .92);
+  box-shadow: 0 10px 26px -12px rgba(32, 56, 36, .45), 0 1px 2px rgba(32, 56, 36, .08),
+    inset 0 1px 1px #fff, inset 0 -1px 1px rgba(32, 56, 36, .06);
+  -webkit-backdrop-filter: blur(10px) saturate(160%); backdrop-filter: blur(10px) saturate(160%);
+}
+.lab-motion {
+  position: absolute; top: 10px; right: 10px; z-index: 10; display: grid; place-items: center;
+  width: 40px; height: 40px; padding: 0; border-radius: 50%; color: var(--lab-ink);
+  -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--lab-spring), opacity 160ms ease;
+}
+.lab-motion svg { width: 18px; height: 18px; fill: currentColor; }
+.lab-motion[aria-pressed="true"] .lab-icon-play, .lab-motion:not([aria-pressed="true"]) .lab-icon-pause { display: none; }
+.lab-motion:active:not(:disabled) { transform: scale(.9); }
+.lab-motion:disabled { cursor: default; opacity: .55; }
+.lab-motion:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 2px; border-radius: 50%; }
+
+/* The stepper floats on the floor below the last row of chairs, where only aisle shows. */
+.lab-replay {
+  position: absolute; left: 50%; bottom: 8px; z-index: 10; display: flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 999px; transform: translateX(-50%);
+}
+.lab-replay button {
+  display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  color: var(--lab-ink); background: transparent; -webkit-tap-highlight-color: transparent;
+  transition: transform 260ms var(--lab-spring), background 160ms ease;
+}
+.lab-replay svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+@media (hover: hover) { .lab-replay button:hover:not(:disabled) { background: rgba(13, 13, 13, .06); } }
+.lab-replay button:active:not(:disabled) { transform: scale(.88); background: rgba(13, 13, 13, .08); }
+.lab-replay button:disabled { cursor: default; color: #b8b8b8; }
+.lab-replay button:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: -2px; border-radius: 50%; }
+.lab-replay #event-number { min-width: 84px; padding: 0 4px; text-align: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.lab-scene-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 4px 0 12px; }
+.lab-scene-foot #scene-caption { font-size: 13px; line-height: 1.45; color: var(--lab-ink-2); }
+.lab-pill {
+  flex: none; display: inline-flex; align-items: center; min-height: 40px; padding: 8px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--lab-ink); background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(13, 13, 13, .1), 0 4px 12px -8px rgba(13, 13, 13, .35);
+  -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--lab-spring), background 160ms ease, color 160ms ease;
+}
+@media (hover: hover) { .lab-pill:hover:not([aria-pressed="true"]) { background: #f6f6f6; } }
+.lab-pill:active { transform: scale(.96); }
+.lab-pill[aria-pressed="true"] { color: #fff; background: var(--lab-ink); box-shadow: none; }
+.lab-pill:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 2px; border-radius: 999px; }
+
+/* ─── the cards ────────────────────────────────────────────────────── */
+.lab-card {
+  position: relative; isolation: isolate; padding: 20px; border-radius: 28px;
+  background: var(--lab-glass); border: 1px solid var(--lab-edge); box-shadow: var(--lab-lift), var(--lab-lit);
+}
+/* the sheen: light caught on the upper-left of the glass */
+.lab-card::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(128deg, rgba(255, 255, 255, .8) 0%, rgba(255, 255, 255, 0) 42%);
+}
+.lab-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.lab-card-head h2 { font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+
+/* the desk being read */
+.lab-desk { scroll-margin-top: calc(var(--chrome-offset) + 16px); }
+.lab-desk-head { display: flex; align-items: center; gap: 14px; }
+/* Head and shoulders of the desk's worker: the top of the first frame, at three times its
+   size, so a pixel stays square. */
+.lab-portrait {
+  flex: none; width: 48px; height: 48px; border-radius: 16px;
+  background-color: #edeee7; background-repeat: no-repeat; background-size: 336px 288px; background-position: 0 -6px;
+  image-rendering: pixelated; box-shadow: inset 0 0 0 1px rgba(32, 56, 36, .06);
+}
+.lab-desk-id { min-width: 0; }
+.lab-desk-id h2 { font-size: 20px; font-weight: 650; line-height: 1.2; letter-spacing: -.025em; }
+.lab-desk-where { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; font-size: 13px; color: var(--lab-ink-2); }
+.lab-desk-where span:empty { display: none; }
+.lab-desk blockquote {
+  margin: 16px 0 0; padding-top: 16px; border-top: 1px solid var(--lab-line);
+  font-size: 16px; line-height: 1.62; letter-spacing: -.005em; overflow-wrap: anywhere;
+}
+.lab-desk blockquote:empty { display: none; }
+.lab-desk #selected-meta { margin-top: 10px; }
+.lab-reason { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--lab-ink-2); }
+.lab-reason:empty { display: none; }
+
+/* A state is a word with a dot: the words are ink, the dot is the room's green. */
+.lab-state {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 10px 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--lab-ink); background: var(--lab-tint);
+}
+.lab-state::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--lab-accent); }
+.lab-state[data-state="thinking"]::before, .lab-state[data-state="research"]::before { animation: lab-pulse 1.6s ease-in-out infinite; }
+.lab-state[data-state="waiting"], .lab-state[data-state="disabled"] { color: var(--lab-ink-2); }
+.lab-state[data-state="waiting"]::before, .lab-state[data-state="disabled"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px #aeb8a0; }
+.lab-state[data-state="stalled"] { color: var(--lab-warn); background: #f3eadf; }
+.lab-state[data-state="stalled"]::before { background: var(--lab-warn); }
+.lab-state[data-state="error"] { color: var(--lab-error); background: #f5e4e2; }
+.lab-state[data-state="error"]::before { background: var(--lab-error); }
+
+/* rules: what the deterministic side returned, row by row */
+.lab-gate #gate-result { font-size: 15px; line-height: 1.5; }
+.lab-gate #gate-result > p:first-child { font-weight: 600; }
+.lab-page .gate-grid { display: flex; flex-direction: column; }
+.lab-page .gate-grid > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 11px 0; }
+.lab-page .gate-grid > div:first-child { padding-top: 2px; }
+.lab-page .gate-grid > div + div { border-top: 1px solid var(--lab-line); }
+.lab-page .gate-grid span { font-size: 15px; color: var(--lab-ink-2); }
+.lab-page .gate-grid strong { font-size: 15px; font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.lab-page #gate-result .lab-caption { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--lab-ink-2); }
+.lab-page .lab-approval {
+  display: flex; align-items: center; justify-content: center; width: 100%; min-height: 50px; margin-top: 16px;
+  padding: 12px 20px; border-radius: 999px; font-size: 15px; font-weight: 600; letter-spacing: -.01em;
+  color: #fff; background: var(--lab-ink);
+  box-shadow: 0 12px 26px -14px rgba(13, 13, 13, .6), inset 0 1px 0 rgba(255, 255, 255, .16);
+  -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--lab-spring), background 160ms ease;
+}
+@media (hover: hover) { .lab-page .lab-approval:hover:not(:disabled) { background: #2a2a2a; } }
+.lab-page .lab-approval:active:not(:disabled) { transform: scale(.98); }
+.lab-page .lab-approval:disabled { cursor: default; color: #a3a3a3; background: rgba(13, 13, 13, .05); box-shadow: none; }
+.lab-page .lab-approval:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 3px; }
+.lab-gate-note { margin-top: 10px; text-align: center; }
+
+/* activity: a thread of events, newest first */
+.lab-events { margin: 0; padding: 0; list-style: none; }
+.lab-events li { position: relative; padding: 0 0 14px 22px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.lab-events li::before {
+  content: ''; position: absolute; left: 2px; top: 5px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--lab-surface); box-shadow: inset 0 0 0 1.5px #c3cbbd;
+}
+.lab-events li::after { content: ''; position: absolute; left: 5.5px; top: 17px; bottom: 1px; width: 1px; background: var(--lab-line); }
+.lab-events li:last-child { padding-bottom: 0; }
+.lab-events li:last-child::after { display: none; }
+.lab-events li:first-child::before { background: var(--lab-accent); box-shadow: 0 0 0 3px rgba(49, 90, 69, .14); }
+.lab-events li.lab-caption { padding-left: 0; color: var(--lab-ink-2); }
+.lab-events li.lab-caption::before, .lab-events li.lab-caption::after { display: none; }
+.lab-events time { display: block; margin-bottom: 1px; font-size: 12px; color: var(--lab-ink-3); font-variant-numeric: tabular-nums; }
+
+/* desks: every seat, by zone, its opening line kept to two lines */
+.lab-roster #roster { margin: 0 -8px -6px; }
+.lab-page .roster-zone + .roster-zone { margin-top: 12px; }
+.lab-page .zone-name { padding: 0 10px 4px; font-size: 13px; font-weight: 600; color: var(--lab-ink-3); }
+.lab-page .role-button {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; min-height: 52px; padding: 10px 10px 10px 30px; border-radius: 16px; text-align: left;
+  font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--lab-ink); background: transparent;
+  -webkit-tap-highlight-color: transparent; transition: background 160ms ease, transform 260ms var(--lab-spring);
+}
+.lab-page .role-button > span:first-child { min-width: 0; }
+.lab-page .role-button::before {
+  content: ''; position: absolute; left: 13px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: var(--lab-accent);
+}
+.lab-page .role-button[data-state="waiting"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px #aeb8a0; }
+.lab-page .role-button[data-state="disabled"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px #d4d9ce; }
+.lab-page .role-button[data-state="thinking"]::before, .lab-page .role-button[data-state="research"]::before { animation: lab-pulse 1.6s ease-in-out infinite; }
+.lab-page .role-button[data-state="stalled"]::before { background: var(--lab-warn); }
+.lab-page .role-button[data-state="error"]::before { background: var(--lab-error); }
+.lab-page .role-button[aria-pressed="true"] { background: var(--lab-tint); }
+@media (hover: hover) { .lab-page .role-button:hover:not([aria-pressed="true"]) { background: rgba(49, 90, 69, .05); } }
+.lab-page .role-button:active { transform: scale(.985); }
+.lab-page .role-button:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: -2px; }
+.lab-page .role-button[data-state="disabled"] { color: var(--lab-ink-3); }
+.lab-page .role-summary {
+  display: -webkit-box; margin-top: 2px; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  font-size: 13px; font-weight: 400; line-height: 1.45; letter-spacing: 0; color: var(--lab-ink-2); overflow-wrap: anywhere;
+}
+.lab-page .role-button[data-state="disabled"] .role-summary { color: var(--lab-ink-3); }
+.lab-page .role-status { flex: none; font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--lab-ink-3); white-space: nowrap; }
+.lab-page .role-button[data-state="thinking"] .role-status, .lab-page .role-button[data-state="research"] .role-status { color: var(--lab-ink); font-weight: 600; }
+.lab-page .role-button[data-state="stalled"] .role-status { color: var(--lab-warn); }
+.lab-page .role-button[data-state="error"] .role-status { color: var(--lab-error); }
+
+@keyframes lab-dot { 50% { opacity: .25; transform: translateY(-1px); } }
+@keyframes lab-pulse { 50% { opacity: .35; transform: scale(.75); } }
+
+/* ─── a wide screen: the office stays in view while the reports scroll ── */
+@media (min-width: 1024px) {
+  /* The office is as wide as the window's height allows, so all of it fits on screen. */
+  body.lab-glass {
+    --lab-side: 380px;
+    --lab-stage: min(760px, calc((100svh - var(--chrome-offset) - 200px) * 1.08));
+  }
+  .lab-container { max-width: calc(var(--lab-stage) + var(--lab-side) + 24px + 2 * var(--gutter)); }
+  .lab-workspace {
+    display: grid; grid-template-columns: minmax(0, var(--lab-stage)) var(--lab-side);
+    grid-template-rows: auto auto auto auto auto 1fr; align-items: start; gap: 16px 24px;
+    grid-template-areas: "office pick" "office now" "office desk" "office gate" "office feed" "office roster";
+  }
+  .lab-pick { grid-area: pick; }
+  .lab-now { grid-area: now; }
+  .lab-office { grid-area: office; position: sticky; top: calc(var(--chrome-offset) + 16px); }
+  .lab-desk { grid-area: desk; }
+  .lab-gate { grid-area: gate; }
+  .lab-feed { grid-area: feed; }
+  .lab-roster { grid-area: roster; }
+  .lab-replay { bottom: 14px; }
+  .lab-motion { top: 14px; right: 14px; }
+  .lab-office-labels span { font-size: 12px; padding: 3px 10px; }
+  .lab-people .desk-label { max-width: 240px; font-size: 12px; }
+}
+
+@media (max-width: 380px) {
+  .lab-head h1 { font-size: 28px; }
+  .lab-now { padding: 18px 18px; }
+  .lab-card { padding: 18px; }
+  .lab-office-labels span { font-size: 10px; padding: 1px 6px; }
+  .lab-people .desk-label { max-width: 130px; font-size: 10px; }
+  .lab-replay #event-number { min-width: 72px; font-size: 12px; }
+}
+
+/* ─── motion, transparency and contrast the reader asked for ───────── */
+@media (prefers-reduced-motion: reduce) {
+  .lab-page *, .lab-page *::before, .lab-page *::after { animation: none !important; transition: none !important; }
+  .lab-ambient-bubbles { display: none !important; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .lab-card, .lab-office, .lab-run, .lab-budget, .lab-float { background: var(--lab-surface); border-color: #c9cfc4; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .lab-now { background: var(--lab-tint); border-color: #c9cfc4; }
+  .lab-card::before, .lab-now::before, .lab-now::after { display: none; }
+  .lab-office-labels span { background: var(--lab-surface); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lab-float { background: rgba(255, 255, 255, .95); }
+}
+@media (forced-colors: active) {
+  .lab-card, .lab-office, .lab-run, .lab-budget, .lab-float, .lab-now { border: 1px solid CanvasText; }
+  .lab-page .role-button[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}

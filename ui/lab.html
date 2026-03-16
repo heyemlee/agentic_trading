@@ -14,50 +14,89 @@
 <link rel="stylesheet" href="assets/console.css" />
 <link rel="stylesheet" href="assets/lab.css" />
 </head>
-<body>
+<body class="theme-mono lab-glass">
 <main id="content" class="lab-page" hidden data-i18n-title="lab.title">
   <div class="lab-container">
-    <section class="lab-now" aria-label="Current activity" aria-live="polite">
-      <span class="lab-now-label" data-i18n="lab.now">Now</span>
-      <div class="lab-now-copy"><strong id="now-title"></strong><span id="now-caption"></span></div>
-      <div class="lab-budget"></div>
-    </section>
-
-    <div class="lab-workbar">
-      <div class="lab-run-choice"><span id="symbol">—</span><span id="instrument" class="lab-instrument-tag" hidden></span><select id="mode" aria-label="Which run to show"></select></div>
-    </div>
+    <header class="lab-head">
+      <h1 data-i18n="lab.title">Lab</h1>
+      <p class="lab-budget" role="status"></p>
+    </header>
 
     <div class="lab-workspace">
-      <section class="lab-office" aria-label="Research office">
-        <div class="lab-scene-head"><div><span class="eyebrow">RESEARCH FLOOR</span><h1 id="office-title"></h1></div><span id="mode-badge" class="lab-mode-badge"></span></div>
+      <div class="lab-pick">
+        <!-- The native picker lies invisibly over the capsule, so a tap opens the phone's own list. -->
+        <div class="lab-run">
+          <span id="run-orb" class="lab-orb" aria-hidden="true">—</span>
+          <span class="lab-run-copy">
+            <span class="lab-run-line"><strong id="symbol">—</strong><span id="instrument" class="lab-tag" hidden></span></span>
+            <span id="run-label" class="lab-run-sub"></span>
+          </span>
+          <span class="lab-chevron" aria-hidden="true"></span>
+          <select id="mode" aria-label="Which run to show"></select>
+        </div>
+        <p class="lab-demo-note" hidden></p>
+      </div>
+
+      <section class="lab-now" aria-label="Current activity" aria-live="polite">
+        <span id="mode-badge" class="lab-mode"></span>
+        <strong id="now-title"></strong>
+        <span id="now-caption"></span>
+        <p id="rest-note" class="lab-rest-note" hidden></p>
+      </section>
+
+      <section class="lab-office" aria-labelledby="office-title">
+        <h2 id="office-title" class="sr-only"></h2>
         <div class="lab-scene" id="scene"><div class="lab-scene-canvas">
           <canvas id="pixel-office" width="320" height="296" role="img" aria-label="Pixel research office with four connected work areas"></canvas>
           <div id="gestures" aria-hidden="true"></div><div id="vacancies" aria-hidden="true"></div><div id="rig-seat"></div>
-          <div class="lab-office-labels" aria-hidden="true"><span style="left:15%;top:15.5%" data-i18n="lab.zone.analysis">Analysis</span><span style="left:68%;top:17%" data-i18n="lab.zone.debate">Debate</span><span style="left:12%;top:65%" data-i18n="lab.zone.trade">Trading & rating</span><span style="left:63%;top:64%" data-i18n="lab.zone.risk">Risk</span></div>
+          <div class="lab-office-labels" aria-hidden="true"><span style="left:15%;top:15.5%" data-zone="analysis" data-i18n="lab.zone.analysis">Analysis</span><span style="left:69%;top:48%" data-zone="debate" data-i18n="lab.zone.debate">Debate</span><span style="left:12%;top:65%" data-zone="trade" data-i18n="lab.zone.trade">Trading & rating</span><span style="left:54%;top:63.5%" data-zone="risk" data-i18n="lab.zone.risk">Risk</span></div>
           <div id="people" class="lab-people"></div>
           <div id="walker" hidden aria-hidden="true"><span></span><small id="walk-speech" hidden></small></div>
           <div id="ambient-bubbles" class="lab-ambient-bubbles" aria-hidden="true"></div>
           <div id="flying-file" class="lab-flying-file" hidden aria-hidden="true">▤</div>
+          <button id="ambient" class="lab-float lab-motion" type="button" aria-pressed="true">
+            <svg class="lab-icon-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="5.5" width="3.4" height="13" rx="1.2"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1.2"/></svg>
+            <svg class="lab-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.8v12.4a1 1 0 0 0 1.5.86l10-6.2a1 1 0 0 0 0-1.72l-10-6.2a1 1 0 0 0-1.5.86Z"/></svg>
+          </button>
+          <div class="lab-float lab-replay" id="replay-controls" role="group" data-i18n-aria="lab.byEvent" aria-label="Stage by stage">
+            <button id="previous" type="button" data-i18n-aria="lab.previous" aria-label="Previous stage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5 9 12l5.5 5.5"/></svg></button>
+            <span id="event-number"></span>
+            <button id="next" type="button" data-i18n-aria="lab.next" aria-label="Next stage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5 15 12l-5.5 5.5"/></svg></button>
+          </div>
         </div></div>
-        <div class="lab-scene-bottom"><span id="scene-caption"></span><button id="walk" class="lab-text-button" data-i18n="lab.walk">Send selected Agent to talk ↗</button></div>
-        <div class="lab-ambience"><span data-i18n="lab.motion">Pixel office · typing / reading / visits</span><button id="ambient" class="lab-text-button" aria-pressed="true"></button></div>
-        <div class="lab-demo-note" hidden></div>
-        <div class="lab-replay-controls" id="replay-controls"><button id="previous" class="btn btn-secondary" data-i18n="lab.previous">Previous event</button><div><span id="event-number"></span><small data-i18n="lab.byEvent">Event replay</small></div><button id="next" class="btn btn-green" data-i18n="lab.next">Next event</button></div>
-        <div id="rest-note" class="lab-rest-note" hidden></div>
+        <div class="lab-scene-foot"><span id="scene-caption"></span><button id="walk" class="lab-pill" type="button" data-i18n="lab.walk">Walk the handoff ↗</button></div>
       </section>
 
-      <aside class="lab-sidebar">
-        <section class="lab-panel" aria-live="polite">
-          <div class="lab-section-top"><span class="eyebrow">DESK / <span id="selected-zone"></span></span><span id="selected-state" class="lab-state-tag"></span></div>
-          <div class="lab-selected-title"><div id="portrait" class="lab-portrait"></div><div><h2 id="selected-name"></h2><p id="selected-meta"></p></div></div>
-          <blockquote id="selected-bubble"></blockquote><div id="selected-reason" class="lab-reason"></div>
-        </section>
-        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.desks">Desks</h2><span id="team-count" class="lab-muted"></span></div><div id="roster"></div></section>
-        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.rules">Rules & approval</h2><span class="lab-rule-label" data-i18n="lab.deterministic">Deterministic rules</span></div><div id="gate-result"></div><button class="lab-approval approval" disabled></button><p class="lab-caption" data-i18n="lab.managerLimit">The portfolio manager rates; rules and you still decide execution.</p></section>
-        <section class="lab-panel"><div class="lab-section-top"><h2 data-i18n="lab.activity">Activity</h2><span class="lab-muted" data-i18n="lab.events">Discrete events</span></div><ol id="events" class="lab-events"></ol></section>
-      </aside>
-    </div>
+      <section class="lab-card lab-desk" id="desk-card" aria-live="polite">
+        <div class="lab-desk-head">
+          <div id="portrait" class="lab-portrait"></div>
+          <div class="lab-desk-id">
+            <h2 id="selected-name"></h2>
+            <p class="lab-desk-where"><span id="selected-zone"></span><span id="selected-state" class="lab-state"></span></p>
+          </div>
+        </div>
+        <blockquote id="selected-bubble"></blockquote>
+        <p id="selected-meta" class="lab-fine"></p>
+        <div id="selected-reason" class="lab-reason"></div>
+      </section>
 
+      <section class="lab-card lab-gate">
+        <div class="lab-card-head"><h2 data-i18n="lab.rules">Rules & approval</h2><span class="lab-tag" data-i18n="lab.deterministic">Deterministic rules</span></div>
+        <div id="gate-result"></div>
+        <button class="lab-approval approval" type="button" disabled></button>
+        <p class="lab-fine lab-gate-note" data-i18n="lab.managerLimit">The portfolio manager rates; rules and you still decide execution.</p>
+      </section>
+
+      <section class="lab-card lab-feed">
+        <div class="lab-card-head"><h2 data-i18n="lab.activity">Activity</h2><span class="lab-count" data-i18n="lab.events">Discrete events</span></div>
+        <ol id="events" class="lab-events"></ol>
+      </section>
+
+      <section class="lab-card lab-roster">
+        <div class="lab-card-head"><h2 data-i18n="lab.desks">Desks</h2><span id="team-count" class="lab-count"></span></div>
+        <div id="roster"></div>
+      </section>
+    </div>
   </div>
 </main>
 <script src="assets/i18n.js"></script>

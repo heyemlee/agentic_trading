@@ -2649,6 +2649,59 @@ test('reports that name a different run are refused, not drawn on this office', 
   assert.equal(deskStates(c).market, 'waiting', 'no desk may show another run’s report');
   assert.doesNotMatch(c.element('#roster').innerHTML, /wrong run/);
   assert.equal(c.element('.lab-demo-note').hidden, false);
+  assert.equal(c.element('.lab-demo-note').dataset.kind, 'error', 'a refusal reads as a fault, not as demo data');
+});
+
+test('the run capsule names the run on screen, and a settled run ends on when the next is due', async () => {
+  const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+                  policy_action: 'NO_TRADE', steps: [] };
+  const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                                   policy_action: 'NO_TRADE', final_action: 'NO_TRADE' }],
+                      fetchJSON: async () => trace });
+  await flush();
+  c.render();
+
+  assert.equal(c.element('.lab-run').hidden, false);
+  assert.equal(c.element('#run-orb').textContent, 'V');
+  // The ticker heads the capsule, so the line under it is the date and the outcome only.
+  assert.match(c.element('#run-label').textContent, /^Sep 4, 2026 · No Trade$/);
+  assert.equal(c.element('#mode-badge').dataset.mode, 'done');
+  // Today's budget is in the head; the settled run's own card only says when the next is due.
+  assert.equal(c.element('#rest-note').hidden, false);
+  assert.match(c.element('#rest-note').textContent, /^lab\.nextAt /);
+
+  const empty = labPage({ research: [], jobs: [] });
+  assert.equal(empty.element('.lab-run').hidden, true, 'with nothing to pick the picker goes');
+  assert.equal(empty.element('#mode-badge').dataset.mode, 'none');
+  assert.equal(empty.element('#rest-note').hidden, true, 'the caption already names the next run');
+});
+
+test('a desk picked from the list brings its card into view; one picked in the office does not', () => {
+  const c = labPage({ research: [], jobs: [] });
+  const scrolls = [];
+  c.element('#desk-card').scrollIntoView = (options) => scrolls.push(options);
+  const pick = (role, className) => c.document.dispatchEvent({ type: 'click', target: {
+    closest: (selector) => selector === '[data-role]'
+      ? { dataset: { role }, classList: { contains: (name) => name === className } } : null } });
+
+  pick('news', 'person');
+  assert.equal(c.labPixelScene.synced.selected, 'news');
+  assert.equal(scrolls.length, 0, 'the office sits right above the card');
+  pick('bear', 'role-button');
+  assert.equal(c.labPixelScene.synced.selected, 'bear');
+  assert.deepEqual(scrolls.map((o) => [o.block, o.behavior]), [['nearest', 'auto']],
+                   'reduced motion jumps rather than glides');
+});
+
+test('the Lab keeps its own colours: only its words and buttons turn ink', () => {
+  /* The owner's rule, 2026-09-23. A redesign once drew the office, its people and their
+     portraits in grey to match the console's ink. The room is drawn in the colours it was
+     painted with, and so are the portraits; the type and the buttons are what turn ink. */
+  const css = uiFile('assets/lab.css'), html = uiFile('lab.html');
+  assert.doesNotMatch(css, /grayscale|saturate\(0/);
+  assert.doesNotMatch(html, /data-palette|grayscale/);
+  assert.match(uiFile('assets/lab/pixel-office.js'), /floor:'#e9e5da'/);
+  assert.match(uiFile('assets/pages/lab.js'), /hue-rotate\(/, 'the second six keep their own colouring in the portrait');
 });
 
 test('unchanged polls and clock ticks preserve the page; errors and new data notify it', async () => {
@@ -3310,8 +3363,14 @@ test('the loading animation and the chrome ask the main thread for nothing per f
     const moved = new Set([...body.matchAll(/([a-z-]+)\s*:/g)].map(m => m[1]));
     assert.deepEqual([...moved].filter(name => !['transform', 'opacity'].includes(name)), [], body);
   }
-  const lab = fs.readFileSync(path.join(root, 'ui/assets/lab.css'), 'utf8');
-  assert.doesNotMatch(lab.match(/\.lab-now\{[^}]*\}/)[0], /backdrop-filter/);
+  /* The Lab's status card sits over nothing that moves: a blur there is recomputed on every
+     scrolled frame and shows nothing (f44292c). Only the controls floating over the office,
+     where there is something to blur, blur. */
+  const lab = fs.readFileSync(path.join(root, 'ui/assets/lab.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const now = [...lab.matchAll(/\.lab-now\s*\{[^}]*\}/g)].map(m => m[0]);
+  assert.ok(now.length > 0, 'the status card is styled');
+  now.forEach(rule => assert.doesNotMatch(rule, /backdrop-filter/, rule));
+  assert.deepEqual([...lab.matchAll(/([^{}]+)\{[^}]*backdrop-filter:\s*blur/g)].map(m => m[1].trim()), ['.lab-float']);
   const chrome = fs.readFileSync(path.join(root, 'ui/assets/console.css'), 'utf8');
   assert.match(chrome, /\.topnav \{ background: #fff;[^}]*backdrop-filter: none;/);
   assert.match(chrome, /html:has\(dialog\[open\]\) \.assistant-launcher::before \{ animation-play-state: paused; \}/);

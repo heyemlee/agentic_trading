@@ -283,11 +283,19 @@ window.Console.page('lab', function (document) {
     q('#instrument').hidden = !v.instrument;
     q('#instrument').textContent = v.instrument ? label('lab.' + v.instrument, v.instrument) : '';
     q('#office-title').textContent = C.t('lab.officeTitle', { symbol: v.run ? v.run.ticker : '—' });
-    q('#mode-badge').textContent = label('lab.mode.' + v.mode, v.mode);
+    const badge = q('#mode-badge');
+    badge.textContent = label('lab.mode.' + v.mode, v.mode);
+    badge.dataset.mode = v.mode;
 
     const select = q('#mode');
     const runs = runList();
     const current = v.run ? v.run.key : '';
+    /* The capsule over the picker names the run shown; the ticker already heads it, so the
+       line under it carries only the date and the outcome. With nothing to pick, it goes. */
+    q('.lab-run').hidden = !runs.length;
+    q('#run-orb').textContent = v.run ? String(v.run.ticker).charAt(0) : '—';
+    q('#run-label').textContent = v.run ? [C.dateOnly(v.run.date),
+      v.run.live ? C.t('lab.runningNow') : C.code(v.run.finalAction || v.run.policy || v.run.state)].join(' · ') : '';
     const markup = runs.length
       ? runs.map((r) => '<option value="' + C.escapeHtml(r.key) + '"' +
           (r.key === current ? ' selected' : '') + '>' +
@@ -314,20 +322,18 @@ window.Console.page('lab', function (document) {
       q('#previous').disabled = v.position <= 0;
       q('#next').disabled = v.position >= v.steps.length - 1;
     }
+    /* A settled run ends on when the next one is due. What is left of today's budget is
+       already in the head, and with no run at all the caption above says it. */
     const note = q('#rest-note');
     const schedule = D.schedule || {};
-    note.hidden = !(v.mode === 'done' || v.mode === 'none') || !schedule.next_run_at;
-    if (!note.hidden) {
-      note.textContent = C.t('lab.nextRun', {
-        n: Math.max(0, (schedule.daily_budget || 0) - (schedule.analyses_today || 0)),
-        at: C.dateTime(schedule.next_run_at),
-      });
-    }
+    note.hidden = !(v.mode === 'done' || v.mode === 'replay') || !schedule.next_run_at;
+    if (!note.hidden) note.textContent = C.t('lab.nextAt', { at: C.dateTime(schedule.next_run_at) });
     const demo = q('.lab-demo-note');
     if (demo) {
       demo.hidden = !window.CT_DEMO && !(v.trace && v.trace.failed);
       demo.textContent = window.CT_DEMO ? C.t('lab.demoNote')
         : v.trace && v.trace.failed ? C.t('lab.traceFailed', { err: v.trace.failed }) : '';
+      demo.dataset.kind = window.CT_DEMO ? 'demo' : 'error';
     }
   }
 
@@ -340,6 +346,8 @@ window.Console.page('lab', function (document) {
     q('#people').innerHTML = seated.map((d) =>
       '<button class="person" data-role="' + C.escapeHtml(d.id) + '" data-state="' + C.escapeHtml(d.state) +
         '" data-pose="seated" data-label="' + (d.y < 40 ? 'below' : 'above') +
+        '" data-edge="' + (d.x < 25 ? 'start' : d.x > 75 ? 'end' : 'middle') +
+        '" data-zone="' + C.escapeHtml(ZONE[d.group] || '') +
         '" aria-pressed="' + (chosenRole === d.id) + '" aria-label="' +
         C.escapeHtml(d.name + ', ' + label('lab.state.' + d.state, d.state)) + '" style="left:' + d.x +
         '%;top:' + d.y + '%;z-index:' + Math.round(d.y) + '">' +
@@ -360,18 +368,17 @@ window.Console.page('lab', function (document) {
     const desk = v.desks.find((d) => d.key === chosenRole) || v.desks[0];
     const state = desk.state;
     const index = SEATS.indexOf(desk.key);
+    /* The worker at this desk, cropped to head and shoulders by lab.css. The second six share
+       the first six's sheets and are recoloured in the room, so they are here too. */
     const portrait = q('#portrait');
     portrait.style.backgroundImage = "url('assets/lab/pixel-agents/characters/char_" +
       (index < 0 ? 0 : index % 6) + ".png')";
-    portrait.style.backgroundSize = '700% 300%';
-    portrait.style.backgroundPosition = '0 0';
     portrait.style.filter = index >= 6 ? 'hue-rotate(' + [25, -20, 55, -30, 30, 60][index - 6] + 'deg)' : '';
 
     q('#selected-name').textContent = desk.name;
     q('#selected-zone').textContent = desk.zone;
     q('#selected-state').textContent = label('lab.state.' + state, state);
-    q('#selected-state').style.color = state === 'error' ? 'var(--lab-error)'
-      : state === 'stalled' ? 'var(--lab-warning)' : '';
+    q('#selected-state').dataset.state = state;
 
     let meta = '', bubble = '';
     if (state === 'disabled') {
@@ -498,9 +505,15 @@ window.Console.page('lab', function (document) {
   /* ── motion ───────────────────────────────────────────────────────── */
   function startAmbience(v) {
     document.documentElement.dataset.ambient = canAnimate() ? 'on' : 'off';
-    q('#ambient').textContent = C.t(reduced.matches ? 'lab.motionReduced'
+    /* An icon over the office: what it would do is its name, and the system's own
+       reduced-motion setting leaves it nothing to do. */
+    const button = q('#ambient');
+    const name = C.t(reduced.matches ? 'lab.motionReduced'
       : ambientEnabled ? 'lab.motionPause' : 'lab.motionPlay');
-    q('#ambient').setAttribute('aria-pressed', String(ambientEnabled));
+    button.setAttribute('aria-label', name);
+    button.title = name;
+    button.setAttribute('aria-pressed', String(ambientEnabled && !reduced.matches));
+    button.disabled = reduced.matches;
   }
   function stopMotion() {
     epoch += 1;
@@ -568,7 +581,14 @@ window.Console.page('lab', function (document) {
   /* ── input ────────────────────────────────────────────────────────── */
   document.addEventListener('click', (event) => {
     const desk = event.target.closest && event.target.closest('[data-role]');
-    if (desk) { chosenRole = desk.dataset.role; render(); }
+    if (!desk) return;
+    chosenRole = desk.dataset.role;
+    render();
+    /* A desk picked from the list is read in the card above it, out of sight on a phone,
+       so the card comes to the reader. The office sits right over the card and needs none. */
+    if (desk.classList && desk.classList.contains('role-button')) {
+      q('#desk-card').scrollIntoView({ block: 'nearest', behavior: reduced.matches ? 'auto' : 'smooth' });
+    }
   });
   q('#mode').addEventListener('change', (e) => {
     stopMotion();
