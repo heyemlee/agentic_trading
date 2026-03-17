@@ -36,9 +36,14 @@ INDEPENDENCE_DAY = datetime(2026, 7, 3, 21, 0, tzinfo=UTC)       # observed holi
 
 @pytest.fixture
 def sandbox(tmp_path):
-    """A Service and a state database whose every path is inside a temp directory."""
+    """A Service and a state database whose every path is inside a temp directory.
+
+    These cases are the single review's mechanics, so the copy names no account, whatever the
+    deployment's own schedule names.
+    """
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
+    accounts_config(cfg, {})
     (tmp_path / "state").mkdir()
     (tmp_path / "runs").mkdir()
     copy_example_ledger("portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
@@ -241,16 +246,17 @@ def micro_ledger(state_dir, *symbols):
 def test_without_accounts_the_plan_and_the_key_are_what_they_always_were(cfg):
     """Installing per-account scheduling must not make this week look unexecuted.
 
-    The deployed schedule is one weekly review. If its executed-period key changed shape, the
-    current period would read as never run and the next trigger would spend a week's allowance
-    researching it again.
+    A deployment that names no account runs one weekly review. If its executed-period key
+    changed shape, the current period would read as never run and the next trigger would spend
+    a week's allowance researching it again.
     """
-    plan = schedule.tasks(cfg)
+    unscoped = {**cfg, "accounts": {}}
+    plan = schedule.tasks(unscoped)
     assert len(plan) == 1
     assert (plan[0].bucket, plan[0].kind, plan[0].scoped) == ("core", schedule.REVIEW, False)
-    assert schedule.period_key(cfg, FRIDAY_AFTER_CLOSE, plan[0]) == schedule.period_key(
-        cfg, FRIDAY_AFTER_CLOSE)
-    assert schedule.finest_period(cfg) == cfg["period"]
+    assert schedule.period_key(unscoped, FRIDAY_AFTER_CLOSE, plan[0]) == schedule.period_key(
+        unscoped, FRIDAY_AFTER_CLOSE)
+    assert schedule.finest_period(unscoped) == unscoped["period"]
 
 
 def test_holdings_come_before_candidates_and_each_account_keeps_its_own_period(cfg):

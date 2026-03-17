@@ -248,7 +248,8 @@ def test_pending_change_can_be_withdrawn_and_refuses_moved_ground(sandbox):
 def test_section_edit_from_the_console(sandbox):
     section = sandbox.config_section(RISK, "research_schedule")
     assert "\nresearch_schedule:\n" in section["text"] and section["guarded"] is False
-    edited = section["text"].replace("max_tickers_per_run: 3", "max_tickers_per_run: 2")
+    # The first occurrence is the section's own cap; a per-account block may repeat the phrase.
+    edited = section["text"].replace("max_tickers_per_run: 3", "max_tickers_per_run: 2", 1)
     result = sandbox.submit_config_change(file=RISK, revision=section["revision"],
                                           key="research_schedule", text=edited, identity="owner")
     assert result["status"] == cc.APPLIED

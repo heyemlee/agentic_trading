@@ -263,6 +263,7 @@ What changes when an account is named:
 | Budget | `reserve_for_exits` is the part of `max_analyses_per_day` a candidate study may not touch. A holdings review draws on the whole allowance, because a holdings review is how an exit is found. The day's count is re-read between tasks, so two tasks cannot together spend more than the subscription allows. |
 | Period keys | Each task claims its own: `daily:micro_live:holdings:2026-09-19`. One account's review can never mark another's as already run, nor a holdings review a candidate study. The single Core review keeps the unscoped key it has always had. |
 | The launchd job | Fires as often as the shortest period any account asks for. A daily review invoked only on Fridays would be a weekly review wearing a daily name, so `research_schedule.launchd.weekday` is dropped from the job once any task is daily. Changing this section re-registers the job. |
+| Weekends | A daily period is keyed by calendar date, and a non-session day analyses the previous session (`on_non_session_day: previous_session`), so a daily task studies Friday's session again on Saturday and on Sunday. `skip` avoids that for every task, a weekly period for its own. This deployment schedules the Agentic account weekly for that reason. |
 | `ct-trigger scheduled` | Runs every configured task. `--bucket micro_live` narrows it to one account's tasks. |
 | Purpose | A holdings run is recorded with `purpose: review_holding`, a candidate run with `candidate`, which is what the research record and the queue then carry. |
 
