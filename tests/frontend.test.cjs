@@ -367,6 +367,47 @@ test('a long candidate pool shows a page at a time', () => {
   assert.match(c.element('candidate-list').innerHTML, /dc.noSnapshot/);
 });
 
+/* The account the assistant sees is chosen in one tap, from the capsule in its header. Each row is
+   a link to this page for that scope, which the router pushes as history Back skips. */
+test('the account picker lists every scope, marks the current one, and names it without its id', async () => {
+  const c = advisorPage(async () => ({}), { search: '?scope=personal&account=aaaaaaaaaaaaaaaaaaaa' });
+  c.CT.accounts.accounts.forEach((row, i) => { row.account_label = '••••' + (i ? '2222' : '1111'); });
+  c.render(); await flush();
+  const rows = c.element('assistant-account').innerHTML;
+  assert.deepEqual([...rows.matchAll(/data-account-choice="([^"]+)"/g)].map(m => m[1]),
+    ['personal:', 'personal:aaaaaaaaaaaaaaaaaaaa', 'personal:bbbbbbbbbbbbbbbbbbbb', 'agentic']);
+  assert.match(rows, /data-account-choice="personal:aaaaaaaaaaaaaaaaaaaa" href="advisor\.html\?scope=personal&amp;account=aaaaaaaaaaaaaaaaaaaa" aria-current="true"/);
+  assert.equal((rows.match(/aria-current/g) || []).length, 1, 'one current account');
+  assert.match(rows, /data-account-choice="agentic" href="advisor\.html\?scope=agentic"/);
+  assert.equal(c.element('assistant-account-label').textContent, '••••1111', 'the directory’s name while the reading has none');
+  assert.equal(c.element('context-account-name').textContent, '••••1111');
+  assert.equal(c.element('scope-dot').className, 'scope-dot');
+  c.CT_API.isLive = key => key !== 'assistant'; c.render();
+  assert.equal(c.element('scope-dot').className, 'scope-dot is-warn', 'an out-of-date reading shows on the capsule');
+  assert.equal(c.element('assistant-account-status').textContent, 'ai.scopeStale');
+
+  const lost = advisorPage(async () => ({}), { search: '?scope=personal&account=cccccccccccccccccccc' });
+  assert.match(lost.element('assistant-account').innerHTML, /data-account-choice="personal:cccccccccccccccccccc"[^>]*aria-current="true"/,
+    'a binding the directory lacks stays listed as the current one');
+  assert.equal(lost.element('scope-dot').className, 'scope-dot is-warn');
+  assert.equal(lost.element('assistant-account-status').textContent, 'ai.unknownAccount');
+});
+
+test('the view switch moves its lens, keeps the chat tools to Chat, and is absent for Agentic', () => {
+  const c = advisorPage(async () => ({}));
+  assert.equal(c.element('view-switch').dataset.index, '0');
+  assert.equal(c.element('chat-tools').hidden, false);
+  c.element('view-discover').events.click();
+  assert.equal(c.element('view-switch').dataset.index, '1');
+  assert.equal(c.element('chat-tools').hidden, true, 'history and a new conversation belong to Chat');
+  c.element('view-chat').events.click();
+  assert.equal(c.element('view-switch').dataset.index, '0');
+  assert.equal(c.element('assistant-subhead').hidden, false);
+  const agentic = advisorPage(async () => ({}), { search: '?scope=agentic' });
+  assert.equal(agentic.element('assistant-subhead').hidden, true, 'one view, so nothing to switch');
+  assert.equal(agentic.element('assistant-account-label').textContent, 'Agentic');
+});
+
 test('the demo assistant is the one advisor fixture, narrowed to an account the way the service narrows it', () => {
   const c = context(true); c.run('api.js');
   const A = 'a'.repeat(20), B = 'b'.repeat(20);

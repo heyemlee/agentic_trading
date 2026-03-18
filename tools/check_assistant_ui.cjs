@@ -84,7 +84,7 @@ const ui = path.resolve(__dirname, '../ui');
     await assertComposer();
     assert.equal(await page.locator('.assistant-spark, .welcome-eyebrow, #assistant-intro, .composer-note, [data-i18n="ai.welcomeTitle"]').count(), 0);
     assert.equal(await page.locator('#assistant-account-status').isVisible(), false);
-    assert.equal(await page.locator('#context-sheet #assistant-account-status').count(), 1);
+    assert.equal(await page.locator('#account-sheet #assistant-account-status').count(), 1);
     await page.locator('.conn-bar').evaluate(el => { el.hidden = false; });
     assert.equal(await page.locator('.conn-bar').isVisible(), false, 'No shared status banner in the assistant');
     await capture('assistant-welcome-phone');
@@ -98,15 +98,20 @@ const ui = path.resolve(__dirname, '../ui');
     await page.locator('#chat-input').press('Enter');
     assert.match(await page.locator('#chat-input').inputValue(), /\n/);
     assert.equal(posts.length, 0, 'Phone Enter inserts a newline');
-    const openContext = async () => { if (!await page.locator('#context-sheet').evaluate(el => el.open)) await page.locator('#assistant-context').click(); };
+    const openContext = async () => { if (!await page.locator('#context-sheet').evaluate(el => el.open)) await page.locator('.composer-context').click(); };
+    // One tap each: the header's capsule opens the picker, and a row switches and closes it.
     const select = async (choice, account) => {
-      await openContext();
-      await page.locator('#assistant-account').selectOption(choice); await page.locator('#assistant-switch').click();
+      await page.locator('#assistant-context').click();
+      await page.waitForFunction(() => document.getElementById('account-sheet').open);
+      await page.locator('#assistant-account [data-account-choice="' + choice + '"]').click();
       await page.waitForFunction(id => CT.assistant?.account_id === id, account);
+      await page.waitForFunction(() => !document.getElementById('account-sheet').open);
+      assert.equal(await page.locator('#assistant-account [aria-current="true"]').getAttribute('data-account-choice'), choice);
     };
     await page.locator('#chat-input').fill('All accounts draft');
     await select('personal:' + accounts[0], accounts[0]);
     assert.equal(await page.locator('#chat-input').inputValue(), '');
+    assert.equal(await page.locator('#assistant-account-label').innerText(), 'Account A', 'The capsule names the account in view');
     await page.locator('#chat-input').fill('Account A draft');
     await select('personal:' + accounts[1], accounts[1]);
     assert.equal(await page.locator('#chat-input').inputValue(), '');
@@ -129,9 +134,18 @@ const ui = path.resolve(__dirname, '../ui');
     await page.waitForFunction(() => document.getElementById('advisor-status').textContent.includes('加入'));
     const review = posts.find(p => p.body.kind === 'portfolio_review');
     assert.equal(review.body.scope, 'personal'); assert.equal(review.body.account_id, accounts[0]);
+    // The tools sheet names its account and hands over to the picker.
+    await openContext();
+    assert.equal(await page.locator('#context-account-name').innerText(), 'Account A');
+    await page.locator('#context-account').click();
+    await page.waitForFunction(() => document.getElementById('account-sheet').open && !document.getElementById('context-sheet').open);
+    await page.locator('[data-close-sheet="account-sheet"]').click();
+    await page.waitForFunction(() => !document.getElementById('account-sheet').open);
     await select('agentic', 'micro_live');
     assert.equal(await page.locator('#review-panel').isVisible(), false);
     assert.equal(await page.locator('#view-discover').isVisible(), false);
+    assert.equal(await page.locator('#assistant-subhead').isVisible(), false, 'Agentic has one view, so no switch');
+    assert.equal(await page.locator('#assistant-account-label').innerText(), 'Agentic');
     await page.locator('#chat-input').fill('Explain this account'); await page.locator('#chat-send').click();
     await page.waitForFunction(() => document.getElementById('chat-input').value === '');
     const chat = posts.find(p => p.body.kind === 'chat'); assert.equal(chat.body.scope, 'agentic'); assert.equal(chat.body.account_id, null);
@@ -211,10 +225,13 @@ const ui = path.resolve(__dirname, '../ui');
       await page.setViewportSize({ width, height });
       await page.waitForFunction(() => Math.abs(document.body.getBoundingClientRect().height - innerHeight) < 1);
       await assertComposer();
+      const header = await page.evaluate(() => ({ pill: document.getElementById('assistant-context').getBoundingClientRect().right,
+        tools: document.getElementById('chat-tools').getBoundingClientRect().left }));
+      assert.ok(header.pill <= header.tools, 'The account capsule never runs under the chat tools: ' + JSON.stringify(header));
       await page.locator('#assistant-context').click();
       assert.equal(await page.locator('#assistant-account').isVisible(), true);
-      await page.locator('[data-close-sheet="context-sheet"]').click();
-      await page.waitForFunction(() => !document.getElementById('context-sheet').open);
+      await page.locator('[data-close-sheet="account-sheet"]').click();
+      await page.waitForFunction(() => !document.getElementById('account-sheet').open);
     }
     // Emulate a mobile visual viewport shrinking while the layout viewport stays tall.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -248,13 +265,17 @@ const ui = path.resolve(__dirname, '../ui');
     assert.equal(await page.locator('.tabbar').isVisible(), false, 'Discover is part of the same immersive assistant');
     assert.equal(await page.locator('#assistant-back').isVisible(), true);
     assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
+    assert.equal(await page.locator('#view-switch').getAttribute('data-index'), '1', 'The lens moves to Discover');
+    assert.equal(await page.locator('#chat-tools').isVisible(), false, 'History and a new conversation belong to Chat');
     await page.locator('#view-chat').click();
+    assert.equal(await page.locator('#view-switch').getAttribute('data-index'), '0');
+    assert.equal(await page.locator('#chat-tools').isVisible(), true);
     await page.locator('#chat-input').focus();
     await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
     await page.locator('#assistant-context').click();
     assert.equal(await page.locator('#assistant-account').isVisible(), true);
-    await page.locator('[data-close-sheet="context-sheet"]').click();
-    await page.waitForFunction(() => !document.getElementById('context-sheet').open);
+    await page.locator('[data-close-sheet="account-sheet"]').click();
+    await page.waitForFunction(() => !document.getElementById('account-sheet').open);
     // After dismissal, both offset and height can remain stale. A sub-keyboard
     // height difference must not leave the navigation suspended above the bottom.
     await page.evaluate(() => {

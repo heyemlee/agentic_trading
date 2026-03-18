@@ -390,6 +390,13 @@ window.I18N = (function () {
       'ai.cash': 'Cash',
       /* chrome */
       'app.chat': 'Chat', 'app.discover': 'Discover',
+      /* Assistant · the account picker */
+      'ai.chooseAccount': 'Choose an account',
+      'ai.chooseAccountHint': 'The assistant only sees the account you choose. Drafts and conversations are kept separately for each.',
+      'ai.groupPersonal': 'Personal Robinhood accounts', 'ai.groupManaged': 'Run by this system',
+      'ai.pickAll': 'Every personal account together', 'ai.pickOne': 'This account only',
+      'ai.pickAgentic': 'Real money · explains only, cannot trade',
+      'ai.accountButton': 'Account: {label}. Choose another account',
       /* Assistant · Discover */
       'dc.eyebrow': 'Assistant picks',
       'dc.title': 'Find the best fits in your candidate pool',
@@ -1302,6 +1309,13 @@ window.I18N = (function () {
       'ai.cash': '现金',
       /* chrome */
       'app.chat': '聊天', 'app.discover': '选股',
+      /* 助手 · 账户选择 */
+      'ai.chooseAccount': '选择账户',
+      'ai.chooseAccountHint': '助手只看你选中的账户。草稿和对话按账户分开保存。',
+      'ai.groupPersonal': '个人 Robinhood 账户', 'ai.groupManaged': '系统管理',
+      'ai.pickAll': '一起看所有个人账户', 'ai.pickOne': '只看这一个账户',
+      'ai.pickAgentic': '真金账户 · 只能解释，不能下单',
+      'ai.accountButton': '当前账户：{label}，点按切换',
       /* 助手 · 选股 */
       'dc.eyebrow': '助手选股',
       'dc.title': '从候选池里，挑出最适合你的',

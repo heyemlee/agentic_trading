@@ -1,8 +1,9 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Assets — liquid glass, ink on white.
+ * Assets — liquid glass, in Home's Robinhood palette.
  *
- * The page opts in with <body class="theme-mono pf-glass">: theme-mono (console.css)
- * turns the shared components ink on white, and this file draws the page's own. Every
+ * The page opts in with <body class="pf-glass">. Like Home, it carries no theme class, so the
+ * shared components keep the console's own green, and this file draws the page's own from the
+ * same values Home uses: its green-tinted field, card fill, hairlines and soft shadow. Every
  * rule is scoped to a .pf- class or to body.pf-glass, because the server ships this sheet
  * with every console page (api/app.py, primary_templates) so a tap from another tab can
  * show Assets before any stylesheet has to be fetched.
@@ -13,11 +14,11 @@
  * scrolled frame for every card on screen (the cost that made the Lab's status bar solid,
  * f44292c). Only the small controls that float over content blur what is behind them.
  *
- * Colour says one thing only: a gain is green and a loss is red. They are resolved on
- * :root, before theme-mono turns --green into ink for decoration, and mixed from the
- * brand values the way console.css derives everything else. --green-ink (44% black) read
- * as black at 13px; 30% keeps the hue and still clears AA: 5.5:1 on white and 5.0:1 on
- * the grey fill, measured. The red is darkened to the same weight (5.8:1).
+ * Green fills the one action a view leads with, the selected account and anything live, as
+ * it does on Home; text stays black. Gain and loss are mixed from the brand values the way
+ * console.css derives everything else. --green-ink (44% black) read as black at 13px; 30%
+ * keeps the hue and still clears AA: 5.5:1 on white and 5.0:1 on the grey fill, measured.
+ * The red is darkened to the same weight (5.8:1).
  * ───────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -26,28 +27,21 @@
 }
 
 body.pf-glass {
-  --pf-ink: #0d0d0d;
-  --pf-ink-2: #5d5d5d;
-  --pf-ink-3: #8f8f8f;
-  --pf-line: rgba(13, 13, 13, .08);
-  --pf-fill: rgba(13, 13, 13, .045);
+  --pf-ink: var(--fg);
+  --pf-ink-2: var(--muted);
+  --pf-ink-3: var(--meta);
+  --pf-line: var(--divider);
+  --pf-fill: #edf1eb;                       /* Home's secondary fill */
   --pf-radius: 28px;
-  --pf-glass: linear-gradient(180deg, rgba(255, 255, 255, .86) 0%, rgba(255, 255, 255, .64) 100%);
-  --pf-edge: rgba(255, 255, 255, .96);
-  --pf-lift: 0 1px 2px rgba(13, 13, 13, .04), 0 18px 44px -24px rgba(13, 13, 13, .26);
-  --pf-lit: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(13, 13, 13, .045);
+  --pf-glass: linear-gradient(135deg, #f4f8eff0 0%, #ffffff 100%);   /* Home's account card */
+  --pf-edge: #e4ebdf;
+  --pf-lift: 0 1px 2px rgba(33, 54, 38, .04), 0 18px 44px -24px rgba(33, 54, 38, .26);
+  --pf-lit: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(33, 54, 38, .045);
   --pf-spring: cubic-bezier(.34, 1.4, .5, 1);
   --pf-settle: cubic-bezier(.22, 1, .36, 1);
-  /* The field the glass sits on: three soft greys near the top of the page, where the
-     cards are. It scrolls with the document, so nothing is recomputed while scrolling. */
-  background:
-    radial-gradient(760px 420px at 12% -60px, #ebebee 0%, rgba(235, 235, 238, 0) 70%),
-    radial-gradient(620px 460px at 100% 180px, #f0f0f2 0%, rgba(240, 240, 242, 0) 70%),
-    radial-gradient(700px 520px at 0% 720px, #f2f2f4 0%, rgba(242, 242, 244, 0) 70%),
-    #fbfbfc;
+  /* The field is Home's own: console.css draws it on every body without a theme class. */
   color: var(--pf-ink);
 }
-html:has(> body.pf-glass) { background: #fbfbfc; }
 
 /* ─── type ──────────────────────────────────────────────────────────── */
 .pf-eyebrow { font-size: 13px; font-weight: 600; letter-spacing: -.005em; color: var(--pf-ink-2); }
@@ -98,8 +92,8 @@ html:has(> body.pf-glass) { background: #fbfbfc; }
   position: relative; margin-top: 16px; padding: 4px; border-radius: 999px;
   background: linear-gradient(135deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .38));
   border: 1px solid rgba(255, 255, 255, .92);
-  box-shadow: 0 10px 30px -14px rgba(13, 13, 13, .22), 0 1px 2px rgba(13, 13, 13, .05),
-    inset 0 1px 1px #fff, inset 0 -1px 1px rgba(13, 13, 13, .05);
+  box-shadow: 0 10px 30px -14px rgba(33, 54, 38, .22), 0 1px 2px rgba(33, 54, 38, .05),
+    inset 0 1px 1px #fff, inset 0 -1px 1px rgba(33, 54, 38, .05);
   -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%);
 }
 .pf-switch[data-count="3"] { --n: 3; }
@@ -110,8 +104,8 @@ html:has(> body.pf-glass) { background: #fbfbfc; }
   border-radius: 999px; pointer-events: none;
   background: linear-gradient(150deg, #fff 0%, rgba(255, 255, 255, .82) 55%, rgba(255, 255, 255, .95) 100%);
   border: 1px solid rgba(255, 255, 255, .98);
-  box-shadow: 0 3px 12px rgba(13, 13, 13, .10), 0 1px 2px rgba(13, 13, 13, .06),
-    inset 0 1px 1px #fff, inset 0 -1px 2px rgba(13, 13, 13, .06);
+  box-shadow: 0 3px 12px rgba(33, 54, 38, .10), 0 1px 2px rgba(33, 54, 38, .06),
+    inset 0 1px 1px #fff, inset 0 -1px 2px rgba(33, 54, 38, .06);
   transform: translateX(calc(100% * var(--i)));
   transition: transform 460ms var(--pf-settle);
   will-change: transform;
@@ -122,7 +116,7 @@ html:has(> body.pf-glass) { background: #fbfbfc; }
   font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--pf-ink-3);
   -webkit-tap-highlight-color: transparent; transition: color 200ms ease, transform 260ms var(--pf-spring);
 }
-.pf-seg.is-selected { color: var(--pf-ink); }
+.pf-seg.is-selected { color: var(--green-ink); }
 @media (hover: hover) { .pf-seg:not(.is-selected):hover { color: var(--pf-ink-2); } }
 .pf-seg:active { transform: scale(.96); }
 .pf-seg:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -3px; }
@@ -133,7 +127,7 @@ html:has(> body.pf-glass) { background: #fbfbfc; }
   border-radius: 50%; color: var(--pf-ink);
   background: linear-gradient(140deg, rgba(255, 255, 255, .9), rgba(255, 255, 255, .55));
   border: 1px solid rgba(255, 255, 255, .96);
-  box-shadow: 0 6px 18px -8px rgba(13, 13, 13, .28), inset 0 1px 1px #fff, inset 0 -1px 1px rgba(13, 13, 13, .06);
+  box-shadow: 0 6px 18px -8px rgba(33, 54, 38, .28), inset 0 1px 1px #fff, inset 0 -1px 1px rgba(33, 54, 38, .06);
   -webkit-backdrop-filter: blur(12px) saturate(140%); backdrop-filter: blur(12px) saturate(140%);
   -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--pf-spring), opacity 160ms ease;
 }
@@ -163,7 +157,7 @@ html:has(> body.pf-glass) { background: #fbfbfc; }
 .pf-card.pf-rows .pf-row + .pf-row::before { left: 10px; }
 a.pf-row:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
 @media (hover: hover) { a.pf-row:hover { background: var(--pf-fill); } }
-a.pf-row:active { background: rgba(13, 13, 13, .07); transform: scale(.985); }
+a.pf-row:active { background: rgba(33, 54, 38, .07); transform: scale(.985); }
 a.pf-row:hover::before, a.pf-row:active::before, a.pf-row:hover + .pf-row::before, a.pf-row:active + .pf-row::before { opacity: 0; }
 .pf-row-main { flex: 1 1 auto; min-width: 0; }
 .pf-row-title { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.012em; line-height: 1.3; }
@@ -180,8 +174,8 @@ div.pf-row .pf-chevron { display: none; }
 .pf-orb {
   flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
   font-size: 16px; font-weight: 650; line-height: 1; color: var(--pf-ink);
-  background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f2f2f3 52%, #e2e2e4 100%);
-  box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(13, 13, 13, .07), 0 1px 2px rgba(13, 13, 13, .08);
+  background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f1f5ee 52%, #e2eadc 100%);
+  box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(33, 54, 38, .07), 0 1px 2px rgba(33, 54, 38, .08);
 }
 .pf-orb-lg { width: 52px; height: 52px; font-size: 21px; }
 
@@ -195,12 +189,12 @@ div.pf-row .pf-chevron { display: none; }
 .pf-cta {
   display: flex; align-items: center; gap: 14px; margin-top: 16px; padding: 16px 18px;
   border-radius: 22px; color: inherit; background: var(--pf-glass); border: 1px solid var(--pf-edge);
-  box-shadow: 0 10px 30px -22px rgba(13, 13, 13, .3), var(--pf-lit);
+  box-shadow: 0 10px 30px -22px rgba(33, 54, 38, .3), var(--pf-lit);
   -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring);
 }
 .pf-cta:active { transform: scale(.985); }
 .pf-cta:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
-.pf-cta-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: #fff; background: var(--pf-ink); }
+.pf-cta-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: var(--green-contrast); background: var(--green); }
 .pf-cta-icon svg { width: 18px; height: 18px; }
 .pf-cta-copy { flex: 1; min-width: 0; }
 .pf-cta-copy strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
@@ -211,13 +205,13 @@ div.pf-row .pf-chevron { display: none; }
   display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px;
   margin-top: 14px; padding: 14px 22px; border: 0; border-radius: 999px;
   font: inherit; font-size: 16px; font-weight: 600; letter-spacing: -.01em;
-  color: #fff; background: var(--pf-ink);
-  box-shadow: 0 12px 26px -14px rgba(13, 13, 13, .6), inset 0 1px 0 rgba(255, 255, 255, .16);
+  color: var(--green-contrast); background: var(--green);
+  box-shadow: 0 12px 26px -14px color-mix(in oklab, var(--green) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, .3);
   -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring), background 160ms ease;
 }
-@media (hover: hover) { .pf-btn:hover:not(:disabled) { background: #2a2a2a; } }
+@media (hover: hover) { .pf-btn:hover:not(:disabled) { background: var(--green-press); } }
 .pf-btn:active:not(:disabled) { transform: scale(.98); }
-.pf-btn:disabled { cursor: not-allowed; color: #a3a3a3; background: #ececec; box-shadow: none; }
+.pf-btn:disabled { cursor: not-allowed; color: var(--meta); background: var(--pf-fill); box-shadow: none; }
 .pf-btn:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
 .pf-btn-note { margin-top: 10px; text-align: center; }
 .pf-quiet {
@@ -270,7 +264,7 @@ div.pf-row .pf-chevron { display: none; }
   display: inline-flex; align-items: center; min-height: 28px; padding: 3px 13px; border-radius: 999px;
   font-size: 13px; font-weight: 650; letter-spacing: .005em; white-space: nowrap; color: #fff; background: var(--pf-ink);
 }
-.pf-verdict-soft { color: var(--pf-ink); background: rgba(13, 13, 13, .07); }
+.pf-verdict-soft { color: var(--pf-ink); background: rgba(33, 54, 38, .07); }
 .pf-row .pf-verdict { min-height: 26px; font-size: 12px; }
 .pf-thesis { margin-top: 14px; font-size: 16px; line-height: 1.62; letter-spacing: -.005em; }
 .pf-aside { margin-top: 10px; }
@@ -311,9 +305,9 @@ div.pf-row .pf-chevron { display: none; }
 .pf-job-copy span { display: block; margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--pf-ink-2); }
 .pf-job.is-failed { background: var(--danger-tint); }
 .pf-job.is-failed strong { color: var(--danger-ink); }
-.pf-pulse { position: relative; flex: none; width: 10px; height: 10px; margin-inline: 4px; border-radius: 50%; background: var(--pf-ink); }
+.pf-pulse { position: relative; flex: none; width: 10px; height: 10px; margin-inline: 4px; border-radius: 50%; background: var(--green); }
 .pf-pulse::after {
-  content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--pf-ink);
+  content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--green);
   animation: pf-pulse 1.7s ease-out infinite;
 }
 @keyframes pf-pulse { 0% { transform: scale(1); opacity: .4; } 80%, 100% { transform: scale(2.8); opacity: 0; } }
@@ -321,8 +315,8 @@ div.pf-row .pf-chevron { display: none; }
 /* ─── the Agentic account, live from Robinhood, above its risk ledger ─
    The live card leads: the venue's own balance, a minute old at most. The ledger follows as
    a smaller second card with its own date, since it is what the risk rules run on and not
-   what the account holds this minute. The stamp's dot is ink, not green: colour on this page
-   means a gain or a loss, and being current is neither. */
+   what the account holds this minute. The stamp's dot is green while the reading is current,
+   as Home marks anything live, and grey once it is not. */
 .pf-live-stamp {
   display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 3px 11px 3px 9px;
   border-radius: 999px; background: var(--pf-fill); color: var(--pf-ink-2);
@@ -331,7 +325,7 @@ div.pf-row .pf-chevron { display: none; }
 .pf-live-stamp:empty { display: none; }
 .pf-live-stamp::before {
   content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--pf-ink); box-shadow: 0 0 0 3px rgba(13, 13, 13, .08);
+  background: var(--green); box-shadow: 0 0 0 3px var(--green-tint);
 }
 .pf-live-stamp.is-stale::before { background: var(--pf-ink-3); box-shadow: none; }
 #live-holdings { margin-top: 16px; }

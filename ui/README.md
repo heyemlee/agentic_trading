@@ -287,9 +287,10 @@ every neutral is a `color-mix()` of them. `--danger` is a local choice, not a
 brand value. Pure green never carries text (1.9:1 on white) — green text uses
 `--green-ink`.
 
-Assets opts out of the green (`<body class="theme-mono pf-glass">`, `assets/portfolio.css`):
-ink on white over a soft grey field, glass cards drawn without blur, and colour only for a
-gain or a loss, both mixed from the brand values and measured above 5:1.
+Assets is drawn in Home's palette (`<body class="pf-glass">`, `assets/portfolio.css`): Home's
+green-tinted field, card fill and shadow, and green for the leading action, the selected
+account and anything live. Glass cards are drawn without blur. Gain and loss are mixed from the
+brand values and measured above 5:1.
 
 
 Assistant uses `assistant` (5s, stale after 5 minutes) for
@@ -309,8 +310,14 @@ its detail sheet is visible, using the independent idempotent `/opened` write.
 explicit review and opened receipts with synthetic APIs, including phone layout.
 
 The Assistant chat is a mobile-first, single-viewport layout. Its welcome prompts fill
-an editable draft; account selection, portfolio reviews and supporting tools open from
-the account chip or composer + button. Messages scroll independently above the composer,
+an editable draft. The account in view is the header's title: a glass capsule, the way
+ChatGPT titles a chat with its model, whose dot is ink when the account reads current,
+hollow while it loads and amber when the picker has something to say. The capsule opens
+the account picker, one row per scope; one tap switches, because each row is a link to
+this page for that scope. Chat and Discover share one glass segmented switch below it,
+hidden for Agentic, which has only Chat; history and a new conversation show in Chat only.
+Portfolio reviews and supporting tools open from the composer's + button, in a sheet that
+names its account and hands over to the picker. Messages scroll independently above the composer,
 with a jump-to-latest control that does not interrupt someone reading older replies.
 The composer grows with its draft, respects IME composition, and keeps Enter as a newline
 on touch devices (desktop Enter sends; Shift+Enter adds a line). The visual viewport keeps

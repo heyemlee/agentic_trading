@@ -53,28 +53,60 @@
 .advisor-decision { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px; overflow-wrap: anywhere; }
 .advisor-decision dt { font-weight: 600; margin-top: 12px; }
 .advisor-decision dd { margin: 4px 0 0; white-space: pre-wrap; }
-.advisor-page .pagehead { padding-block: 8px 0; }
+.advisor-page .pagehead { padding-block: 2px 0; }
 .assistant-header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; flex-shrink: 0; padding-block: 8px; background: #fff; }
 .assistant-header .container { max-width: 720px; }
-.assistant-heading, .assistant-subhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.assistant-heading { display: grid; grid-template-columns: 92px minmax(0, 1fr) 92px; gap: 4px; min-height: 44px; }
-.assistant-heading h1 { font-size: 18px; letter-spacing: -.03em; text-align: center; }
-.assistant-back { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #f5f5f5; color: #111; }
+/* ─── The header: Back, the account as the title, then Chat's own tools ───
+   The account is what the assistant can see, so it is the title, the way ChatGPT titles a chat
+   with its model: a glass capsule with the account and a chevron, one tap from the picker. Its
+   dot carries the picker's verdict: ink when the account reads current, hollow while it loads,
+   amber when the picker has something to say. */
+.assistant-heading { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.assistant-back { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #f5f5f5; color: #111; }
 .assistant-back svg { width: 24px; height: 24px; }
 .assistant-back:hover { background: #e9e9e9; }
-.chat-tools { display: flex; gap: 4px; }
+.chat-tools { flex: none; display: flex; gap: 4px; margin-left: auto; }
 .advisor-page .circle-control { background: transparent; border: 0; box-shadow: none; color: #252923; width: 44px; height: 44px; }
-.assistant-subhead { border-bottom: 1px solid #eceeeb; padding-bottom: 6px; }
-.scope-pill { display: inline-flex; align-items: center; gap: 8px; max-width: 62%; min-height: 44px; border: 0; background: none; padding: 0; font-size: 12px; color: #555c53; text-align: left; }
-#assistant-account-label { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.scope-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #737c70; }
-.scope-chevron { width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); margin: -3px 3px 0; flex: none; }
-.advisor-page .assistant-shortcuts { display: flex; flex-wrap: nowrap; gap: 18px; margin: 0; }
-.assistant-shortcuts [role="tab"] { padding: 0; min-height: 44px; border: 0; border-radius: 0; background: none; color: #747b72; font-size: 13px; position: relative; }
-.advisor-page .assistant-shortcuts [aria-selected="true"] { background: none; color: #11170e; font-weight: 600; }
-.assistant-shortcuts [aria-selected="true"]::after { content: ''; position: absolute; bottom: -7px; height: 2px; background: #151b12; left: 0; right: 0; }
-#assistant-account-status { color: #846324; font-size: 12px; line-height: 1.5; padding-top: 6px; }
-#assistant-account-status:empty { display: none; }
+.scope-pill {
+  flex: 0 1 auto; display: inline-flex; align-items: center; gap: 9px; min-width: 0; min-height: 44px;
+  padding: 0 16px 0 15px; border: 0; border-radius: 999px;
+  background: var(--dc-glass); color: var(--dc-ink);
+  box-shadow: var(--dc-glass-edge), 0 6px 16px -10px #0d0d0d59, var(--dc-glass-light);
+  font-size: 15px; font-weight: 600; letter-spacing: -.012em; text-align: left;
+  transition: transform var(--motion-lift) var(--ease-spring), box-shadow var(--motion-fast) var(--ease);
+}
+@media (hover: hover) { .scope-pill:hover { box-shadow: var(--dc-glass-edge), 0 8px 20px -10px #0d0d0d73, var(--dc-glass-light); } }
+.scope-pill:active { transform: scale(.97); transition: transform var(--motion-press) var(--ease); }
+#assistant-account-label { min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.scope-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dc-ink); }
+.scope-dot.is-loading { background: none; box-shadow: inset 0 0 0 1.5px var(--dc-ink-3); }
+.scope-dot.is-warn { background: var(--warn-ink); box-shadow: 0 0 0 3px var(--warn-tint); }
+.scope-chevron { flex: none; width: 7px; height: 7px; margin: -4px 1px 0; border: solid var(--dc-ink-2); border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
+
+/* ─── Chat and Discover: one glass track, one lens that slides ──────────
+   The shape of the Assets account switch in the assistant's ink: a track sunk a little into the
+   white, and a white lens with a lit top edge that glides to the chosen view. */
+.assistant-subhead { padding: 4px 0 10px; }
+.view-switch {
+  position: relative; max-width: 440px; margin-inline: auto; padding: 4px; border-radius: 999px;
+  background: #f0f0f0; box-shadow: inset 0 1px 2px #0d0d0d14, inset 0 0 0 1px #0d0d0d08;
+}
+.view-switch-lens {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 2);
+  border-radius: 999px; pointer-events: none; background: linear-gradient(180deg, #fff, #fbfbfb);
+  box-shadow: 0 1px 2px #0d0d0d14, 0 6px 14px -6px #0d0d0d33, inset 0 1px 0 #fff, inset 0 -1px 0 #0d0d0d0a;
+  transition: transform 440ms cubic-bezier(.22, 1, .36, 1);
+  will-change: transform;
+}
+.view-switch[data-index="1"] .view-switch-lens { transform: translateX(100%); }
+.advisor-page .assistant-shortcuts { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; margin: 0; }
+.assistant-shortcuts [role="tab"] {
+  min-height: 40px; padding: 0 12px; border: 0; border-radius: 999px; background: none;
+  color: var(--dc-ink-2); font-size: 15px; font-weight: 500; letter-spacing: -.01em;
+  transition: color var(--motion-fast) var(--ease);
+}
+.advisor-page .assistant-shortcuts [aria-selected="true"] { background: none; color: var(--dc-ink); font-weight: 600; }
+.advisor-page .assistant-shortcuts [role="tab"]:focus-visible { outline-offset: -3px; }
 html:has(body.advisor-page.chat-view) { height: 100%; overflow: hidden; overscroll-behavior: none; }
 /* The assistant is a separate full-screen view. Only its conversation scrolls;
    the header and composer remain visible, without bottom navigation. */
@@ -146,9 +178,6 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 .thinking-dot { width: 8px; height: 8px; border-radius: 50%; background: #8eab5a; animation: thinking 1.4s ease-in-out infinite; }
 .text-control { border: 0; background: none; color: #596b3d; font-size: 11px; min-height: 44px; margin-left: auto; }
 @keyframes thinking { 50% { opacity: .3; } }
-.assistant-scope-controls { display: flex; gap: 12px; align-items: end; margin-block: 16px; }
-.assistant-scope-controls .field { flex: 1; min-width: 0; }
-.assistant-scope-controls select { width: 100%; }
 #context-sheet { max-height: min(85dvh, 760px); }
 #context-sheet .section { padding: 12px 0; }
 #context-sheet .container { padding: 0; }
@@ -205,7 +234,6 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 .advisor-page .glass-editor { border-color: #ddd; }
 .advisor-page .glass-editor:focus { outline-color: #555; }
 .advisor-page .context-tool { color: #333; border-top-color: #e5e5e5; }
-.advisor-page #assistant-account-status,
 .advisor-page .chat-message .eyebrow,
 .advisor-page #advisor-status, .advisor-page .chat-progress { color: #666; }
 .advisor-page .mini-orb, .advisor-page .utility-orb,
@@ -228,9 +256,6 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 .advisor-page .utility-copy > span, .advisor-page #decision-detail dd { color: #666; }
 .advisor-page .task-copy .task-error { color: #555; }
 .advisor-page #context-sheet .card { border-color: #e5e5e5; }
-.advisor-page .scope-pill, .advisor-page .assistant-shortcuts [role="tab"] { color: #666; }
-.advisor-page .assistant-shortcuts [aria-selected="true"] { color: #111; }
-.advisor-page .scope-dot { background: #555; }
 .advisor-page .context-card strong { color: #222; }
 .advisor-page .prompt-card span > span { color: #666; }
 .advisor-page .chat-message.user .eyebrow { color: #666; }
@@ -483,4 +508,72 @@ body.advisor-page.chat-view { position: relative; width: 100%; height: 100dvh; m
 @media (forced-colors: active) {
   .dc-cta, .dc-chip, .dc-go, .dc-more, .advisor-page .symbol-search { border: 1px solid ButtonText; }
   .dc-chip[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
+}
+
+/* ─── The account picker ────────────────────────────────────────────────
+   One row per account, one tap to switch, the current one outlined in ink and checked. Personal
+   accounts are grey orbs; the Agentic account, which is real money, is the one solid ink orb. */
+#account-sheet { max-height: min(82dvh, 680px); }
+#account-sheet .sheet-description { margin-bottom: 10px; }
+.account-status { margin: 0 0 12px; padding: 11px 14px; border-radius: 16px; background: var(--warn-tint); color: var(--warn-ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-status.is-loading { background: var(--dc-fill); color: var(--dc-ink-2); }
+.account-status:empty { display: none; }
+.account-choices { display: flex; flex-direction: column; gap: 8px; }
+.account-group { margin: 14px 4px 2px; color: var(--dc-ink-3); font-size: 12px; font-weight: 600; letter-spacing: .01em; }
+.account-group:first-child { margin-top: 2px; }
+.account-choice {
+  display: flex; align-items: center; gap: 14px; min-height: 66px; padding: 11px 16px 11px 12px;
+  border-radius: 20px; background: #fff; color: var(--dc-ink); text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--dc-hair);
+  transition: background var(--motion-fast) var(--ease), transform var(--motion-lift) var(--ease-spring);
+}
+@media (hover: hover) { .account-choice:hover { background: #fafafa; } }
+.account-choice:active { transform: scale(.985); transition: transform var(--motion-press) var(--ease); }
+.account-choice[aria-current="true"] { box-shadow: inset 0 0 0 1.5px var(--dc-ink), 0 10px 22px -16px #0d0d0d73; }
+.advisor-page .account-choice:focus-visible { outline-offset: 2px; border-radius: 20px; }
+.account-orb { flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--dc-fill); color: var(--dc-ink); }
+.account-orb svg { width: 21px; height: 21px; }
+.account-choice.is-agentic .account-orb { background: var(--dc-ink); color: #fff; }
+.account-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.account-copy strong { overflow: hidden; font-size: 16px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.account-copy span { color: var(--dc-ink-2); font-size: 13px; line-height: 1.4; }
+.account-check { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--dc-ink); }
+.account-check svg { width: 20px; height: 20px; }
+
+/* The tools sheet opens on the account it works on, with the way to change it. */
+.context-account {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin: 2px 0 10px; padding: 14px 14px 14px 16px;
+  border: 0; border-radius: 20px; background: var(--dc-fill); color: var(--dc-ink); font: inherit; text-align: left;
+  transition: transform var(--motion-lift) var(--ease-spring);
+}
+.context-account:active { transform: scale(.985); transition: transform var(--motion-press) var(--ease); }
+.context-account-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.context-account-label { color: var(--dc-ink-3); font-size: 12px; font-weight: 600; }
+#context-account-name { overflow: hidden; font-size: 17px; font-weight: 650; letter-spacing: -.015em; text-overflow: ellipsis; white-space: nowrap; }
+#assistant-scope-note { color: var(--dc-ink-2); font-size: 13px; line-height: 1.45; }
+.context-account-change {
+  flex: none; display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; border-radius: 999px;
+  background: var(--dc-glass); box-shadow: var(--dc-glass-edge), 0 4px 10px -6px #0d0d0d59, var(--dc-glass-light);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.context-fine { margin: 0 4px 8px; color: var(--dc-ink-3); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.context-fine:empty { display: none; }
+
+@media (max-height: 620px) {
+  .assistant-subhead { padding-block: 2px 6px; }
+  .assistant-shortcuts [role="tab"] { min-height: 34px; font-size: 14px; }
+}
+@media (max-width: 360px) {
+  .scope-pill { padding-inline: 12px 13px; font-size: 14px; }
+  .context-account-change { padding-inline: 11px; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .scope-pill, .context-account-change { background: #fff; box-shadow: 0 0 0 1px #0d0d0d66; }
+  .view-switch { background: #fff; box-shadow: 0 0 0 1px #0d0d0d66; }
+  .view-switch-lens { background: var(--dc-ink); }
+  .advisor-page .assistant-shortcuts [aria-selected="true"] { color: #fff; }
+}
+@media (forced-colors: active) {
+  .scope-pill, .view-switch, .account-choice { border: 1px solid ButtonText; }
+  .advisor-page .assistant-shortcuts [aria-selected="true"], .account-choice[aria-current="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }

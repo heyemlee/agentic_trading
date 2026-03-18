@@ -141,6 +141,9 @@ window.Console.page('advisor', function (document) {
       el('view-' + name).setAttribute('aria-selected', String(name === view));
       el('view-' + name).tabIndex = name === view ? 0 : -1;
     }
+    // The lens slides under the chosen view; history and a new conversation belong to Chat.
+    el('view-switch').dataset.index = String(views.indexOf(view));
+    el('chat-tools').hidden = view !== 'chat';
     el('panel-personal').hidden = view !== 'chat' || binding.scope !== 'personal';
     el('panel-tools').hidden = view === 'chat' || binding.scope !== 'personal';
     if (focus) el('view-' + view).focus();
@@ -224,35 +227,72 @@ window.Console.page('advisor', function (document) {
   // Chat's status line sits in its composer, out of sight on Discover; this one is Discover's own.
   const discoverSay = text => setText('discover-status', text);
   const active = j => j.state === 'RUNNING' || j.state === 'QUEUED';
-  function updateAccountLink() {
-    const value = el('assistant-account').value;
-    accountChoice = value;
-    const q = new URLSearchParams({ scope: value === 'agentic' ? 'agentic' : 'personal' });
-    if (value.startsWith('personal:') && value.slice(9)) q.set('account', value.slice(9));
+  /* The account the assistant sees. One tap on a row switches: each row links to this page for
+     that scope, so the router pushes it as history that the header's Back skips (navigation.js,
+     ctAssistantReturnDepth), and routeEntry rebinds the drafts, conversation and reads to it. */
+  const ACCOUNT_ICON = {
+    all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 3.5 8 12 12.5 20.5 8z"/><path d="M3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5"/></svg>',
+    one: C.ICON.more,
+    agentic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3 5.5 13.5H11L10.5 21 18.5 10.5H13z"/></svg>',
+  };
+  const choiceLink = key => {
+    const q = new URLSearchParams({ scope: key === 'agentic' ? 'agentic' : 'personal' });
+    if (key.startsWith('personal:') && key.slice(9)) q.set('account', key.slice(9));
     if (window.CT_DEMO) q.set('demo', '1');
-    el('assistant-switch').href = 'advisor.html?' + q;
-  }
-  el('assistant-account').addEventListener('change', updateAccountLink);
+    return 'advisor.html?' + q;
+  };
+  const choiceRow = ([key, label, hint, kind]) => '<a class="account-choice is-' + kind + '" data-account-choice="' + h(key) +
+    '" href="' + h(choiceLink(key)) + '"' + (key === accountChoice ? ' aria-current="true"' : '') + '><span class="account-orb" aria-hidden="true">' +
+    ACCOUNT_ICON[kind] + '</span><span class="account-copy"><strong>' + h(label) + '</strong><span>' + h(hint) + '</span></span>' +
+    '<span class="account-check" aria-hidden="true">' + (key === accountChoice ? C.ICON.check : '') + '</span></a>';
+  el('assistant-account').addEventListener('click', e => {
+    /* Another account closes every sheet at once as routeEntry rebinds. Only the current one is
+       closed here: an animated close started for a switch would still be pending when the
+       picker is opened again, and its timer would shut the new one (console.js, closeSheet). */
+    if (e.target.closest?.('[data-account-choice]')?.dataset.accountChoice === accountChoice) C.closeSheet('account-sheet');
+  });
+  el('context-account').addEventListener('click', () => {
+    // From the tools sheet, the picker takes its place and hands focus back to the header.
+    el('context-sheet').close();
+    el('assistant-context').focus?.();
+    C.openSheet('account-sheet');
+  });
   function renderScope(state) {
-    const options = [['personal:', t('ai.allPersonal')], ['agentic', 'Agentic']];
-    (D.accounts?.accounts || []).filter(row => row.scope === 'personal' && row.account_scope_kind === 'single')
-      .forEach(row => options.push(['personal:' + row.account_id, row.account_label || row.account_id]));
-    if (!options.some(([key]) => key === accountChoice)) options.push([accountChoice, binding.account || t('ai.scopeMismatch')]);
-    paint('assistant-account', options.map(([key, label]) => '<option value="' + h(key) + '">' + h(label) + '</option>').join(''));
-    el('assistant-account').value = accountChoice; updateAccountLink();
-    el('assistant-account-label').textContent = state.account_label || binding.account || (binding.scope === 'agentic' ? 'Agentic' : t('ai.allPersonal'));
+    const personal = [['personal:', t('ai.allPersonal'), t('ai.pickAll'), 'all'],
+      ...(D.accounts?.accounts || []).filter(row => row.scope === 'personal' && row.account_scope_kind === 'single')
+        .map(row => ['personal:' + row.account_id, row.account_label || row.account_id, t('ai.pickOne'), 'one'])];
+    // A binding the directory does not know is still listed, as the current one, never dropped.
+    if (accountChoice !== 'agentic' && !personal.some(([key]) => key === accountChoice))
+      personal.push([accountChoice, binding.account || t('ai.scopeMismatch'), t('ai.pickOne'), 'one']);
+    paint('assistant-account', '<p class="account-group">' + h(t('ai.groupPersonal')) + '</p>' + personal.map(choiceRow).join('') +
+      '<p class="account-group">' + h(t('ai.groupManaged')) + '</p>' + choiceRow(['agentic', 'Agentic', t('ai.pickAgentic'), 'agentic']));
+    // Until this account's own reading arrives, its name comes from the directory, never its id.
+    const named = (D.accounts?.accounts || []).find(row => row.scope === 'personal' && row.account_id === binding.account)?.account_label;
+    const label = state.account_label || (binding.account ? named || binding.account : binding.scope === 'agentic' ? 'Agentic' : t('ai.allPersonal'));
+    setText('assistant-account-label', label);
+    setText('context-account-name', label);
+    el('assistant-context').setAttribute('aria-label', t('ai.accountButton', { label }));
     el('assistant-context-summary').textContent = state.snapshot?.fetched_at
       ? t('ai.fresh', { date: C.dateTime(state.snapshot.fetched_at) }) : t('ai.contextHint');
-    el('assistant-scope-note').textContent = (state.account_label || binding.account || (binding.scope === 'agentic' ? 'Agentic' : t('ai.allPersonal'))) + ' · ' +
-      t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.personalOnly');
-    const source = A.state?.resources?.assistant;
-    el('assistant-account-status').textContent = !['personal', 'agentic'].includes(binding.scope) ? t('ai.scopeMismatch') : !knownAccount() && D.accounts ? t('ai.unknownAccount') : !currentState() ? source?.error || t('common.loading')
-      : !A.isLive('assistant') ? t('ai.scopeStale') : !A.isLive('accounts') || D.accounts?.personal_snapshot?.stale && binding.scope === 'personal'
-        ? t('rs.accountsPartial') : '';
+    setText('assistant-scope-note', t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.personalOnly'));
+    /* What is wrong with the account's reading, said in the picker and signalled on the capsule
+       by its dot: ink when current, hollow while loading, amber when there is something to read.
+       The demo's fixtures are its reading, so nothing there goes out of date. */
+    const source = A.state?.resources?.assistant, live = key => window.CT_DEMO || A.isLive(key);
+    const [note, tone] = !['personal', 'agentic'].includes(binding.scope) ? [t('ai.scopeMismatch'), 'warn']
+      : !knownAccount() && D.accounts ? [t('ai.unknownAccount'), 'warn']
+      : !currentState() ? (source?.error ? [source.error, 'warn'] : [t('common.loading'), 'loading'])
+      : !live('assistant') ? [t('ai.scopeStale'), 'warn']
+      : !live('accounts') || D.accounts?.personal_snapshot?.stale && binding.scope === 'personal' ? [t('rs.accountsPartial'), 'warn'] : ['', ''];
+    setText('assistant-account-status', note);
+    el('assistant-account-status').className = 'account-status' + (tone ? ' is-' + tone : '');
+    el('scope-dot').className = 'scope-dot' + (tone ? ' is-' + tone : '');
     el('assistant-coverage').textContent = state.coverage_info?.note || state.coverage || '';
     el('assistant-research-link').href = scopeLink('research');
     el('assistant-chat-note').textContent = t(binding.scope === 'agentic' ? 'ai.agenticOnly' : 'ai.scopedChatNote');
+    // Discover is personal only; with one view left, the switch has nothing to switch.
     el('view-discover').hidden = binding.scope !== 'personal';
+    el('assistant-subhead').hidden = binding.scope !== 'personal';
     el('agentic-records-panel').hidden = binding.scope !== 'agentic';
     document.querySelectorAll('[data-open-sheet="personal-sheet"]').forEach(button => { button.hidden = binding.scope !== 'personal'; });
     el('panel-personal').hidden = binding.scope !== 'personal' || el('panel-chat').hidden;
@@ -691,7 +731,7 @@ window.Console.page('advisor', function (document) {
       el('chat-input').value = ''; el('personal-notes').value = ''; status('');
       candidateFilter = 'all'; candidateQuery = ''; candidateLimit = CANDIDATE_PAGE;
       el('symbol-input').value = ''; discoverSay('');
-      ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet'].forEach(id => el(id).close());
+      ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet', 'account-sheet'].forEach(id => el(id).close());
       document.querySelectorAll('#review-panel details, #agentic-records-panel details').forEach(node => { node.open = false; });
       paintMessages();
     }

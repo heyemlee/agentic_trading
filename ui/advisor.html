@@ -19,8 +19,9 @@
 <header class="assistant-header"><div class="container">
     <div class="assistant-heading">
       <a id="assistant-back" class="assistant-back" href="index.html" data-i18n-aria="common.back" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 19.5l-7-7.5 7-7.5"/></svg></a>
-      <h1 data-i18n="nav.advisor">助手</h1>
-      <div class="chat-tools">
+      <h1 class="sr-only" data-i18n="nav.advisor">助手</h1>
+      <button id="assistant-context" class="scope-pill" type="button" data-open-sheet="account-sheet" aria-haspopup="dialog"><span id="scope-dot" class="scope-dot" aria-hidden="true"></span><span id="assistant-account-label"></span><span class="scope-chevron" aria-hidden="true"></span></button>
+      <div class="chat-tools" id="chat-tools">
         <button class="circle-control" data-open-sheet="conversation-sheet" data-i18n-aria="ai.history" aria-haspopup="dialog" data-icon="history"></button>
         <button id="new-conversation" class="circle-control" data-i18n-aria="ai.new" data-icon="plus"></button>
       </div>
@@ -28,11 +29,13 @@
   </div></header>
 <main id="content" hidden data-i18n-title="ai.title">
   <section class="section pagehead"><div class="container">
-    <div class="assistant-subhead">
-      <button id="assistant-context" class="scope-pill" data-open-sheet="context-sheet" aria-haspopup="dialog"><span class="scope-dot" aria-hidden="true"></span><span id="assistant-account-label"></span><span class="scope-chevron" aria-hidden="true"></span></button>
-      <div class="assistant-shortcuts" role="tablist" data-i18n-aria="ai.title">
-        <button id="view-chat" role="tab" aria-selected="true" aria-controls="panel-chat" data-i18n="app.chat">聊天</button>
-        <button id="view-discover" role="tab" aria-selected="false" aria-controls="panel-discover" tabindex="-1" data-i18n="app.discover">选股</button>
+    <div class="assistant-subhead" id="assistant-subhead">
+      <div class="view-switch" id="view-switch" data-index="0">
+        <span class="view-switch-lens" aria-hidden="true"></span>
+        <div class="assistant-shortcuts" role="tablist" data-i18n-aria="ai.title">
+          <button id="view-chat" type="button" role="tab" aria-selected="true" aria-controls="panel-chat" data-i18n="app.chat">聊天</button>
+          <button id="view-discover" type="button" role="tab" aria-selected="false" aria-controls="panel-discover" tabindex="-1" data-i18n="app.discover">选股</button>
+        </div>
       </div>
     </div>
   </div></section>
@@ -111,12 +114,13 @@
 </div>
 <dialog id="context-sheet" class="glass-sheet" data-sheet aria-labelledby="context-title">
   <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="context-title" data-i18n="ai.contextTools">账户与工具</h2><button class="circle-control" data-close-sheet="context-sheet" data-i18n-aria="common.close" data-icon="cross"></button></div>
-    <div class="assistant-scope-controls"><div class="field"><label for="assistant-account" data-i18n="ai.account">Account scope</label><select id="assistant-account" class="select"></select></div>
-    <a id="assistant-switch" class="btn btn-secondary btn-sm" data-i18n="ai.switchAccount">Switch account</a></div>
-    <p id="assistant-scope-note" class="body-sm" style="margin-top:12px;"></p>
-    <p id="assistant-account-status" class="body-sm body-muted" role="status"></p>
-    <p id="assistant-coverage" class="body-sm body-muted"></p>
-  <p id="assistant-chat-note" class="sheet-description"></p>
+  <button id="context-account" class="context-account" type="button" aria-haspopup="dialog">
+    <span class="context-account-copy"><span class="context-account-label" data-i18n="ai.account">账户范围</span>
+      <strong id="context-account-name"></strong><span id="assistant-scope-note"></span></span>
+    <span class="context-account-change" data-i18n="ai.switchAccount">切换账户</span>
+  </button>
+  <p id="assistant-coverage" class="context-fine"></p>
+  <p id="assistant-chat-note" class="context-fine"></p>
   <section class="section" style="padding-top:0;" id="review-panel"><div class="container"><details class="card app-disclosure"><summary data-i18n="ai.portfolioReview">Portfolio review</summary><p id="review-summary" class="body-sm body-muted"></p>
     <p id="review-stale" class="body-sm" role="status"></p>
     <div class="advisor-actions"><button id="review-start" class="btn btn-secondary btn-sm" data-i18n="ai.reviewStart">Review this portfolio</button><button id="review-open" class="btn btn-secondary btn-sm" data-i18n="ai.reviewOpen" hidden>View review</button></div>
@@ -128,6 +132,12 @@
     <button class="context-tool" data-open-sheet="jobs-sheet"><span data-icon="activity" aria-hidden="true"></span><span data-i18n="ux.activity">任务动态</span><span class="ux-chevron" aria-hidden="true"></span></button>
     <a class="context-tool" id="assistant-research-link" href="research.html"><span data-icon="research" aria-hidden="true"></span><span data-i18n="nav.hint.research">完整研究与 Agent 报告</span><span class="ux-chevron" aria-hidden="true"></span></a>
   </div>
+</dialog>
+<dialog id="account-sheet" class="glass-sheet" data-sheet aria-labelledby="account-title">
+  <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="account-title" data-i18n="ai.chooseAccount">选择账户</h2><button class="circle-control" data-close-sheet="account-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
+  <p class="sheet-description" data-i18n="ai.chooseAccountHint">助手只看你选中的账户。草稿和对话按账户分开保存。</p>
+  <p id="assistant-account-status" class="account-status" role="status"></p>
+  <nav id="assistant-account" class="account-choices" data-i18n-aria="ai.chooseAccount"></nav>
 </dialog>
 <dialog id="conversation-sheet" class="glass-sheet" data-sheet aria-labelledby="conversation-title">
   <div class="sheet-grip"></div><div class="glass-sheet-head"><h2 id="conversation-title" data-i18n="ai.history">历史对话</h2><button class="circle-control" data-close-sheet="conversation-sheet" data-i18n-aria="common.close" aria-label="Close" data-icon="cross"></button></div>
