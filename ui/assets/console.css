@@ -368,43 +368,69 @@ dialog.sheet[open]::backdrop { animation: fade-in var(--motion-base) var(--ease)
   background: var(--surface-2); margin: var(--space-2) auto var(--space-3);
 }
 
-/* The final tab is a personal-center page with grouped supporting tools. */
-.more-page-card { padding-bottom: var(--space-6); }
-.more-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0 var(--space-4); }
-.more-avatar {
-  flex: none; width: 48px; height: 48px; border-radius: 16px;
-  display: grid; place-items: center; background: var(--green); color: var(--green-contrast);
-  font-size: 13px; font-weight: 750; letter-spacing: .02em;
+/* ─── Me: a page of links, drawn in Assets' glass ──────────────────────
+   <body class="theme-mono pf-glass"> brings in the material from portfolio.css: the
+   grey field, the glass card, rows with a bead, the ink call to action. What follows is
+   only what a page of links adds to it: the system's state as the card's figure, an
+   icon in the bead, and rows that are buttons. The state's dot is the one colour on the
+   page, and it means something: ready, paused or neither. */
+/* The same glass in ink. portfolio.css draws Assets in Home's green on body.pf-glass alone; a
+   page that also carries theme-mono gets the material in black and white, whatever those
+   tokens say for Assets. Two classes outrank one, so this holds in either load order. */
+body.theme-mono.pf-glass {
+  --pf-ink: #0d0d0d; --pf-ink-2: #5d5d5d; --pf-ink-3: #8f8f8f;
+  --pf-line: rgba(13, 13, 13, .08); --pf-fill: rgba(13, 13, 13, .045);
+  --pf-glass: linear-gradient(180deg, rgba(255, 255, 255, .86) 0%, rgba(255, 255, 255, .64) 100%);
+  --pf-edge: rgba(255, 255, 255, .96);
+  --pf-lift: 0 1px 2px rgba(13, 13, 13, .04), 0 18px 44px -24px rgba(13, 13, 13, .26);
+  --pf-lit: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(13, 13, 13, .045);
+  /* three soft greys near the top, where the cards are; the field scrolls with the page */
+  background:
+    radial-gradient(760px 420px at 12% -60px, #ebebee 0%, rgba(235, 235, 238, 0) 70%),
+    radial-gradient(620px 460px at 100% 180px, #f0f0f2 0%, rgba(240, 240, 242, 0) 70%),
+    radial-gradient(700px 520px at 0% 720px, #f2f2f4 0%, rgba(242, 242, 244, 0) 70%),
+    #fbfbfc;
 }
-.more-identity { min-width: 0; flex: 1; }
-.more-identity h2 { margin-top: 2px; font-size: var(--text-xl); }
-.more-status {
-  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md); background: var(--surface); color: var(--fg);
+html:has(> body.theme-mono.pf-glass) { background: #fbfbfc; }
+.theme-mono.pf-glass .pf-orb {
+  background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f2f2f3 52%, #e2e2e4 100%);
+  box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(13, 13, 13, .07), 0 1px 2px rgba(13, 13, 13, .08);
 }
-.more-status .dot { flex: none; }
-.more-status .chevron { margin-left: auto; }
+.theme-mono.pf-glass .pf-cta { box-shadow: 0 10px 30px -22px rgba(13, 13, 13, .3), var(--pf-lit); }
+.theme-mono.pf-glass a.pf-row:active { background: rgba(13, 13, 13, .07); }
 .more-section-label {
   margin: var(--space-4) 0 var(--space-2); color: var(--meta);
   font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
 }
-.more-link-icon {
-  flex: none; width: 34px; height: 34px; display: grid; place-items: center;
-  border-radius: 11px; background: var(--bg); color: var(--fg);
+.me-body { animation: pf-arrive 360ms var(--pf-settle) both; }
+.me-page .pf-cta { margin-top: 0; }
+.me-status {
+  display: block; margin: -8px -8px 0; padding: 8px; border-radius: 22px; color: inherit;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 200ms ease, transform 280ms var(--pf-spring);
 }
-.more-link-icon svg { width: 19px; height: 19px; }
-.more-actions { overflow: hidden; border-radius: var(--radius-md); background: var(--surface); }
-.more-action {
-  width: 100%; min-height: 64px; display: flex; align-items: center; gap: var(--space-3);
-  padding: var(--space-2) var(--space-3); border: 0; border-bottom: 1px solid var(--divider);
-  background: none; color: var(--fg); text-align: left;
-}
-.more-action:last-child { border-bottom: 0; }
-.more-action .more-link-icon { background: var(--bg); }
-.more-action .chevron { margin-left: auto; }
-.more-now { margin-top: var(--space-3); }
-/* a hidden last row must not leave the one above it with a divider */
-.more-actions > .more-action:has(+ .more-action[hidden]:last-child) { border-bottom: 0; }
+@media (hover: hover) { .me-status:hover { background: var(--pf-fill); } }
+.me-status:active { transform: scale(.985); }
+.me-status:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 2px; }
+.me-state { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.me-state .pf-figure { margin-top: 0; }
+.me-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--pf-ink-3); box-shadow: 0 0 0 5px rgba(13, 13, 13, .06); }
+.me-dot.is-ok { background: var(--ok); box-shadow: 0 0 0 5px color-mix(in oklab, var(--ok) 16%, transparent); }
+.me-dot.is-warn { background: var(--warn-ink); box-shadow: 0 0 0 5px color-mix(in oklab, var(--warn-ink) 16%, transparent); }
+.me-dot.is-bad { background: var(--danger); box-shadow: 0 0 0 5px color-mix(in oklab, var(--danger) 16%, transparent); }
+.me-copy { display: block; margin-top: 8px; }
+.me-rows { margin: 16px -10px -8px; padding-top: 6px; border-top: 1px solid var(--pf-line); }
+/* a section label sits close to the rows it names */
+.me-page .pf-card-head + .pf-holdings { margin-top: 6px; }
+.me-orb svg { width: 19px; height: 19px; }
+.me-value { font-size: 15px; font-weight: 500; color: var(--pf-ink-2); }
+/* language and sign-out are buttons; they answer a finger the way the links beside them do */
+.me-page button.pf-row { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) { .me-page button.pf-row:hover { background: var(--pf-fill); } }
+.me-page button.pf-row:active { background: rgba(13, 13, 13, .07); transform: scale(.985); }
+.me-page button.pf-row:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
+.me-page button.pf-row:hover::before, .me-page button.pf-row:active::before,
+.me-page button.pf-row:hover + .pf-row::before, .me-page button.pf-row:active + .pf-row::before { opacity: 0; }
 
 /* ─── blocks — the app groups with whitespace, not borders ──────────── */
 /* .card is a plain grouping block: no border, no fill, no padding. */

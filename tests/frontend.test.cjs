@@ -2489,6 +2489,20 @@ test('the product name is Agentic Trading across visible console branding', () =
   assert.equal(manifest.short_name, 'Agentic Trading');
 });
 
+test('the home-screen app is laid out below the status bar, never under it', () => {
+  /* black-translucent draws an installed app from the top of the screen, under the status bar,
+     yet iOS can lay the page out in a viewport one status bar short (WebKit 301108). The tab
+     bar is fixed to that viewport's bottom, so each launch drew it a status bar too high and
+     then dropped it into place once the viewport caught up. With the default style the page
+     starts below the status bar and every viewport measure agrees. theme-color paints that
+     status bar, so it stays the white of the header beneath it. */
+  for (const file of pages.filter(file => file !== 'assets/startup.html')) {
+    const html = uiFile(file);
+    assert.match(html, /name="apple-mobile-web-app-status-bar-style" content="default"/, file);
+    assert.match(html, /name="theme-color" content="#ffffff"/, file);
+  }
+});
+
 test('the login form never falls back to putting a password in the URL', () => {
   const html = uiFile('login.html');
   const form = html.match(/<form\b[^>]*id="login-form"[^>]*>/)?.[0] || '';

@@ -8,94 +8,112 @@
 <link rel="icon" type="image/svg+xml" href="icons/mark.svg" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Agentic Trading" />
-<meta name="theme-color" content="#111318" />
+<meta name="theme-color" content="#ffffff" />
 <link rel="stylesheet" href="assets/console.css" />
+<link rel="stylesheet" href="assets/portfolio.css" />
 </head>
-<body class="theme-mono">
+<body class="theme-mono pf-glass">
 
-<main id="content" class="more-page" hidden data-i18n-title="nav.more">
-  <section class="section pagehead">
+<main id="content" class="more-page me-page" hidden data-i18n-title="nav.more">
+  <section class="section pagehead pf-head">
     <div class="container">
-      <h1 data-i18n="nav.more">More</h1>
+      <h1 data-i18n="nav.more">Me</h1>
     </div>
   </section>
 
-  <section class="section" style="padding-top:0;">
-    <div class="container">
-      <div class="more-page-card">
-        <a class="more-status" href="system.html" data-od-id="more-status">
-          <span class="dot" id="more-status-dot"></span>
-          <span class="list-main"><span class="list-title" data-i18n="more.status">System status</span><span class="list-sub" id="more-status-copy">—</span></span>
-          <span data-icon="chevron" aria-hidden="true"></span>
+  <section class="section pf-body me-body">
+    <div class="container pf-stack">
+
+      <!-- the system's state, and what is waiting on you -->
+      <article class="pf-card me-hero" data-od-id="more-overview">
+        <a class="me-status" href="system.html" data-od-id="more-status">
+          <span class="pf-card-head">
+            <span class="pf-eyebrow" data-i18n="more.status">System status</span>
+            <span class="pf-chevron" aria-hidden="true"></span>
+          </span>
+          <span class="me-state">
+            <span class="me-dot" id="more-status-dot" aria-hidden="true"></span>
+            <span class="pf-figure me-word" id="more-status-word">—</span>
+          </span>
+          <span class="pf-fine me-copy" id="more-status-copy">—</span>
         </a>
+        <div class="pf-rows me-rows">
+          <a class="pf-row" href="index.html">
+            <span class="pf-orb me-orb" data-icon="activity" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="at.title">Current attention</span><span class="pf-row-sub" id="more-attention-copy">—</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
+          </a>
+          <a class="pf-row" href="approvals.html" id="more-approvals" hidden>
+            <span class="pf-orb me-orb" data-icon="lock" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="ap.title">Approvals</span><span class="pf-row-sub" id="more-approvals-copy">—</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
+          </a>
+        </div>
+      </article>
 
-        <div class="more-actions more-now">
-          <a class="more-action" href="index.html">
-            <span class="more-link-icon" data-icon="activity"></span>
-            <span class="list-main"><span class="list-title" data-i18n="at.title">Current attention</span><span class="list-sub" id="more-attention-copy">—</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
-          </a>
-          <a class="more-action" href="approvals.html" id="more-approvals" hidden>
-            <span class="more-link-icon" data-icon="lock"></span>
-            <span class="list-main"><span class="list-title" data-i18n="ap.title">Approvals</span><span class="list-sub" id="more-approvals-copy">—</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
-          </a>
-        </div>
-        <p class="more-section-label" data-i18n="more.records">Records</p>
-        <div class="more-actions">
-          <a class="more-action" href="risk.html">
-            <span class="more-link-icon" data-icon="risk"></span>
-            <span class="list-main"><span class="list-title" data-i18n="nav.risk">Risk</span><span class="list-sub" data-i18n="more.riskHint">Market regime, limits and whether new positions may open</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
-          </a>
-          <a class="more-action" href="activity.html">
-            <span class="more-link-icon" data-icon="activity"></span>
-            <span class="list-main"><span class="list-title" data-i18n="nav.activity">Activity</span><span class="list-sub" data-i18n="more.activityHint">Recorded fills and orders open at the venue</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
-          </a>
-          <a class="more-action" href="evaluation.html">
-            <span class="more-link-icon" data-icon="evaluation"></span>
-            <span class="list-main"><span class="list-title" data-i18n="evl.title">Evaluation</span><span class="list-sub" data-i18n="more.evaluationHint">Strategy record against its declared benchmark</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
-          </a>
-        </div>
+      <!-- the one page here that is about you -->
+      <a class="pf-cta me-cta" href="profile.html" data-od-id="more-personal">
+        <span class="pf-cta-icon" data-icon="personal" aria-hidden="true"></span>
+        <span class="pf-cta-copy"><strong data-i18n="ai.personal">My personal context</strong>
+          <span data-i18n="more.personalHint">Goals, timeline and communication preferences</span></span>
+        <span class="pf-chevron" aria-hidden="true"></span>
+      </a>
 
-        <p class="more-section-label" data-i18n="more.preferences">Preferences</p>
-        <div class="more-actions">
-          <a class="more-action" href="profile.html">
-            <span class="more-link-icon" data-icon="personal"></span>
-            <span class="list-main"><span class="list-title" data-i18n="ai.personal">My personal context</span><span class="list-sub" data-i18n="more.personalHint">Goals, timeline and communication preferences</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+      <article class="pf-card" data-od-id="more-records">
+        <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="more.records">Records</p></div>
+        <div class="pf-rows pf-holdings">
+          <a class="pf-row" href="risk.html">
+            <span class="pf-orb me-orb" data-icon="risk" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="nav.risk">Risk</span><span class="pf-row-sub" data-i18n="more.riskHint">Market regime, limits and whether new positions may open</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </a>
-          <a class="more-action" href="settings.html">
-            <span class="more-link-icon" data-icon="settings"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.settings">Settings</span><span class="list-sub" data-i18n="more.settingsHint">Schedule, watchlist, calendar, limits and every config file</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+          <a class="pf-row" href="activity.html">
+            <span class="pf-orb me-orb" data-icon="activity" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="nav.activity">Activity</span><span class="pf-row-sub" data-i18n="more.activityHint">Recorded fills and orders open at the venue</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </a>
-          <button class="more-action" id="more-language" type="button">
-            <span class="more-link-icon" data-icon="language"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.language">Language</span><span class="list-sub" id="more-language-value"></span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+          <a class="pf-row" href="evaluation.html">
+            <span class="pf-orb me-orb" data-icon="evaluation" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="evl.title">Evaluation</span><span class="pf-row-sub" data-i18n="more.evaluationHint">Strategy record against its declared benchmark</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
+          </a>
+        </div>
+      </article>
+
+      <article class="pf-card" data-od-id="more-preferences">
+        <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="more.preferences">Preferences</p></div>
+        <div class="pf-rows pf-holdings">
+          <a class="pf-row" href="settings.html">
+            <span class="pf-orb me-orb" data-icon="settings" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="more.settings">Settings</span><span class="pf-row-sub" data-i18n="more.settingsHint">Schedule, watchlist, calendar, limits and every config file</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
+          </a>
+          <button class="pf-row" id="more-language" type="button">
+            <span class="pf-orb me-orb" data-icon="language" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="more.language">Language</span></span>
+            <span class="pf-row-side"><span class="pf-row-value me-value" id="more-language-value"></span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </button>
-          <a class="more-action" href="notifications.html">
-            <span class="more-link-icon" data-icon="notifications"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.notifications">Devices &amp; notifications</span><span class="list-sub" data-i18n="more.notificationsHint">Signed-in devices, push status and a test</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+          <a class="pf-row" href="notifications.html">
+            <span class="pf-orb me-orb" data-icon="notifications" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="more.notifications">Devices &amp; notifications</span><span class="pf-row-sub" data-i18n="more.notificationsHint">Signed-in devices, push status and a test</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </a>
-          <a class="more-action" id="more-session" href="login.html?next=more.html" hidden>
-            <span class="more-link-icon" data-icon="session"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.signIn">Sign in</span><span class="list-sub" data-i18n="more.sessionHint">Sign in to manage account access</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+          <a class="pf-row" href="login.html?next=more.html" id="more-session" hidden>
+            <span class="pf-orb me-orb" data-icon="session" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="more.signIn">Sign in</span><span class="pf-row-sub" data-i18n="more.sessionHint">Sign in to manage account access</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </a>
-          <button class="more-action" id="more-logout" type="button" hidden>
-            <span class="more-link-icon" data-icon="session"></span>
-            <span class="list-main"><span class="list-title" data-i18n="more.signOut">Sign out</span><span class="list-sub" id="more-logout-hint" data-i18n="more.signOutHint">End the session on this device</span></span>
-            <span data-icon="chevron" aria-hidden="true"></span>
+          <button class="pf-row" id="more-logout" type="button" hidden>
+            <span class="pf-orb me-orb" data-icon="session" aria-hidden="true"></span>
+            <span class="pf-row-main"><span class="pf-row-title" data-i18n="more.signOut">Sign out</span><span class="pf-row-sub" id="more-logout-hint" data-i18n="more.signOutHint">End the session on this device</span></span>
+            <span class="pf-chevron" aria-hidden="true"></span>
           </button>
         </div>
-      </div>
+      </article>
+
     </div>
   </section>
 </main>

@@ -3,9 +3,9 @@ window.Console.page('more', function (document) {
   const C = window.Console;
   C.mount('more');
 
+  /* The rows' beads and the call to action carry the console's own line icons. */
   document.querySelectorAll('[data-icon]').forEach((el) => {
-    const name = el.dataset.icon;
-    el.innerHTML = name === 'chevron' ? C.CHEVRON : (C.ICON[name] || '');
+    el.innerHTML = C.ICON[el.dataset.icon] || '';
   });
 
   function render() {
@@ -16,10 +16,12 @@ window.Console.page('more', function (document) {
     document.getElementById('more-approvals').hidden = !approvals.length;
     document.getElementById('more-approvals').href = C.taskLink(approvals[0]?.link) || 'approvals.html';
     document.getElementById('more-approvals-copy').textContent = attention.known ? C.t('at.approvals', { n: approvals.length }) : C.t('at.unknown');
+    /* The state is the card's figure; its dot is the one colour on the page, and means it. */
     const status = C.systemStatus();
-    document.getElementById('more-status-dot').className = 'dot ' +
-      (status === 'READY' ? 'dot-ok' : (status === 'PAUSED' ? 'dot-warn' : 'dot-bad'));
-    document.getElementById('more-status-copy').textContent = C.code(status) + ' · ' + C.sysCopy(status);
+    document.getElementById('more-status-dot').className = 'me-dot ' +
+      (status === 'READY' ? 'is-ok' : (status === 'PAUSED' ? 'is-warn' : 'is-bad'));
+    document.getElementById('more-status-word').textContent = C.code(status);
+    document.getElementById('more-status-copy').textContent = C.sysCopy(status);
     document.getElementById('more-language-value').textContent = nameOf(window.I18N.lang);
 
     /* Signed in, devices and sign-in sessions are the "Devices & notifications" row above; a
