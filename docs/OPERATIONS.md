@@ -251,27 +251,37 @@ research_schedule:
     micro_live:
       holdings:   {period: daily,  max_tickers_per_run: 2}
       candidates: {period: weekly, max_tickers_per_run: 1}
+      watchlist:  {period: weekly, max_tickers_per_run: 3}
+    advisory:                        # the owner's own Robinhood accounts, reviewed read-only
+      holdings:   {period: weekly, max_tickers_per_run: 2, language: zh}
   reserve_for_exits: 1               # of max_analyses_per_day
 ```
+
+This deployment studies only what the owner holds and what the owner added (owner's decision,
+2026-09-23): the Agentic account's holdings, the holdings of the owner's own accounts, and the
+names on the owner's Robinhood watchlists. `candidates` is off, because the configured universe is
+a list the system chose. The Lab lists the same names, read from the same places
+(`GET /research/subjects`).
 
 What changes when an account is named:
 
 | | |
 | --- | --- |
-| Subjects | A `holdings` review reads that account's own ledger: least recently researched first, and anything never researched before those, so the rotation cannot leave one holding unexamined for months. A `candidates` study keeps the configured universe, less whatever the account already holds: a held name is reviewed once, as a holding, and the study's cap reaches the next members of the universe instead. With `holdings` turned off, a held name is not scheduled at all. A holding that has since left the universe is still reviewed, because the two lists are read from different places. |
-| Order | Holdings before candidates, across every account. Risk already on the books comes before risk that is not. |
-| Budget | `reserve_for_exits` is the part of `max_analyses_per_day` a candidate study may not touch. A holdings review draws on the whole allowance, because a holdings review is how an exit is found. The day's count is re-read between tasks, so two tasks cannot together spend more than the subscription allows. |
+| Subjects | A `holdings` review reads that account's own ledger: least recently researched first, and anything never researched before those, so the rotation cannot leave one holding unexamined for months. A `candidates` study keeps the configured universe, less whatever the account already holds: a held name is reviewed once, as a holding, and the study's cap reaches the next members of the universe instead. With `holdings` turned off, a held name is not scheduled at all. A holding that has since left the universe is still reviewed, because the two lists are read from different places. A `watchlist` study reads the names on the owner's Robinhood watchlists in the last reading of Robinhood (screener results and the profile's ETF groups are not the owner's and are left out), less anything held in the account or in the owner's own accounts, and rotates like a holdings review. |
+| The owner's own accounts | `advisory` names them. Only `holdings` applies: each name they hold, as the last Robinhood reading saw it, is analysed read-only in the context of the first account that holds it, the same analysis the console starts from a holding. It never produces an order. The analysis refreshes the reading when it starts and refuses a holding that is gone. `language` is the language its reports are written in. |
+| Order | Holdings before candidates, and candidates before the watchlist, across every account; within a kind the managed account comes before the owner's own. Risk already on the books comes before risk that is not. |
+| Budget | `reserve_for_exits` is the part of `max_analyses_per_day` a candidate or watchlist study, or a review of the owner's own accounts, may not touch. The managed account's holdings review draws on the whole allowance, because that review is how an exit is found. The day's count is re-read between tasks, so two tasks cannot together spend more than the subscription allows. |
 | Period keys | Each task claims its own: `daily:micro_live:holdings:2026-09-19`. One account's review can never mark another's as already run, nor a holdings review a candidate study. The single Core review keeps the unscoped key it has always had. |
 | The launchd job | Fires as often as the shortest period any account asks for. A daily review invoked only on Fridays would be a weekly review wearing a daily name, so `research_schedule.launchd.weekday` is dropped from the job once any task is daily. Changing this section re-registers the job. |
 | Weekends | A daily period is keyed by calendar date, and a non-session day analyses the previous session (`on_non_session_day: previous_session`), so a daily task studies Friday's session again on Saturday and on Sunday. `skip` avoids that for every task, a weekly period for its own. This deployment schedules the Agentic account weekly for that reason. |
 | `ct-trigger scheduled` | Runs every configured task. `--bucket micro_live` narrows it to one account's tasks. |
-| Purpose | A holdings run is recorded with `purpose: review_holding`, a candidate run with `candidate`, which is what the research record and the queue then carry. |
+| Purpose | A holdings run is recorded with `purpose: review_holding`, a candidate or watchlist run with `candidate`, which is what the research record and the queue then carry. A review of the owner's own accounts is an `analysis` task with `trigger: scheduled`. |
 
 Not scheduled by any of this: an event-triggered run when verified data arrives. `ct-trigger
 event` still exists and is still manual, because the arrival of a *verified* event time is not
 something this system can yet detect on its own.
 
-A run that is going nowhere can be stopped from the Research screen or through
+A run that is going nowhere can be stopped from the Lab or through
 `POST /research/{run_key}/cancel`; it otherwise holds a concurrency slot until its timeout. A
 run stopped by the subscription limit is requeued automatically once the reset window passes,
 at most `max_limit_recoveries` times.

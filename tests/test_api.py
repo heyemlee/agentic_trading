@@ -653,6 +653,12 @@ def test_pausing_stops_orders_while_research_keeps_running(sandbox_service, monk
     """
     from agentic_trading.triggers import scheduled_review
 
+    # The single review always has a universe to study. The deployment's own schedule, which the
+    # sandbox copies, can name nothing to study today, and that would say nothing about pausing.
+    path = sandbox_service.profiles().config_dir / "risk_profile.yaml"
+    doc = yaml.safe_load(path.read_text())
+    doc["research_schedule"]["accounts"] = {}
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     started = []
     monkeypatch.setattr(sandbox_service, "start_research",
                         lambda ticker, **kw: started.append(ticker) or {"run_key": ticker})

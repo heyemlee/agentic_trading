@@ -494,3 +494,174 @@ def test_the_scheduled_job_names_no_bucket_and_that_means_every_configured_task(
     assert asked == [None, "micro_live"]
     assert triggers.main(["manual", "--ticker", "VTI", "--config-dir", str(tmp_path)]) == 0
     assert started == ["core"]
+
+
+# ------------------------------------------------------------------ what the owner holds and added
+def owner_snapshot(**extra):
+    """The owner's own accounts and watchlists as advisor.fetch_snapshot stores them."""
+    from agentic_trading.advisor import now
+
+    return {"fetched_at": now(), "complete": True, "errors": [], "source": "test",
+            "accounts": [{"id": "a" * 20, "label": "••••1111", "complete": True,
+                          "positions": [{"symbol": "AAPL", "quantity": 3},
+                                        {"symbol": "MSFT", "quantity": 1},
+                                        {"symbol": "GONE", "quantity": 0}]},
+                         {"id": "b" * 20, "label": "••••2222", "complete": True,
+                          "positions": [{"symbol": "MSFT", "quantity": 2}, {"symbol": "KO", "quantity": 5}]}],
+            "candidates": [{"symbol": "NVDA", "sources": ["watchlists:AI & chips", "scans:52-week highs"]},
+                           {"symbol": "AAPL", "sources": ["watchlists:Core"]},
+                           {"symbol": "VTI", "sources": ["watchlists:Core", "profile:us_broad_equity"]},
+                           {"symbol": "AMD", "sources": ["watchlists:AI & chips"]},
+                           {"symbol": "META", "sources": ["scans:52-week highs"]},
+                           {"symbol": "VXUS", "sources": ["profile:international_equity"]}],
+            **extra}
+
+
+def test_a_watchlist_study_reads_the_owners_watchlists_and_sets_aside_what_is_held(tmp_path):
+    """Only a name the owner put on a watchlist, and never one a holdings review examines.
+
+    A screener's results and the profile's own ETF groups travel in the same list with their
+    source; they are the system's suggestions, not the owner's. A name held in the managed book
+    or in the owner's own accounts is its holdings review's to examine.
+    """
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state, "VTI")
+    profiles = accounts_config(cfg_dir, {"micro_live": {"watchlist": {"period": "weekly"}}})
+    task = schedule.tasks(schedule.settings(profiles))[0]
+    assert (task.bucket, task.kind) == ("micro_live", schedule.WATCHLIST)
+
+    snapshot = owner_snapshot()
+    assert schedule.watchlist_names(snapshot) == ["NVDA", "AAPL", "VTI", "AMD"]
+    # AAPL is held in an own account, VTI in the managed book: neither is studied as a candidate.
+    assert schedule.subjects_for(profiles, task, snapshot=snapshot) == ["AMD", "NVDA"]
+    # The watchlist rotates like a holdings review: never studied first, then the longest since.
+    history = [{"ticker": "AMD", "bucket": "micro_live", "created_at": "2026-09-16T10:00:00+00:00"}]
+    assert schedule.subjects_for(profiles, task, history=history, snapshot=snapshot) == ["NVDA", "AMD"]
+    # Nothing read yet: nothing to study, and the reason says where the names come from.
+    assert schedule.subjects_for(profiles, task, snapshot={}) == []
+    decision = decide(profiles, task=task, subjects=[])
+    assert decision.run is False and "Robinhood watchlists" in decision.reason
+
+
+def test_the_owners_own_accounts_are_reviewed_on_what_they_hold_and_nothing_else(tmp_path):
+    """The observed accounts are reviewed, never bought for, and come after the managed book."""
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    profiles = accounts_config(cfg_dir, {
+        "advisory": {"holdings": {"period": "weekly", "max_tickers_per_run": 2, "language": "en"},
+                     "watchlist": {"period": "weekly"}, "candidates": {"period": "weekly"}},
+        "micro_live": {"holdings": {"period": "weekly"}, "watchlist": {"period": "weekly"}}})
+    plan = schedule.tasks(schedule.settings(profiles))
+    assert [(task.bucket, task.kind) for task in plan] == [
+        ("micro_live", schedule.HOLDINGS), (schedule.PERSONAL, schedule.HOLDINGS),
+        ("micro_live", schedule.WATCHLIST)]
+    personal = plan[1]
+    assert personal.language == "en" and plan[0].language is None
+    assert schedule.period_key(schedule.settings(profiles), FRIDAY_AFTER_CLOSE, personal).startswith(
+        "weekly:advisory:holdings:")
+
+    # Each symbol once, bound to the first account that holds it; a zero quantity is not held.
+    assert schedule.personal_holdings(owner_snapshot()) == {"AAPL": "a" * 20, "MSFT": "a" * 20, "KO": "b" * 20}
+    history = [{"ticker": "AAPL", "bucket": "advisory", "created_at": "2026-09-16T10:00:00+00:00"},
+               # The managed book's research says nothing about the owner's own rotation.
+               {"ticker": "KO", "bucket": "micro_live", "created_at": "2026-09-17T10:00:00+00:00"}]
+    assert schedule.subjects_for(profiles, personal, history=history, snapshot=owner_snapshot()) == [
+        "KO", "MSFT", "AAPL"]
+    assert schedule.subjects_for(profiles, personal, snapshot={}) == []
+    empty = decide(profiles, task=personal, subjects=[])
+    assert empty.run is False and "your own Robinhood accounts hold nothing" in empty.reason
+
+
+def test_only_the_managed_books_holdings_review_may_spend_the_exit_reserve(profiles):
+    """Studying a watchlist or the owner's own holdings can find no exit this system would take."""
+    profiles.risk["research_schedule"].update(max_analyses_per_day=3, reserve_for_exits=1)
+    spent = [{"created_at": FRIDAY_AFTER_CLOSE.isoformat(), "state": "COMPLETE"} for _ in range(2)]
+    managed = schedule.Task(bucket="micro_live", kind=schedule.HOLDINGS, period="weekly", max_tickers=2)
+    assert decide(profiles, task=managed, subjects=["VTI"], jobs=spent).run is True
+    for task in (schedule.Task(bucket="micro_live", kind=schedule.WATCHLIST, period="weekly", max_tickers=2),
+                 schedule.Task(bucket=schedule.PERSONAL, kind=schedule.HOLDINGS, period="weekly",
+                               max_tickers=2, language="zh")):
+        refused = decide(profiles, task=task, subjects=["NVDA"], jobs=spent)
+        assert refused.run is False and "reserved for exit reviews" in refused.reason
+
+
+def test_a_weekly_run_reviews_own_holdings_read_only_and_studies_the_watchlist_for_the_book(
+        tmp_path, monkeypatch, offline_market_reads):
+    """Holdings of the owner's own accounts become read-only analyses bound to their account;
+    watchlist names become candidate research for the managed book, whose BUY still waits for
+    the owner's approval."""
+    from agentic_trading.advisor import SNAPSHOT
+    from agentic_trading.research_jobs import ResearchJobManager
+
+    monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    state = tmp_path / "state"
+    state.mkdir()
+    (tmp_path / "runs").mkdir()
+    copy_example_ledger("portfolio.example.yaml", state / "portfolio.yaml")
+    micro_ledger(state)
+    accounts_config(cfg_dir, {
+        "micro_live": {"holdings": {"period": "weekly", "max_tickers_per_run": 2},
+                       "candidates": {"period": "weekly", "enabled": False},
+                       "watchlist": {"period": "weekly", "max_tickers_per_run": 3}},
+        "advisory": {"holdings": {"period": "weekly", "max_tickers_per_run": 2}}},
+        max_analyses_per_day=6, reserve_for_exits=1)
+    service = Service(cfg_dir)
+    service.state_db().write_meta(SNAPSHOT, owner_snapshot())
+
+    result = scheduled_review(service)
+    kinds = [(task["schedule"]["bucket"], task["schedule"]["kind"]) for task in result["tasks"]]
+    assert kinds == [("micro_live", "holdings"), ("advisory", "holdings"), ("micro_live", "watchlist")]
+    book, own, watched = result["tasks"]
+    assert book["started"] == [] and "holds nothing to review" in book["reason"]
+
+    # Two of the three own holdings, never researched, in order; each bound to its account.
+    assert [run["ticker"] for run in own["started"]] == ["AAPL", "KO"]
+    for run in own["started"]:
+        assert run["bucket"] == "advisory" and run["trigger"] == "scheduled"
+        assert run["task"]["kind"] == "analysis" and run["task"]["scope"] == "personal"
+        assert run["task"]["language"] == "zh"
+    assert [run["task"]["account_id"] for run in own["started"]] == ["a" * 20, "b" * 20]
+
+    # The watchlist without what the owner holds (AAPL): as candidates for the managed book,
+    # which holds nothing here, so VTI is studied too; three is what the reserve leaves (six a
+    # day, one kept for exits, two spent above) and the task's own cap.
+    assert sorted(run["ticker"] for run in watched["started"]) == ["AMD", "NVDA", "VTI"]
+    assert {(run["bucket"], run["purpose"], run["trigger"]) for run in watched["started"]} == {
+        ("micro_live", "candidate", "scheduled")}
+
+    # Each task claimed its own period; a repeat inside the week starts nothing more.
+    again = scheduled_review(service)
+    assert again["started"] == []
+    assert all("already executed" in task["reason"] or "holds nothing" in task["reason"]
+               for task in again["tasks"])
+
+
+def test_a_personal_review_can_only_be_scheduled_by_the_schedule(tmp_path, monkeypatch, offline_market_reads):
+    """The console cannot say a task was scheduled, and nothing but a holding analysis can be."""
+    import uuid
+
+    from agentic_trading.advisor import SNAPSHOT
+    from agentic_trading.research_jobs import ResearchJobManager
+    from agentic_trading.service import ServiceError
+
+    monkeypatch.setattr(ResearchJobManager, "dispatch", lambda self: [])
+    cfg_dir = tmp_path / "config"
+    shutil.copytree(ROOT / "config", cfg_dir)
+    (tmp_path / "state").mkdir()
+    (tmp_path / "runs").mkdir()
+    copy_example_ledger("portfolio.example.yaml", tmp_path / "state" / "portfolio.yaml")
+    service = Service(cfg_dir)
+    service.state_db().write_meta(SNAPSHOT, owner_snapshot())
+    with pytest.raises(ServiceError, match="only a holding analysis can be scheduled"):
+        service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()), trigger="scheduled")
+    with pytest.raises(ServiceError, match="only a holding analysis can be scheduled"):
+        service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="AAPL",
+                              account_id="a" * 20, trigger="event")
+    job = service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="AAPL", account_id="a" * 20)
+    assert job["trigger"] == "manual"

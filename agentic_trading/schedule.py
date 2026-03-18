@@ -30,9 +30,17 @@ MAX_RECORDS = 60
 
 #: What the schedule can do for one account. Reviewing what an account already holds comes
 #: before looking at what it might buy, because the risk that is already on the books is the
-#: risk a person is already carrying.
-HOLDINGS, CANDIDATES, REVIEW = "holdings", "candidates", "review"
-KIND_ORDER = (HOLDINGS, CANDIDATES)
+#: risk a person is already carrying. A candidate study reads the configured universe; a
+#: watchlist study reads the names the owner put on their Robinhood watchlists instead.
+HOLDINGS, CANDIDATES, WATCHLIST, REVIEW = "holdings", "candidates", "watchlist", "review"
+KIND_ORDER = (HOLDINGS, CANDIDATES, WATCHLIST)
+
+#: The owner's own Robinhood accounts. The system observes them and never trades them, so
+#: research about them is personal and read-only and is recorded under this bucket, and the only
+#: study the schedule gives them is a review of what they hold.
+PERSONAL = "advisory"
+#: How advisor.fetch_snapshot marks a name that came from one of the owner's watchlists.
+WATCHLIST_SOURCE = "watchlists:"
 
 
 @dataclass(frozen=True)
@@ -50,6 +58,8 @@ class Task:
     period: str
     max_tickers: int
     scoped: bool = True
+    #: The language a personal review writes its reports in; the trading buckets name none.
+    language: str | None = None
 
     @property
     def label(self) -> str:
@@ -65,7 +75,13 @@ def tasks(cfg: dict[str, Any], *, bucket: str | None = None) -> list[Task]:
         accounts:
           micro_live:
             holdings:   {period: daily,  max_tickers_per_run: 2}
-            candidates: {period: weekly, max_tickers_per_run: 1}
+            watchlist:  {period: weekly, max_tickers_per_run: 1}
+          advisory:
+            holdings:   {period: weekly, max_tickers_per_run: 2, language: zh}
+
+    ``advisory`` is the owner's own accounts, reviewed read-only; any kind but ``holdings``
+    under it is ignored, because nothing is ever bought for them. Within a kind the managed
+    accounts come first: their exits are the risk this system carries.
 
     Absent, this answers the one review the deployment already runs, so the schedule behaves
     exactly as it did until an account is named deliberately.
@@ -79,13 +95,17 @@ def tasks(cfg: dict[str, Any], *, bucket: str | None = None) -> list[Task]:
     else:
         out = []
         for kind in KIND_ORDER:
-            for name in sorted(accounts):
+            for name in sorted(accounts, key=lambda n: (n == PERSONAL, n)):
                 block = (accounts.get(name) or {}).get(kind)
                 if not isinstance(block, dict) or block.get("enabled") is False:
                     continue
+                if name == PERSONAL and kind != HOLDINGS:
+                    continue
                 out.append(Task(bucket=name, kind=kind,
                                 period=str(block.get("period", period)),
-                                max_tickers=int(block.get("max_tickers_per_run", cap))))
+                                max_tickers=int(block.get("max_tickers_per_run", cap)),
+                                language=(str(block.get("language", "zh"))
+                                          if name == PERSONAL else None)))
     return [task for task in out if bucket is None or task.bucket == bucket]
 
 
@@ -110,7 +130,8 @@ def ledger_for(profiles, bucket: str) -> Path:
     return Path(profiles.project_dir) / str(configured)
 
 
-def subjects_for(profiles, task: Task, *, history: list[dict[str, Any]] = ()) -> list[str]:
+def subjects_for(profiles, task: Task, *, history: list[dict[str, Any]] = (),
+                 snapshot: dict[str, Any] | None = None) -> list[str]:
     """What this task should analyse, in the order it should be analysed.
 
     A holdings review reads the account's own ledger, so an account is reviewed on what it
@@ -119,40 +140,98 @@ def subjects_for(profiles, task: Task, *, history: list[dict[str, Any]] = ()) ->
     the rotation is what stops one holding from going unexamined for months while another is
     looked at every day. Ordering by event proximity is deliberately not done here -- that needs
     the event calendar and a verified event time, and guessing it would be worse than rotating.
+    The owner's own accounts have no ledger here: their holdings are read from ``snapshot``, the
+    last Robinhood reading (advisor.fetch_snapshot), and rotate the same way.
 
     A candidate study keeps the configured universe, which is what the single review has always
     used. The universe bounds what may be *researched*; what may then be *bought* is the
     authority's business, and a holding that has since left the universe must still be
-    reviewable, which is why the two lists are read from different places.
+    reviewable, which is why the two lists are read from different places. A watchlist study
+    reads the owner's Robinhood watchlists in that reading instead, and rotates through them,
+    because a watchlist can be longer than any one week's cap.
 
-    It sets aside what the account already holds, before the cap, so the cap reaches the next
-    members of the universe. A held name is the holdings review's to examine: studied again as a
-    candidate it is the same research under another purpose -- the pipeline is told about the
-    position either way -- run twice on one day, and able to come back as a BUY beside the
-    review's REDUCE. The single review a deployment runs until it names an account is not a
-    candidate study; it reads no book and sets nothing aside, as before.
+    Both set aside what is already held, before the cap, so the cap reaches the next names. A
+    held name is the holdings review's to examine: studied again as a candidate it is the same
+    research under another purpose -- the pipeline is told about the position either way -- run
+    twice on one day, and able to come back as a BUY beside the review's REDUCE. A watchlist
+    study also sets aside what the owner's own accounts hold, which their review examines. The
+    single review a deployment runs until it names an account is not a candidate study; it reads
+    no book and sets nothing aside, as before.
     """
     from .portfolio import PortfolioError, load_portfolio
 
     cfg = settings(profiles)
-    if task.kind not in (HOLDINGS, CANDIDATES):
+    if task.kind not in (HOLDINGS, CANDIDATES, WATCHLIST):
         return default_tickers(profiles, cfg)
+    if task.bucket == PERSONAL:
+        return _rotation(personal_holdings(snapshot), history, task.bucket) if task.kind == HOLDINGS else []
     try:
         ledger = load_portfolio(ledger_for(profiles, task.bucket))
     except (PortfolioError, OSError, ValueError):
         # A book that cannot be read schedules no holdings review, so a candidate study has
         # nothing to repeat and sets nothing aside. Either way the reason belongs to whatever
         # reads the book for real, not to a decision about when to run.
-        return default_tickers(profiles, cfg) if task.kind == CANDIDATES else []
+        if task.kind == CANDIDATES:
+            return default_tickers(profiles, cfg)
+        if task.kind == WATCHLIST:
+            owned = set(personal_holdings(snapshot))
+            return _rotation([s for s in watchlist_names(snapshot) if s not in owned], history, task.bucket)
+        return []
     held = [position.symbol for position in ledger.positions if position.bucket == task.bucket]
     if task.kind == CANDIDATES:
         return default_tickers(profiles, cfg, exclude=held)
+    if task.kind == WATCHLIST:
+        owned = {symbol.upper() for symbol in held} | set(personal_holdings(snapshot))
+        return _rotation([s for s in watchlist_names(snapshot) if s not in owned], history, task.bucket)
+    return _rotation(held, history, task.bucket)
+
+
+def _rotation(symbols: Iterable[str], history: Iterable[dict[str, Any]], bucket: str) -> list[str]:
+    """Never researched first, then the longest since this account's research last looked."""
     seen: dict[str, str] = {}
     for row in history or ():
         symbol = str(row.get("ticker") or "").upper()
-        if row.get("bucket") == task.bucket and symbol:
+        if row.get("bucket") == bucket and symbol:
             seen.setdefault(symbol, str(row.get("created_at") or ""))
-    return sorted(dict.fromkeys(held), key=lambda symbol: (symbol in seen, seen.get(symbol, ""), symbol))
+    return sorted(dict.fromkeys(symbols), key=lambda symbol: (symbol in seen, seen.get(symbol, ""), symbol))
+
+
+def personal_holdings(snapshot: dict[str, Any] | None) -> dict[str, str]:
+    """Each symbol the owner's own accounts hold, with the first account that holds it.
+
+    A review is bound to one observed account, the one whose context it is read in; a symbol
+    held in two accounts is reviewed once, in the first the reading lists.
+    """
+    held: dict[str, str] = {}
+    for account in (snapshot or {}).get("accounts") or []:
+        if not isinstance(account, dict) or not account.get("id"):
+            continue
+        for position in account.get("positions") or []:
+            symbol = str((position or {}).get("symbol") or "").upper()
+            try:
+                quantity = float((position or {}).get("quantity") or 0)
+            except (TypeError, ValueError):
+                quantity = 0.0
+            if symbol and quantity > 0:
+                held.setdefault(symbol, str(account["id"]))
+    return held
+
+
+def watchlist_names(snapshot: dict[str, Any] | None) -> list[str]:
+    """The names on the owner's Robinhood watchlists, as the last reading saw them.
+
+    Screener results and the profile's own ETF groups travel in the same list, marked with
+    their source; only a name the owner put on a watchlist is theirs.
+    """
+    out: list[str] = []
+    for item in (snapshot or {}).get("candidates") or []:
+        if not isinstance(item, dict):
+            continue
+        if any(str(source).startswith(WATCHLIST_SOURCE) for source in item.get("sources") or []):
+            symbol = str(item.get("symbol") or "").upper()
+            if symbol:
+                out.append(symbol)
+    return list(dict.fromkeys(out))
 
 
 @dataclass
@@ -383,8 +462,10 @@ def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, An
     limit = int(cfg.get("max_analyses_per_day", 6))
     used = analyses_today(jobs, cfg, now)
     # Looking for something to buy may not spend the capacity an exit review needs. A holdings
-    # review is how an exit is found, so it draws on the whole allowance.
-    reserved = int(cfg.get("reserve_for_exits", 0)) if task.kind == CANDIDATES else 0
+    # review of a managed account is how an exit is found, so it alone draws on the whole
+    # allowance; a review of the owner's own accounts can find no exit this system would take.
+    reserved = int(cfg.get("reserve_for_exits", 0)) if (
+        task.kind in (CANDIDATES, WATCHLIST) or (task.kind == HOLDINGS and task.bucket == PERSONAL)) else 0
     available = limit - reserved
     if used >= available:
         spent = f"{used}/{limit} analyses today"
@@ -396,8 +477,14 @@ def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, An
         subjects = default_tickers(profiles, cfg)
     tickers = list(subjects)[:max(0, min(task.max_tickers, available - used))]
     if not tickers:
+        if task.kind == HOLDINGS and task.bucket == PERSONAL:
+            return no("your own Robinhood accounts hold nothing to review in the last reading "
+                      "of them", trade_date)
         if task.kind == HOLDINGS:
             return no(f"{task.bucket} holds nothing to review", trade_date)
+        if task.kind == WATCHLIST:
+            return no("no name is left on your Robinhood watchlists to study: none has been read "
+                      "yet, or every one is already held", trade_date)
         if task.kind == CANDIDATES and not subjects and default_tickers(profiles, cfg):
             # The universe names something and none of it is left: the account holds all of it.
             return no(f"{task.bucket} already holds everything in the universe", trade_date)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,8 +31,10 @@ TRIGGERS = ("scheduled", "manual", "event")
 
 #: Why a scheduled run was asked for, by the kind of task that asked. A holdings review is a
 #: review of something the book holds, which is what ``purpose`` means downstream; the single
-#: legacy review names no purpose, so it behaves exactly as it always has.
-PURPOSE_OF_KIND = {schedule.HOLDINGS: "review_holding", schedule.CANDIDATES: "candidate"}
+#: legacy review names no purpose, so it behaves exactly as it always has. A name from the
+#: owner's watchlists is a candidate like any other.
+PURPOSE_OF_KIND = {schedule.HOLDINGS: "review_holding", schedule.CANDIDATES: "candidate",
+                   schedule.WATCHLIST: "candidate"}
 
 
 def scheduled_review(service: Service, *, tickers: list[str] | None = None,
@@ -49,11 +52,17 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
     before any of them started would let holdings and candidates together spend more than the
     subscription allows, which is the one thing more concurrency cannot fix.
     """
+    from .advisor import SNAPSHOT
+
     profiles = service.profiles()
     db = service.state_db(profiles)
     cfg = schedule.settings(profiles)
     health = service.health()
     history = service.research_history(limit=200)
+    # The owner's own holdings and watchlists, as Robinhood was last read. The run does not read
+    # the venue itself: a personal review refreshes the reading when it starts, and refuses a
+    # holding that is no longer there.
+    snapshot = db.read_meta(SNAPSHOT, {}) or {}
     plan = schedule.tasks(cfg, bucket=bucket)
     results: list[dict[str, Any]] = []
 
@@ -61,11 +70,12 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
         decision = schedule.decide(
             profiles, task=task,
             subjects=[t.upper() for t in tickers] if tickers else
-            schedule.subjects_for(profiles, task, history=history),
+            schedule.subjects_for(profiles, task, history=history, snapshot=snapshot),
             health_status=health.status, paused=bool(health.paused),
             executed=db.read_meta(schedule.EXECUTIONS, {}) or {},
             jobs=service.research_jobs(limit=200), now=now, force=force)
-        results.append(_run_task(service, db, task, decision, now=now, force=force))
+        results.append(_run_task(service, db, task, decision, now=now, force=force,
+                                 snapshot=snapshot))
 
     at = datetime.now(UTC).isoformat()
     if len(results) == 1:
@@ -79,7 +89,8 @@ def scheduled_review(service: Service, *, tickers: list[str] | None = None,
 
 
 def _run_task(service: Service, db, task: schedule.Task, decision: schedule.Decision, *,
-              now: datetime | None, force: bool) -> dict[str, Any]:
+              now: datetime | None, force: bool,
+              snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Carry out one task's decision and record what came of it."""
     at = datetime.now(UTC).isoformat()
     if not decision.run:
@@ -102,8 +113,11 @@ def _run_task(service: Service, db, task: schedule.Task, decision: schedule.Deci
             # published, and anchoring to a date with no data yields an UNKNOWN regime and a
             # run that looks healthy while reasoning from evidence it does not have. The
             # service picks the newest session that actually has data.
-            started.append(service.start_research(ticker, bucket=task.bucket, trigger="scheduled",
-                                                  purpose=PURPOSE_OF_KIND.get(task.kind)))
+            if task.bucket == schedule.PERSONAL:
+                started.append(_review_personal_holding(service, task, ticker, snapshot))
+            else:
+                started.append(service.start_research(ticker, bucket=task.bucket, trigger="scheduled",
+                                                      purpose=PURPOSE_OF_KIND.get(task.kind)))
         except ServiceError as exc:      # one refused ticker must not lose the others
             errors.append({"ticker": ticker, "error": str(exc)})
     # Bookkeeping must not be able to fail a run that already started.
@@ -117,6 +131,22 @@ def _run_task(service: Service, db, task: schedule.Task, decision: schedule.Deci
                       min_interval_seconds=0)
     return {"started": started, "skipped": False, "errors": errors,
             "schedule": decision.as_dict(), "at": at}
+
+
+def _review_personal_holding(service: Service, task: schedule.Task, ticker: str,
+                             snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """One holding of the owner's own accounts, reviewed read-only in its account's context.
+
+    The same analysis the console starts from a holding: the research graph runs, and its
+    answer is advice about an account this system never trades. It is bound to the account
+    that holds the name, which the service checks against the snapshot again.
+    """
+    account_id = schedule.personal_holdings(snapshot).get(ticker.upper())
+    if account_id is None:
+        raise ServiceError(f"{ticker} is not held in the last reading of your own accounts")
+    return service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker=ticker,
+                                 account_id=account_id, language=task.language or "zh",
+                                 scope="personal", trigger="scheduled")
 
 
 def event_analysis(service: Service, ticker: str, *, bucket: str = "core",

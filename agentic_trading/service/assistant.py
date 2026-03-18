@@ -271,20 +271,24 @@ class AssistantMixin:
     def start_advisor(self, *, kind: str, request_id: str, message: str = "",
                       conversation_id: str = "default", ticker: str = "",
                       account_id: str | None = None, language: str = "zh",
-                      scope: str = "personal") -> dict[str, Any]:
+                      scope: str = "personal", trigger: str = "manual") -> dict[str, Any]:
         """Queue an assistant task, bound by the server to the account scope it is about.
 
         The binding is written into the task from what the server knows -- the snapshot's
         accounts, the conversation's existing binding -- and never from anything the model
         says later. A personal task names one observed account (``single``) or, with no
         account, all of them as the snapshot lists them now (``all_personal``). The Agentic
-        scope is for explaining what is recorded and admits nothing else.
+        scope is for explaining what is recorded and admits nothing else. ``trigger`` is
+        ``scheduled`` only when the weekly review of the owner's holdings asks; the console
+        cannot say it.
         """
         from ..advisor import SYMBOL
         from ..schedule import analyses_today, settings
 
         if kind not in KINDS:
             raise ServiceError("unknown assistant task")
+        if trigger not in ("manual", "scheduled") or (trigger == "scheduled" and kind != "analysis"):
+            raise ServiceError("only a holding analysis can be scheduled")
         if scope not in SCOPES:
             raise ServiceError(f"unknown assistant scope {scope!r}; one of {', '.join(SCOPES)}")
         if scope == "agentic" and kind not in AGENTIC_KINDS:
@@ -354,6 +358,6 @@ class AssistantMixin:
                 self._bind_conversation(db, conversation_id, scope, account_kind, account_id, account_ids)
             job, created = manager.create(run_key=run_key, ticker=ticker, bucket="advisory",
                                           trade_date=_last_session(), instrument_type="auto",
-                                          trigger="manual", task=task)
+                                          trigger=trigger, task=task)
         manager.dispatch()
         return {**(manager.store.get(job["run_key"]) or job), "deduplicated": not created}

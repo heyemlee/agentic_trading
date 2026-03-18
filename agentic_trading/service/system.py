@@ -329,6 +329,7 @@ class SystemMixin:
         only task until an account is configured, so a screen that reads them keeps working.
         """
         from .. import schedule as scheduling
+        from ..advisor import SNAPSHOT
 
         profiles = self.profiles()
         cfg = scheduling.settings(profiles)
@@ -336,10 +337,12 @@ class SystemMixin:
         record = db.read_meta(scheduling.EXECUTIONS, {}) or {}
         jobs = self.research_jobs(limit=200)
         history = self.research_history(limit=200)
+        snapshot = db.read_meta(SNAPSHOT, {}) or {}
         health = self.health()
         plan = scheduling.tasks(cfg)
         decisions = [scheduling.decide(
-            profiles, task=task, subjects=scheduling.subjects_for(profiles, task, history=history),
+            profiles, task=task,
+            subjects=scheduling.subjects_for(profiles, task, history=history, snapshot=snapshot),
             health_status=health.status, paused=bool(health.paused), executed=record, jobs=jobs)
             for task in plan]
         periods = record.get("periods") or {}
