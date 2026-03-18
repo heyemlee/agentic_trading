@@ -466,3 +466,31 @@ def test_only_a_candidate_study_sets_the_book_aside_and_an_empty_one_says_why(tm
     assert schedule.subjects_for(profiles, candidates) == []
     decision = decide(profiles, task=candidates, subjects=[])
     assert decision.run is False and "already holds everything" in decision.reason
+
+
+def test_the_scheduled_job_names_no_bucket_and_that_means_every_configured_task(monkeypatch, tmp_path):
+    """run_scheduled_research.sh calls `ct-trigger scheduled` with no --bucket.
+
+    A default of core narrowed that to core's tasks, so once an account was named in
+    research_schedule.accounts the job ran nothing, recorded no skip, and left the tasks
+    showing as due. Manual and event triggers still research core unless told otherwise.
+    """
+    from agentic_trading import triggers
+
+    asked, started = [], []
+
+    class Stub:
+        def start_research(self, ticker, **kwargs):
+            started.append(kwargs["bucket"])
+            return {"run_key": ticker}
+
+    monkeypatch.setattr(triggers, "load_env", lambda: None)
+    monkeypatch.setattr(triggers, "Service", lambda config_dir: Stub())
+    monkeypatch.setattr(triggers, "_append_trigger_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(triggers, "scheduled_review",
+                        lambda service, **kwargs: asked.append(kwargs["bucket"]) or {})
+    assert triggers.main(["scheduled", "--config-dir", str(tmp_path)]) == 0
+    assert triggers.main(["scheduled", "--bucket", "micro_live", "--config-dir", str(tmp_path)]) == 0
+    assert asked == [None, "micro_live"]
+    assert triggers.main(["manual", "--ticker", "VTI", "--config-dir", str(tmp_path)]) == 0
+    assert started == ["core"]

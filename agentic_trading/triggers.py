@@ -148,7 +148,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("kind", choices=TRIGGERS)
     parser.add_argument("--ticker", action="append", dest="tickers",
                         help="repeatable; defaults to one representative per core exposure group")
-    parser.add_argument("--bucket", choices=["core", "sandbox", "micro_live"], default="core")
+    # No default here. The launchd job names no bucket, and for a scheduled trigger that has to
+    # mean every configured task: a default of core narrowed it to core's, so naming an account
+    # in research_schedule.accounts ran nothing, recorded no skip, and left the tasks showing as
+    # due. Manual and event triggers still research core unless told otherwise.
+    parser.add_argument("--bucket", choices=["core", "sandbox", "micro_live"], default=None,
+                        help="scheduled: narrow to one account's tasks (default: every task); "
+                             "manual and event: the book to research (default: core)")
     parser.add_argument("--reason", default="external event", help="event triggers only")
     parser.add_argument("--force", action="store_true",
                         help="scheduled triggers only: run again inside an executed period")
@@ -169,11 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.kind == "event":
             if not args.tickers:
                 parser.error("an event trigger needs at least one --ticker")
-            result = event_analysis(service, args.tickers[0], bucket=args.bucket, reason=args.reason)
+            result = event_analysis(service, args.tickers[0], bucket=args.bucket or "core",
+                                    reason=args.reason)
         else:
             if not args.tickers:
                 parser.error("a manual trigger needs at least one --ticker")
-            result = {"started": [service.start_research(t, bucket=args.bucket, trigger="manual")
+            result = {"started": [service.start_research(t, bucket=args.bucket or "core", trigger="manual")
                                   for t in args.tickers], "skipped": False}
     except ServiceError as exc:
         print(f"trigger failed: {exc}")
