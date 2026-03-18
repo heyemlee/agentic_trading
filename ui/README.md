@@ -4,15 +4,15 @@ Frontend for the local API in `agentic_trading`. Fifteen pages, one shared
 asset layer, no build step.
 
 ```
-index.html       Home      equity vs high-water mark, the open proposal, buckets
+index.html       Home      Today: what needs you, what is not normal, research conclusions, the account
 portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
-research.html    Research  decision strength, run history, start a run
+research.html    Research  the third tab: studies running, each run's conclusion against its threshold, reports, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, tracked orders, audit trail
 system.html      System    health, notices, kill switch
 advisor.html     Assistant personal context, holdings review, candidates, chat
-lab.html         Lab       visual research-agent state and report handoffs
+lab.html         Lab       one run's process, opened from Research (`?run=`): desks, handoffs, the gate
 evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
 notifications.html Devices signed-in devices, push status and a test
@@ -138,10 +138,14 @@ Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposal
 read only on pages that use it and opens no venue session. No websocket; the
 backend offers none and none is needed.
 
-Home and More read current attention from `/attention`, preserving server priority. Home combines
-those items with `/health.warnings` in one persistent notification stack; actionable items come
-first, followed by system notices. It hides the stack after a current, readable empty attention
-result when there are no health warnings. A native disclosure shows additional cards. Missing, stale or partially
+Home and More read current attention from `/attention`, preserving server priority. Home shows
+those items alone, and hides them after a current, readable empty result; a native disclosure
+shows additional cards. Below them, Home lists only what is not normal, each row opening the page
+that owns it: a status other than READY (System), a preflight block while real money is armed
+(Risk), an order still working at the venue (Activity), and the number of `/health.warnings`
+(System, which holds their text). Nothing there means nothing is abnormal. Research follows: a
+running study opens its Lab, a finished one its report, each naming its account; the paper book
+stays off Home. Missing, stale or partially
 readable results say "cannot confirm", never "nothing to do". Links retain
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in

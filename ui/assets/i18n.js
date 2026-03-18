@@ -584,7 +584,7 @@ window.I18N = (function () {
       'acct.opening': 'Opening allocation', 'acct.flows': 'Recorded deposits and withdrawals',
       'acct.hwm': 'High-water mark', 'acct.drawdown': 'Drawdown',
 
-      'home.title': 'Home',
+      'home.title': 'Home', 'home.today': 'Today',
       'home.equityOf': '{a} · priced for {d}', 'home.equitySource': 'Source: {s} · ledger as of {d}',
       'home.noAccount': 'No account could be read',
       'home.funded': 'Money paid in (net)', 'home.pnl': 'Investment result',
@@ -1493,7 +1493,7 @@ window.I18N = (function () {
       'acct.opening': '初始配额', 'acct.flows': '已登记出入金',
       'acct.hwm': '历史高点', 'acct.drawdown': '回撤',
 
-      'home.title': '首页',
+      'home.title': '首页', 'home.today': '今天',
       'home.equityOf': '{a} · 按 {d} 定价', 'home.equitySource': '数据来源：{s} · 账本截至 {d}',
       'home.noAccount': '没有可读取的账户',
       'home.funded': '净入金', 'home.pnl': '投资损益',

@@ -4,10 +4,15 @@ window.Console.page('index', function (document) {
 
   const $ = (id) => document.getElementById(id);
 
-  /* Runs on a hidden bucket stay out of the headline and the Latest list. */
+  /* Today answers four things, in the order a person asks them: what needs me, what is not
+     normal, what research concluded, and how the account stands. Whatever is normal and
+     unchanging -- the market clock, a preflight that passes, an empty order book, a notice
+     that has read the same for weeks -- has its own page and is not repeated here. */
+
+  /* Runs on a hidden bucket stay out of Home, as they stay out of every headline. */
   const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket));
 
-  /* ── equity against the high-water mark ────────────────────────────
+  /* ── the account, against its own high-water mark ────────────────
      One account at a time. The paper core/sandbox book and the real-money
      Micro-Live account keep separate ledgers and separate high-water marks,
      so a headline that added them together could not be compared against
@@ -21,6 +26,7 @@ window.Console.page('index', function (document) {
     return Object.keys(A).filter(C.showsAccount)
       .sort((a, b) => (a === PRIMARY ? -1 : b === PRIMARY ? 1 : a.localeCompare(b)));
   }
+  const assetsLink = (key) => 'portfolio.html?scope=' + (key === 'conceptual' ? 'demo' : 'agentic');
 
   function renderEquity() {
     const A = D.portfolio.accounts || {};
@@ -30,58 +36,30 @@ window.Console.page('index', function (document) {
       $('equity-label').textContent = C.t('home.noAccount');
       C.tickValue($('equity-value'), '—');
       $('equity-source').textContent = Object.values(D.portfolio.errors || {}).join('; ');
-      C.setHTML($('funding-kv'), '');
-      C.setHTML($('account-list'), '');
-      $('home-drawdown').textContent = '';
-      $('hwm-delta').textContent = '—';
       $('hwm-foot').textContent = '';
-      $('hwm-fill').style.width = '0%';
-      $('hwm-mark').style.left = '0%';
-      $('hwm-track').setAttribute('aria-label', C.t('home.noAccount'));
+      $('funding-kv').textContent = '';
+      C.setHTML($('account-list'), '');
       return;
     }
-    $('home-drawdown').textContent = C.t('home.drawdown', { p: C.pct(lead.drawdown_pct || 0) });
-    const equity = lead.equity_usd;
-    const hwm = lead.high_water_mark_usd;
-
+    $('account-card').href = assetsLink(names[0]);
+    $('account-card').className = (lead.is_real_money === false ? 'card-quiet' : 'card-real') + ' home-account';
     $('equity-label').textContent = C.t('home.equityOf', {
       a: C.t('acct.' + names[0]), d: C.dateOnly(lead.priced_for) });
-    C.tickValue($('equity-value'), C.usd(equity));
-    $('equity-source').textContent = C.t('home.equitySource',
-      { s: C.t('acct.src.' + names[0]), d: C.dateOnly(lead.as_of) });
-
-    const delta = equity - hwm;
-    const deltaPct = hwm ? (delta / hwm) * 100 : 0;
-    const under = delta < 0;
-    const el = $('hwm-delta');
-    C.tickValue(el, C.t(under ? 'home.hwmBelow' : 'home.hwmAbove',
-      { v: C.usd(Math.abs(delta)), p: Math.abs(deltaPct).toFixed(2) }));
-    el.classList.add('hwm-delta', under ? 'neg' : 'pos');
-    el.classList.toggle('pos', !under);
-    el.classList.toggle('neg', under);
-
-    /* one scale for both marks, with headroom so neither pins to the edge */
-    const scale = Math.max(equity, hwm) * 1.1 || 1;
-    const fill = $('hwm-fill');
-    fill.style.width = ((equity / scale) * 100).toFixed(2) + '%';
-    fill.className = 'hwm-fill' + (under ? ' is-under' : '');
-    $('hwm-mark').style.left = ((hwm / scale) * 100).toFixed(2) + '%';
-    $('hwm-track').setAttribute('aria-label',
-      'Equity ' + C.usd(equity) + ' against a high-water mark of ' + C.usd(hwm));
-
+    C.tickValue($('equity-value'), C.usd(lead.equity_usd));
     $('hwm-foot').textContent = C.t('home.hwmFoot',
-      { v: C.usd(hwm), d: C.pct(lead.drawdown_pct || 0), l: C.code(lead.ladder_level) });
-
+      { v: C.usd(lead.high_water_mark_usd), d: C.pct(lead.drawdown_pct || 0), l: C.code(lead.ladder_level) });
     /* Money paid in is not money made. Both are shown so neither can be read
        as the other, and the return is stated against funding, not equity. */
-    C.setHTML($('funding-kv'), fundingRows(lead));
+    $('funding-kv').textContent = fundingLine(lead);
+    $('equity-source').textContent = C.t('home.equitySource',
+      { s: C.t('acct.src.' + names[0]), d: C.dateOnly(lead.as_of) });
 
     /* Any further account keeps its own equity, funding and high-water mark. */
     C.setHTML($('account-list'), names.slice(1).map((key) => {
       const a = A[key];
       return C.listRow({
         id: 'account-' + key,
-        href: 'portfolio.html?scope=' + (key === 'conceptual' ? 'demo' : 'agentic'),
+        href: assetsLink(key),
         title: C.t('acct.' + key),
         sub: (a.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.t('acct.src.' + key),
         value: C.usd(a.equity_usd),
@@ -92,81 +70,52 @@ window.Console.page('index', function (document) {
     }).join(''));
   }
 
-  function fundingRows(a) {
-    const kv = (k, v) => '<div class="kv-row"><dt>' + C.escapeHtml(k) + '</dt><dd>' +
-      C.escapeHtml(v) + '</dd></div>';
-    return kv(C.t('home.funded'), C.usd(a.net_deposits_usd)) +
-      kv(C.t('home.pnl'), (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd)) +
-      kv(C.t('home.return'), a.return_pct == null ? '—' : C.pct(a.return_pct, 2));
+  function fundingLine(a) {
+    return [
+      C.t('home.funded') + ' ' + C.usd(a.net_deposits_usd),
+      C.t('home.pnl') + ' ' + (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd),
+      C.t('home.return') + ' ' + (a.return_pct == null ? '—' : C.pct(a.return_pct, 2)),
+    ].join(' · ');
   }
 
-  /* ── the agent's own state ───────────────────────────────────────
-     RUNNING comes from /research/{run_key}; otherwise the queue and the
-     last decision record say what it just did. The run_key format is
-     {date}_{TICKER}_{hex} (service.py), so the ticker is readable from it. */
-  function renderAgent() {
-    const job = (D.researchJobs || []).find(j => ['QUEUED', 'RUNNING'].includes(j.state));
-    if (!window.CT_DEMO && CT_API.activeRun !== (job?.run_key || null)) CT_API.watchRun(job?.run_key || null);
-    const run = D.researchRun || job;
-    $('agent-link').href = 'lab.html' + (run?.run_key ? '?run=' + encodeURIComponent(run.run_key) : '');
-    const attention = C.attentionState();
-    const waiting = attention.known && attention.items.find(x => x.kind === 'proposal_waiting' && x.requires_person);
-    const last = visibleRuns()[0];
-    const dot = $('agent-dot');
-    let live = false, state, note;
-
-    if (run && ['QUEUED', 'RUNNING'].includes(run.state)) {
-      live = true;
-      state = C.t('agent.studying', { t: String(run.run_key).split('_')[1] || '—' });
-      note = C.t('agent.studyingNote');
-    } else if (waiting) {
-      state = C.t('agent.waiting');
-      note = waiting.title;
-    } else if (C.isPaused()) {
-      state = C.t('agent.paused');
-      note = C.t('agent.pausedNote');
-    } else if (last) {
-      state = C.t('agent.idle');
-      note = C.t('agent.idleNote', {
-        t: last.ticker, d: C.dateOnly(last.trade_date),
-        a: last.final_action ? C.code(last.final_action) : C.t('home.noResult'),
-        c: last.confidence });
-    } else {
-      state = C.t('agent.idle');
-      note = C.t('agent.noRuns');
+  /* ── what is not normal ────────────────────────────────────────────
+     Each row names its own page. An unknown order is the attention collector's to report;
+     one still working at the venue is shown here. Health notices are counted, not repeated:
+     System holds their text, and a notice that reads the same for weeks is not a to-do. */
+  function renderConditions() {
+    const rows = [];
+    const status = C.systemStatus();
+    if (status !== 'READY') {
+      rows.push(C.listRow({ id: 'condition-status', href: 'system.html',
+        title: C.code(status), sub: C.sysCopy(status) }));
     }
-    dot.className = 'agent-dot' + (live ? ' is-live' : '');
-    $('agent-state').textContent = state;
-    $('agent-note').textContent = note;
+    const live = D.microLive || {};
+    if (D.health.micro_live_enabled && live.preflight_ready === false) {
+      rows.push(C.listRow({ id: 'condition-preflight', href: 'risk.html', title: C.t('home.preflight'),
+        sub: C.t('home.blocking', { ids: (live.blocking || []).join(', ') || '—' }) }));
+    }
+    const working = ((D.orders || {}).tracked_orders || [])
+      .filter((x) => ['SUBMITTED', 'PARTIALLY_FILLED'].includes(x.status));
+    if (working.length) {
+      rows.push(C.listRow({ id: 'condition-orders', href: 'activity.html', title: C.t('home.orders'),
+        sub: C.t('home.ordersPending', { n: working.length }) }));
+    }
+    const notices = D.health.warnings || [];
+    if (notices.length) {
+      rows.push(C.listRow({ id: 'condition-notices', href: 'system.html',
+        title: C.t('at.systemNotice'), value: String(notices.length) }));
+    }
+    $('home-conditions').hidden = !rows.length;
+    C.setHTML($('conditions-list'), rows.join(''));
   }
 
-  /* ── status chips ────────────────────────────────────────────────── */
-  function renderChips() {
-    const s = C.systemStatus();
-    const normal = s === 'READY' && !(D.health.warnings || []).length && D.microLive?.preflight_ready !== false;
-    const sys = $('chip-system');
-    sys.textContent = normal ? C.t('home.allNormal') : C.code(s);
-    sys.className = 'chip' + (s === 'READY' ? '' : ' chip-warn');
-    sys.title = C.sysCopy(s);
-
-    const open = D.health.market.is_open;
-    $('chip-market').textContent = C.t(open ? 'home.marketOpen' : 'home.marketClosed');
-
-    $('chip-market').hidden = normal;
-    const money = $('chip-money');
-    money.hidden = normal;
-    const on = D.health.micro_live_enabled;
-    money.textContent = C.t(on ? 'home.moneyOn' : 'home.moneyOff');
-    money.className = 'chip' + (on ? ' chip-accent' : '');
-  }
-
-  /* Keep actionable items and health notices in one place. Attention retains
-     server priority; a partial/stale collector never implies an empty inbox. */
+  /* ── what needs you ────────────────────────────────────────────────
+     Attention retains server priority; a partial or stale collector never implies an
+     empty inbox, and the section goes only after a current, readable, empty answer. */
   function renderAttention() {
     const { data, items, known } = C.attentionState();
     const h = C.escapeHtml;
-    const warnings = D.health.warnings || [];
-    const empty = known && !items.length && !warnings.length;
+    const empty = known && !items.length;
     $('home-attention').hidden = empty;
     if (empty) {
       C.setHTML($('needs-you-slot'), '');
@@ -193,15 +142,10 @@ window.Console.page('index', function (document) {
         (href ? '<a class="attention-action" href="' + h(href) + '">' + C.t('at.open') + C.CHEVRON + '</a>' : '') +
         '</div></div></article>';
     };
-    const notice = (message, index) =>
-      '<article class="home-attention-item attention-notice" data-od-id="warning-' + index + '">' +
-        '<span class="attention-icon" aria-hidden="true">' + C.ICON.info + '</span>' +
-        '<div class="attention-copy"><div class="attention-kicker"><span>' + C.t('at.systemNotice') + '</span></div>' +
-        '<p class="attention-detail">' + h(message) + '</p></div></article>';
-    const cards = items.map(card).concat(warnings.map(notice));
+    const cards = items.map(card);
     const expanded = $('attention-rest')?.open;
     C.setHTML($('needs-you-slot'),
-      '<div class="attention-heading"><h2 id="attention-heading">' + C.t('at.homeTitle') + '</h2>' +
+      '<div class="attention-heading"><h2 id="attention-heading">' + C.t('at.title') + '</h2>' +
       (cards.length ? '<span class="attention-count">' + h(C.t('at.count', { n: cards.length })) + '</span>' : '') + '</div>' +
       (!known ? '<div class="attention-unavailable" role="status"><span class="attention-icon" aria-hidden="true">' + C.ICON.info +
         '</span><div><p><strong>' + C.t('at.unknown') + '</strong> ' + C.t('at.partial') + '</p>' +
@@ -214,53 +158,54 @@ window.Console.page('index', function (document) {
     if ($('attention-rest')) $('attention-rest').open = !!expanded;
   }
 
-  /* ── latest ──────────────────────────────────────────────────────── */
-  function renderLatest() {
-    const rows = [];
-    const run = visibleRuns()[0];
-    if (run) {
-      rows.push(C.listRow({
-        id: 'latest-run', href: 'research.html',
-        title: C.t('home.studied', { t: run.ticker,
-          a: run.final_action ? C.code(run.final_action) : C.t('home.noResult') }),
-        sub: C.t('home.studiedSub', { c: run.confidence }),
-        value: C.dateOnly(run.trade_date),
-        note: run.llm_calls + ' calls · ' + C.clock(run.elapsed_seconds),
-      }));
-    }
-    const checks = (D.microLive && D.microLive.checks) || [];
-    if (checks.length) {
-      const blocking = D.microLive.blocking || [];
-      rows.push(C.listRow({
-        id: 'latest-preflight', href: 'risk.html',
-        title: C.t('home.preflight'),
-        sub: blocking.length ? C.t('home.blocking', { ids: blocking.join(', ') })
-                             : C.t('home.allGreen'),
-        value: checks.filter((c) => c.passed).length + ' / ' + checks.length,
-        note: C.t('home.gatesGreen'),
-      }));
-    }
-    const o = D.orders || { fills: [], tracked_orders: [] };
-    const pending = (o.tracked_orders || []).filter(x => ['UNKNOWN', 'SUBMITTED', 'PARTIALLY_FILLED'].includes(x.status));
-    rows.push(C.listRow({
-      id: 'latest-orders', href: 'activity.html',
-      title: C.t('home.orders'),
-      sub: pending.length ? C.t('home.ordersPending', { n: pending.length }) : C.t('home.ordersNone'),
-      value: String((o.fills || []).length),
-      note: C.t('home.fills'),
-    }));
-    C.setHTML($('latest-list'), rows.join(''));
+  /* ── what research concluded ───────────────────────────────────────
+     A study still running leads, and opens the office it is running in. A finished one
+     opens its report. Each names the account it is about, because the same symbol can be
+     studied for the Agentic account and for a personal one with different conclusions. */
+  const accountOf = (row) => row.account_label || C.t('rs.scope.' + (row.scope || 'unspecified'));
+  function reportLink(r) {
+    const q = new URLSearchParams({ run: r.run_id });
+    if (['agentic', 'demo', 'personal'].includes(r.scope)) q.set('scope', r.scope);
+    if (r.scope === 'personal' && r.account_scope_kind === 'single' && r.account_id) q.set('account', r.account_id);
+    if (r.scope === 'personal' && r.account_scope_kind === 'all_personal') q.set('include_all_personal', 'true');
+    return 'research.html?' + q;
   }
 
-  document.addEventListener('ct:pause-changed', () => { renderChips(); renderAgent(); });
+  function renderResearch() {
+    /* Assistant jobs share the queue but do not run the research graph, so they have no
+       office to open. The presence of `task` is what separates them. */
+    const running = (D.researchJobs || []).filter((j) => !j.task && C.showsBucket(j.bucket) &&
+      ['QUEUED', 'RUNNING'].includes(j.state));
+    const shown = new Set(running.map((j) => j.run_key));
+    const rows = running.map((job) => C.listRow({
+      id: 'research-live-' + job.run_key,
+      href: 'lab.html?run=' + encodeURIComponent(job.run_key),
+      title: C.t('agent.studying', { t: job.ticker || String(job.run_key).split('_')[1] || '—' }),
+      sub: accountOf(job),
+      note: C.t('home.viewProcess'),
+    }));
+    visibleRuns().filter((r) => !shown.has(r.run_id)).slice(0, 3).forEach((r) => rows.push(C.listRow({
+      id: 'research-' + r.run_id,
+      href: reportLink(r),
+      title: (r.ticker || '—') + ' · ' + (r.final_action ? C.code(r.final_action) : C.t('ac.incomplete')),
+      sub: [accountOf(r), C.dateOnly(r.trade_date)].join(' · '),
+      value: r.confidence == null ? '' : String(r.confidence),
+    })));
+    C.setHTML($('research-list'), rows.length ? rows.join('')
+      : '<p class="body-sm body-muted">' + C.t('agent.noRuns') + '</p>');
+    const next = (D.schedule || {}).next_run_at;
+    $('research-next').textContent = next ? C.t('lab.nextAt', { at: C.dateTime(next) }) : '';
+  }
+
+  document.addEventListener('ct:pause-changed', renderConditions);
 
   /* Poll only what this screen reads; render on first paint and every tick. */
   C.live(['portfolio', 'proposals'],
     function render() {
-      renderAgent();
-      renderEquity();
-      renderChips();
+      $('today-date').textContent = C.dateOnly(new Date().toISOString());
       renderAttention();
-      renderLatest();
-    }, ['attention', 'microLive', 'research', 'orders', 'researchJobs', 'researchRun']);
+      renderConditions();
+      renderResearch();
+      renderEquity();
+    }, ['attention', 'microLive', 'research', 'orders', 'researchJobs', 'schedule']);
 });

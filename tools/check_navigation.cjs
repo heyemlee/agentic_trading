@@ -227,20 +227,20 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  await selectTab('dashboard');
 
- // Assistant is a header action; Lab occupies the third tab. Returning from
- // Assistant must restore Lab, including its selected navigation state.
+ // Assistant is a header action; Research occupies the third tab. Returning from
+ // Assistant must restore Research, including its selected navigation state.
  assert.deepEqual(await page.locator('.tabbar .tabitem').evaluateAll(tabs => tabs.map(el => el.getAttribute('href'))),
-   ['index.html', 'portfolio.html', 'lab.html', 'more.html']);
+   ['index.html', 'portfolio.html', 'research.html', 'more.html']);
  assert.equal(await page.locator('.tabbar a[href="advisor.html"]').count(), 0);
- await selectTab('lab');
+ await selectTab('research');
  await page.waitForFunction(() => !document.getElementById('content').inert);
- assert.equal(await page.locator('[data-od-id="tab-lab"]').getAttribute('aria-current'), 'page');
+ assert.equal(await page.locator('[data-od-id="tab-research"]').getAttribute('aria-current'), 'page');
  await page.locator('#assistant-launcher').click();
  await page.waitForURL('**/advisor.html');
  assert.equal(await page.locator('#assistant-back').isVisible(), true);
  await page.locator('#assistant-back').click();
- await page.waitForURL('**/lab.html');
- assert.equal(await page.locator('[data-od-id="tab-lab"]').getAttribute('aria-current'), 'page');
+ await page.waitForURL('**/research.html');
+ assert.equal(await page.locator('[data-od-id="tab-research"]').getAttribute('aria-current'), 'page');
  await page.emulateMedia({reducedMotion:'reduce'});
  assert.equal(await page.locator('#assistant-launcher').evaluate(el => getComputedStyle(el, '::before').animationName), 'none');
  await page.emulateMedia({reducedMotion:'no-preference'});
@@ -271,19 +271,19 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await lensAligned();
  assert.equal(await page.evaluate(() => window.navigationLens === document.querySelector('.tab-indicator')), true);
  const portfolioTab = await page.locator('[data-od-id="tab-portfolio"]').boundingBox();
- const labTab = await page.locator('[data-od-id="tab-lab"]').boundingBox();
+ const researchTab = await page.locator('[data-od-id="tab-research"]').boundingBox();
  const cx = box => box.x + box.width / 2;
  const cy = portfolioTab.y + portfolioTab.height / 2;
  const depthBeforeDrag = await page.evaluate(() => history.state.ctDepth);
  await page.mouse.move(cx(portfolioTab), cy);
  await page.mouse.down();
- await page.mouse.move((cx(portfolioTab) + cx(labTab)) / 2, cy, {steps:4});
+ await page.mouse.move((cx(portfolioTab) + cx(researchTab)) / 2, cy, {steps:4});
  assert.ok(page.url().endsWith('portfolio.html'), 'A drag does not navigate before release');
  const dragLeft = await page.locator('.tab-indicator').evaluate(el => el.getBoundingClientRect().left);
- assert.ok(dragLeft > portfolioTab.x + 5 && dragLeft < labTab.x - 5, 'Lens tracks the finger between tabs');
- await page.mouse.move(cx(labTab), cy, {steps:4});
+ assert.ok(dragLeft > portfolioTab.x + 5 && dragLeft < researchTab.x - 5, 'Lens tracks the finger between tabs');
+ await page.mouse.move(cx(researchTab), cy, {steps:4});
  await page.mouse.up();
- await page.waitForURL('**/lab.html');
+ await page.waitForURL('**/research.html');
  await lensAligned();
  assert.equal(await page.evaluate(() => history.state.ctDepth), depthBeforeDrag + 1, 'Drag commits one route');
  await page.goBack();
@@ -295,11 +295,11 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{x:cx(portfolioTab),y:cy}]});
    for (let step = 1; step <= 6; step++) {
      await cdp.send('Input.dispatchTouchEvent', {type:'touchMove',
-       touchPoints:[{x:cx(portfolioTab) + (cx(labTab) - cx(portfolioTab)) * step / 6,y:cy}]});
+       touchPoints:[{x:cx(portfolioTab) + (cx(researchTab) - cx(portfolioTab)) * step / 6,y:cy}]});
    }
    assert.ok(page.url().endsWith('portfolio.html'));
    await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
-   await page.waitForURL('**/lab.html');
+   await page.waitForURL('**/research.html');
    await lensAligned();
    await page.goBack();
    await page.waitForURL('**/portfolio.html');
@@ -309,19 +309,19 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  // Pointer cancellation restores the current section without committing a route.
  await page.mouse.move(cx(portfolioTab), cy);
  await page.mouse.down();
- await page.mouse.move(cx(labTab), cy, {steps:4});
+ await page.mouse.move(cx(researchTab), cy, {steps:4});
  await page.locator('.tabbar').dispatchEvent('pointercancel', {pointerId:1});
  await page.mouse.up();
  await lensAligned();
  assert.ok(page.url().endsWith('portfolio.html'));
  await page.emulateMedia({reducedMotion:'reduce'});
- await selectTab('lab');
+ await selectTab('research');
  await lensAligned();
  assert.equal(await page.locator('.tab-indicator').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
  await page.emulateMedia({reducedMotion:'no-preference'});
  await selectTab('advisor');
  await page.locator('#assistant-back').click();
- await page.waitForURL('**/lab.html');
+ await page.waitForURL('**/research.html');
  await lensAligned();
 
  // More tools must switch synchronously even while their first reads are pending.
@@ -481,8 +481,20 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
      document.body.append(link); link.click(); link.remove();
    }, ticker);
    assert.equal(await page.locator('#f-ticker').inputValue(), ticker);
-   await page.locator('#back-link').click(); await page.waitForURL('**/more.html?demo=1');
+   // Research is a tab: its own tab is the way back, as it is for Home and Assets.
+   assert.equal(await page.locator('#back-link').count(), 0);
+   assert.equal(await page.locator('[data-od-id="tab-research"]').getAttribute('aria-current'), 'page');
+   await selectTab('more'); await page.waitForURL('**/more.html?demo=1');
  }
+ // The Lab is how one run was reached: it lights Research and its back control returns there.
+ await selectTab('research'); await page.waitForURL('**/research.html?demo=1');
+ await page.evaluate(() => {
+   const link = document.createElement('a'); link.href = 'lab.html?demo=1';
+   document.body.append(link); link.click(); link.remove();
+ });
+ await page.waitForURL('**/lab.html?demo=1');
+ assert.equal(await page.locator('[data-od-id="tab-research"]').getAttribute('data-section-active'), 'true');
+ await page.locator('#back-link').click(); await page.waitForURL('**/research.html?demo=1');
  assert.equal(calls.length, 0, 'demo must never read or write the API');
 
  // A cold open with failed reads must expose recovery controls, not an endless animation.

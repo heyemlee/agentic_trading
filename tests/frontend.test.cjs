@@ -260,7 +260,8 @@ test('research confidence uses each recorded threshold and preserves missing sco
     { run_id: 'missing', bucket: 'micro_live', ticker: 'VT', confidence: null, applicable_floor: null },
   ];
   c.run('pages/research.js');
-  const html = c.element('conf-chart').innerHTML;
+  // each run carries its own score against its own threshold, in the list itself
+  const html = c.element('panel-runs-all').innerHTML;
   assert.match(html, /left:80%/); assert.ok(!html.includes('left:50%'));
   assert.equal((html.match(/meter-fill is-warn/g) || []).length, 1);
   assert.equal((html.match(/meter-track/g) || []).length, 2, 'a missing score has no zero-width meter');
@@ -1672,22 +1673,68 @@ test('home hides the entire attention section only when the collector is readabl
   assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
 });
 
-test('home puts system notices after actionable items in the same disclosure', () => {
+test('home counts system notices on one line to System, never among the to-dos', () => {
   const c = homePage();
   c.CT.attention = attentionPayload([attentionItem()]);
-  c.CT.health.warnings = ['Optional data <source> unavailable'];
+  c.CT.health.warnings = ['Optional data <source> unavailable', 'A second notice'];
   c.render();
   const html = c.element('needs-you-slot').innerHTML;
   assert.equal(c.element('home-attention').hidden, false);
-  assert.ok(html.indexOf('data-attention-id="waiting:A"') < html.indexOf('data-od-id="warning-0"'));
-  assert.match(html, /at.more 1/);
-  assert.match(html, /Optional data &lt;source&gt; unavailable/);
-  assert.doesNotMatch(html, /home-notices/);
+  assert.doesNotMatch(html, /Optional data|A second notice|at.more/, 'a notice is not a to-do');
+  const line = c.element('conditions-list').innerHTML;
+  assert.equal(c.element('home-conditions').hidden, false);
+  assert.match(line, /system\.html" data-od-id="condition-notices"/);
+  assert.match(line, /list-value">2</);
+  assert.doesNotMatch(line, /Optional data/, 'System holds the text; Home only counts it');
   c.CT.attention = attentionPayload(); c.render();
-  assert.equal(c.element('home-attention').hidden, false, 'a notice alone keeps the shared section visible');
-  assert.match(c.element('needs-you-slot').innerHTML, /warning-0/);
+  assert.equal(c.element('home-attention').hidden, true, 'a notice alone does not keep the to-dos open');
+  assert.equal(c.element('home-conditions').hidden, false);
   c.CT.health.warnings = []; c.render();
-  assert.equal(c.element('home-attention').hidden, true);
+  assert.equal(c.element('home-conditions').hidden, true);
+});
+
+test('home lists only what is not normal, each row on the page that owns it', () => {
+  const c = homePage();
+  c.CT.attention = attentionPayload(); c.render();
+  assert.equal(c.element('home-conditions').hidden, true, 'a normal system adds nothing to Today');
+  c.CT.health.paused = true;
+  c.CT.health.micro_live_enabled = true;
+  c.CT.microLive = { ...c.CT.microLive, preflight_ready: false, blocking: ['PF07'] };
+  c.CT.orders = { fills: [], tracked_orders: [{ status: 'SUBMITTED' }, { status: 'UNKNOWN' }] };
+  c.render();
+  const html = c.element('conditions-list').innerHTML;
+  assert.match(html, /system\.html" data-od-id="condition-status"/);
+  assert.match(html, /risk\.html" data-od-id="condition-preflight"/); assert.match(html, /PF07/);
+  assert.match(html, /activity\.html" data-od-id="condition-orders"/);
+  assert.match(html, /home.ordersPending 1/, 'an unknown order is the attention collector\'s to report');
+  c.CT.health.micro_live_enabled = false; c.render();
+  assert.doesNotMatch(c.element('conditions-list').innerHTML, /condition-preflight/,
+    'real money switched off by choice is not a problem to report');
+});
+
+test('home leads with running research, then conclusions, each naming its account', () => {
+  const c = homePage(); c.CT_DEMO = false;
+  c.CT.attention = attentionPayload();
+  c.CT.researchJobs = [
+    { run_key: '2026-09-25_VTI_live', ticker: 'VTI', bucket: 'micro_live', scope: 'agentic', account_label: 'Agentic', state: 'RUNNING' },
+    { run_key: 'chat-1', task: { kind: 'chat' }, state: 'RUNNING' },
+  ];
+  c.CT.research = [
+    { run_id: '2026-09-18_BND_x', ticker: 'BND', bucket: 'micro_live', scope: 'agentic', account_label: 'Agentic',
+      final_action: 'NO_TRADE', confidence: 45, trade_date: '2026-09-18' },
+    { run_id: '2026-09-18_VXUS_demo', ticker: 'VXUS', bucket: 'core', scope: 'demo', account_label: 'Demo',
+      final_action: 'NO_TRADE', trade_date: '2026-09-18' },
+    { run_id: 'advisor_1', ticker: 'NVDA', bucket: 'advisory', scope: 'personal', account_label: 'Robinhood ••••1111',
+      account_scope_kind: 'single', account_id: 'A', final_action: 'NO_TRADE', trade_date: '2026-09-15' },
+  ];
+  c.render();
+  const html = c.element('research-list').innerHTML;
+  assert.ok(html.indexOf('lab.html?run=2026-09-25_VTI_live') < html.indexOf('BND'), 'a running study leads');
+  assert.doesNotMatch(html, /chat-1/, 'an assistant job runs no desks, so it has no office to open');
+  assert.doesNotMatch(html, /VXUS/, 'the hidden Demo book stays off Home');
+  assert.match(html, /research.html\?run=2026-09-18_BND_x&amp;scope=agentic/);
+  assert.match(html, /run=advisor_1&amp;scope=personal&amp;account=A/);
+  assert.match(html, /Robinhood ••••1111/);
 });
 
 test('home preserves collector priority, displays partial items, and removes resolved items', () => {
@@ -1830,7 +1877,8 @@ test('research exposes provenance, unknown fact time and supersession without pr
   assert.match(html, /rs.inferred/); assert.match(html, /model-A/); assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /NaN|undefined/);
   assert.match(html, /rs.meta.facts<\/dt><dd[^>]*>rs.unknown/); assert.match(html, /data-trace="new"/);
-  assert.match(c.element('recent-card').innerHTML, /NEW/); assert.doesNotMatch(c.element('recent-card').innerHTML, /OLD/);
+  assert.equal((html.match(/rs.supersededShort/g) || []).length, 1, 'only the superseded run is marked as such');
+  assert.ok(html.indexOf('rs.supersededShort') < html.indexOf('data-trace="new"'), 'the mark sits on the old run');
   c.openReport('old'); await flush(); const displayed = c.element('trace-record').innerHTML;
   c.CT.researchHistory = []; c.render(); assert.equal(c.element('trace-record').innerHTML, displayed);
 });
@@ -2003,9 +2051,9 @@ test('the headline equity is one account, never the real and paper books added t
 
 test('with the switch off, no conceptual money reaches the home screen', () => {
   const c = homePage();
-  const screen = c.element('equity-value').textContent + c.element('funding-kv').innerHTML +
+  const screen = c.element('equity-value').textContent + c.element('funding-kv').textContent +
     c.element('account-list').innerHTML + c.element('bucket-list').innerHTML +
-    c.element('hwm-foot').textContent;
+    c.element('hwm-foot').textContent + c.element('research-list').innerHTML;
   // the paper book's equity, and each of its buckets, in the figures the page writes
   for (const paper of ['$3,000.00', '$2,500.00', '$500.00']) {
     assert.ok(!screen.includes(paper), 'the paper book leaked onto the home screen: ' + paper);
@@ -2023,7 +2071,7 @@ test('the conceptual book comes back in full when the switch is on', () => {
 
 test('money paid in is shown as funding, not as a result', () => {
   const c = homePage();
-  const funded = c.element('funding-kv').innerHTML;
+  const funded = c.element('funding-kv').textContent;
   assert.ok(funded.includes('$100.00'));         // net deposits
   assert.ok(funded.includes('+$0.00'));          // investment result, separate from funding
   assert.ok(funded.includes('0.00%'));           // return measured against money paid in
@@ -2447,6 +2495,7 @@ function labPage(options = {}) {
   }
   c.CT_API = { activeRun: null, watchRun(key) { this.activeRun = key; this.watched = key; },
                fetchJSON: options.fetchJSON || (async () => { throw new Error('no trace expected'); }) };
+  if (options.search) c.location.search = options.search;
   c.run('pages/lab.js');
   return c;
 }
@@ -2581,6 +2630,28 @@ test('an empty deployment says so instead of drawing a run that never happened',
   assert.ok(Object.values(states).every((s) => ['waiting', 'disabled'].includes(s)));
   assert.equal(c.element('#now-title').textContent, 'lab.noRuns');
   assert.equal(c.element('#symbol').textContent, '—');
+});
+
+test('a link opens the run it names, drawn from its own trace when the list no longer holds it', async () => {
+  const trace = { run_id: 'old-run', ticker: 'BND', bucket: 'micro_live', trade_date: '2026-08-28',
+    instrument_type: 'etf', analysts: ['market', 'news'], policy_action: 'NO_TRADE', final_action: 'NO_TRADE', steps: [] };
+  const fetched = [];
+  const c = labPage({ search: '?run=old-run',
+    research: [{ run_id: 'newest', ticker: 'VTI', trade_date: '2026-09-18', instrument_type: 'etf',
+                 bucket: 'core', scope: 'demo', account_label: 'Demo', policy_action: 'NO_TRADE' }],
+    fetchJSON: async (url) => { fetched.push(url); return url.includes('old-run') ? trace : { run_id: 'newest', steps: [] }; } });
+  await flush(); c.render();
+  assert.equal(c.element('#symbol').textContent, 'BND', 'the named run, never the newest in its place');
+  assert.deepEqual(fetched, ['/research/old-run/trace']);
+  assert.match(c.element('#run-label').textContent, /micro_live/, 'the account comes from the run itself');
+  assert.equal(c.element('#lab-report').hidden, false);
+  assert.equal(c.element('#lab-report').href, 'research.html?run=old-run');
+  // the picker names each run's account, so a Demo study is not read as an Agentic one
+  assert.match(c.element('#mode').innerHTML, /VTI · Demo/);
+
+  c.location.search = '?run=newest'; c.document.dispatchEvent({ type: 'ct:route' }); await flush();
+  assert.equal(c.element('#symbol').textContent, 'VTI');
+  assert.equal(c.element('#lab-report').href, 'research.html?run=newest&scope=demo');
 });
 
 test('a run queued as "auto" names no instrument until the engine has classified it', () => {
@@ -2760,17 +2831,19 @@ test('unchanged account markup is not replaced when another resource updates', (
   assert.equal(replacements, 0);
 });
 
-test('home follows active research and clears stale account details when the ledger is withheld', () => {
+test('home opens a running study in its office and clears account figures when the ledger is withheld', () => {
   const c = homePage(); c.CT_DEMO = false;
   c.CT.attention = null;
-  c.CT_API.watchRun = key => { c.CT_API.activeRun = key; };
+  let watched = 0; c.CT_API.watchRun = () => { watched++; };
   c.CT.researchJobs = [{ run_key: '2026-09-15_VTI_test', state: 'RUNNING' }]; c.render();
-  assert.equal(c.CT_API.activeRun, '2026-09-15_VTI_test');
-  assert.match(c.element('agent-state').textContent, /agent.studying/);
+  assert.match(c.element('research-list').innerHTML, /lab\.html\?run=2026-09-15_VTI_test"/);
+  assert.match(c.element('research-list').innerHTML, /agent.studying VTI/);
+  assert.equal(watched, 0, 'Home lists the queue; the office is what follows a run');
   c.CT.researchJobs = []; c.CT.portfolio = { accounts: {}, buckets: {}, errors: { micro_live: 'unconfirmed' } };
   c.CT.proposals = []; c.render();
-  assert.equal(c.CT_API.activeRun, null);
-  assert.equal(c.element('hwm-delta').textContent, '—');
+  assert.doesNotMatch(c.element('research-list').innerHTML, /lab.html/);
+  assert.equal(c.element('equity-value').textContent, '—');
+  assert.equal(c.element('hwm-foot').textContent, '');
   assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/, 'only the attention collector decides what needs action');
 });
 

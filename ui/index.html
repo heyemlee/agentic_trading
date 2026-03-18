@@ -17,65 +17,43 @@
 
 <main id="content" hidden data-i18n-title="home.title">
 
-  <!-- ── attention and system notices ─────────────────────────────── -->
+  <!-- ── today: what needs you, what is not normal, what research found, the account ─ -->
+  <section class="section pagehead" data-od-id="today">
+    <div class="container">
+      <h1 data-i18n="home.today">Today</h1>
+      <p class="body-sm body-muted" id="today-date"></p>
+    </div>
+  </section>
+
   <section class="section home-attention" id="home-attention" data-od-id="needs-you" aria-labelledby="attention-heading" hidden>
     <div class="container" id="needs-you-slot"></div>
   </section>
 
-  <!-- ── equity and high-water mark, for one account at a time ─────── -->
-  <section class="section pagehead" style="padding-top:var(--space-4);" data-od-id="equity">
+  <!-- Only what is not normal. What is normal and unchanging has its own page. -->
+  <section class="section home-conditions" id="home-conditions" data-od-id="conditions" hidden>
+    <div class="container"><div class="list" id="conditions-list"></div></div>
+  </section>
+
+  <section class="section" data-od-id="research">
     <div class="container">
-      <p class="eyebrow" id="equity-label">Equity</p>
-      <p class="figure figure-lg" style="margin-top:8px;" id="equity-value">—</p>
-      <p class="body-sm body-muted" style="margin-top:4px;" id="equity-source">—</p>
-
-      <p class="body-sm" id="home-drawdown"></p>
-      <div class="row row-wrap" style="margin-top:8px;">
-        <span class="chip" id="chip-system">—</span>
-        <span class="chip" id="chip-market">—</span>
-        <span class="chip" id="chip-money">—</span>
-      </div>
-
-      <div class="app-quick-actions">
-        <a class="btn btn-green" href="advisor.html" data-i18n="app.ask">问问助手</a>
-        <a class="btn btn-secondary" href="portfolio.html?scope=agentic" data-i18n="nav.portfolio">资产</a>
-      </div>
-      <details class="app-disclosure">
-      <summary data-i18n="app.details">账户明细</summary>
-      <div class="hwm" data-od-id="high-water-mark">
-        <p class="hwm-delta" id="hwm-delta">—</p>
-        <div class="hwm-track" id="hwm-track" role="img" aria-label="">
-          <div class="hwm-fill" id="hwm-fill" style="width:0%"></div>
-          <span class="hwm-mark" id="hwm-mark" style="left:0%"></span>
-        </div>
-        <p class="hwm-foot" id="hwm-foot">—</p>
-      </div>
-
-      <dl class="kv" style="margin-top:16px;" id="funding-kv"></dl>
-      <div class="list" style="margin-top:16px;" id="account-list"></div>
-      </details>
+      <div class="section-head"><h2 data-i18n="nav.research">Research</h2>
+        <a class="body-sm" href="research.html" data-i18n="common.all">All</a></div>
+      <div class="list" id="research-list"></div>
+      <p class="body-sm body-muted" id="research-next"></p>
     </div>
   </section>
 
-  <!-- ── what the agent is doing ───────────────────────────────────── -->
-  <section class="section" style="padding-block:0;" data-od-id="agent">
+  <!-- One account at a time, measured against its own high-water mark. -->
+  <section class="section" data-od-id="equity">
     <div class="container">
-      <a class="agent-strip" id="agent-link" href="lab.html">
-        <span class="agent-dot" id="agent-dot"></span>
-        <div>
-          <p class="agent-state" id="agent-state">—</p>
-          <p class="agent-note" id="agent-note"></p>
-        </div>
-        <span class="body-sm" data-i18n="home.viewProcess">查看过程</span>
+      <a class="card-real home-account" id="account-card" href="portfolio.html?scope=agentic">
+        <p class="eyebrow" id="equity-label">Equity</p>
+        <p class="figure" id="equity-value">—</p>
+        <p class="body-sm" id="hwm-foot"></p>
+        <p class="body-sm" id="funding-kv"></p>
+        <p class="body-sm body-muted" id="equity-source">—</p>
       </a>
-    </div>
-  </section>
-
-  <!-- ── latest ────────────────────────────────────────────────────── -->
-  <section class="section" data-od-id="latest">
-    <div class="container">
-      <h2 style="margin-bottom:8px;" data-i18n="home.latest">Latest</h2>
-      <div class="list" id="latest-list"></div>
+      <div class="list" id="account-list"></div>
     </div>
   </section>
 

@@ -77,6 +77,9 @@ window.Console.page('lab', function (document) {
     return {
       key: job ? job.run_key : record.run_id,
       ticker: source.ticker, bucket: source.bucket,
+      /* Which account the run was about, so a Demo study is never read as the Agentic one. */
+      account: source.account_label || null, scope: source.scope || null,
+      accountId: source.account_id || null, accountKind: source.account_scope_kind || null,
       date: job ? job.trade_date : record.trade_date,
       instrument: instrumentOf(job && job.instrument_type) || instrumentOf(record && record.instrument_type),
       state: job ? job.state : 'COMPLETE',
@@ -92,8 +95,24 @@ window.Console.page('lab', function (document) {
   }
   const selectedRun = () => {
     const runs = runList();
-    return runs.find((r) => r.key === chosenRun) || runs[0] || null;
+    const found = runs.find((r) => r.key === chosenRun);
+    if (found || !chosenRun) return found || runs[0] || null;
+    /* A link can name a run older than the list this room reads. That run is drawn, from
+       its own trace once it arrives, rather than another one in its place. */
+    return { key: chosenRun, ticker: '—', bucket: null, account: null, scope: null, accountId: null,
+             accountKind: null, date: null, instrument: null, state: 'COMPLETE', live: false,
+             broken: false, error: null, policy: null, confidence: null, hardRisk: null,
+             finalAction: null, proposalId: null, named: true };
   };
+  const accountOf = (run) => run.account || (run.bucket ? label('bucket.' + run.bucket, run.bucket) : '');
+  /* The report is on Research, bound to the same account the run was about. */
+  function reportLink(run) {
+    const q = new URLSearchParams({ run: run.key });
+    if (['agentic', 'demo', 'personal'].includes(run.scope)) q.set('scope', run.scope);
+    if (run.scope === 'personal' && run.accountKind === 'single' && run.accountId) q.set('account', run.accountId);
+    if (run.scope === 'personal' && run.accountKind === 'all_personal') q.set('include_all_personal', 'true');
+    return 'research.html?' + q;
+  }
 
   /* A finished run's reports are read once and kept. Demo mode carries the same shape as
      a fixture, because the room is what the project shows first and an empty office
@@ -133,6 +152,12 @@ window.Console.page('lab', function (document) {
     const progress = live && live.progress;
     const trace = run && !run.live ? traceFor(run.key) : null;
     const loadedTrace = trace && !trace.failed ? trace : null;
+    /* A run named by a link and not in the list takes its facts from its own trace. */
+    if (run && run.named && loadedTrace) {
+      Object.assign(run, { ticker: loadedTrace.ticker || run.ticker, bucket: loadedTrace.bucket || null,
+        date: loadedTrace.trade_date || null, policy: loadedTrace.policy_action || null,
+        finalAction: loadedTrace.final_action || null });
+    }
 
     /* Which desks this run seated, in the run's own words: its start event while it runs,
        its record once finished. The configured selection stands in only while a known
@@ -294,13 +319,17 @@ window.Console.page('lab', function (document) {
        line under it carries only the date and the outcome. With nothing to pick, it goes. */
     q('.lab-run').hidden = !runs.length;
     q('#run-orb').textContent = v.run ? String(v.run.ticker).charAt(0) : '—';
-    q('#run-label').textContent = v.run ? [C.dateOnly(v.run.date),
-      v.run.live ? C.t('lab.runningNow') : C.code(v.run.finalAction || v.run.policy || v.run.state)].join(' · ') : '';
+    q('#run-label').textContent = v.run ? [accountOf(v.run), v.run.date ? C.dateOnly(v.run.date) : '',
+      v.run.live ? C.t('lab.runningNow') : C.code(v.run.finalAction || v.run.policy || v.run.state)]
+      .filter(Boolean).join(' · ') : '';
+    const report = q('#lab-report');
+    report.hidden = !v.run || v.run.live;
+    if (v.run) report.href = reportLink(v.run);
     const markup = runs.length
       ? runs.map((r) => '<option value="' + C.escapeHtml(r.key) + '"' +
           (r.key === current ? ' selected' : '') + '>' +
           C.escapeHtml(C.t('lab.runOption', {
-            ticker: r.ticker, date: C.dateOnly(r.date),
+            ticker: [r.ticker, accountOf(r)].filter(Boolean).join(' · '), date: C.dateOnly(r.date),
             state: r.live ? C.t('lab.runningNow') : C.code(r.finalAction || r.policy || r.state),
           })) + '</option>').join('')
       : '<option value="">' + C.escapeHtml(C.t('lab.noRuns')) + '</option>';
@@ -614,6 +643,16 @@ window.Console.page('lab', function (document) {
   document.addEventListener('visibilitychange', () => { stopMotion(); render(); });
   document.addEventListener('ct:leave', stopMotion);
   document.addEventListener('ct:lang', render);
+
+  /* A link names the run to show: a report's "View process", or a study still running. */
+  function routeEntry() {
+    const named = new URLSearchParams(window.location.search).get('run');
+    if (!named || named === chosenRun) return false;
+    chosenRun = named; cursor = null; chosenRole = null;
+    return true;
+  }
+  document.addEventListener('ct:route', () => { if (routeEntry()) { stopMotion(); render(); } });
+  routeEntry();
 
   C.live(['research', 'researchJobs', 'schedule', 'labRoster'], render, ['researchRun']);
 });

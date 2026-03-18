@@ -2,9 +2,9 @@ window.Console.page('research', function (document) {
   const C = window.Console, D = C.D;
   C.mount('research');
   C.wireTabs();
+  /* Results first: what is running, then what each run concluded, then the form that asks
+     for another. A run's process -- the office its desks worked in -- opens from the run. */
   const startSection = document.querySelector('[data-od-id="start-run"]');
-  const chartSection = document.querySelector('[data-od-id="confidence-chart"]');
-  chartSection.before(startSection);
   const $ = id => document.getElementById(id);
   const scopes = ['agentic', 'demo', 'personal', 'unspecified'];
   let filter = { scope: window.CT_DEMO ? 'demo' : 'agentic', account: '', task_type: '', include_all_personal: false };
@@ -91,38 +91,46 @@ window.Console.page('research', function (document) {
     renderFilters();
     paintScope();
 
-    /* Runs on a hidden bucket leave the charts and the lists. The record is
-       untouched: `ct-evaluate report` still counts every one of them. */
+    /* Runs on a hidden bucket leave the lists. The record is untouched:
+       `ct-evaluate report` still counts every one of them. */
     const runs = runsInScope();
-    chartSection.hidden = filter.scope === 'personal' || filter.scope === 'unspecified';
+    const schedule = D.schedule || {};
+    $('research-next').textContent = schedule.next_run_at ? C.t('lab.nextRun', {
+      n: Math.max(0, (schedule.daily_budget || 0) - (schedule.analyses_today || 0)),
+      at: C.dateTime(schedule.next_run_at) }) : '';
+    /* A study still running is watched in the office it runs in; anything else opens its
+       report. Assistant jobs run no research graph, so they have no office to open. */
     const jobs = jobsInScope();
-    C.setHTML($('research-jobs'), jobs.map(job => C.listRow({ href: '#trace', trace: job.run_key,
-      title: (job.ticker || typeName(job)) + ' · ' + recordName(job),
-      sub: C.code(job.state), value: job.route?.name || C.t('rs.unknown'), note: C.dateTime(job.created_at) })).join(''));
+    C.setHTML($('research-jobs'), jobs.map(job => {
+      const watch = !job.task && ['QUEUED', 'RUNNING'].includes(job.state);
+      return C.listRow({ href: watch ? 'lab.html?run=' + encodeURIComponent(job.run_key) : '#trace',
+        trace: watch ? null : job.run_key,
+        title: (job.ticker || typeName(job)) + ' · ' + recordName(job),
+        sub: C.code(job.state), value: job.route?.name || C.t('rs.unknown'),
+        note: watch ? C.t('home.viewProcess') : C.dateTime(job.created_at) });
+    }).join(''));
 
-    /* ── confidence bars — filled encoding, real values only ─────────── */
-    C.setHTML(document.getElementById('conf-chart'), '<div class="stack stack-4">' +
-      runs.map((r) => {
-        const confidence = Number.isFinite(r.confidence) ? r.confidence : null;
-        const floor = Number.isFinite(r.applicable_floor) && r.applicable_floor >= 0 && r.applicable_floor <= 100
-          ? r.applicable_floor : null;
-        return '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '">' +
-          '<div class="row-between" style="margin-bottom:6px;">' +
-            '<span class="body-sm">' + C.escapeHtml(r.ticker) + ' · ' + C.escapeHtml(C.bucket(r.bucket)) +
-              ' <span class="body-muted">' + C.dateOnly(r.trade_date) + '</span></span>' +
-            '<span class="body-sm num">' + C.escapeHtml(confidence ?? '—') + '</span>' +
-          '</div>' +
-          (confidence == null ? '' : '<div style="position:relative;">' +
-            '<div class="meter-track" style="height:10px;">' +
-              '<div class="meter-fill' + (floor != null && confidence < floor ? ' is-warn' : ' is-accent') +
-              '" style="width:' + Math.max(0, Math.min(100, confidence)) + '%"></div></div>' +
-            (floor == null ? '' : '<span style="position:absolute;top:-3px;bottom:-3px;left:' + floor +
-              '%;width:2px;background:var(--fg);" aria-hidden="true"></span>') +
-          '</div>') +
-          '<p class="body-sm body-muted" style="margin-top:6px;">' +
-            C.escapeHtml(floor == null ? C.t('rs.floorUnavailable') : C.t('rs.applicableFloor', { n: floor })) + '</p>' +
-        '</div>';
-      }).join('') + '</div>');
+    /* Confidence against the threshold it had to clear, on the run itself: the reason a
+       strategy run ended in no trade, read where the run is. Real values only -- a missing
+       score draws no meter, and a missing threshold says so rather than drawing one. A
+       personal analysis opens no position, so it has no threshold to be measured against. */
+    const strategy = filter.scope === 'agentic' || filter.scope === 'demo';
+    function meter(r) {
+      const confidence = Number.isFinite(r.confidence) ? r.confidence : null;
+      const floor = Number.isFinite(r.applicable_floor) && r.applicable_floor >= 0 && r.applicable_floor <= 100
+        ? r.applicable_floor : null;
+      return '<div data-od-id="conf-' + C.escapeHtml(r.run_id) + '" style="padding-bottom:12px;">' +
+        (confidence == null ? '' : '<div style="position:relative;">' +
+          '<div class="meter-track">' +
+            '<div class="meter-fill' + (floor != null && confidence < floor ? ' is-warn' : ' is-accent') +
+            '" style="width:' + Math.max(0, Math.min(100, confidence)) + '%"></div></div>' +
+          (floor == null ? '' : '<span style="position:absolute;top:-3px;bottom:-3px;left:' + floor +
+            '%;width:2px;background:var(--fg);" aria-hidden="true"></span>') +
+        '</div>') +
+        '<p class="body-sm body-muted" style="margin-top:6px;">' +
+          C.escapeHtml(floor == null ? C.t('rs.floorUnavailable') : C.t('rs.applicableFloor', { n: floor })) + '</p>' +
+      '</div>';
+    }
 
     /* ── run list ────────────────────────────────────────────────────── */
     function runList(rows) {
@@ -141,36 +149,12 @@ window.Console.page('research', function (document) {
              C.t('rs.traceCalls', { n: r.llm_calls ?? '—' }) + ' · ' + duration(r.elapsed_seconds),
         value: r.confidence == null ? '—' : String(r.confidence),
         note: (r.superseded_by ? C.t('rs.supersededShort') + ' · ' : '') + C.dateOnly(r.trade_date),
-      }) + '<details class="app-disclosure"><summary>' + C.t('rs.recordDetails') + '</summary>' + recordDetails(r) + '</details>').join('') + '</div>';
+      }) + (strategy ? meter(r) : '') +
+      '<details class="app-disclosure"><summary>' + C.t('rs.recordDetails') + '</summary>' + recordDetails(r) + '</details>').join('') + '</div>';
     }
     C.setHTML(document.getElementById('panel-runs-all'), runList(runs));
     C.setHTML(document.getElementById('panel-runs-notrade'), runList(runs.filter((r) => r.final_action === 'NO_TRADE')));
     C.setHTML(document.getElementById('panel-runs-proposal'), runList(runs.filter((r) => r.proposal_id)));
-
-    /* Most recent decision — read from the record, not baked into markup. */
-    const last = runs.find(row => !row.superseded_by);
-    C.setHTML(document.getElementById('recent-card'), !last ? '' :
-      '<div class="section-head">' +
-        '<span class="chip chip-ink">' +
-          (last.final_action ? C.escapeHtml(C.code(last.final_action)) : C.t('ac.incomplete')) + '</span>' +
-        '<span class="body-sm body-muted mono">' + C.escapeHtml(last.run_id) + '</span></div>' +
-      '<h3 style="font-size:20px;">' + C.escapeHtml(last.ticker || typeName(last)) + ' · ' + C.escapeHtml(recordName(last)) + ' · ' +
-        C.dateOnly(last.trade_date) + '</h3>' +
-      '<dl class="kv" style="margin-top:16px;">' +
-        '<div class="kv-row"><dt>' + C.t('rs.rating') + '</dt><dd>' +
-          C.escapeHtml(C.code(last.portfolio_manager_rating)) + '</dd></div>' +
-        '<div class="kv-row"><dt>' + C.t('rs.policyAction') + '</dt><dd>' +
-          C.escapeHtml((last.policy_action || '—')) + '</dd></div>' +
-        '<div class="kv-row"><dt>' + C.t('rs.hardRiskVerdict') + '</dt><dd>' +
-          C.escapeHtml((last.hard_risk_verdict || '—')) + '</dd></div>' +
-        '<div class="kv-row"><dt>' + C.t('rs.strength') + '</dt><dd>' +
-          (last.confidence == null ? '—' : C.escapeHtml(last.confidence) + ' / 100') + '</dd></div>' +
-        '<div class="kv-row"><dt>' + C.t('rs.callsElapsed') + '</dt><dd>' +
-          C.escapeHtml(last.llm_calls ?? '—') + ' · ' + duration(last.elapsed_seconds) + '</dd></div>' +
-        '<div class="kv-row"><dt>' + C.t('rs.proposal') + '</dt><dd>' +
-          C.escapeHtml((last.proposal_id || C.t('common.none'))) + '</dd></div>' +
-      '</dl>');
-
   }
 
   /* Reattach to a queued/running job after a refresh or phone reconnect. */
@@ -281,7 +265,12 @@ window.Console.page('research', function (document) {
         usage.calls ? C.t('rs.traceCalls', { n: usage.calls }) : null,
         t.elapsed_seconds ? C.clock(t.elapsed_seconds) : null,
         (t.analysts || []).length ? (t.analysts || []).join(' + ') : null,
-      ].filter(Boolean).map(C.escapeHtml).join(' · ') + '</p>';
+      ].filter(Boolean).map(C.escapeHtml).join(' · ') + '</p>' +
+      /* Strategy research and a personal analysis both ran the desks, so either can be
+         replayed in the office; a portfolio review ran none. */
+      (['full_research', 'analysis'].includes((traceReading.record || job || {}).task_type || 'full_research')
+        ? '<a class="btn btn-secondary btn-sm" style="margin-top:12px;" href="lab.html?run=' +
+          encodeURIComponent(runId) + '">' + C.t('home.viewProcess') + '</a>' : '');
 
     let group = null;
     const steps = (t.steps || []).map((st, i) => {
@@ -466,6 +455,6 @@ window.Console.page('research', function (document) {
   }
   document.addEventListener('ct:route', routeEntry);
   routeEntry();
-  C.live([], render, ['researchHistory', 'researchQueue', 'researchRun', 'accounts']);
+  C.live([], render, ['researchHistory', 'researchQueue', 'researchRun', 'accounts', 'schedule']);
   document.addEventListener('ct:auth', e => { if (e.detail?.clearDrafts) { accounts.clear(); requestDraft = null; } });
 });

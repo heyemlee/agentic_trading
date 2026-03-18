@@ -147,8 +147,10 @@
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'assistant' },
-    { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
-    { href: 'research.html',  key: 'research',  icon: 'research' },
+    /* Research is the tab, results first; the Lab is how one run was reached, opened from
+       that run. The flask stays on the tab so the third place looks as it always has. */
+    { href: 'research.html',  key: 'research',  icon: 'lab',       tab: true },
+    { href: 'lab.html',       key: 'lab',       icon: 'lab' },
     { href: 'risk.html',      key: 'risk',     icon: 'risk' },
     { href: 'activity.html',  key: 'activity', icon: 'activity' },
     { href: 'system.html',    key: 'system',   icon: 'system' },
@@ -167,7 +169,7 @@
      not the parent's name, because in-app it returns to wherever you came from. */
   const PARENT = {
     approvals:  'index.html',
-    research:   'lab.html',
+    lab:        'research.html',
     risk:       'more.html',
     activity:   'more.html',
     evaluation: 'more.html',
@@ -181,7 +183,7 @@
   function renderChrome(activeKey) {
     const open = openCount();
     const overflow = NAV.filter((n) => !n.tab);
-    const section = activeKey === 'approvals' ? 'dashboard' : activeKey === 'research' ? 'lab' : activeKey;
+    const section = activeKey === 'approvals' ? 'dashboard' : activeKey === 'lab' ? 'research' : activeKey;
     const inOverflow = overflow.some((n) => n.key === section);
 
     const tabs = NAV.filter((n) => n.tab).map((n) => {

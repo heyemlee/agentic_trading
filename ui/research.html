@@ -20,6 +20,7 @@
   <section class="section pagehead" data-od-id="pagehead">
     <div class="container">
       <h1 data-i18n="rs.title">Research</h1>
+      <p id="research-next" class="body-sm body-muted" style="margin-top:4px;"></p>
       <nav id="research-scopes" class="row row-wrap" style="gap:8px;margin-block:16px;"></nav>
       <p id="research-scope-note" class="body-sm body-muted"></p>
       <div class="grid-2" style="margin-top:16px;">
@@ -30,24 +31,10 @@
       <p id="research-account-status" class="body-sm body-muted" role="status"></p>
       <a class="btn btn-secondary btn-sm" id="research-apply" style="margin-block:12px;" data-i18n="rs.applyFilter">Apply filters</a>
       <p id="research-record-status" class="body-sm" role="status"></p>
-      <a class="btn btn-secondary btn-sm" href="lab.html" data-i18n="home.viewProcess">View process</a>
     </div>
   </section>
 
-  <!-- ── decision strength ─────────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="confidence-chart">
-    <div class="container">
-      <div class="card">
-        <div class="row-between row-wrap" style="margin-bottom:16px;">
-          <p class="eyebrow" data-i18n="rs.floorChart">Internal research confidence</p>
-          <span class="chip" data-i18n="rs.floor">Not a win probability</span>
-        </div>
-        <div id="conf-chart"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── run history ───────────────────────────────────────────────── -->
+  <!-- ── results first: what is running, then what each run concluded ── -->
   <section class="section" data-od-id="run-history">
     <div class="container">
       <div class="section-head"><h2 data-i18n="rs.runs">Runs</h2></div>
@@ -60,14 +47,6 @@
       <div class="tabpanel" role="tabpanel" id="panel-runs-all" aria-labelledby="tab-runs-all"></div>
       <div class="tabpanel" role="tabpanel" id="panel-runs-notrade" aria-labelledby="tab-runs-notrade" hidden></div>
       <div class="tabpanel" role="tabpanel" id="panel-runs-proposal" aria-labelledby="tab-runs-proposal" hidden></div>
-    </div>
-  </section>
-
-  <!-- ── most recent decision ──────────────────────────────────────── -->
-  <section class="section" data-od-id="run-detail">
-    <div class="container">
-      <h2 style="margin-bottom:8px;" data-i18n="rs.recent">Most recent decision</h2>
-      <div class="card" id="recent-card"></div>
     </div>
   </section>
 
