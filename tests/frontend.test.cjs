@@ -864,6 +864,162 @@ test('when the market data is behind the ledger the notice says so and does not 
   assert.equal(stale.element('confirm-ledger').hidden, false, 'a ledger nobody confirmed is offered the check');
 });
 
+/* The Agentic account's automatic trading sits on the account it governs: two switches and the
+   kill switch. On asks for the switch's number and the password and applies at once; off,
+   pause and resume take a second tap. A state that cannot be read offers no switch. */
+const authorityWith = (over = {}) => {
+  const base = {
+    version: 'v1', real_money_enabled: true, kill_switch: { engaged: false, since: null, reason: null },
+    withdrawn: { tripped: false, reason: null, at: null }, switches: { reduce: false, open: false },
+    actions: {
+      REDUCE: { mode: 'human_approval', autonomous: { permitted: false, blocked_by: [] },
+                human_approval: { permitted: true, blocked_by: [] },
+                limits: { min_confidence: 80, max_positions_reduced_per_day: 1, max_fraction_of_holding: 0.5,
+                          min_remaining_pct_of_opened: null, used_today: 0 } },
+      BUY: { mode: 'human_approval', autonomous: { permitted: false, blocked_by: [] },
+             human_approval: { permitted: true, blocked_by: [] },
+             limits: { classes: ['broad_diversified_etf', 'bond_or_cash_like_etf'], max_pct_of_account: 20,
+                       max_new_positions_per_day: 1, min_confidence: null, used_today: 0 } },
+    },
+    limits: { confidence_floors: { autonomous_any: 80 } }, pending_changes: [],
+  };
+  return { ...base, ...over };
+};
+// Objects built inside the page's context carry its prototypes; compare their plain shape.
+const plain = value => JSON.parse(JSON.stringify(value));
+const press = (c, key) => c.element('pfa-rows').events.click({
+  target: { closest: selector => selector === '[data-pfa]' ? { dataset: { pfa: key }, disabled: false } : null } });
+
+test('the Agentic view carries both autonomy switches and the brake, and says what is on', () => {
+  const c = ledgerPage(async () => ({}), readableLedger);
+  c.CT.authority = authorityWith(); c.CT.health.paused = false; c.render();
+  assert.equal(c.element('agentic-controls').hidden, false);
+  assert.match(c.element('pfa-summary').textContent, /pfa.sumNone/);
+  let rows = c.element('pfa-rows').innerHTML;
+  for (const key of ['on:reduce', 'on:open', 'pause']) assert.match(rows, new RegExp('data-pfa="' + key + '">'));
+  assert.doesNotMatch(rows, /disabled/);
+
+  const on = authorityWith({ switches: { reduce: true, open: false } });
+  on.actions.REDUCE.limits = { ...on.actions.REDUCE.limits, min_remaining_pct_of_opened: 50 };
+  c.CT.authority = on; c.render();
+  assert.match(c.element('pfa-summary').textContent, /pfa.sumReduce/);
+  rows = c.element('pfa-rows').innerHTML;
+  assert.match(rows, /data-pfa="off:reduce"/);
+  assert.match(rows, /pfa.reduceOn 50 0 1/, 'the number it keeps and what it has used today');
+  assert.match(rows, /data-pfa="on:open"/);
+
+  c.CT.authority = null; c.render();
+  assert.match(c.element('pfa-summary').textContent, /pfa.unreadable/);
+  assert.doesNotMatch(c.element('pfa-rows').innerHTML, /data-pfa="o[nf]/, 'no switch is drawn from a guess');
+  assert.match(c.element('pfa-rows').innerHTML, /data-pfa="pause">/, 'the brake never waits on the authority read');
+  c.CT_API.isLive = key => key !== 'health'; c.CT.authority = authorityWith(); c.render();
+  assert.match(c.element('pfa-rows').innerHTML, /pf-state">—<\/span><button[^>]*data-pfa="pause">/,
+               'an unread system state is not called normal, and pausing stays on offer');
+
+  const robinhood = portfolioPage(async () => ({}), { stale: false, jobs: [], snapshot: savedSnapshot });
+  assert.equal(robinhood.element('agentic-controls').hidden, true);
+});
+
+test('turning a switch on asks for its number and the password, and sends them together once', async () => {
+  const sent = [];
+  const c = ledgerPage(async (path, body) => { sent.push([path, body]); return { changed: true }; }, readableLedger);
+  c.CT.authority = authorityWith(); c.render();
+  press(c, 'on:reduce');
+  assert.equal(c.element('pfa-sheet').open, true);
+  assert.equal(c.element('pfa-value').value, 50, 'a floor nobody declared starts at half');
+  assert.equal(c.element('pfa-value').min, 1); assert.equal(c.element('pfa-value').max, 99);
+  assert.match(c.element('pfa-sheet-limits').innerHTML, /pfa.l.half[\s\S]*pfa.l.reducePerDay 1[\s\S]*pfa.l.neverSell/);
+
+  c.element('pfa-sheet-confirm').events.click(); await flush();
+  assert.match(c.element('pfa-sheet-status').textContent, /pfa.needPassword/);
+  c.element('pfa-password').value = 'pw'; c.element('pfa-value').value = '0';
+  c.element('pfa-sheet-confirm').events.click(); await flush();
+  assert.match(c.element('pfa-sheet-status').textContent, /pfa.valueRange 1 99/);
+  assert.equal(sent.length, 0);
+
+  c.element('pfa-value').value = '40';
+  c.element('pfa-sheet-confirm').events.click(); await flush();
+  assert.deepEqual(plain(sent), [['/autonomy/switch', { block: 'reduce', on: true, value: 40, password: 'pw',
+                                                        reason: 'switched on from Assets' }]]);
+  assert.match(c.element('pfa-status').textContent, /pfa.doneOn/);
+  assert.equal(c.reread, true, 'the switch is read back, not assumed');
+
+  press(c, 'on:open');
+  assert.equal(c.element('pfa-value').value, 80, 'the confidence to buy starts at the autonomous floor');
+  assert.equal(c.element('pfa-value').min, 80);
+  // The stub translates nothing, so each class falls back to its own name, as an unknown one would.
+  assert.match(c.element('pfa-sheet-limits').innerHTML, /pfa.l.classes broad_diversified_etf.*bond_or_cash_like_etf/);
+  assert.match(c.element('pfa-sheet-note').innerHTML, /<strong>pfa.noteOpen<\/strong><br>pfa.note/);
+});
+
+test('a refused password keeps the sheet open with the server’s reason', async () => {
+  const c = ledgerPage(async () => { throw Object.assign(Error('the console password did not match'), { status: 400 }); },
+                       readableLedger);
+  c.CT.authority = authorityWith(); c.render();
+  press(c, 'on:open');
+  c.element('pfa-password').value = 'wrong';
+  c.element('pfa-sheet-confirm').events.click(); await flush();
+  assert.match(c.element('pfa-sheet-status').textContent, /pfa.failed.*did not match/);
+  assert.equal(c.element('pfa-sheet').open, true);
+  assert.equal(c.element('pfa-sheet-confirm').disabled, false, 'and it can be tried again');
+});
+
+test('off, pause and resume take a second tap and follow the server’s answer', async () => {
+  const sent = [];
+  const c = ledgerPage(async (path, body) => {
+    sent.push([path, body]);
+    return path === '/system/pause' ? { paused: true } : path === '/system/resume' ? { paused: false } : { changed: true };
+  }, readableLedger);
+  c.CT.authority = authorityWith({ switches: { reduce: true, open: false } }); c.CT.health.paused = false; c.render();
+  press(c, 'off:reduce');
+  assert.equal(sent.length, 0, 'the first tap only arms');
+  assert.match(c.element('pfa-rows').innerHTML, /data-pfa="off:reduce">pf.tapAgain/);
+  press(c, 'off:reduce'); await flush();
+  assert.deepEqual(plain(sent[0]), ['/autonomy/switch', { block: 'reduce', on: false, reason: 'switched off from Assets' }]);
+  assert.match(c.element('pfa-status').textContent, /pfa.doneOff/);
+
+  press(c, 'pause'); press(c, 'pause'); await flush();
+  assert.equal(sent[1][0], '/system/pause');
+  assert.equal(c.CT.health.paused, true);
+  assert.match(c.element('pfa-summary').textContent, /pfa.sumPaused/);
+  assert.match(c.element('pfa-rows').innerHTML, /data-pfa="resume"/);
+  press(c, 'resume'); press(c, 'resume'); await flush();
+  assert.deepEqual(plain(sent[2]), ['/system/resume', {}]);
+  assert.equal(c.CT.health.paused, false);
+});
+
+test('autonomy the system withdrew is shown as stopped and restored only with the password', async () => {
+  const sent = [];
+  const c = ledgerPage(async (path, body) => { sent.push([path, body]); return { withdrawn: false }; }, readableLedger);
+  c.CT.authority = authorityWith({ switches: { reduce: true, open: false },
+    withdrawn: { tripped: true, reason: 'an autonomous action in micro_live ended in SUBMIT_UNCERTAIN', at: '2026-09-23T17:00:00Z' } });
+  c.render();
+  assert.match(c.element('pfa-summary').textContent, /pfa.sumWithdrawn.*SUBMIT_UNCERTAIN/);
+  const rows = c.element('pfa-rows').innerHTML;
+  assert.match(rows, /data-pfa="restore"/);
+  assert.match(rows, /pf-state is-held">pfa.held/, 'a switch that is on but held reads as stopped');
+  press(c, 'restore');
+  assert.equal(c.element('pfa-value-field').hidden, true);
+  c.element('pfa-password').value = 'pw';
+  c.element('pfa-sheet-confirm').events.click(); await flush();
+  assert.deepEqual(plain(sent), [['/autonomy/resume', { reason: 'restored from Assets', password: 'pw' }]]);
+});
+
+test('a reader who cannot write sees the switches but cannot move them', () => {
+  const c = ledgerPage(async () => ({}), readableLedger);
+  c.CT.authority = authorityWith({ pending_changes: [{ id: 'chg_1', status: 'pending', apply_after: '2026-09-24T17:00:00Z',
+                                                       paths: ['buckets.micro_live.autonomy.open.enabled'] }] });
+  c.render();
+  assert.match(c.element('pfa-status').textContent, /pfa.pending/, 'a change still cooling is named');
+  c.CT_API.writesEnabled = false; c.render();
+  const buttons = c.element('pfa-rows').innerHTML.match(/<button[^>]*>/g);
+  assert.equal(buttons.length, 3);
+  assert.ok(buttons.every(b => / disabled/.test(b)));
+  assert.match(c.element('pfa-status').textContent, /pfa.writesOff/);
+  press(c, 'pause');
+  assert.doesNotMatch(c.element('pfa-rows').innerHTML, /pf.tapAgain/);
+});
+
 /* The daily job's refusal over cash carries the figure. The card shows it before the ledger
    has expired, and records it as what the reader says it was — on a second tap, with the
    amount filled in — then runs the same check again. */

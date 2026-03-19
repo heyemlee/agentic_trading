@@ -5,7 +5,7 @@ asset layer, no build step.
 
 ```
 index.html       Home      Today: what needs you, what is not normal, research conclusions
-portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view
+portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view; Agentic carries its automatic-trading switches
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, tracked orders, audit trail
@@ -307,6 +307,17 @@ Assets is drawn in Home's palette (`<body class="pf-glass">`, `assets/portfolio.
 green-tinted field, card fill and shadow, and green for the leading action, the selected
 account and anything live. Glass cards are drawn without blur. Gain and loss are mixed from the
 brand values and measured above 5:1.
+
+The Agentic view carries the account's automatic trading under its balance: the two autonomy
+switches, `reduce` and `open`, and the kill switch. They are read from `authority`
+(`/config/authority`, 30s: `switches`, `actions.*.limits`, `withdrawn`, `pending_changes`) and
+`/health.paused`, and a state that cannot be read draws no switch. Turning one on opens a sheet
+with its limits, its one number (the share of each holding kept; the confidence needed to buy,
+never below `limits.confidence_floors.autonomous_any`) and the console password, and posts
+`POST /autonomy/switch`; the change applies at once. Off, pause and resume take a second tap, as
+the ledger's booking buttons do. Autonomy the system withdrew shows as stopped, with a Restore
+that asks for the password (`POST /autonomy/resume`). Settings and System keep their own
+controls; both screens post the same calls and read the same state.
 
 
 Assistant uses `assistant` (5s, stale after 5 minutes) for

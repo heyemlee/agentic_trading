@@ -59,6 +59,16 @@
         <p class="pf-warn" id="live-note" role="status" hidden></p>
         <dl class="pf-stats pf-stats-flat" id="live-stats"></dl>
       </article>
+      <!-- what this account may do without asking: the two autonomy switches and the brake -->
+      <article class="pf-card pf-auto" id="agentic-controls" data-od-id="agentic-controls" hidden>
+        <div class="pf-card-head">
+          <p class="pf-eyebrow" data-i18n="pfa.title">Automatic trading</p>
+        </div>
+        <p class="pf-auto-summary" id="pfa-summary"></p>
+        <div class="pf-rows" id="pfa-rows"></div>
+        <p class="pf-fine" id="pfa-status" role="status" aria-live="polite"></p>
+        <p class="pf-fine pf-card-foot" id="pfa-foot" data-i18n="pfa.foot">Pausing applies to every account; this is the only one that can place real orders.</p>
+      </article>
       <article class="pf-card" id="live-holdings" data-od-id="agentic-holdings" hidden>
         <div class="pf-card-head">
           <p class="pf-eyebrow" data-i18n="pf.liveHoldings">Holdings, live</p>
@@ -159,6 +169,33 @@
   </div>
 
 </main>
+
+<!-- Turning an autonomy switch on, or restoring autonomy after the system stopped it: the
+     password is asked here, and the change applies the moment it is confirmed. -->
+<dialog class="modal" data-sheet id="pfa-sheet" data-od-id="pfa-sheet">
+  <form method="dialog" class="dialog-body" id="pfa-form" onsubmit="return false;">
+    <h2 id="pfa-sheet-title">—</h2>
+    <p class="body-sm body-muted" style="margin-top:8px;" id="pfa-sheet-lead"></p>
+    <ul class="pf-bullets pf-auto-limits" id="pfa-sheet-limits"></ul>
+    <div class="field" id="pfa-value-field">
+      <label for="pfa-value" id="pfa-value-label"></label>
+      <div class="settings-inline pf-auto-value">
+        <input class="input" id="pfa-value" type="number" inputmode="numeric" step="1" autocomplete="off" />
+        <span id="pfa-value-unit"></span>
+      </div>
+    </div>
+    <p class="body-sm" style="margin-top:12px;" id="pfa-sheet-note"></p>
+    <div class="field" style="margin-top:12px;">
+      <label for="pfa-password" data-i18n="cf.confirmPassword">Console password</label>
+      <input class="input" id="pfa-password" type="password" autocomplete="current-password" />
+    </div>
+    <p class="body-sm" style="margin-top:8px;" id="pfa-sheet-status" role="status" aria-live="polite"></p>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-green" id="pfa-sheet-confirm" data-od-id="cta-autonomy-switch">—</button>
+    <button class="btn btn-secondary" id="pfa-sheet-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
 
 <script src="assets/i18n.js"></script>
 <script src="assets/data.js"></script>

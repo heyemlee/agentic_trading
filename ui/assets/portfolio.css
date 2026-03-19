@@ -345,6 +345,29 @@ div.pf-row .pf-chevron { display: none; }
 .pf-live .pf-stats-flat { margin-bottom: -20px; border-bottom: 0; }
 .pf-live .pf-stats-flat:empty { display: none; }
 
+/* ─── the Agentic account's automatic trading ──────────────────────────
+   Two switches and the brake, under the balance they govern. A switch's state is a word, not a
+   toggle: turning one on asks for the password in a sheet, so a thumb on a toggle would promise
+   an answer the page cannot give yet. Green marks what is on, as Home marks anything live; the
+   actions that stop something are red text, and a second tap confirms them. */
+#agentic-controls { margin-top: 16px; }
+.pf-auto-summary { margin-top: 6px; font-size: 15px; font-weight: 600; line-height: 1.45; letter-spacing: -.01em; }
+.pf-auto-summary:empty { display: none; }
+.pf-auto .pf-rows { margin: 12px -10px -4px; }
+.pf-auto .pf-row { min-height: 60px; }
+.pf-auto > .pf-fine:not(.pf-card-foot) { margin-top: 10px; }
+.pf-state { flex: none; min-width: 2em; font-size: 13px; font-weight: 600; text-align: right; color: var(--pf-ink-3); }
+.pf-state.is-on { color: var(--pf-up); }
+.pf-state.is-held { color: var(--warn-ink); }
+.pf-quiet.is-go { color: var(--green-contrast); background: var(--green); box-shadow: none; }
+.pf-quiet.is-stop { color: var(--pf-down); }
+.pf-quiet.is-armed { color: #fff; background: var(--pf-down); box-shadow: none; }
+.pf-quiet:disabled { cursor: not-allowed; color: var(--pf-ink-3); background: var(--pf-fill); box-shadow: none; }
+.pf-auto-limits { margin: 12px 0 14px; font-size: 14px; }
+.pf-auto-value { align-items: center; }
+.pf-auto-value .input { max-width: 7em; }
+.pf-auto-value span { font-size: 15px; color: var(--pf-ink-2); }
+
 /* ─── arriving: a view settles in rather than popping ──────────────── */
 #robinhood-view, #agentic-view, #holding-view { animation: pf-arrive 360ms var(--pf-settle) both; }
 @keyframes pf-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }

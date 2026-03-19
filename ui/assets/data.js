@@ -123,7 +123,7 @@ window.CT = (function () {
     preflight_ready: false,
     checks: [
       { id: "PF00", name: "micro-live master switch", passed: false, detail: "micro_live_execution.enabled is false: real-money orders are disabled (this is the intended default)" },
-      { id: "PF04", name: "human approval active", passed: true, detail: "execution_mode=human_approval, autonomous opening=False" },
+      { id: "PF04", name: "opening a position: a person, or the bounded open switch only", passed: true, detail: "execution_mode=human_approval, blanket autonomous opening=False; the open switch is off: every opening waits for a person" },
       { id: "PF05", name: "stale-proposal protection active", passed: true, detail: "5 freshness classes configured; the micro-live class is core_conservative" },
       { id: "PF06", name: "execution-time revalidation active", passed: true, detail: "outcomes: ['VALID', 'REDUCED', 'STALE', 'INVALIDATED', 'REANALYZE', 'REJECTED']" },
       { id: "PF07", name: "duplicate protection active", passed: true, detail: "client-order-id prefix 'ct', broker checked before submit, max attempts 1" },
@@ -159,9 +159,12 @@ window.CT = (function () {
     mode: "blocked",
     autonomous: { permitted: false, blocked_by: [authorityBlock] },
     human_approval: { permitted: false, blocked_by: [authorityBlock] },
-    limits: action === "SELL"
-      ? { quantity_basis: "full ledger holding" }
-      : { max_order_usd: 35.0, max_position_pct: 40.0 },
+    // Each action's limits in the server's own vocabulary (autonomy.effective_authority).
+    limits: action === "SELL" ? { quantity_basis: "full ledger holding" }
+      : action === "REDUCE" ? { min_confidence: 80, max_positions_reduced_per_day: 1, max_fraction_of_holding: 0.5,
+                                min_remaining_pct_of_opened: null, used_today: 0 }
+      : { classes: ["broad_diversified_etf", "bond_or_cash_like_etf"], max_pct_of_account: 20,
+          max_new_positions_per_day: 1, min_confidence: null, used_today: 0 },
   });
   const authority = {
     checked_at: "2026-09-04T20:32:16+00:00",
@@ -175,10 +178,12 @@ window.CT = (function () {
     stage_allows: ["BUY", "ADD", "REDUCE", "SELL"],
     real_money_enabled: false,
     execution_mode: "human_approval",
-    kill_switch: { engaged: false, reason: null, at: null },
-    withdrawn: { active: false, reason: null, at: null },
+    kill_switch: { engaged: false, since: null, reason: null },
+    withdrawn: { tripped: false, reason: null, at: null },
+    switches: { reduce: false, open: false },
     actions: Object.fromEntries(["BUY", "ADD", "REDUCE", "SELL"].map(action => [action, authorityAction(action)])),
-    limits: { capital: { max_capital_usd: 100.0 }, tiers: { low: { max_order_usd: 35.0 } } },
+    limits: { capital: { max_capital_usd: 100.0 }, tiers: { low: { max_order_usd: 35.0 } },
+              confidence_floors: { autonomous_any: 80 } },
     pending_changes: [],
     preflight: { ready: false, blocking: ["PF00"], checked_at: "2026-09-04T20:32:16+00:00", stale: false },
     consistency: [],

@@ -477,6 +477,179 @@ window.Console.page('portfolio', function (document) {
     return holdings != null;
   }
 
+  /* ── what the Agentic account may do without asking ───────────────────
+     The two autonomy switches and the kill switch, on the account they govern. Read from
+     /config/authority and /health, written through the calls Settings and System make. On asks
+     for the password in a sheet and applies at once (POST /autonomy/switch: the owner's decision
+     of 2026-09-23); off, pause and resume are one gesture that a second tap confirms, as the
+     ledger's booking buttons are. A state that cannot be read offers no button: a guess drawn
+     as a switch is worse than none. */
+  const BLOCKS = [{ block: 'reduce', action: 'REDUCE', name: 'pfa.reduce' },
+                  { block: 'open', action: 'BUY', name: 'pfa.open' }];
+  let autoArmed = null, armTimer = null, autoBusy = false, autoStatus = '', sheetMode = null;
+  const authorityRead = () => { const a = D.authority; return a && a.switches && a.actions ? a : null; };
+  const blockName = (block) => C.t(BLOCKS.find((b) => b.block === block).name);
+  const orAsIs = (key, raw) => { const text = C.t(key); return text === key ? raw : text; };
+
+  function renderControls() {
+    const card = $('agentic-controls');
+    card.hidden = scope !== 'agentic';
+    if (card.hidden) return;
+    const a = authorityRead(), paused = C.isPaused(), known = window.CT_DEMO || API.isLive('health');
+    const canWrite = !!a && API.writesEnabled && (window.CT_DEMO || API.isLive('authority')) && !autoBusy;
+    // The brake never waits on the authority read: pausing is safe whatever else is unknown.
+    const canBrake = API.writesEnabled && !autoBusy;
+    const withdrawn = !!a && a.withdrawn?.tripped === true;
+    const isOn = (block) => !!a && a.switches[block] === true;
+    $('pfa-summary').textContent = !a ? C.t('pfa.unreadable')
+      : paused ? C.t('pfa.sumPaused')
+      : a.real_money_enabled === false ? C.t('pfa.sumNoMoney')
+      : withdrawn ? C.t('pfa.sumWithdrawn', { reason: a.withdrawn.reason || '—' })
+      : isOn('reduce') && isOn('open') ? C.t('pfa.sumBoth')
+      : isOn('reduce') ? C.t('pfa.sumReduce') : isOn('open') ? C.t('pfa.sumOpen') : C.t('pfa.sumNone');
+
+    const button = (key, label, kind, enabled = canWrite) => '<button class="pf-quiet ' + kind + '" type="button" data-pfa="' +
+      key + '"' + (enabled ? '' : ' disabled') + '>' + h(label) + '</button>';
+    const armed = (key, label, kind, enabled = canWrite) => autoArmed === key
+      ? button(key, C.t('pf.tapAgain'), 'is-armed', enabled) : button(key, label, kind, enabled);
+    const row = (id, title, sub, state, tone, action) =>
+      '<div class="pf-row" data-od-id="pfa-' + id + '"><span class="pf-row-main"><span class="pf-row-title">' + h(title) +
+        '</span><span class="pf-row-sub">' + h(sub) + '</span></span>' +
+        '<span class="pf-state' + (tone ? ' ' + tone : '') + '">' + h(state) + '</span>' + action + '</div>';
+    const rows = [];
+    if (withdrawn) rows.push(row('restore', C.t('pfa.restoreTitle'), a.withdrawn.reason || '', '', '',
+      button('restore', C.t('pfa.restore'), 'is-go')));
+    if (a) for (const { block, action, name } of BLOCKS) {
+      const limits = a.actions[action]?.limits || {}, on = isOn(block), n = (v) => v ?? '—';
+      const sub = !on ? C.t(block === 'reduce' ? 'pfa.reduceOff' : 'pfa.openOff')
+        : block === 'reduce' ? C.t('pfa.reduceOn', { pct: n(limits.min_remaining_pct_of_opened),
+                                                     used: limits.used_today ?? 0, max: n(limits.max_positions_reduced_per_day) })
+        : C.t('pfa.openOn', { conf: n(limits.min_confidence), pct: n(limits.max_pct_of_account),
+                              used: limits.used_today ?? 0, max: n(limits.max_new_positions_per_day) });
+      rows.push(row(block, C.t(name), sub,
+        C.t(on && withdrawn ? 'pfa.held' : on ? 'pfa.on' : 'pfa.off'), on ? (withdrawn ? 'is-held' : 'is-on') : '',
+        on ? armed('off:' + block, C.t('pfa.turnOff'), 'is-stop') : button('on:' + block, C.t('pfa.turnOn'), 'is-go')));
+    }
+    rows.push(row('orders', C.t('pfa.orders'),
+      paused ? C.t('pfa.ordersPaused', { reason: (a && a.kill_switch?.reason) || '—' }) : C.t('pfa.ordersOn'),
+      paused ? C.t('pfa.paused') : known ? C.t('pfa.normal') : '—', paused ? 'is-held' : known ? 'is-on' : '',
+      paused ? armed('resume', C.t('pfa.resume'), 'is-go', canBrake) : armed('pause', C.t('pfa.pause'), 'is-stop', canBrake)));
+    C.setHTML($('pfa-rows'), rows.join(''));
+
+    const pending = !a ? null : (a.pending_changes || []).find((c) =>
+      (c.paths || []).some((p) => String(p).startsWith('buckets.micro_live.autonomy.')));
+    $('pfa-status').textContent = autoStatus
+      || (window.CT_DEMO ? C.t('hd.demo') : !API.writesEnabled ? C.t('pfa.writesOff') : '')
+      || (pending ? C.t('pfa.pending', { at: C.dateTime(pending.apply_after) }) : '');
+  }
+
+  $('pfa-rows').addEventListener('click', (event) => {
+    const target = event.target.closest && event.target.closest('[data-pfa]');
+    if (!target || target.disabled || autoBusy || !API.writesEnabled) return;
+    const key = target.dataset.pfa, [verb, block] = key.split(':');
+    if (verb !== 'pause' && verb !== 'resume' && !authorityRead()) return;
+    if (verb === 'on') { openSheet({ kind: 'on', block }); return; }
+    if (verb === 'restore') { openSheet({ kind: 'restore' }); return; }
+    clearTimeout(armTimer);
+    if (autoArmed !== key) {            // the first tap only arms; it falls back after a while
+      autoArmed = key; autoStatus = '';
+      armTimer = setTimeout(() => { autoArmed = null; renderControls(); }, 6000);
+      renderControls();
+      return;
+    }
+    autoArmed = null;
+    act(verb, block);
+  });
+
+  async function act(verb, block) {
+    autoBusy = true; autoStatus = ''; renderControls();
+    try {
+      const result = verb === 'off' ? await API.post('/autonomy/switch', { block, on: false, reason: 'switched off from Assets' })
+        : verb === 'pause' ? await API.post('/system/pause', { reason: 'paused from the Agentic account in Assets' })
+        : await API.post('/system/resume', {});
+      if (result && result.blocked) { autoStatus = C.t('pfa.writesOff'); return; }
+      if (verb !== 'off') {
+        // The server's answer, not a local guess: the same rule the System page follows.
+        C.setPaused(result && result.paused !== undefined ? !!result.paused : verb === 'pause');
+        API.readOnce('health');
+      }
+      autoStatus = verb === 'off' ? C.t('pfa.doneOff', { name: blockName(block) })
+        : C.t(verb === 'pause' ? 'pfa.donePause' : 'pfa.doneResume');
+      await API.readOnce('authority');
+    } catch (error) { autoStatus = C.t('pfa.failed', { error: error.message }); }
+    finally { autoBusy = false; renderControls(); }
+  }
+
+  /* The sheet: turning a switch on, with its one number and the password; or restoring
+     autonomy after the system stopped it, with the password. The password never outlives
+     the sheet. */
+  function openSheet(mode) {
+    const a = authorityRead();
+    if (!a) return;
+    sheetMode = mode;
+    const on = mode.kind === 'on', reduce = mode.block === 'reduce';
+    const limits = on ? a.actions[reduce ? 'REDUCE' : 'BUY']?.limits || {} : {};
+    const floor = a.limits?.confidence_floors?.autonomous_any ?? 80;
+    $('pfa-sheet-title').textContent = on ? C.t('pfa.sheetOn', { name: blockName(mode.block) }) : C.t('pfa.restoreTitle');
+    $('pfa-sheet-lead').textContent = !on ? C.t('pfa.restoreLead', { reason: a.withdrawn?.reason || '—' })
+      : C.t(reduce ? 'pfa.leadReduce' : 'pfa.leadOpen');
+    const items = !on ? [] : reduce
+      ? [C.t('pfa.l.half'),
+         limits.max_positions_reduced_per_day != null && C.t('pfa.l.reducePerDay', { n: limits.max_positions_reduced_per_day }),
+         limits.min_confidence != null && C.t('pfa.l.confidence', { n: limits.min_confidence }),
+         C.t('pfa.l.neverSell'), C.t('pfa.l.rules')]
+      : [(limits.classes || []).length && C.t('pfa.l.classes', { list: limits.classes
+           .map((cls) => orAsIs('pfa.class.' + cls, cls)).join(C.t('pfa.listJoin')) }),
+         limits.max_pct_of_account != null && C.t('pfa.l.share', { n: limits.max_pct_of_account }),
+         limits.max_new_positions_per_day != null && C.t('pfa.l.openPerDay', { n: limits.max_new_positions_per_day }),
+         C.t('pfa.l.rules')];
+    C.setHTML($('pfa-sheet-limits'), items.filter(Boolean).map((item) => '<li>' + h(item) + '</li>').join(''));
+    $('pfa-value-field').hidden = !on;
+    if (on) {
+      const input = $('pfa-value');
+      input.min = reduce ? 1 : floor; input.max = reduce ? 99 : 100;
+      input.value = reduce ? (limits.min_remaining_pct_of_opened ?? 50) : Math.max(limits.min_confidence ?? floor, floor);
+      $('pfa-value-label').textContent = C.t(reduce ? 'pfa.valueReduce' : 'pfa.valueOpen');
+      $('pfa-value-unit').textContent = C.t(reduce ? 'pfa.unitReduce' : 'pfa.unitOpen');
+    }
+    // Buying is the switch that spends money on its own, so it says so first, on its own line.
+    C.setHTML($('pfa-sheet-note'), !on ? '' : (reduce ? '' : '<strong>' + h(C.t('pfa.noteOpen')) + '</strong><br>') + h(C.t('pfa.note')));
+    $('pfa-password').value = '';
+    $('pfa-sheet-status').textContent = '';
+    $('pfa-sheet-confirm').textContent = C.t(on ? 'pfa.turnOn' : 'pfa.restore');
+    $('pfa-sheet-confirm').disabled = false;
+    C.openSheet('pfa-sheet');
+  }
+  $('pfa-sheet').addEventListener('close', () => { $('pfa-password').value = ''; sheetMode = null; });
+  $('pfa-sheet-cancel').addEventListener('click', () => C.closeSheet('pfa-sheet'));
+  $('pfa-sheet-confirm').addEventListener('click', async () => {
+    const mode = sheetMode, status = $('pfa-sheet-status'), password = $('pfa-password').value;
+    if (!mode || autoBusy) return;
+    let value = null;
+    if (mode.kind === 'on') {
+      const input = $('pfa-value'), min = Number(input.min), max = Number(input.max);
+      value = Number(input.value);
+      if (input.value === '' || !Number.isInteger(value) || value < min || value > max) {
+        status.textContent = C.t('pfa.valueRange', { min, max }); return;
+      }
+    }
+    if (!password) { status.textContent = C.t('pfa.needPassword'); return; }
+    autoBusy = true; $('pfa-sheet-confirm').disabled = true; status.textContent = '';
+    try {
+      const result = mode.kind === 'on'
+        ? await API.post('/autonomy/switch', { block: mode.block, on: true, value, password, reason: 'switched on from Assets' })
+        : await API.post('/autonomy/resume', { reason: 'restored from Assets', password });
+      if (result && result.blocked) { status.textContent = C.t('pfa.writesOff'); return; }
+      autoStatus = mode.kind === 'on' ? C.t('pfa.doneOn', { name: blockName(mode.block) }) : C.t('pfa.doneRestore');
+      C.closeSheet('pfa-sheet');
+      await API.readOnce('authority');
+    } catch (error) {
+      status.textContent = C.t('pfa.failed', { error: error.message });
+    } finally {
+      autoBusy = false; $('pfa-sheet-confirm').disabled = false; renderControls();
+    }
+  });
+
   /* Everything below is re-run on every poll cycle. */
   function render() {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
@@ -525,6 +698,7 @@ window.Console.page('portfolio', function (document) {
 
     if (holding) renderHolding(holding);
     renderLedger(renderLive());
+    renderControls();
   }
 
   /* Opening a holding starts at its top, and Back returns to the same place in the list.
@@ -540,7 +714,7 @@ window.Console.page('portfolio', function (document) {
   document.addEventListener('ct:route', () => {
     const next = routeScope(), nextHolding = routeHolding(), entered = away;
     away = false;
-    if (next !== scope) { armedKind = null; bookStatus = confirmStatus = ''; }
+    if (next !== scope) { armedKind = null; bookStatus = confirmStatus = ''; autoArmed = null; autoStatus = ''; }
     let scrollTo = null;
     if (nextHolding && !sameHolding(holding, nextHolding)) {
       if (!holding && !entered) listScroll = window.scrollY || 0;
@@ -552,6 +726,6 @@ window.Console.page('portfolio', function (document) {
     render();
     if (scrollTo !== null && window.scrollTo) window.scrollTo(0, scrollTo);
   });
-  C.live(['portfolio'], render, ['advisor', 'microLive']);
+  C.live(['portfolio'], render, ['advisor', 'microLive', 'authority']);
   loadCheck();
 });
