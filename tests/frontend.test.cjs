@@ -1472,7 +1472,7 @@ function homePage(portfolio, showConceptual = false) {
   c.CT.health.warnings = [];
   if (portfolio) c.CT.portfolio = portfolio;
   c.Console.mount = c.Console.wireTabs = () => {};
-  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.Console.live = (keys, render, extra = []) => { c.reads = [...keys, ...extra]; c.render = render; render(); };
   c.CT_API = { canAct: () => true, readOnce: async () => {}, isLive: () => true };
   c.run('pages/index.js');
   return c;
@@ -2142,50 +2142,60 @@ test('Assistant marks a completed decision only while its result sheet remains v
   }
 });
 
-test('the headline equity is one account, never the real and paper books added together', () => {
-  const c = homePage();
-  const A = c.CT.portfolio.accounts;
-  assert.equal(c.element('equity-value').textContent, '$100.00');
-  assert.notEqual(A.micro_live.equity_usd, c.CT.portfolio.combined.equity_usd);
-  // the mark it is measured against belongs to the same account
-  assert.ok(c.element('hwm-foot').textContent.includes('$100.00'));
-  assert.ok(c.element('equity-source').textContent.length > 0);
-});
-
-test('with the switch off, no conceptual money reaches the home screen', () => {
-  const c = homePage();
-  const screen = c.element('equity-value').textContent + c.element('funding-kv').textContent +
-    c.element('account-list').innerHTML + c.element('bucket-list').innerHTML +
-    c.element('hwm-foot').textContent + c.element('research-list').innerHTML;
-  // the paper book's equity, and each of its buckets, in the figures the page writes
-  for (const paper of ['$3,000.00', '$2,500.00', '$500.00']) {
-    assert.ok(!screen.includes(paper), 'the paper book leaked onto the home screen: ' + paper);
+/* Home carried a card of the Agentic ledger: equity, its high-water mark, funding, source. Every
+   figure repeated Assets', and the card read only the ledger, so it went blank whenever the
+   ledger was held back while Assets led with the live balance. The owner had it removed
+   (2026-09-23). A ladder that moves, a halt and an unconfirmed ledger reach Home as attention
+   or as a condition; the account's figures are Assets' alone. */
+test('Home draws no account figures, and does not read the ledger to draw them', () => {
+  for (const showConceptual of [false, true]) {
+    const c = homePage(null, showConceptual);
+    assert.ok(!c.reads.includes('portfolio'), 'Home asked for the ledger it no longer draws');
+  }
+  const html = uiFile('index.html');
+  for (const id of ['account-card', 'equity-value', 'hwm-foot', 'funding-kv', 'equity-source', 'account-list']) {
+    assert.ok(!html.includes('id="' + id + '"'), 'the account card is back on Home: #' + id);
   }
 });
 
-test('the conceptual book comes back in full when the switch is on', () => {
-  const c = homePage(null, true);
-  assert.equal(c.element('equity-value').textContent, '$3,000.00');
-  assert.ok(c.element('hwm-foot').textContent.includes('$3,000.00'));
-  // the real-money account keeps its own row rather than being folded into the total
-  assert.ok(c.element('account-list').innerHTML.includes('$100.00'));
-  assert.equal(c.element('bucket-list').innerHTML, '', 'bucket detail belongs to Assets');
-});
-
-test('money paid in is shown as funding, not as a result', () => {
+test('a drawdown ladder away from normal stays in view on Home; a halt is left to status and attention', () => {
   const c = homePage();
-  const funded = c.element('funding-kv').textContent;
-  assert.ok(funded.includes('$100.00'));         // net deposits
-  assert.ok(funded.includes('+$0.00'));          // investment result, separate from funding
-  assert.ok(funded.includes('0.00%'));           // return measured against money paid in
+  const R = c.CT.risk;
+  R.micro_live = { ...R.micro_live, level: 'WARNING', drawdown_pct: 6.25 };
+  R.regime = { ...R.regime, level: 'ELEVATED_RISK' };
+  R.core = { ...R.core, level: 'WARNING', drawdown_pct: 4 };
+  c.render();
+  const list = c.element('conditions-list').innerHTML;
+  assert.equal(c.element('home-conditions').hidden, false);
+  assert.match(list, /\/risk\.html" data-od-id="condition-ladder-micro_live"/, 'the row opens Risk');
+  assert.match(list, /6\.25%/);
+  assert.doesNotMatch(list, /condition-ladder-regime/, 'the regime has a level, and is not a ladder');
+  assert.doesNotMatch(list, /condition-ladder-core/, 'the Demo book stays off Home while it is hidden');
+  R.micro_live = { ...R.micro_live, level: 'HALT', manual_reset_required: true }; c.render();
+  assert.doesNotMatch(c.element('conditions-list').innerHTML, /condition-ladder/, 'a halt is already status and attention');
+  R.micro_live = { ...R.micro_live, level: 'NORMAL', manual_reset_required: false }; c.render();
+  assert.doesNotMatch(c.element('conditions-list').innerHTML, /condition-ladder/);
+  assert.ok(c.reads.includes('risk'), 'Home reads the ladders from /risk');
+  const shown = homePage(null, true);
+  shown.CT.risk.core = { ...shown.CT.risk.core, level: 'WARNING', drawdown_pct: 4 }; shown.render();
+  assert.match(shown.element('conditions-list').innerHTML, /condition-ladder-core/, 'with the Demo book shown, its ladders are too');
 });
 
-test('an unreadable account degrades to an explicit gap, not a zero', () => {
-  const c = homePage({ as_of: '2026-09-02', buckets: {}, accounts: {},
-    errors: { conceptual: 'portfolio state file not found' },
-    combined: { equity_usd: 0, accounts: [], complete: false, mixes_real_and_conceptual: false } });
-  assert.equal(c.element('equity-value').textContent, '—');
-  assert.ok(c.element('equity-source').textContent.includes('not found'));
+test('Assets shows money paid in as funding, and the result against it, never one as the other', () => {
+  const c = context(true); c.location.search = '?scope=agentic&demo=1'; c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => {}, post: async () => ({}) };
+  c.CT.advisor = { stale: false, jobs: [], snapshot: savedSnapshot };
+  Object.assign(c.CT.portfolio.accounts.micro_live,
+    { equity_usd: 110, net_deposits_usd: 100, investment_pnl_usd: 10, return_pct: 10 });
+  c.run('pages/portfolio.js');
+  assert.equal(c.element('pf-total').textContent, '$110.00');
+  assert.match(c.element('account-cards').innerHTML, /home\.funded<\/dt><dd>\$100\.00</, 'funding is its own figure');
+  const result = c.element('pf-result').innerHTML;
+  assert.ok(result.includes('+$10.00'), 'the result is equity less money paid in');
+  assert.ok(result.includes('+10.00%'), 'the return is stated against money paid in');
+  assert.ok(!result.includes('$110.00') && !result.includes('$100.00'), 'neither equity nor funding is read as a result');
 });
 
 function systemPage(overrides) {
@@ -2971,7 +2981,7 @@ test('unchanged account markup is not replaced when another resource updates', (
   assert.equal(replacements, 0);
 });
 
-test('home opens a running study in its office and clears account figures when the ledger is withheld', () => {
+test('home opens a running study in its office', () => {
   const c = homePage(); c.CT_DEMO = false;
   c.CT.attention = null;
   let watched = 0; c.CT_API.watchRun = () => { watched++; };
@@ -2979,11 +2989,8 @@ test('home opens a running study in its office and clears account figures when t
   assert.match(c.element('research-list').innerHTML, /lab\.html\?run=2026-09-15_VTI_test"/);
   assert.match(c.element('research-list').innerHTML, /agent.studying VTI/);
   assert.equal(watched, 0, 'Home lists the queue; the office is what follows a run');
-  c.CT.researchJobs = []; c.CT.portfolio = { accounts: {}, buckets: {}, errors: { micro_live: 'unconfirmed' } };
-  c.CT.proposals = []; c.render();
+  c.CT.researchJobs = []; c.CT.proposals = []; c.render();
   assert.doesNotMatch(c.element('research-list').innerHTML, /agent.studying/, 'nothing running, nothing to watch');
-  assert.equal(c.element('equity-value').textContent, '—');
-  assert.equal(c.element('hwm-foot').textContent, '');
   assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/, 'only the attention collector decides what needs action');
 });
 

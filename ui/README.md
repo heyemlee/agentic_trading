@@ -4,7 +4,7 @@ Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
 asset layer, no build step.
 
 ```
-index.html       Home      Today: what needs you, what is not normal, research conclusions, the account
+index.html       Home      Today: what needs you, what is not normal, research conclusions
 portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
@@ -141,11 +141,14 @@ Home and More read current attention from `/attention`, preserving server priori
 those items alone, and hides them after a current, readable empty result; a native disclosure
 shows additional cards. Below them, Home lists only what is not normal, each row opening the page
 that owns it: a status other than READY (System), a preflight block while real money is armed
-(Risk), an order still working at the venue (Activity), and the number of `/health.warnings`
+(Risk), a drawdown ladder away from NORMAL short of a halt (Risk; the attention list keeps only
+a halt), an order still working at the venue (Activity), and the number of `/health.warnings`
 (System, which holds their text). Nothing there means nothing is abnormal. Research follows: a
 running study opens the Lab on it, a finished one its report in the Lab, each naming its account;
-the paper book and records bound to no account stay off Home. Missing, stale or partially
-readable results say "cannot confirm", never "nothing to do". Links retain
+the paper book and records bound to no account stay off Home. Home draws no account figures
+and does not read `/portfolio`: equity, funding and the high-water mark are Assets' alone. A
+ladder reaches Home from `/risk` as above, and a halt or a ledger left unconfirmed as attention.
+Missing, stale or partially readable results say "cannot confirm", never "nothing to do". Links retain
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
 a visible sheet; polling never marks it. Failed receipts offer an explicit retry and are not

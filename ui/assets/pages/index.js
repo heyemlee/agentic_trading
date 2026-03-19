@@ -4,10 +4,14 @@ window.Console.page('index', function (document) {
 
   const $ = (id) => document.getElementById(id);
 
-  /* Today answers four things, in the order a person asks them: what needs me, what is not
-     normal, what research concluded, and how the account stands. Whatever is normal and
-     unchanging -- the market clock, a preflight that passes, an empty order book, a notice
-     that has read the same for weeks -- has its own page and is not repeated here. */
+  /* Today answers three things, in the order a person asks them: what needs me, what is not
+     normal, and what research concluded. Whatever is normal and unchanging -- the market
+     clock, a preflight that passes, an empty order book, a notice that has read the same for
+     weeks -- has its own page and is not repeated here. The account's figures are Assets'
+     alone: a card here repeated them and, reading only the ledger, went blank whenever the
+     ledger was held back while Assets still showed the live balance. A drawdown that moves a
+     ladder, a halt and an unconfirmed ledger each still reach this page, as attention or as
+     a condition. */
 
   /* Runs on a hidden bucket stay out of Home, as they stay out of every headline. */
   /* Research about the owner's own money only: never a Demo book's, never a record bound to no
@@ -15,76 +19,14 @@ window.Console.page('index', function (document) {
   const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket) &&
     !['demo', 'unspecified'].includes(r.scope) && r.task_type !== 'portfolio_review');
 
-  /* ── the account, against its own high-water mark ────────────────
-     One account at a time. The paper core/sandbox book and the real-money
-     Micro-Live account keep separate ledgers and separate high-water marks,
-     so a headline that added them together could not be compared against
-     either mark: it would misstate both the assets and the drawdown. The
-     lead figure is the primary account; the other is listed beneath it with
-     its own numbers. */
-  const PRIMARY = C.SHOW_CONCEPTUAL ? 'conceptual' : 'micro_live';
-
-  function accountsInOrder() {
-    const A = D.portfolio.accounts || {};
-    return Object.keys(A).filter(C.showsAccount)
-      .sort((a, b) => (a === PRIMARY ? -1 : b === PRIMARY ? 1 : a.localeCompare(b)));
-  }
-  const assetsLink = (key) => 'portfolio.html?scope=' + (key === 'conceptual' ? 'demo' : 'agentic');
-
-  function renderEquity() {
-    const A = D.portfolio.accounts || {};
-    const names = accountsInOrder();
-    const lead = A[names[0]];
-    if (!lead) {
-      $('equity-label').textContent = C.t('home.noAccount');
-      C.tickValue($('equity-value'), '—');
-      $('equity-source').textContent = Object.values(D.portfolio.errors || {}).join('; ');
-      $('hwm-foot').textContent = '';
-      $('funding-kv').textContent = '';
-      C.setHTML($('account-list'), '');
-      return;
-    }
-    $('account-card').href = assetsLink(names[0]);
-    $('account-card').className = (lead.is_real_money === false ? 'card-quiet' : 'card-real') + ' home-account';
-    $('equity-label').textContent = C.t('home.equityOf', {
-      a: C.t('acct.' + names[0]), d: C.dateOnly(lead.priced_for) });
-    C.tickValue($('equity-value'), C.usd(lead.equity_usd));
-    $('hwm-foot').textContent = C.t('home.hwmFoot',
-      { v: C.usd(lead.high_water_mark_usd), d: C.pct(lead.drawdown_pct || 0), l: C.code(lead.ladder_level) });
-    /* Money paid in is not money made. Both are shown so neither can be read
-       as the other, and the return is stated against funding, not equity. */
-    $('funding-kv').textContent = fundingLine(lead);
-    $('equity-source').textContent = C.t('home.equitySource',
-      { s: C.t('acct.src.' + names[0]), d: C.dateOnly(lead.as_of) });
-
-    /* Any further account keeps its own equity, funding and high-water mark. */
-    C.setHTML($('account-list'), names.slice(1).map((key) => {
-      const a = A[key];
-      return C.listRow({
-        id: 'account-' + key,
-        href: assetsLink(key),
-        title: C.t('acct.' + key),
-        sub: (a.is_real_money ? C.t('bucket.realShort') + ' · ' : '') + C.t('acct.src.' + key),
-        value: C.usd(a.equity_usd),
-        note: C.t('home.acctNote', {
-          p: (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd),
-          d: C.pct(a.drawdown_pct || 0) }),
-      });
-    }).join(''));
-  }
-
-  function fundingLine(a) {
-    return [
-      C.t('home.funded') + ' ' + C.usd(a.net_deposits_usd),
-      C.t('home.pnl') + ' ' + (a.investment_pnl_usd >= 0 ? '+' : '') + C.usd(a.investment_pnl_usd),
-      C.t('home.return') + ' ' + (a.return_pct == null ? '—' : C.pct(a.return_pct, 2)),
-    ].join(' · ');
-  }
-
   /* ── what is not normal ────────────────────────────────────────────
      Each row names its own page. An unknown order is the attention collector's to report;
      one still working at the venue is shown here. Health notices are counted, not repeated:
      System holds their text, and a notice that reads the same for weeks is not a to-do. */
+  /* The drawdown ladders, each with the account it measures. The regime has a level too, and
+     is not one of them. */
+  const LADDERS = { micro_live: 'micro_live', total: 'conceptual', core: 'conceptual', sandbox: 'conceptual' };
+
   function renderConditions() {
     const rows = [];
     const status = C.systemStatus();
@@ -97,6 +39,17 @@ window.Console.page('index', function (document) {
       rows.push(C.listRow({ id: 'condition-preflight', href: 'risk.html', title: C.t('home.preflight'),
         sub: C.t('home.blocking', { ids: (live.blocking || []).join(', ') || '—' }) }));
     }
+    /* A ladder away from NORMAL. It is pushed once as it moves, but the attention list keeps
+       only a halt, so this is where a lesser level stays in view. A halt is not repeated: the
+       status row above and the attention list both carry it already. */
+    Object.entries(LADDERS).forEach(([name, account]) => {
+      const ladder = (D.risk || {})[name];
+      if (!ladder || !ladder.level || ladder.level === 'NORMAL' || ladder.manual_reset_required ||
+          !C.showsAccount(account)) return;
+      rows.push(C.listRow({ id: 'condition-ladder-' + name, href: 'risk.html', title: C.t('home.ladder'),
+        sub: C.t('home.ladderAt', { a: name === 'core' || name === 'sandbox' ? C.bucket(name) : C.t('acct.' + account),
+          l: C.code(ladder.level), d: C.pct(ladder.drawdown_pct || 0, 2) }) }));
+    });
     const working = ((D.orders || {}).tracked_orders || [])
       .filter((x) => ['SUBMITTED', 'PARTIALLY_FILLED'].includes(x.status));
     if (working.length) {
@@ -203,12 +156,11 @@ window.Console.page('index', function (document) {
   document.addEventListener('ct:pause-changed', renderConditions);
 
   /* Poll only what this screen reads; render on first paint and every tick. */
-  C.live(['portfolio', 'proposals'],
+  C.live(['proposals'],
     function render() {
       $('today-date').textContent = C.dateOnly(new Date().toISOString());
       renderAttention();
       renderConditions();
       renderResearch();
-      renderEquity();
-    }, ['attention', 'microLive', 'research', 'orders', 'researchJobs', 'schedule']);
+    }, ['attention', 'microLive', 'risk', 'research', 'orders', 'researchJobs', 'schedule']);
 });

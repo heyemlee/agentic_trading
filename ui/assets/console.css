@@ -959,11 +959,8 @@ html:has(dialog[open]) .assistant-launcher::before { animation-play-state: pause
 .app-segments { display: flex; gap: 4px; padding: 5px; background: #eaf0e7; border-radius: 25px; margin-top: 22px; }
 .app-segments button { flex: 1; min-height: 44px; border: 0; border-radius: 21px; color: #555b56; background: transparent; font-size: 15px; font-weight: 600; }
 .app-segments [aria-selected="true"] { background: #fff; color: #172218; box-shadow: 0 2px 8px #23351d12, inset 0 1px 0 #fff; }
-/* Today: the account is one card that opens Assets, and what is not normal a short list. */
+/* Today: what is not normal is a short list. */
 .home-page .home-conditions { padding-block: 0 8px; }
-.home-account { display: block; color: inherit; text-decoration: none; }
-.home-account .figure { margin-block: 6px 4px; }
-.home-account p + p { margin-top: 4px; }
 @view-transition { navigation: auto; }
 ::view-transition-old(root) { animation-duration: 120ms; }
 ::view-transition-new(root) { animation-duration: 180ms; }
