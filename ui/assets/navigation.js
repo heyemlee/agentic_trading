@@ -3,15 +3,21 @@
 (function () {
   'use strict';
   const routes = new Set(['index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
-    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'research', 'lab', 'settings']);
+    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'lab', 'settings']);
+  /* Research moved into the Lab. A link written before then, or one the server still names,
+     opens the Lab with its query, here and on a cold load alike (api/app.py redirects). */
+  const aliases = { research: 'lab' };
   const dependencies = { advisor: ['advisor-session.js'], notifications: ['push.js'],
-    approvals: ['approval-intent.js'], lab: ['lab/pixel-office.js'] };
+    approvals: ['approval-intent.js'], lab: ['lab/pixel-office.js', 'lab/report.js'] };
   const views = new Map(), factories = new Map(), pending = new Map();
   const assets = new Map([...document.querySelectorAll('script[src], link[rel="stylesheet"]')]
     .map(el => [el.src || el.href, Promise.resolve()]));
   const base = new URL('./', location.href);
   const version = new URL(document.currentScript.src).search;
-  const routeName = url => url.pathname.slice(base.pathname.length).replace(/\.html$/, '') || 'index';
+  const routeName = url => {
+    const name = url.pathname.slice(base.pathname.length).replace(/\.html$/, '') || 'index';
+    return Object.hasOwn(aliases, name) ? aliases[name] : name;
+  };
   let active, revision = 0;
   history.scrollRestoration = 'manual';
   history.replaceState({ ...history.state, ctDepth: 0, ctAssistantReturnDepth: null }, '');
@@ -123,7 +129,7 @@
       // execute once; prefetch never mounts a page or starts its automatic refresh job.
       for (const el of html.querySelectorAll('script[src]')) {
         const src = el.getAttribute('src');
-        if (/assets\/(?:pages\/|advisor-session\.js|push\.js|approval-intent\.js|lab\/pixel-office\.js)/.test(src)) {
+        if (/assets\/(?:pages\/|advisor-session\.js|push\.js|approval-intent\.js|lab\/pixel-office\.js|lab\/report\.js)/.test(src)) {
           await asset(new URL(src, url).href, false);
         }
       }
@@ -183,6 +189,8 @@
   }
   function navigate(url, historyMode = 'push') {
     const ticket = ++revision;
+    const alias = url.pathname.slice(base.pathname.length).replace(/\.html$/, '');
+    if (Object.hasOwn(aliases, alias)) url = new URL(aliases[alias] + '.html' + url.search + url.hash, base);
     if (routeName(url) === 'advisor' && url.searchParams.get('view') === 'holdings') {
       url = new URL('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''), base);
     }

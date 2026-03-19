@@ -1,13 +1,18 @@
 'use strict';
 /* ─────────────────────────────────────────────────────────────────────────
- * The research room: one run, drawn as the office that performed it.
+ * The research room: one run, drawn as the office that performed it, and what the room
+ * studies -- what the owner holds, then what the owner added to their Robinhood watchlists.
  *
- * Everything here is something the engine recorded. Three sources feed the room and
+ * Everything here is something the engine recorded. Four sources feed the room and
  * none of them is a simulation:
  *
  *   /research/roster       the team, and which analysts an instrument type seats
  *   /research/{key}        a run in flight, with the events its model calls append
  *   /research/{id}/trace   a finished run, with the report each desk wrote
+ *   /research/subjects     the owner's holdings and watchlist names, as the weekly run reads them
+ *
+ * A Demo book's run and a record bound to no account are about nothing the owner holds or
+ * chose, so the room draws neither (owner's decision, 2026-09-23).
  *
  * Two rules the drawing must not break. A desk changes only when an event says so, so
  * nothing here is driven by a timer and no percentage appears anywhere: the engine
@@ -20,6 +25,8 @@ window.Console.page('lab', function (document) {
   C.mount('lab');
   window.createLabPixelScene?.(document);
   const q = (s) => document.querySelector(s);
+  /* One run's report opens over the room (lab/report.js). */
+  const report = window.LabReport(document, C, { record: recordFor, canStart: (ticker) => subjectFor(ticker)?.symbol || null });
 
   /* Seat order belongs to the drawn room, not to the team: pixel-office.js addresses
      seats by index, and gives seats 0-3, 7 and 8 their own desk furniture. The roster
@@ -42,6 +49,7 @@ window.Console.page('lab', function (document) {
   /* Reader's choices. None of these changes what the engine did. */
   let chosenRun = null, chosenRole = null, cursor = null;
   let ambientEnabled = true, fileTimer = null, epoch = 0;
+  const expanded = { held: false, added: false };
   const traces = new Map();
   const walking = new Set();
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -59,17 +67,20 @@ window.Console.page('lab', function (document) {
 
   /* ── what the API is currently saying ─────────────────────────────── */
   const roster = () => D.labRoster;
-  /* Assistant jobs share the queue but do not run the research graph, so they have no
-     office to draw. The presence of `task` is what separates them. */
-  const graphJobs = () => (D.researchJobs || []).filter((j) => !j.task);
+  /* Only runs about the owner's own money: never a Demo book's, never one bound to nothing. */
+  const ownRun = (row) => !['demo', 'unspecified'].includes(row.scope);
+  /* Conversations, shortlists, refreshes and portfolio reviews share the queue but run no
+     desks, so they have no office to draw. Strategy research and a personal analysis do. */
+  const graphJobs = () => (D.researchJobs || []).filter((j) => ownRun(j) && (!j.task || j.task.kind === 'analysis'));
+  const history = () => (D.research || []).filter((r) => ownRun(r) && r.task_type !== 'portfolio_review');
 
   function runList() {
-    const history = D.research || [], out = [], seen = new Set();
+    const records = history(), out = [], seen = new Set();
     graphJobs().forEach((job) => {
       seen.add(job.run_key);
-      out.push(entry(job, history.find((r) => r.run_id === job.run_key)));
+      out.push(entry(job, records.find((r) => r.run_id === job.run_key)));
     });
-    history.forEach((r) => { if (!seen.has(r.run_id)) out.push(entry(null, r)); });
+    records.forEach((r) => { if (!seen.has(r.run_id)) out.push(entry(null, r)); });
     return out;
   }
   function entry(job, record) {
@@ -105,13 +116,19 @@ window.Console.page('lab', function (document) {
              finalAction: null, proposalId: null, named: true };
   };
   const accountOf = (run) => run.account || (run.bucket ? label('bucket.' + run.bucket, run.bucket) : '');
-  /* The report is on Research, bound to the same account the run was about. */
-  function reportLink(run) {
-    const q = new URLSearchParams({ run: run.key });
-    if (['agentic', 'demo', 'personal'].includes(run.scope)) q.set('scope', run.scope);
-    if (run.scope === 'personal' && run.accountKind === 'single' && run.accountId) q.set('account', run.accountId);
-    if (run.scope === 'personal' && run.accountKind === 'all_personal') q.set('include_all_personal', 'true');
-    return 'research.html?' + q;
+
+  /* ── what the room studies ────────────────────────────────────────── */
+  const subjects = () => D.researchSubjects || null;
+  function subjectFor(ticker) {
+    const all = subjects();
+    const symbol = String(ticker || '').toUpperCase();
+    return all ? [...(all.held || []), ...(all.added || [])].find((s) => s.symbol === symbol) || null : null;
+  }
+  /* The record a report is opened for, wherever the page already holds it. */
+  function recordFor(runId) {
+    const all = subjects();
+    const latest = all ? [...(all.held || []), ...(all.added || [])].map((s) => s.latest).filter(Boolean) : [];
+    return (D.research || []).find((r) => r.run_id === runId) || latest.find((r) => r.run_id === runId) || null;
   }
 
   /* A finished run's reports are read once and kept. Demo mode carries the same shape as
@@ -253,12 +270,13 @@ window.Console.page('lab', function (document) {
     }
     syncWatch(v.run);
     paintNow(v);
-    paintPicker(v);
+    paintRun(v);
     paintScene(v);
     paintSelected(v);
     paintRoster(v);
     paintGate(v);
     paintFeed(v);
+    paintSubjects();
     startAmbience(v);
   }
 
@@ -286,7 +304,9 @@ window.Console.page('lab', function (document) {
       title = C.t('lab.runStopped', { ticker: v.run.ticker });
       caption = v.run.error || C.t('lab.runState', { state: C.code(v.run.state) });
     } else {
-      title = v.run.ticker + ' · ' + C.code(v.run.finalAction || v.run.policy || 'COMPLETE');
+      /* The ticker heads the card, so the line under it is whose run, when, and how it ended. */
+      title = [accountOf(v.run), v.run.date ? C.dateOnly(v.run.date) : '',
+               C.code(v.run.finalAction || v.run.policy || 'COMPLETE')].filter(Boolean).join(' · ');
       caption = v.loadedTrace && v.loadedTrace.elapsed_seconds
         ? C.t('lab.runTook', { t: C.clock(v.loadedTrace.elapsed_seconds) }) : C.t('lab.runArchived');
     }
@@ -303,7 +323,7 @@ window.Console.page('lab', function (document) {
     }
   }
 
-  function paintPicker(v) {
+  function paintRun(v) {
     q('#symbol').textContent = v.run ? v.run.ticker : '—';
     q('#instrument').hidden = !v.instrument;
     q('#instrument').textContent = v.instrument ? label('lab.' + v.instrument, v.instrument) : '';
@@ -311,34 +331,20 @@ window.Console.page('lab', function (document) {
     const badge = q('#mode-badge');
     badge.textContent = label('lab.mode.' + v.mode, v.mode);
     badge.dataset.mode = v.mode;
-
-    const select = q('#mode');
-    const runs = runList();
-    const current = v.run ? v.run.key : '';
-    /* The capsule over the picker names the run shown; the ticker already heads it, so the
-       line under it carries only the date and the outcome. With nothing to pick, it goes. */
-    q('.lab-run').hidden = !runs.length;
-    q('#run-orb').textContent = v.run ? String(v.run.ticker).charAt(0) : '—';
-    q('#run-label').textContent = v.run ? [accountOf(v.run), v.run.date ? C.dateOnly(v.run.date) : '',
-      v.run.live ? C.t('lab.runningNow') : C.code(v.run.finalAction || v.run.policy || v.run.state)]
-      .filter(Boolean).join(' · ') : '';
-    const report = q('#lab-report');
-    report.hidden = !v.run || v.run.live;
-    if (v.run) report.href = reportLink(v.run);
-    const markup = runs.length
-      ? runs.map((r) => '<option value="' + C.escapeHtml(r.key) + '"' +
-          (r.key === current ? ' selected' : '') + '>' +
-          C.escapeHtml(C.t('lab.runOption', {
-            ticker: [r.ticker, accountOf(r)].filter(Boolean).join(' · '), date: C.dateOnly(r.date),
-            state: r.live ? C.t('lab.runningNow') : C.code(r.finalAction || r.policy || r.state),
-          })) + '</option>').join('')
-      : '<option value="">' + C.escapeHtml(C.t('lab.noRuns')) + '</option>';
-    if (select.dataset.signature !== markup) {
-      select.innerHTML = markup;
-      select.dataset.signature = markup;
+    /* A run in flight has no report yet; the office is where it is watched. */
+    q('#lab-report').hidden = !v.run || v.run.live;
+    /* Looking back at another run while one is working: one tap returns to the one working. */
+    const working = runList().find((r) => r.live);
+    q('#lab-back-live').hidden = !working || !v.run || v.run.key === working.key;
+    /* A run going nowhere otherwise holds a concurrency slot and a share of the day's budget
+       until its timeout; the server decides whether its state still allows a stop. */
+    const cancel = q('#lab-cancel');
+    cancel.hidden = !v.run || !v.run.live;
+    if (v.run && v.run.live) {
+      cancel.disabled = !!stopping;
+      cancel.textContent = stopping && stopping.key === v.run.key ? C.t('rs.cancelling')
+        : stopNote && stopNote.key === v.run.key ? stopNote.text : C.t('rs.cancel');
     }
-    select.setAttribute('aria-label', C.t('lab.runPicker'));
-    select.disabled = !runs.length;
 
     /* Stepping only means something for a run whose reports exist. */
     const replayable = !v.run || v.run.live ? false : v.steps.length > 0;
@@ -531,6 +537,173 @@ window.Console.page('lab', function (document) {
   }
 
 
+  /* ── what the room studies: what the owner holds, then what they added ── */
+  const SHOWN = 8;
+  let starting = null, refreshing = false, refreshKey = null, refreshNote = '';
+  /* What became of the last tap on "Research", said on the row it was tapped for. */
+  let rowNote = null;
+  /* A repeated tap after an answer that never arrived reuses its request id, so the server
+     returns the run it already started instead of starting another (and spending twice). */
+  const drafts = new Map();
+  const holderName = (holder) => holder.scope === 'agentic' ? C.t('acct.micro_live')
+    : C.t('lab.ownAccount', { label: holder.account_label || '' });
+
+  function subjectRow(subject) {
+    const h = C.escapeHtml, latest = subject.latest, running = subject.running;
+    const where = subject.holders.length ? subject.holders.map(holderName).join(' · ')
+      : subject.lists.length ? C.t('lab.onLists', { lists: subject.lists.join(', ') }) : '';
+    let state, status, open = '';
+    if (running) {
+      state = 'running';
+      status = C.t(running.state === 'QUEUED' ? 'lab.queued' : 'lab.researching');
+      open = ' data-watch="' + h(running.run_key) + '"';
+    } else if (latest) {
+      state = 'done';
+      status = [C.code(latest.final_action || latest.policy_action || 'COMPLETE'),
+                latest.confidence == null ? '' : C.t('lab.confidenceShort', { n: latest.confidence })]
+        .filter(Boolean).join(' · ');
+      open = ' data-trace="' + h(latest.run_id) + '"';
+    } else {
+      state = 'none';
+      status = '';
+    }
+    /* A name never studied says so first, where the eye lands; the button beside it studies it. */
+    const sub = [state === 'none' ? C.t('lab.notResearched') : '', where,
+      latest && !running ? C.dateOnly(latest.trade_date) + (latest.account_label &&
+      !subject.holders.some((holder) => holder.account_label === latest.account_label)
+      ? ' · ' + latest.account_label : '') : ''].filter(Boolean).join(' · ');
+    const note = rowNote && rowNote.symbol === subject.symbol ? rowNote : null;
+    const tag = open ? 'button' : 'div';
+    return '<div class="lab-subject" data-state="' + state + '">' +
+      '<' + tag + ' class="lab-subject-main"' + (open ? ' type="button"' + open : '') + '>' +
+        '<span class="lab-subject-copy"><span class="lab-subject-line"><strong>' + h(subject.symbol) + '</strong>' +
+          (status ? '<span class="lab-subject-state">' + h(status) + '</span>' : '') + '</span>' +
+          (sub ? '<span class="lab-subject-sub">' + h(sub) + '</span>' : '') +
+          (note ? '<span class="lab-subject-note" role="status" data-kind="' + note.kind + '">' + h(note.text) + '</span>' : '') +
+        '</span>' +
+        (open ? '<span class="lab-chevron" aria-hidden="true"></span>' : '') +
+      '</' + tag + '>' +
+      (state === 'none' ? '<button class="lab-pill lab-subject-start" type="button" data-start="' + h(subject.symbol) + '"' +
+        (starting ? ' disabled' : '') + '>' + h(C.t(starting === subject.symbol ? 'rs.starting' : 'lab.research')) + '</button>' : '') +
+      '</div>';
+  }
+
+  function subjectList(rows, which, empty) {
+    if (!rows.length) return '<p class="lab-fine lab-subjects-empty">' + C.escapeHtml(empty) + '</p>';
+    /* What is being studied now comes first; the rest keep the order the schedule reads. */
+    const ordered = [...rows.filter((s) => s.running), ...rows.filter((s) => !s.running)];
+    const shown = expanded[which] ? ordered : ordered.slice(0, SHOWN);
+    return shown.map(subjectRow).join('') + (ordered.length > SHOWN
+      ? '<button class="lab-more" type="button" data-more="' + which + '" aria-expanded="' + expanded[which] + '">' +
+        C.escapeHtml(C.t(expanded[which] ? 'lab.showFewer' : 'lab.showAll', { n: ordered.length })) + '</button>' : '');
+  }
+
+  function paintSubjects() {
+    const all = subjects();
+    const failed = !window.CT_DEMO && !!CT_API.state?.resources?.researchSubjects?.error;
+    const snapshot = (all && all.snapshot) || {};
+    /* A refresh asked for here is finished once its job is; the lists are then read again. */
+    const asked = refreshKey && (D.researchJobs || []).find((j) => j.run_key === refreshKey);
+    if (asked && !RUNNING.includes(asked.state)) {
+      refreshNote = asked.state === 'COMPLETE' ? '' : C.t('lab.readFailed', { err: asked.error || C.code(asked.state) });
+      refreshKey = null;
+      CT_API.readOnce?.('researchSubjects');
+    }
+    const held = (all && all.held) || [], added = (all && all.added) || [];
+    q('#held-count').textContent = all ? String(held.length) : '';
+    C.setHTML(q('#held-list'), !all ? '<p class="lab-fine">' + C.escapeHtml(C.t(failed ? 'lab.subjectsUnavailable' : 'common.loading')) + '</p>'
+      : subjectList(held, 'held', C.t(snapshot.read ? 'lab.heldEmpty' : 'lab.heldUnread')));
+    C.setHTML(q('#added-list'), !all ? ''
+      : subjectList(added, 'added', C.t(snapshot.read ? 'lab.addedEmpty' : 'lab.addedUnread')));
+    q('#subjects-note').textContent = [
+      snapshot.read ? C.t('lab.readAt', { at: C.dateTime(snapshot.fetched_at) }) : '',
+      ...((all && all.errors) || []),
+      refreshing || refreshKey ? C.t('lab.reading') : refreshNote,
+    ].filter(Boolean).join(' · ');
+    const refresh = q('#subjects-refresh');
+    refresh.disabled = refreshing || !!refreshKey;
+  }
+
+  async function startResearch(symbol) {
+    const subject = subjectFor(symbol);
+    if (!subject || starting) return;
+    /* Asked from a report: the answer is said on the name's row, so the sheet steps aside. */
+    report.close();
+    if (window.CT_DEMO || !CT_API.writesEnabled) {
+      rowNote = { symbol: subject.symbol, kind: 'info', text: C.t(window.CT_DEMO ? 'lab.demoStart' : 'lab.signInToStart') };
+      render(); return;
+    }
+    const plan = subject.start || {};
+    const personal = plan.scope === 'personal';
+    const body = personal
+      ? { kind: 'analysis', ticker: subject.symbol, account_id: plan.account_id, scope: 'personal',
+          language: window.I18N?.lang === 'zh' ? 'zh' : 'en' }
+      : { ticker: subject.symbol, bucket: plan.bucket, scope: 'agentic', purpose: plan.purpose,
+          instrument_type: 'auto', trigger: 'manual' };
+    const signature = JSON.stringify(body);
+    let draft = drafts.get(subject.symbol);
+    if (!draft || draft.signature !== signature) {
+      draft = { signature, id: crypto.randomUUID() };
+      drafts.set(subject.symbol, draft);
+    }
+    body.request_id = draft.id;
+    starting = subject.symbol; rowNote = null; render();
+    try {
+      const res = await CT_API.post(personal ? '/advisor/jobs' : '/research', body);
+      if (res.blocked) { rowNote = { symbol: subject.symbol, kind: 'info', text: C.t('lab.signInToStart') }; return; }
+      drafts.delete(subject.symbol);
+      /* The office turns to the new run at once; its desks light as its events arrive. */
+      stopMotion();
+      chosenRun = res.run_key; cursor = null; chosenRole = null;
+      ['researchJobs', 'researchSubjects', 'schedule', 'research'].forEach((key) => CT_API.readOnce(key));
+      q('.lab-office').scrollIntoView({ block: 'start', behavior: reduced.matches ? 'auto' : 'smooth' });
+    } catch (error) {
+      rowNote = { symbol: subject.symbol, kind: 'error', text: C.t('lab.startFailed', { ticker: subject.symbol, err: error.message }) };
+    } finally {
+      starting = null; render();
+    }
+  }
+
+  let stopping = null, stopNote = null;
+  async function stopRun() {
+    const run = selectedRun();
+    if (!run || !run.live || stopping) return;
+    if (window.CT_DEMO || !CT_API.writesEnabled) {
+      stopNote = { key: run.key, text: C.t(window.CT_DEMO ? 'lab.demoStart' : 'lab.signInToStart') }; render(); return;
+    }
+    stopping = { key: run.key }; stopNote = null; render();
+    try {
+      const result = await CT_API.post('/research/' + encodeURIComponent(run.key) + '/cancel', {});
+      if (result.blocked) stopNote = { key: run.key, text: C.t('lab.signInToStart') };
+      ['researchRun', 'researchJobs', 'researchSubjects'].forEach((key) => CT_API.readOnce(key));
+    } catch (error) {
+      stopNote = { key: run.key, text: C.t('rs.cancelFailed', { err: error.message }) };
+    } finally {
+      stopping = null; render();
+    }
+  }
+
+  let refreshRequest = null;
+  async function readRobinhood() {
+    if (refreshing || refreshKey) return;
+    if (window.CT_DEMO || !CT_API.writesEnabled) {
+      refreshNote = C.t(window.CT_DEMO ? 'lab.demoStart' : 'lab.signInToStart'); render(); return;
+    }
+    refreshing = true; refreshNote = ''; render();
+    refreshRequest ||= crypto.randomUUID();
+    try {
+      const job = await CT_API.post('/advisor/jobs', { kind: 'refresh', scope: 'personal', request_id: refreshRequest,
+        language: window.I18N?.lang === 'zh' ? 'zh' : 'en' });
+      if (job.blocked) { refreshNote = C.t('lab.signInToStart'); return; }
+      refreshRequest = null; refreshKey = job.run_key;
+      CT_API.readOnce('researchJobs');
+    } catch (error) {
+      refreshNote = C.t('lab.readFailed', { err: error.message });
+    } finally {
+      refreshing = false; render();
+    }
+  }
+
   /* ── motion ───────────────────────────────────────────────────────── */
   function startAmbience(v) {
     document.documentElement.dataset.ambient = canAnimate() ? 'on' : 'off';
@@ -619,12 +792,35 @@ window.Console.page('lab', function (document) {
       q('#desk-card').scrollIntoView({ block: 'nearest', behavior: reduced.matches ? 'auto' : 'smooth' });
     }
   });
-  q('#mode').addEventListener('change', (e) => {
+  /* A name: its report, the office running it, or a first study of it. */
+  function showRun(key) {
     stopMotion();
-    chosenRun = e.target.value || null;
-    cursor = null; chosenRole = null;
+    chosenRun = key; cursor = null; chosenRole = null;
     render();
+    q('.lab-office').scrollIntoView({ block: 'start', behavior: reduced.matches ? 'auto' : 'smooth' });
+  }
+  document.addEventListener('click', (event) => {
+    const target = event.target.closest && event.target.closest('[data-trace], [data-watch], [data-replay], [data-start], [data-more]');
+    if (!target) return;
+    const d = target.dataset;
+    if (d.trace) report.open(d.trace);
+    else if (d.watch) showRun(d.watch);
+    else if (d.replay) { report.close(); showRun(d.replay); }
+    else if (d.start) startResearch(d.start);
+    else if (d.more) { expanded[d.more] = !expanded[d.more]; render(); }
   });
+  q('#lab-report').addEventListener('click', () => { const run = selectedRun(); if (run) report.open(run.key); });
+  q('#lab-back-live').addEventListener('click', () => {
+    const working = runList().find((r) => r.live);
+    if (working) showRun(working.key);
+  });
+  q('#added-how').addEventListener('click', () => {
+    const help = q('#added-help');
+    help.hidden = !help.hidden;
+    q('#added-how').setAttribute('aria-expanded', String(!help.hidden));
+  });
+  q('#subjects-refresh').addEventListener('click', readRobinhood);
+  q('#lab-cancel').addEventListener('click', stopRun);
   q('#previous').addEventListener('click', () => step(-1));
   q('#next').addEventListener('click', () => step(1));
   function step(delta) {
@@ -644,15 +840,21 @@ window.Console.page('lab', function (document) {
   document.addEventListener('ct:leave', stopMotion);
   document.addEventListener('ct:lang', render);
 
-  /* A link names the run to show: a report's "View process", or a study still running. */
+  /* A link names a run: a study still running is watched in the office; a finished one is
+     drawn there and its report opens over it. Research links written before the Lab held
+     the reports (research.html?run=) arrive here too. */
+  let routed = null;
   function routeEntry() {
     const named = new URLSearchParams(window.location.search).get('run');
-    if (!named || named === chosenRun) return false;
+    if (!named || window.location.href === routed) return false;
+    routed = window.location.href;
     chosenRun = named; cursor = null; chosenRole = null;
+    if (!graphJobs().some((job) => job.run_key === named && RUNNING.includes(job.state))) report.open(named);
     return true;
   }
   document.addEventListener('ct:route', () => { if (routeEntry()) { stopMotion(); render(); } });
+  document.addEventListener('ct:leave', () => { routed = null; });
   routeEntry();
 
-  C.live(['research', 'researchJobs', 'schedule', 'labRoster'], render, ['researchRun']);
+  C.live(['research', 'researchJobs', 'schedule', 'labRoster'], render, ['researchRun', 'researchSubjects']);
 });

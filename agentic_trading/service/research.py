@@ -440,6 +440,95 @@ class ResearchMixin:
         return out
 
 
+    def research_subjects(self) -> dict[str, Any]:
+        """What research is about: what the owner holds, then what the owner added.
+
+        Read from the places the schedule reads (:func:`schedule.subjects_for`), so the lists a
+        screen shows are the names the weekly run studies. Held: the Agentic ledger, then the
+        owner's own accounts as Robinhood was last read. Added: the names on the owner's
+        Robinhood watchlists in that reading, less anything held, which a holdings review
+        examines instead. Each name carries its newest record, a run still in flight, and what
+        researching it now would start. Demo books and records bound to no account are not
+        about anything the owner holds or chose, so neither appears. Nothing here reads the
+        venue: the reading is as old as ``snapshot`` says.
+        """
+        import math
+
+        from .. import schedule as scheduling
+        from ..advisor import SNAPSHOT, age
+        from ..portfolio import PortfolioError, load_portfolio
+
+        profiles = self.profiles()
+        snapshot = self.state_db(profiles).read_meta(SNAPSHOT, {}) or {}
+        errors: list[str] = []
+        try:
+            ledger = load_portfolio(scheduling.ledger_for(profiles, MICRO_BUCKET))
+            agentic = list(dict.fromkeys(position.symbol.upper() for position in ledger.positions
+                                         if position.bucket == MICRO_BUCKET))
+        except (PortfolioError, OSError, ValueError) as exc:
+            agentic = []
+            errors.append(f"The Agentic ledger could not be read: {exc}")
+
+        holders: dict[str, list[dict[str, Any]]] = {}
+        for symbol in agentic:
+            holders.setdefault(symbol, []).append(
+                {"scope": "agentic", "account_id": MICRO_BUCKET, "account_label": "Agentic"})
+        for account in snapshot.get("accounts") or []:
+            if not isinstance(account, dict) or not account.get("id"):
+                continue
+            for symbol in scheduling.personal_holdings({"accounts": [account]}):
+                holders.setdefault(symbol, []).append(
+                    {"scope": "personal", "account_id": str(account["id"]),
+                     "account_label": account.get("label")})
+        lists: dict[str, list[str]] = {}
+        for item in snapshot.get("candidates") or []:
+            if isinstance(item, dict) and item.get("symbol"):
+                names = [str(source)[len(scheduling.WATCHLIST_SOURCE):]
+                         for source in item.get("sources") or []
+                         if str(source).startswith(scheduling.WATCHLIST_SOURCE)]
+                if names:
+                    lists[str(item["symbol"]).upper()] = names
+
+        studied = ("full_research", "analysis")
+        latest: dict[str, dict[str, Any]] = {}
+        for row in self.research_history(limit=200):      # newest first
+            if row["scope"] in ("agentic", "personal") and row["task_type"] in studied:
+                latest.setdefault(str(row.get("ticker") or "").upper(), row)
+        running: dict[str, dict[str, Any]] = {}
+        for job in self.research_jobs(limit=100):
+            if (job["state"] in ("QUEUED", "RUNNING") and job["scope"] in ("agentic", "personal")
+                    and job["task_type"] in studied):
+                running.setdefault(str(job["ticker"]).upper(), job)
+
+        def start(held_by: list[dict[str, Any]]) -> dict[str, Any]:
+            # A position in the managed account is reviewed there, where an exit could follow;
+            # one only the owner holds is analysed read-only in the account that holds it; a
+            # watched name is a candidate for the managed account, and a BUY still waits for
+            # the owner's approval.
+            if any(holder["scope"] == "agentic" for holder in held_by):
+                return {"scope": "agentic", "bucket": MICRO_BUCKET, "purpose": "review_holding"}
+            if held_by:
+                return {"scope": "personal", "kind": "analysis", "account_id": held_by[0]["account_id"]}
+            return {"scope": "agentic", "bucket": MICRO_BUCKET, "purpose": "candidate"}
+
+        def subject(symbol: str, held_by: list[dict[str, Any]]) -> dict[str, Any]:
+            return {"symbol": symbol, "holders": held_by, "lists": lists.get(symbol, []),
+                    "latest": latest.get(symbol), "running": running.get(symbol),
+                    "start": start(held_by)}
+
+        seconds = age(snapshot)
+        return {
+            "checked_at": utcnow().isoformat(),
+            "held": [subject(symbol, held_by) for symbol, held_by in holders.items()],
+            "added": [subject(symbol, []) for symbol in scheduling.watchlist_names(snapshot)
+                      if symbol not in holders],
+            "snapshot": {"read": bool(snapshot.get("fetched_at")), "fetched_at": snapshot.get("fetched_at"),
+                         "age_seconds": round(seconds, 1) if math.isfinite(seconds) else None,
+                         "errors": [str(error) for error in snapshot.get("errors") or []][:10]},
+            "errors": errors,
+        }
+
+
 # ---------------------------------------------------------------------- record description
 def _scope_fields(bucket: str | None, task: dict[str, Any] | None, *, labels: dict[str, str],
                   explicit_kind: str | None = None, explicit_ids: list[str] | None = None,

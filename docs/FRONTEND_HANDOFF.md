@@ -143,6 +143,7 @@ for a product-level refusal and 500 for an unexpected fault.
 | GET | `/proposals/{id}/revalidate` | dry-run of the approval check; changes nothing |
 | GET | `/research?scope=&account_id=&task_type=&include_all_personal=&limit=` | completed decision records, newest first, each bound to the account it is about: `scope` (`agentic`, `demo`, `personal`, or `unspecified` for a record that predates buckets), `account_scope_kind` (`single`, `all_personal`, `unknown`), `account_id`, `account_ids`, `account_label`, `task_type`, `purpose`, `route` (`name`, `inferred`, versions, models), `authority_version`; what the facts are as of (`snapshot_as_of`, `prices_as_of`, `sources_retrieved_at_max`; `facts_as_of` stays `null` until sources carry their own event time), `evidence`, `limitations`, `counter_evidence` (600 chars, `counter_evidence_truncated`; the full bear case is in the trace), `superseded_by` (a newer record of the same kind about the same thing; chat and lightweight checks never supersede a full analysis), `applicable_floor` (the confidence a run in that scope needs to open; `null` for personal research). `account_id` narrows to that account's own records; `include_all_personal=true` adds the all-accounts reviews that covered it |
 | GET | `/research/jobs?scope=&account_id=&limit=` | persistent queue, including queued/running/failed jobs, each with the same `scope`/account/`task_type`/`route` binding, `purpose`, `request_id`, `authority_version`, `opened_at` and `cancellable` |
+| GET | `/research/subjects` | what research is about, as the weekly run reads it: `held` (the Agentic ledger, then the owner's own accounts as Robinhood was last read) and `added` (the names on the owner's Robinhood watchlists that neither holds). Each name carries `holders`, the watchlists that name it (`lists`), its newest Agentic or personal record (`latest`), a run in flight (`running`), and what researching it now starts (`start`: Agentic `bucket`/`purpose`, or a personal `analysis` with its `account_id`). Demo and unbound records never appear. `snapshot` says how old the Robinhood reading is; nothing here reads the venue |
 | GET | `/research/{run_key}` | one run's progress |
 | GET | `/orders?limit=` | recorded fills and tracked orders, from the local record |
 
@@ -450,6 +451,7 @@ that moves is a quote.
 | `/advisor` | 5s while a conversation is open | 5 min |
 | `/research/{run_key}` during a run | 5s | 30s |
 | `/research/jobs` | 10s; use it to resume an active run after page reload | 30s |
+| `/research/subjects` in the Lab | 60s | 3 min |
 | `/orders` when an order is open | 10s (a local read; it opens no venue session) | 90s |
 
 A poll is only how often a screen asks. Whether what it holds is current is a separate question,

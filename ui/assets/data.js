@@ -16,7 +16,7 @@ window.CT = (function () {
     config: null, authority: null, attention: null,
     evaluation: null,
     activity: null,
-    proposals: [], proposalDetail: null, research: [], researchJobs: [], researchHistory: [], researchQueue: [], researchRun: null,
+    proposals: [], proposalDetail: null, research: [], researchJobs: [], researchSubjects: null, researchRun: null,
     labRoster: null, labTrace: {},
     orders: {fills: [], tracked_orders: []}
   };
@@ -388,7 +388,7 @@ window.CT = (function () {
   };
 
   const research = [
-    { run_id: "2026-09-04_VTI_873e64ae", ticker: "VTI", bucket: "core", trade_date: "2026-09-04", instrument_type: "etf", created_at: "2026-09-05T06:18:43.090801+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 412.6 },
+    { run_id: "2026-09-04_VTI_873e64ae", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-04", instrument_type: "etf", created_at: "2026-09-05T06:18:43.090801+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 412.6 },
     { run_id: "2026-09-02_VTI_2bf5a8b5", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-04T00:09:52.569799+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 420.9 },
     { run_id: "2026-09-02_VTI_f819eaa6", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T21:05:24.598310+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 57, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 582.7 },
     { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
@@ -396,7 +396,7 @@ window.CT = (function () {
 
   const researchJobs = [{
     run_key: "2026-09-04_VTI_873e64ae", dedupe_key: "demo:VTI:2026-09-04",
-    ticker: "VTI", bucket: "core", trade_date: "2026-09-04", instrument_type: "etf",
+    ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-04", instrument_type: "etf",
     trigger: "scheduled", state: "COMPLETE", created_at: "2026-09-04T20:30:00+00:00",
     updated_at: "2026-09-04T20:31:30+00:00", started_at: "2026-09-04T20:30:02+00:00",
     finished_at: "2026-09-04T20:31:30+00:00", deadline_at: "2026-09-04T21:30:02+00:00",
@@ -404,9 +404,9 @@ window.CT = (function () {
     timeout_seconds: 3600, log: "Research completed without a proposal.", exit_code: 0, error: null,
     limit_recoveries: 0, proposal_created: false, proposal_id: null, task: null,
     authority_version: authorityVersion, opened_at: null, purpose: "candidate",
-    request_id: "11111111-1111-4111-8111-111111111111", scope: "demo",
-    account_scope_kind: "single", account_id: "conceptual", account_ids: [],
-    account_label: "Demo", task_type: "full_research",
+    request_id: "11111111-1111-4111-8111-111111111111", scope: "agentic",
+    account_scope_kind: "single", account_id: "micro_live", account_ids: [],
+    account_label: "Agentic", task_type: "full_research",
     route: { name: "tradingagents", inferred: false, package_version: "demo",
       upstream_commit: "0000000000000000000000000000000000000000", skill_version: null,
       models: { quick: "sample-model", deep: "sample-model" } },
@@ -706,7 +706,7 @@ window.CT = (function () {
     "2026-09-04_VTI_873e64ae": {
       "run_id": "2026-09-04_VTI_873e64ae",
       "ticker": "VTI",
-      "bucket": "core",
+      "bucket": "micro_live",
       "trade_date": "2026-09-04",
       "created_at": "2026-09-05T06:18:43.090801+00:00",
       "stage": 3,
@@ -1044,9 +1044,39 @@ window.CT = (function () {
     account_scope_kind: 'single', account_id: row.bucket === 'micro_live' ? 'micro_live' : 'conceptual',
     account_label: row.bucket === 'micro_live' ? 'Agentic' : 'Demo', task_type: 'full_research' }));
 
+  /* The Lab's two lists, read from the same snapshot the Assistant shows: what the accounts
+     hold, then the watchlist names they do not, each with its newest record, the way
+     GET /research/subjects answers. */
+  const researchSubjects = (() => {
+    const records = [...research.filter(r => r.scope !== 'demo'), ...advisor.decisions.filter(d => d.task_type === 'analysis')
+      .map(d => ({ ...d, final_action: d.policy.final_action, policy_action: d.policy.final_action, confidence: d.policy.confidence }))];
+    const latest = symbol => records.filter(r => r.ticker === symbol)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+    const holders = new Map();
+    for (const account of advisor.snapshot.accounts) {
+      for (const position of account.positions) {
+        if (!holders.has(position.symbol)) holders.set(position.symbol, []);
+        holders.get(position.symbol).push({ scope: 'personal', account_id: account.id, account_label: account.label });
+      }
+    }
+    const lists = symbol => (advisor.snapshot.candidates.find(c => c.symbol === symbol)?.sources || [])
+      .filter(source => source.startsWith('watchlists:')).map(source => source.slice('watchlists:'.length));
+    const subject = (symbol, held) => ({ symbol, holders: held, lists: lists(symbol), latest: latest(symbol), running: null,
+      start: held.length ? { scope: 'personal', kind: 'analysis', account_id: held[0].account_id }
+        : { scope: 'agentic', bucket: 'micro_live', purpose: 'candidate' } });
+    return {
+      checked_at: advisor.snapshot.fetched_at,
+      held: [...holders].map(([symbol, held]) => subject(symbol, held)),
+      added: advisor.snapshot.candidates.filter(c => !holders.has(c.symbol) && lists(c.symbol).length)
+        .map(c => subject(c.symbol, [])),
+      snapshot: { read: true, fetched_at: advisor.snapshot.fetched_at, age_seconds: 600, errors: advisor.snapshot.errors },
+      errors: [],
+    };
+  })();
+
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
-    approveExecuted, approveReanalysis, research, researchJobs, orders,
+    approveExecuted, approveReanalysis, research, researchJobs, researchSubjects, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts, advisor,
   };

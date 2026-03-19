@@ -1,18 +1,17 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Fifteen pages, one shared
+Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
 asset layer, no build step.
 
 ```
 index.html       Home      Today: what needs you, what is not normal, research conclusions, the account
 portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
-research.html    Research  the third tab: studies running, each run's conclusion against its threshold, reports, start a run
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, tracked orders, audit trail
 system.html      System    health, notices, kill switch
 advisor.html     Assistant personal context, holdings review, candidates, chat
-lab.html         Lab       one run's process, opened from Research (`?run=`): desks, handoffs, the gate
+lab.html         Lab       the third tab: the office at work, then what I hold and what I added, each name's report
 evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
 notifications.html Devices signed-in devices, push status and a test
@@ -144,14 +143,14 @@ shows additional cards. Below them, Home lists only what is not normal, each row
 that owns it: a status other than READY (System), a preflight block while real money is armed
 (Risk), an order still working at the venue (Activity), and the number of `/health.warnings`
 (System, which holds their text). Nothing there means nothing is abnormal. Research follows: a
-running study opens its Lab, a finished one its report, each naming its account; the paper book
-stays off Home. Missing, stale or partially
+running study opens the Lab on it, a finished one its report in the Lab, each naming its account;
+the paper book and records bound to no account stay off Home. Missing, stale or partially
 readable results say "cannot confirm", never "nothing to do". Links retain
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
 a visible sheet; polling never marks it. Failed receipts offer an explicit retry and are not
 queued. A successful receipt refreshes attention. Until Assistant supports a specific review
-deep link, a finished portfolio review opens its exact run in the Research result sheet.
+deep link, a finished portfolio review opens its exact run in the Lab's report sheet.
 
 `node tools/check_attention_ui.cjs` exercises the mobile attention-to-result flow with a static
 server and intercepted API responses. Like the approval check, it needs Playwright and Chrome
@@ -169,27 +168,33 @@ fixtures for each scope and make no requests.
 history navigation and a delayed response arriving after another scope is selected. It uses
 the same offline browser setup and screenshot option as the other browser checks.
 
-Research history has its own scoped resources: `researchHistory` reads `/research` every 60s,
-and `researchQueue` reads `/research/jobs` every 10s. They replace the unfiltered resources on
-that page, so Home and Lab keep their existing reads. `/accounts` supplies account labels every
-60s from kept readings without opening a venue session. Its errors or stale personal snapshot
-are shown; historical account labels remain available for reading old records.
+The Lab is where research lives (2026-09-23): the office drawing one run, then what the owner
+holds and what they added, each name with its newest conclusion. It studies only those. The two
+lists come from `researchSubjects`, `GET /research/subjects` every 60s: held is the Agentic ledger
+and the owner's own accounts as Robinhood was last read; added is the names on the owner's
+Robinhood watchlists that neither holds. Screener results and the profile's ETF groups are not
+the owner's and are not listed. These are the names the weekly run studies, read from the same
+places (`schedule.subjects_for`). A Demo book's run and a record bound to no account are never
+drawn in the office, listed, or offered.
 
-History requests bind `scope`, `account_id`, `task_type` and explicit `include_all_personal`.
-Unknown account bindings are never included in a single-account view, and the default excludes
-all-account reviews. Old responses cannot replace a newly selected scope. A filtered view shows
-at most 100 records, not the complete archive. The queue API includes covering all-account jobs;
-the page applies the same explicit inclusion choice before displaying or following them.
+A studied name opens its report over the room; a running one is watched in the office; one never
+studied offers Research. A name in the Agentic account is reviewed there
+(`POST /research {scope: agentic, purpose: review_holding}`), a name only the owner holds is
+analysed read-only in the account that holds it (`POST /advisor/jobs {kind: analysis,
+account_id}`), and a watched name is a candidate for the Agentic account, whose BUY still waits
+for approval. A retry after a lost response reuses its request id; the answer is said on the row.
+"+ Add" explains that a name is added in Robinhood, and offers one reading of Robinhood now.
 
-Record details distinguish retrieved time from fact time, show inferred route provenance,
-versions/models, missing evidence, a truncated counter-evidence excerpt, and a link to a
-superseding record. Opening a report freezes its record details until it is reopened; changing
-scope closes it and prevents a late response from marking it read. Personal and unassigned
-views have no trading-research form. Strategy requests include the selected scope and purpose,
-with a request UUID reused for an explicit retry of an unchanged request after network failure.
+A report shows the run's strength against the threshold it had to clear, when both were
+recorded, and its record details: retrieved time apart from fact time, route provenance,
+versions and models, missing evidence, a truncated counter-evidence excerpt, and the record that
+superseded it. It is frozen while open. A link naming a run opens that run in the office and, if
+it has finished, its report; a link that also names an account refuses a report bound to another.
+`research.html` is gone: the API redirects it to `lab.html` with its query, and the console's
+navigation does the same for an in-app link.
 
-`node tools/check_research_ui.cjs` checks account and task filtering, explicit all-account
-inclusion, report provenance and supersession, scoped submissions, and delayed responses on a
+`node tools/check_research_ui.cjs` checks the lists, owner-only runs, report provenance, the read
+receipt, an account-bound deep link, research started per account and an old research link on a
 phone viewport using synthetic APIs. It accepts the same browser and screenshot options above.
 
 Each screen declares what it reads:
@@ -235,7 +240,7 @@ in. Everything on it comes from the `/advisor` read the page already polls:
 - the position from the snapshot. Cost basis and gain are drawn only when every figure they
   rest on is present;
 - the recorded analyses of that symbol bound to that account, plus all-account ones, which
-  say so. A record whose account binding is unknown is left out, as it is on Research;
+  say so. A record whose account binding is unknown is left out, as it is in the Lab;
 - a queued or running analysis, with Stop, and the newest failure until a newer analysis
   replaces it;
 - the latest portfolio review's line for the symbol, only when that review covered the
@@ -251,7 +256,7 @@ rather than repeats.
 `GET /research/{run_id}/trace` returns the run's decision record plus every
 stage report the pipeline wrote under `runs/<id>/reports` — analysts, the
 bull/bear debate, the trader, the risk debate, the portfolio decision. Tapping
-a run on the Research screen opens that trace as an expandable sequence.
+a name in the Lab opens that trace as an expandable sequence.
 
 ## Writes
 

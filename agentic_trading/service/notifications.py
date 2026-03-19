@@ -340,7 +340,7 @@ class NotificationsMixin:
                         title=f"research on {job['ticker']} did not finish",
                         detail=str(job.get("error") or job["state"])[:300],
                         link=_link("research", run=job["run_key"]), attention=listed,
-                        notify_kind="research_failed", notify_link="/ui/research.html", **base))
+                        notify_kind="research_failed", notify_link="/ui/lab.html", **base))
                 elif job["state"] == "CLAUDE_LIMIT_REACHED":
                     recoveries = int(job.get("limit_recoveries", 0))
                     out.append(Condition(
@@ -350,7 +350,7 @@ class NotificationsMixin:
                         detail=str(job.get("error") or "")[:300],
                         link=_link("research", run=job["run_key"]),
                         attention=recoveries >= exhausted_at,
-                        notify_kind="research_limit", notify_link="/ui/research.html", **base))
+                        notify_kind="research_limit", notify_link="/ui/lab.html", **base))
                 elif (job["state"] == "COMPLETE" and personal and task_kind in PERSONAL_REQUESTED
                       and not job.get("opened_at") and age_hours is not None and age_hours <= DONE_HOURS):
                     review = task_kind == "portfolio_review"

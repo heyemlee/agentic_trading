@@ -10,7 +10,10 @@ window.Console.page('index', function (document) {
      that has read the same for weeks -- has its own page and is not repeated here. */
 
   /* Runs on a hidden bucket stay out of Home, as they stay out of every headline. */
-  const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket));
+  /* Research about the owner's own money only: never a Demo book's, never a record bound to no
+     account, and never a portfolio review, which studied no one symbol. */
+  const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket) &&
+    !['demo', 'unspecified'].includes(r.scope) && r.task_type !== 'portfolio_review');
 
   /* ── the account, against its own high-water mark ────────────────
      One account at a time. The paper core/sandbox book and the real-money
@@ -162,20 +165,20 @@ window.Console.page('index', function (document) {
      A study still running leads, and opens the office it is running in. A finished one
      opens its report. Each names the account it is about, because the same symbol can be
      studied for the Agentic account and for a personal one with different conclusions. */
-  const accountOf = (row) => row.account_label || C.t('rs.scope.' + (row.scope || 'unspecified'));
+  const accountOf = (row) => row.account_label || (row.scope ? C.t('rs.scope.' + row.scope) : '');
   function reportLink(r) {
     const q = new URLSearchParams({ run: r.run_id });
     if (['agentic', 'demo', 'personal'].includes(r.scope)) q.set('scope', r.scope);
     if (r.scope === 'personal' && r.account_scope_kind === 'single' && r.account_id) q.set('account', r.account_id);
     if (r.scope === 'personal' && r.account_scope_kind === 'all_personal') q.set('include_all_personal', 'true');
-    return 'research.html?' + q;
+    return 'lab.html?' + q;
   }
 
   function renderResearch() {
-    /* Assistant jobs share the queue but do not run the research graph, so they have no
-       office to open. The presence of `task` is what separates them. */
-    const running = (D.researchJobs || []).filter((j) => !j.task && C.showsBucket(j.bucket) &&
-      ['QUEUED', 'RUNNING'].includes(j.state));
+    /* Conversations, shortlists, refreshes and reviews share the queue but run no desks, so
+       they have no office to open; strategy research and a personal analysis do. */
+    const running = (D.researchJobs || []).filter((j) => (!j.task || j.task.kind === 'analysis') &&
+      C.showsBucket(j.bucket) && !['demo', 'unspecified'].includes(j.scope) && ['QUEUED', 'RUNNING'].includes(j.state));
     const shown = new Set(running.map((j) => j.run_key));
     const rows = running.map((job) => C.listRow({
       id: 'research-live-' + job.run_key,

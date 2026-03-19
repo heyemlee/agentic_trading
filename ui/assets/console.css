@@ -412,12 +412,13 @@ html:has(> body.theme-mono.pf-glass) { background: #fbfbfc; }
 @media (hover: hover) { .me-status:hover { background: var(--pf-fill); } }
 .me-status:active { transform: scale(.985); }
 .me-status:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 2px; }
-.me-state { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
-.me-state .pf-figure { margin-top: 0; }
-.me-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--pf-ink-3); box-shadow: 0 0 0 5px rgba(13, 13, 13, .06); }
-.me-dot.is-ok { background: var(--ok); box-shadow: 0 0 0 5px color-mix(in oklab, var(--ok) 16%, transparent); }
-.me-dot.is-warn { background: var(--warn-ink); box-shadow: 0 0 0 5px color-mix(in oklab, var(--warn-ink) 16%, transparent); }
-.me-dot.is-bad { background: var(--danger); box-shadow: 0 0 0 5px color-mix(in oklab, var(--danger) 16%, transparent); }
+.me-state { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+/* the state word reads at a row title's size, not a figure's: it is a word beside other words */
+.me-state .pf-figure { margin-top: 0; font-size: 16px; font-weight: 600; letter-spacing: -.012em; line-height: 1.3; }
+.me-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pf-ink-3); box-shadow: 0 0 0 4px rgba(13, 13, 13, .06); }
+.me-dot.is-ok { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in oklab, var(--ok) 16%, transparent); }
+.me-dot.is-warn { background: var(--warn-ink); box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn-ink) 16%, transparent); }
+.me-dot.is-bad { background: var(--danger); box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 16%, transparent); }
 .me-copy { display: block; margin-top: 8px; }
 .me-rows { margin: 16px -10px -8px; padding-top: 6px; border-top: 1px solid var(--pf-line); }
 /* a section label sits close to the rows it names */

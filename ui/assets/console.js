@@ -147,10 +147,10 @@
     { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'assistant' },
-    /* Research is the tab, results first; the Lab is how one run was reached, opened from
-       that run. The flask stays on the tab so the third place looks as it always has. */
-    { href: 'research.html',  key: 'research',  icon: 'lab',       tab: true },
-    { href: 'lab.html',       key: 'lab',       icon: 'lab' },
+    /* The Lab is the third tab: the office at work, then what it studies -- what the owner
+       holds and what they added -- and each run's report over it. Research lives here; a link
+       to research.html is a link to the Lab (navigation.js, api/app.py). */
+    { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
     { href: 'risk.html',      key: 'risk',     icon: 'risk' },
     { href: 'activity.html',  key: 'activity', icon: 'activity' },
     { href: 'system.html',    key: 'system',   icon: 'system' },
@@ -169,7 +169,6 @@
      not the parent's name, because in-app it returns to wherever you came from. */
   const PARENT = {
     approvals:  'index.html',
-    lab:        'research.html',
     risk:       'more.html',
     activity:   'more.html',
     evaluation: 'more.html',
@@ -183,7 +182,7 @@
   function renderChrome(activeKey) {
     const open = openCount();
     const overflow = NAV.filter((n) => !n.tab);
-    const section = activeKey === 'approvals' ? 'dashboard' : activeKey === 'lab' ? 'research' : activeKey;
+    const section = activeKey === 'approvals' ? 'dashboard' : activeKey;
     const inOverflow = overflow.some((n) => n.key === section);
 
     const tabs = NAV.filter((n) => n.tab).map((n) => {
@@ -877,8 +876,8 @@
   }
   const LINK_PARAMS = {
     index: ['scope'], portfolio: ['scope', 'account', 'ticker'],
-    advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'ticker', 'task_type', 'include_all_personal'],
-    lab: ['run'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
+    advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'include_all_personal'],
+    lab: ['run', 'scope', 'account', 'include_all_personal'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
     settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'],
     system: [], profile: [], notifications: [], more: [],
   };
@@ -890,7 +889,8 @@
       params.set(key, value);
     }
     if (window.CT_DEMO) params.set('demo', '1');
-    return link.page + '.html' + (params.size ? '?' + params : '');
+    /* The collector still names research, the page a report used to open on; it is the Lab's now. */
+    return (link.page === 'research' ? 'lab' : link.page) + '.html' + (params.size ? '?' + params : '');
   }
   function attentionState() {
     const data = D.attention;

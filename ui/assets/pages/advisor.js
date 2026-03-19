@@ -460,8 +460,7 @@ window.Console.page('advisor', function (document) {
       const detail = (key, value) => value ? '<dt>' + t(key) + '</dt><dd>' + h(value) + '</dd>' : '';
       const scope = d.account_id
         ? (snapshot.accounts || []).find(a => a.id === d.account_id)?.label || t('ai.readOnly') : C.bucket(d.bucket);
-      decisionDetails.set(d.run_id, '<div class="research-sheet-hero"><span class="ticker-orb" aria-hidden="true">' + h(d.ticker) +
-        '</span><div><h3>' + h(d.ticker) + '</h3><p>' + h(C.code(d.action)) + ' · ' + h(d.trade_date) + '</p></div></div><p class="body-sm">' + h(d.account_id
+      decisionDetails.set(d.run_id, '<div class="research-sheet-hero"><div><h3>' + h(d.ticker) + '</h3><p>' + h(C.code(d.action)) + ' · ' + h(d.trade_date) + '</p></div></div><p class="body-sm">' + h(d.account_id
           ? (snapshot.accounts || []).find(a => a.id === d.account_id)?.label || t('ai.readOnly') : C.bucket(d.bucket)) +
         '</p><p>' + h(p.investment_thesis || '') + '</p><dl>' + detail('ai.entry', p.entry_logic) +
         detail('ai.exit', p.exit_logic) + detail('ai.risks', [...(p.primary_risks || []), ...(p.missing_information || [])].join('\n')) +

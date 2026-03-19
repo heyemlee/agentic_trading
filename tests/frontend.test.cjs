@@ -246,29 +246,6 @@ test('personal report research stays read-only and preserves its account', async
   assert.equal(sent[0].body.account_id, '1234567890abcdef1234');
 });
 
-test('research confidence uses each recorded threshold and preserves missing scores', () => {
-  const c = context(true); c.run('console.js');
-  c.Console.mount = c.Console.wireTabs = () => {};
-  c.Console.live = (keys, render) => { render(); };
-  c.element('[data-od-id="confidence-chart"]').before = () => {};
-  c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
-  c.CT_API = { activeRun: null, watchRun: () => {}, readOnce: async () => {}, state: { resources: {} },
-    isLive: () => true, matchesResearch: () => true, selectResearch: () => { c.CT.researchHistory = c.CT.research; } };
-  c.CT.research = [
-    { run_id: 'threshold', bucket: 'micro_live', ticker: 'VTI', confidence: 70, applicable_floor: 80 },
-    { run_id: 'legacy', bucket: 'micro_live', ticker: 'BND', confidence: 40 },
-    { run_id: 'missing', bucket: 'micro_live', ticker: 'VT', confidence: null, applicable_floor: null },
-  ];
-  c.run('pages/research.js');
-  // each run carries its own score against its own threshold, in the list itself
-  const html = c.element('panel-runs-all').innerHTML;
-  assert.match(html, /left:80%/); assert.ok(!html.includes('left:50%'));
-  assert.equal((html.match(/meter-fill is-warn/g) || []).length, 1);
-  assert.equal((html.match(/meter-track/g) || []).length, 2, 'a missing score has no zero-width meter');
-  assert.match(html, /rs.floorUnavailable/);
-  assert.ok(!c.element('panel-runs-all').innerHTML.includes('null'));
-});
-
 test('glass sheets restore focus without clearing an unsaved personal draft', async () => {
   const c = advisorPage(async () => ({}));
   let focused = false;
@@ -1773,7 +1750,7 @@ test('home leads with running research, then conclusions, each naming its accoun
   assert.ok(html.indexOf('lab.html?run=2026-09-25_VTI_live') < html.indexOf('BND'), 'a running study leads');
   assert.doesNotMatch(html, /chat-1/, 'an assistant job runs no desks, so it has no office to open');
   assert.doesNotMatch(html, /VXUS/, 'the hidden Demo book stays off Home');
-  assert.match(html, /research.html\?run=2026-09-18_BND_x&amp;scope=agentic/);
+  assert.match(html, /lab.html\?run=2026-09-18_BND_x&amp;scope=agentic/);
   assert.match(html, /run=advisor_1&amp;scope=personal&amp;account=A/);
   assert.match(html, /Robinhood ••••1111/);
 });
@@ -1803,11 +1780,12 @@ test('task links only allow known pages and parameter keys, encoding every value
   assert.equal(c.Console.taskLink({ page: '//evil.test', params: {} }), null);
   assert.equal(c.Console.taskLink({ page: '__proto__', params: {} }), null);
   assert.equal(c.Console.taskLink({ page: 'research', params: { href: 'javascript:alert(1)' } }), null);
-  assert.equal(c.Console.taskLink({ page: 'research', params: { run: 'A&scope=agentic' } }), 'research.html?run=A%26scope%3Dagentic');
+  assert.equal(c.Console.taskLink({ page: 'research', params: { run: 'A&scope=agentic' } }), 'lab.html?run=A%26scope%3Dagentic',
+    'the collector still names research; its reports are in the Lab');
   const home = homePage();
   home.CT.attention = attentionPayload([attentionItem({ kind: 'personal_task_done', subject: 'review-A',
     link: { page: 'advisor', params: { scope: 'personal' } } })]); home.render();
-  assert.match(home.element('needs-you-slot').innerHTML, /research.html\?run=review-A/);
+  assert.match(home.element('needs-you-slot').innerHTML, /lab.html\?run=review-A/);
 });
 
 test('More only offers approvals for collector items requiring a proposal decision', () => {
@@ -1848,125 +1826,209 @@ test('reading or polling a finished run never marks it opened; explicit receipts
   c.document.hidden = true; await c.CT_API.markOpened('hidden'); assert.equal(writes.length, 1);
 });
 
-function researchPage(fetchJSON, options = {}) {
-  const c = context(); c.run('console.js');
-  if (options.search) c.location.search = options.search;
-  c.Console.mount = c.Console.wireTabs = () => {};
-  c.Console.live = (keys, render) => { c.render = render; render(); };
-  c.element('[data-od-id="confidence-chart"]').before = () => {};
-  c.element('f-bucket').options = []; c.element('f-bucket').value = 'micro_live';
-  c.opened = [];
-  c.CT_API = { activeRun: null, writesEnabled: true, watchRun: () => {}, readOnce: async () => {}, fetchJSON,
-    state: { resources: { researchHistory: { lastOkAt: Date.now() } } }, isLive: () => true,
-    matchesResearch: () => true, selectResearch: () => {},
-    markOpened: async key => { c.opened.push(key); return { opened_at: 'now' }; } };
-  c.run('pages/research.js');
-  c.openReport = run => c.document.dispatchEvent({ type: 'click', preventDefault() {}, target: {
-    closest: selector => selector === '[data-trace]' ? { getAttribute: () => run } : null } });
-  return c;
+/* Research lives in the Lab: a run's report opens over the room, read the way Research read it. */
+function reportPage(fetchJSON, options = {}) {
+  return labPage({ fetchJSON, search: options.search, research: options.research || [], jobs: [] });
 }
+const ownSubjects = () => ({
+  held: [
+    { symbol: 'VTI', holders: [{ scope: 'agentic', account_id: 'micro_live', account_label: 'Agentic' }], lists: [],
+      latest: null, running: null, start: { scope: 'agentic', bucket: 'micro_live', purpose: 'review_holding' } },
+    { symbol: 'AAPL', holders: [{ scope: 'personal', account_id: 'a'.repeat(20), account_label: '••••1111' }], lists: ['Core'],
+      latest: { run_id: 'r-aapl', ticker: 'AAPL', scope: 'personal', account_label: '••••1111', task_type: 'analysis',
+                final_action: 'HOLD', confidence: 62, trade_date: '2026-09-18' },
+      running: null, start: { scope: 'personal', kind: 'analysis', account_id: 'a'.repeat(20) } },
+    { symbol: 'KO', holders: [{ scope: 'personal', account_id: 'b'.repeat(20), account_label: '••••2222' }], lists: [],
+      latest: null, running: null, start: { scope: 'personal', kind: 'analysis', account_id: 'b'.repeat(20) } }],
+  added: [
+    { symbol: 'AMD', holders: [], lists: ['AI & chips'], latest: null, running: null,
+      start: { scope: 'agentic', bucket: 'micro_live', purpose: 'candidate' } },
+    { symbol: 'NVDA', holders: [], lists: ['AI & chips'], latest: null, running: { run_key: 'live-nvda', state: 'RUNNING' },
+      start: { scope: 'agentic', bucket: 'micro_live', purpose: 'candidate' } }],
+  snapshot: { read: true, fetched_at: '2026-09-23T10:00:00Z', age_seconds: 60, errors: [] }, errors: [] });
 
-test('research filters isolate unknown, other-account and all-account records unless explicitly included', () => {
-  const c = context(true); c.run('api.js');
-  const own = { scope: 'personal', account_scope_kind: 'single', account_id: 'A', task_type: 'analysis' };
-  const all = { scope: 'personal', account_scope_kind: 'all_personal', account_ids: ['A', 'B'], task_type: 'portfolio_review' };
-  c.CT_API.selectResearch({ scope: 'personal', account: 'A' });
-  assert.equal(c.CT_API.matchesResearch(own), true);
-  assert.equal(c.CT_API.matchesResearch({ ...own, account_id: 'B' }), false);
-  assert.equal(c.CT_API.matchesResearch({ ...own, account_scope_kind: 'unknown' }), false);
-  assert.equal(c.CT_API.matchesResearch(all), false);
-  c.CT_API.selectResearch({ scope: 'personal', account: 'A', include_all_personal: true });
-  assert.equal(c.CT_API.matchesResearch(all), true);
-  c.CT_API.selectResearch({ scope: 'personal', account: 'A', include_all_personal: true, task_type: 'analysis' });
-  assert.equal(c.CT_API.matchesResearch(all), false);
-  assert.equal(c.CT_API.matchesResearch(all, false), true);
-  assert.equal(c.CT_API.matchesResearch({ ...own, scope: 'unspecified' }), false);
+test('the room lists what the owner holds, then what they added, each with its newest conclusion', () => {
+  const c = labPage({ subjects: ownSubjects() });
+  const held = c.element('#held-list').innerHTML, added = c.element('#added-list').innerHTML;
+  assert.match(held, /data-trace="r-aapl"/, 'a studied name opens its report');
+  assert.match(held, /Hold · lab.confidenceShort 62/);
+  assert.match(held, /lab.ownAccount ••••1111/); assert.match(held, /acct.micro_live/);
+  assert.match(held, /data-start="VTI"/); assert.match(held, /data-start="KO"/);
+  assert.doesNotMatch(held, /data-start="AAPL"/, 'a studied name is studied again from its report, not from the list');
+  assert.match(held, /lab.notResearched/);
+  assert.ok(added.indexOf('NVDA') < added.indexOf('AMD'), 'what is being studied now comes first');
+  assert.match(added, /data-watch="live-nvda"/); assert.match(added, /lab.researching/);
+  assert.match(added, /lab.onLists AI &amp; chips/);
+  assert.equal(c.element('#held-count').textContent, '3');
+  assert.match(c.element('#subjects-note').textContent, /^lab.readAt /);
+
+  // A study in flight is watched in the office.
+  c.CT.researchJobs = [{ run_key: 'live-nvda', ticker: 'NVDA', scope: 'agentic', bucket: 'micro_live', state: 'RUNNING',
+                         trade_date: '2026-09-23', instrument_type: 'auto' }];
+  c.click('[data-watch]', { watch: 'live-nvda' });
+  assert.equal(c.element('#symbol').textContent, 'NVDA'); assert.equal(c.CT_API.watched, 'live-nvda');
+
+  const unread = labPage({ subjects: { held: [], added: [], snapshot: { read: false }, errors: [] } });
+  assert.match(unread.element('#held-list').innerHTML, /lab.heldUnread/);
+  assert.match(unread.element('#added-list').innerHTML, /lab.addedUnread/);
+  const read = labPage({ subjects: { held: [], added: [], snapshot: { read: true, fetched_at: '2026-09-23T10:00:00Z' }, errors: [] } });
+  assert.match(read.element('#held-list').innerHTML, /lab.heldEmpty/);
 });
 
-test('scoped research requests discard old account responses without changing shared home and lab resources', async () => {
-  const c = context(); const pending = new Map(); c.fetch = url => new Promise(resolve => pending.set(url, resolve));
-  c.run('api.js'); c.CT.research = [{ run_id: 'home' }]; c.CT.researchJobs = [{ run_key: 'lab' }];
-  c.CT_API.selectResearch({ scope: 'personal', account: 'A' });
-  const first = [...pending.keys()];
-  c.CT_API.selectResearch({ scope: 'personal', account: 'B', task_type: 'analysis' });
-  first.forEach(path => pending.get(path)(response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'A', task_type: 'analysis' }])));
-  await flush(); assert.equal(c.CT.researchHistory.length, 0); assert.equal(c.CT.researchQueue.length, 0);
-  const current = [...pending.keys()].filter(path => path.includes('account_id=B'));
-  assert.equal(current.length, 2); assert.ok(current.some(path => path.includes('task_type=analysis')));
-  assert.ok(current.find(path => path.includes('/jobs')).includes('task_type=') === false);
-  current.forEach(path => pending.get(path)(response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'B', task_type: 'analysis' }])));
-  await flush(); assert.equal(c.CT.researchHistory[0].account_id, 'B');
-  assert.equal(c.CT.research[0].run_id, 'home'); assert.equal(c.CT.researchJobs[0].run_key, 'lab');
+test('a long list shows its first names and the rest on request', () => {
+  const many = ownSubjects();
+  many.added = Array.from({ length: 12 }, (_, i) => ({ ...many.added[0], symbol: 'S' + i }));
+  const c = labPage({ subjects: many });
+  assert.equal((c.element('#added-list').innerHTML.match(/class="lab-subject"/g) || []).length, 8);
+  assert.match(c.element('#added-list').innerHTML, /data-more="added"[^>]*>lab.showAll 12/);
+  c.click('[data-more]', { more: 'added' });
+  assert.equal((c.element('#added-list').innerHTML.match(/class="lab-subject"/g) || []).length, 12);
 });
 
-test('research rejects a server response for the wrong account rather than reporting an empty success', async () => {
-  const c = context(); c.fetch = async () => response([{ scope: 'personal', account_scope_kind: 'single', account_id: 'B' }]);
-  c.run('api.js'); c.CT_API.selectResearch({ scope: 'personal', account: 'A' }); await flush();
-  assert.equal(c.CT.researchHistory.length, 0); assert.equal(c.CT_API.isLive('researchHistory'), false);
-  assert.equal(c.CT_API.state.resources.researchHistory.error, 'rs.recordsInvalid');
+test('the room never draws a Demo book’s run, or a record bound to no account', async () => {
+  const c = labPage({
+    research: [
+      { run_id: 'paper', ticker: 'VXUS', scope: 'demo', bucket: 'core', trade_date: '2026-09-18', instrument_type: 'etf', task_type: 'full_research' },
+      { run_id: 'lost', ticker: 'BND', scope: 'unspecified', trade_date: '2026-09-17', task_type: 'full_research' },
+      { run_id: 'review', ticker: 'ASSISTANT', scope: 'personal', task_type: 'portfolio_review', trade_date: '2026-09-16' },
+      { run_id: 'mine', ticker: 'VTI', scope: 'agentic', account_label: 'Agentic', bucket: 'micro_live', trade_date: '2026-09-14',
+        instrument_type: 'etf', task_type: 'full_research' }],
+    jobs: [{ run_key: 'paper-live', ticker: 'BND', scope: 'demo', bucket: 'core', state: 'RUNNING', trade_date: '2026-09-23' }],
+    fetchJSON: async () => ({ run_id: 'mine', steps: [] }) });
+  await flush();
+  assert.equal(c.element('#symbol').textContent, 'VTI');
+  assert.equal(c.CT_API.activeRun, null, 'a Demo run in flight is not followed');
+});
+
+test('a name is researched for the account it belongs to, and a retry after an uncertain answer reuses its id', async () => {
+  const c = labPage({ subjects: ownSubjects() }); const sent = [];
+  c.CT_API.post = async (path, body) => { sent.push({ path, ...body }); if (sent.length === 1) throw new Error('network'); return { run_key: 'new-' + sent.length }; };
+  c.click('[data-start]', { start: 'AMD' }); await flush();
+  assert.match(c.element('#added-list').innerHTML, /lab.startFailed AMD network/, 'the answer is said on the row it was asked from');
+  c.click('[data-start]', { start: 'AMD' }); await flush();
+  assert.deepEqual({ ...sent[0], request_id: 'id' }, { path: '/research', ticker: 'AMD', bucket: 'micro_live', scope: 'agentic',
+    purpose: 'candidate', instrument_type: 'auto', trigger: 'manual', request_id: 'id' });
+  assert.match(sent[0].request_id, /^[0-9a-f-]{36}$/);
+  assert.equal(sent[0].request_id, sent[1].request_id, 'a retry after an uncertain answer is the same request');
+  assert.equal(c.element('#symbol').textContent, '—', 'the office turns to the new run at once');
+
+  // A name only the owner holds is analysed read-only, in the account that holds it.
+  c.click('[data-start]', { start: 'KO' }); await flush();
+  assert.equal(sent[2].path, '/advisor/jobs');
+  assert.deepEqual([sent[2].kind, sent[2].scope, sent[2].account_id, sent[2].bucket], ['analysis', 'personal', 'b'.repeat(20), undefined]);
+  // What the managed account holds is reviewed there, where an exit could follow.
+  c.click('[data-start]', { start: 'VTI' }); await flush();
+  assert.deepEqual([sent[3].path, sent[3].purpose, sent[3].scope], ['/research', 'review_holding', 'agentic']);
+  assert.notEqual(sent[3].request_id, sent[0].request_id);
+});
+
+test('a run in flight can be stopped from the room, and a refusal is said on the button', async () => {
+  const c = labPage({ jobs: [{ run_key: 'live1', ticker: 'VTI', scope: 'agentic', bucket: 'micro_live', state: 'RUNNING',
+                               trade_date: '2026-09-23', instrument_type: 'etf' }] });
+  const sent = []; let fail = true;
+  c.CT_API.post = async (path) => { sent.push(path); if (fail) throw new Error('conflict'); return { cancelled: true }; };
+  assert.equal(c.element('#lab-cancel').hidden, false);
+  c.element('#lab-cancel').events.click(); await flush();
+  assert.deepEqual(sent, ['/research/live1/cancel']);
+  assert.equal(c.element('#lab-cancel').textContent, 'rs.cancelFailed conflict');
+  fail = false; c.element('#lab-cancel').events.click(); await flush();
+  assert.equal(sent.length, 2); assert.equal(c.element('#lab-cancel').textContent, 'rs.cancel');
+  const settled = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', scope: 'agentic', trade_date: '2026-09-04', instrument_type: 'etf' }],
+                            fetchJSON: async () => ({ run_id: 'r1', steps: [] }) });
+  assert.equal(settled.element('#lab-cancel').hidden, true, 'a settled run has nothing to stop');
+});
+
+test('a link never starts research by itself, and demo starts nothing', async () => {
+  for (const search of ['?scope=personal', '?scope=unspecified', '?account=A', '?ticker=VTI']) {
+    const c = labPage({ search, subjects: ownSubjects() }); let posts = 0;
+    c.CT_API.post = async () => { posts++; return {}; };
+    await flush(); assert.equal(posts, 0);
+  }
+  const demo = labPage({ demo: true, fetchJSON: async () => { throw new Error('demo must not reach the API'); } });
+  let posts = 0; demo.CT_API.post = async () => { posts++; return {}; };
+  assert.match(demo.element('#held-list').innerHTML, /data-start="VOO"/, 'the demo room studies the demo accounts');
+  demo.click('[data-start]', { start: 'VOO' }); await flush();
+  assert.equal(posts, 0); assert.match(demo.element('#held-list').innerHTML, /lab.demoStart/);
+});
+
+test('reading Robinhood asks once, and the lists are read again when it has finished', async () => {
+  const c = labPage({ subjects: ownSubjects() }); const sent = [], reads = [];
+  c.CT_API.post = async (path, body) => { sent.push({ path, ...body }); return { run_key: 'refresh-1' }; };
+  c.CT_API.readOnce = async key => { reads.push(key); };
+  c.element('#subjects-refresh').events.click(); await flush();
+  c.element('#subjects-refresh').events.click(); await flush();
+  assert.equal(sent.length, 1, 'a reading in flight is not asked for again');
+  assert.deepEqual([sent[0].path, sent[0].kind, sent[0].scope], ['/advisor/jobs', 'refresh', 'personal']);
+  assert.match(c.element('#subjects-note').textContent, /lab.reading/);
+  c.CT.researchJobs = [{ run_key: 'refresh-1', ticker: 'ASSISTANT', task: { kind: 'refresh' }, scope: 'personal', state: 'COMPLETE' }];
+  c.render();
+  assert.ok(reads.includes('researchSubjects'));
+  assert.doesNotMatch(c.element('#subjects-note').textContent, /lab.reading/);
+});
+
+test('the subjects read refuses a payload that is not two lists rather than reporting nothing held', async () => {
+  const c = context();
+  c.fetch = async url => url === '/auth/session' ? response({ authenticated: true, csrf_token: 'x' }) : response({ held: 'VTI' });
+  c.run('api.js'); c.CT_API.start(['researchSubjects']); await flush();
+  assert.equal(c.CT.researchSubjects, null); assert.equal(c.CT_API.isLive('researchSubjects'), false);
+  assert.equal(c.CT_API.state.resources.researchSubjects.error, 'rs.recordsInvalid');
 });
 
 test('research exposes provenance, unknown fact time and supersession without promoting an old result', async () => {
-  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'old', final_action: 'HOLD', steps: [] }
-    : { run_key: 'old', state: 'COMPLETE' });
   const old = { run_id: 'old', ticker: 'OLD', scope: 'agentic', account_label: 'Agentic', account_scope_kind: 'single',
     task_type: 'full_research', route: { name: 'tradingagents', inferred: true, models: { quick: 'model-A' } },
     sources_retrieved_at_max: '2026-09-18T20:00:00Z', facts_as_of: null, counter_evidence: '<script>bad</script>',
     counter_evidence_truncated: true, superseded_by: 'new', limitations: { missing_information: ['cash flow'] } };
-  c.CT.researchHistory = [old, { ...old, run_id: 'new', ticker: 'NEW', superseded_by: null }]; c.render();
-  const html = c.element('panel-runs-all').innerHTML;
+  const c = reportPage(async url => url.endsWith('/trace') ? { run_id: url.includes('new') ? 'new' : 'old', final_action: 'HOLD', steps: [] }
+    : { run_key: 'old', state: 'COMPLETE' }, { research: [{ ...old, run_id: 'new', ticker: 'NEW', superseded_by: null }, old] });
+  c.openReport('old'); await flush();
+  const html = c.element('trace-record').innerHTML;
   assert.match(html, /rs.inferred/); assert.match(html, /model-A/); assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /NaN|undefined/);
-  assert.match(html, /rs.meta.facts<\/dt><dd[^>]*>rs.unknown/); assert.match(html, /data-trace="new"/);
-  assert.equal((html.match(/rs.supersededShort/g) || []).length, 1, 'only the superseded run is marked as such');
-  assert.ok(html.indexOf('rs.supersededShort') < html.indexOf('data-trace="new"'), 'the mark sits on the old run');
-  c.openReport('old'); await flush(); const displayed = c.element('trace-record').innerHTML;
-  c.CT.researchHistory = []; c.render(); assert.equal(c.element('trace-record').innerHTML, displayed);
+  assert.match(html, /rs.meta.facts<\/dt><dd[^>]*>rs.unknown/);
+  assert.match(html, /rs.superseded new/, 'the old record names the one that replaced it');
+  c.CT.research = []; c.render(); assert.equal(c.element('trace-record').innerHTML, html, 'new data does not rewrite an open report');
 });
 
-test('personal, unknown and account-only links cannot start trading research', async () => {
-  for (const search of ['?scope=personal', '?scope=unspecified', '?scope=invalid', '?account=A']) {
-    const c = researchPage(async () => ({}), { search }); let posts = 0;
-    c.CT_API.post = async () => { posts++; return {}; };
-    assert.equal(c.element('[data-od-id="start-run"]').hidden, true);
-    await c.element('run-form').events.submit({ preventDefault() {} }); assert.equal(posts, 0);
-  }
+test('a report states the strength against the threshold the run had to clear, and never invents either', async () => {
+  const run = (applicable_floor, confidence) => ({ run_id: 'r', ticker: 'VTI', scope: 'agentic', account_label: 'Agentic',
+    task_type: 'full_research', confidence, applicable_floor, trade_date: '2026-09-18' });
+  const head = async (record) => {
+    const c = reportPage(async url => url.endsWith('/trace') ? { run_id: 'r', steps: [] } : { run_key: 'r', state: 'COMPLETE' },
+      { research: [record] });
+    c.openReport('r'); await flush(); return c.element('trace-head').innerHTML;
+  };
+  const both = await head(run(80, 70));
+  assert.match(both, /rs.traceStrength 70/); assert.match(both, /rs.applicableFloor 80/);
+  const legacy = await head(run(undefined, 40));
+  assert.match(legacy, /rs.traceStrength 40/); assert.doesNotMatch(legacy, /rs.applicableFloor/);
+  const missing = await head(run(null, null));
+  assert.doesNotMatch(missing, /rs.traceStrength|rs.applicableFloor|null/);
 });
 
-test('research submissions bind scope and purpose and reuse the request id after an uncertain failure', async () => {
-  const c = researchPage(async () => ({}), { search: '?scope=demo' }); const sent = [];
-  c.element('f-ticker').value = 'vti'; c.element('f-purpose').value = 'review_holding';
-  c.CT_API.post = async (path, body) => { sent.push({ ...body }); if (sent.length === 1) throw new Error('network'); return { run_key: 'new' }; };
-  await c.element('run-form').events.submit({ preventDefault() {} });
-  await c.element('run-form').events.submit({ preventDefault() {} });
-  assert.equal(sent.length, 2); assert.equal(sent[0].scope, 'demo'); assert.equal(sent[0].bucket, 'core');
-  assert.equal(sent[0].purpose, 'review_holding'); assert.equal(sent[0].ticker, 'VTI');
-  assert.match(sent[0].request_id, /^[0-9a-f-]{36}$/); assert.equal(sent[0].request_id, sent[1].request_id);
-  await c.element('run-form').events.submit({ preventDefault() {} }); assert.notEqual(sent[1].request_id, sent[2].request_id);
-});
-
-test('changing research scope closes the report and ignores its late response without marking it read', async () => {
-  const pending = new Map(); const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
-  c.openReport('old'); c.location.search = '?scope=personal'; c.location.href = 'https://console.test/ui/research.html?scope=personal';
-  c.document.dispatchEvent({ type: 'ct:route' });
+test('leaving the Lab drops a report still loading, without marking it read', async () => {
+  const pending = new Map(); const c = reportPage(url => new Promise(resolve => pending.set(url, resolve)));
+  c.openReport('old');
+  c.document.dispatchEvent({ type: 'ct:leave', detail: { name: 'lab' } });
   pending.get('/research/old/trace')({ run_id: 'old', final_action: 'SELL', steps: [] });
   pending.get('/research/old')({ run_key: 'old', state: 'COMPLETE' }); await flush();
-  assert.equal(c.element('trace-sheet').open, false); assert.deepEqual(c.opened, []);
+  assert.deepEqual(c.opened, []);
   assert.doesNotMatch(c.element('trace-steps').innerHTML, /SELL/);
 });
 
 test('an account-bound report deep link refuses another account result without consuming its notice', async () => {
-  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'wrong', final_action: 'SELL', steps: [] }
-    : { run_key: 'wrong', scope: 'personal', account_id: 'B', state: 'COMPLETE' }, { search: '?scope=personal&account=A' });
-  c.CT_API.matchesResearch = row => row?.scope === 'personal' && row.account_id === 'A';
-  c.openReport('wrong'); await flush();
+  const c = reportPage(async url => url.endsWith('/trace') ? { run_id: 'wrong', final_action: 'SELL', steps: [] }
+    : { run_key: 'wrong', scope: 'personal', account_scope_kind: 'single', account_id: 'B', state: 'COMPLETE' },
+    { search: '?run=wrong&scope=personal&account=A' });
+  await flush();
+  assert.equal(c.element('trace-sheet').open, true, 'a link naming a finished run opens its report');
   assert.match(c.element('trace-steps').innerHTML, /rs.reportOutside/); assert.deepEqual(c.opened, []);
   assert.doesNotMatch(c.element('trace-steps').innerHTML, /SELL/);
 });
 
 test('a displayed report marks only its finished job, and shows failures before marking them', async () => {
   for (const state of ['COMPLETE', 'FAILED', 'RUNNING']) {
-    const c = researchPage(async url => url.endsWith('/trace')
+    const c = reportPage(async url => url.endsWith('/trace')
       ? { run_id: 'one', final_action: state === 'COMPLETE' ? 'HOLD' : null, steps: [] }
       : { run_key: 'one', state, error: state === 'FAILED' ? 'feed unavailable' : null });
     c.openReport('one'); await flush();
@@ -1979,7 +2041,7 @@ test('a displayed report marks only its finished job, and shows failures before 
 
 test('missing results and mismatched report ids remain unread', async () => {
   for (const trace of [{ run_id: 'one', steps: [] }, { run_id: 'other', final_action: 'SELL', steps: [] }]) {
-    const c = researchPage(async url => url.endsWith('/trace') ? trace : { run_key: 'one', state: 'COMPLETE' });
+    const c = reportPage(async url => url.endsWith('/trace') ? trace : { run_key: 'one', state: 'COMPLETE' });
     c.openReport('one'); await flush();
     assert.deepEqual(c.opened, []); assert.match(c.element('trace-steps').innerHTML, /rs.resultMissing/);
   }
@@ -1987,7 +2049,7 @@ test('missing results and mismatched report ids remain unread', async () => {
 
 test('late report responses cannot replace a newer report or consume its notification', async () => {
   const pending = new Map();
-  const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
+  const c = reportPage(url => new Promise(resolve => pending.set(url, resolve)));
   c.openReport('one'); c.openReport('two');
   pending.get('/research/two/trace')({ run_id: 'two', final_action: 'HOLD', steps: [] });
   pending.get('/research/two')({ run_key: 'two', state: 'COMPLETE' }); await flush();
@@ -1999,7 +2061,7 @@ test('late report responses cannot replace a newer report or consume its notific
 
 test('hidden and closed report sheets do not mark results before they are displayed', async () => {
   for (const close of [false, true]) {
-    const pending = new Map(); const c = researchPage(url => new Promise(resolve => pending.set(url, resolve)));
+    const pending = new Map(); const c = reportPage(url => new Promise(resolve => pending.set(url, resolve)));
     c.openReport('one'); c.document.hidden = true;
     if (close) c.element('trace-sheet').open = false;
     pending.get('/research/one/trace')({ run_id: 'one', final_action: 'HOLD', steps: [] });
@@ -2011,7 +2073,7 @@ test('hidden and closed report sheets do not mark results before they are displa
 });
 
 test('failed read receipts remain visible and are only retried explicitly', async () => {
-  const c = researchPage(async url => url.endsWith('/trace') ? { run_id: 'one', final_action: 'HOLD', steps: [] }
+  const c = reportPage(async url => url.endsWith('/trace') ? { run_id: 'one', final_action: 'HOLD', steps: [] }
     : { run_key: 'one', state: 'COMPLETE' });
   let attempts = 0;
   c.CT_API.markOpened = async () => { attempts++; throw new Error('offline'); };
@@ -2383,7 +2445,7 @@ test('the polling cadence stays within its budget, because two of these reads ca
     advisor: 5000, assistant: 5000, health: 30000, schedule: 60000, operations: 60000,
     notifications: 120000, pushDevices: 120000, authSessions: 60000, config: 60000, authority: 30000, attention: 30000, evaluation: 300000,
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
-    research: 60000, researchHistory: 60000, researchQueue: 10000, accounts: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
+    research: 60000, researchSubjects: 60000, accounts: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,
   };
   assert.deepEqual(found, budget);
@@ -2548,10 +2610,19 @@ function labPage(options = {}) {
     c.CT.researchRun = options.run || null;
     c.CT.schedule = options.schedule || { analyses_today: 2, daily_budget: 6, next_run_at: '2026-09-15T13:30:00+00:00' };
   }
+  if (!options.demo) c.CT.researchSubjects = options.subjects === undefined ? { held: [], added: [], snapshot: { read: true }, errors: [] } : options.subjects;
+  c.opened = [];
   c.CT_API = { activeRun: null, watchRun(key) { this.activeRun = key; this.watched = key; },
+               writesEnabled: true, state: { resources: {} }, readOnce: async () => {},
+               markOpened: async key => { c.opened.push(key); return { opened_at: 'now' }; },
                fetchJSON: options.fetchJSON || (async () => { throw new Error('no trace expected'); }) };
   if (options.search) c.location.search = options.search;
+  c.element('.lab-office').scrollIntoView = () => {};
+  c.run('lab/report.js');
   c.run('pages/lab.js');
+  c.click = (selector, data) => c.document.dispatchEvent({ type: 'click', preventDefault() {}, target: {
+    closest: s => s.split(',').map(x => x.trim()).includes(selector) ? { dataset: data, getAttribute: k => data[k] } : null } });
+  c.openReport = run => c.click('[data-trace]', { trace: run });
   return c;
 }
 const ROLES = [
@@ -2687,26 +2758,40 @@ test('an empty deployment says so instead of drawing a run that never happened',
   assert.equal(c.element('#symbol').textContent, '—');
 });
 
-test('a link opens the run it names, drawn from its own trace when the list no longer holds it', async () => {
+test('a link opens the run it names, drawn from its own trace, with its report over it', async () => {
   const trace = { run_id: 'old-run', ticker: 'BND', bucket: 'micro_live', trade_date: '2026-08-28',
     instrument_type: 'etf', analysts: ['market', 'news'], policy_action: 'NO_TRADE', final_action: 'NO_TRADE', steps: [] };
   const fetched = [];
   const c = labPage({ search: '?run=old-run',
     research: [{ run_id: 'newest', ticker: 'VTI', trade_date: '2026-09-18', instrument_type: 'etf',
-                 bucket: 'core', scope: 'demo', account_label: 'Demo', policy_action: 'NO_TRADE' }],
-    fetchJSON: async (url) => { fetched.push(url); return url.includes('old-run') ? trace : { run_id: 'newest', steps: [] }; } });
+                 bucket: 'micro_live', scope: 'agentic', account_label: 'Agentic', policy_action: 'NO_TRADE' }],
+    fetchJSON: async (url) => { fetched.push(url);
+      return url.endsWith('/trace') ? (url.includes('old-run') ? trace : { run_id: 'newest', steps: [] }) : { run_key: 'old-run', state: 'COMPLETE' }; } });
   await flush(); c.render();
   assert.equal(c.element('#symbol').textContent, 'BND', 'the named run, never the newest in its place');
-  assert.deepEqual(fetched, ['/research/old-run/trace']);
-  assert.match(c.element('#run-label').textContent, /micro_live/, 'the account comes from the run itself');
+  assert.match(c.element('#now-title').textContent, /micro_live/, 'the account comes from the run itself');
+  assert.equal(c.element('trace-sheet').open, true, 'a finished run named by a link opens its report');
+  assert.deepEqual([...new Set(fetched)].sort(), ['/research/old-run', '/research/old-run/trace']);
   assert.equal(c.element('#lab-report').hidden, false);
-  assert.equal(c.element('#lab-report').href, 'research.html?run=old-run');
-  // the picker names each run's account, so a Demo study is not read as an Agentic one
-  assert.match(c.element('#mode').innerHTML, /VTI · Demo/);
 
-  c.location.search = '?run=newest'; c.document.dispatchEvent({ type: 'ct:route' }); await flush();
-  assert.equal(c.element('#symbol').textContent, 'VTI');
-  assert.equal(c.element('#lab-report').href, 'research.html?run=newest&scope=demo');
+  // A study still running is watched in the office, with no report over it.
+  const live = labPage({ search: '?run=live1', jobs: [{ run_key: 'live1', ticker: 'VTI', scope: 'agentic', bucket: 'micro_live',
+    trade_date: '2026-09-23', instrument_type: 'etf', state: 'RUNNING' }] });
+  assert.notEqual(live.element('trace-sheet').open, true);
+  assert.equal(live.CT_API.watched, 'live1');
+});
+
+test('looking back at another run while one works, one tap returns to the one working', async () => {
+  const c = labPage({
+    jobs: [{ run_key: 'live1', ticker: 'VTI', scope: 'agentic', bucket: 'micro_live', state: 'RUNNING', trade_date: '2026-09-23', instrument_type: 'etf' }],
+    research: [{ run_id: 'old', ticker: 'BND', scope: 'agentic', bucket: 'micro_live', trade_date: '2026-09-01', instrument_type: 'etf' }],
+    fetchJSON: async (url) => url.endsWith('/trace') ? { run_id: 'old', steps: [] } : { run_key: 'old', state: 'COMPLETE' } });
+  assert.equal(c.element('#symbol').textContent, 'VTI'); assert.equal(c.element('#lab-back-live').hidden, true);
+  c.openReport('old'); await flush();
+  c.click('[data-replay]', { replay: 'old' }); await flush();
+  assert.equal(c.element('#symbol').textContent, 'BND'); assert.equal(c.element('#lab-back-live').hidden, false);
+  c.element('#lab-back-live').events.click();
+  assert.equal(c.element('#symbol').textContent, 'VTI'); assert.equal(c.element('#lab-back-live').hidden, true);
 });
 
 test('a run queued as "auto" names no instrument until the engine has classified it', () => {
@@ -2778,7 +2863,7 @@ test('reports that name a different run are refused, not drawn on this office', 
   assert.equal(c.element('.lab-demo-note').dataset.kind, 'error', 'a refusal reads as a fault, not as demo data');
 });
 
-test('the run capsule names the run on screen, and a settled run ends on when the next is due', async () => {
+test('the run card names the run on screen, and a settled run ends on when the next is due', async () => {
   const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
                   policy_action: 'NO_TRADE', steps: [] };
   const c = labPage({ research: [{ run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
@@ -2787,17 +2872,17 @@ test('the run capsule names the run on screen, and a settled run ends on when th
   await flush();
   c.render();
 
-  assert.equal(c.element('.lab-run').hidden, false);
-  assert.equal(c.element('#run-orb').textContent, 'V');
-  // The ticker heads the capsule, so the line under it is the date and the outcome only.
-  assert.match(c.element('#run-label').textContent, /^Sep 4, 2026 · No Trade$/);
+  assert.equal(c.element('#symbol').textContent, 'VTI');
+  // The ticker heads the card, so the line under it is whose run, when, and how it ended.
+  assert.match(c.element('#now-title').textContent, /^Sep 4, 2026 · No Trade$/);
   assert.equal(c.element('#mode-badge').dataset.mode, 'done');
+  assert.equal(c.element('#lab-report').hidden, false, 'a settled run offers its report');
   // Today's budget is in the head; the settled run's own card only says when the next is due.
   assert.equal(c.element('#rest-note').hidden, false);
   assert.match(c.element('#rest-note').textContent, /^lab\.nextAt /);
 
   const empty = labPage({ research: [], jobs: [] });
-  assert.equal(empty.element('.lab-run').hidden, true, 'with nothing to pick the picker goes');
+  assert.equal(empty.element('#lab-report').hidden, true, 'no run, no report');
   assert.equal(empty.element('#mode-badge').dataset.mode, 'none');
   assert.equal(empty.element('#rest-note').hidden, true, 'the caption already names the next run');
 });
@@ -2896,7 +2981,7 @@ test('home opens a running study in its office and clears account figures when t
   assert.equal(watched, 0, 'Home lists the queue; the office is what follows a run');
   c.CT.researchJobs = []; c.CT.portfolio = { accounts: {}, buckets: {}, errors: { micro_live: 'unconfirmed' } };
   c.CT.proposals = []; c.render();
-  assert.doesNotMatch(c.element('research-list').innerHTML, /lab.html/);
+  assert.doesNotMatch(c.element('research-list').innerHTML, /agent.studying/, 'nothing running, nothing to watch');
   assert.equal(c.element('equity-value').textContent, '—');
   assert.equal(c.element('hwm-foot').textContent, '');
   assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/, 'only the attention collector decides what needs action');

@@ -75,7 +75,7 @@ const ui = path.resolve(__dirname, '../ui');
     await page.evaluate(() => I18N.set('zh'));
     await page.locator('[data-attention-id]').scrollIntoViewIfNeeded();
     assert.equal(posts.length, 0, 'listing a completed job must not mark it opened');
-    assert.equal(await page.locator('[data-attention-id] a').getAttribute('href'), 'research.html?run=' + run);
+    assert.equal(await page.locator('[data-attention-id] a').getAttribute('href'), 'lab.html?run=' + run);
     await screenshot('attention-phone.png');
     await page.locator('[data-attention-id] a').click();
     await page.waitForFunction(() => window.CT.attention?.items.length === 0);

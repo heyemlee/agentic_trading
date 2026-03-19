@@ -997,6 +997,67 @@ class ResearchRecord(BaseModel):
     applicable_floor: int | None = None
 
 
+class ResearchHolder(BaseModel):
+    """An account that holds a name: the Agentic account, or one of the owner's own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str
+    account_id: str | None = None
+    account_label: str | None = None
+
+
+class ResearchStart(BaseModel):
+    """What researching a name now would start.
+
+    Agentic research names its bucket and purpose (POST /research); a personal analysis names
+    the observed account it is read in (POST /advisor/jobs, kind ``analysis``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str
+    bucket: str | None = None
+    purpose: str | None = None
+    kind: str | None = None
+    account_id: str | None = None
+
+
+class ResearchSubject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    holders: list[ResearchHolder] = Field(default_factory=list)
+    #: The owner's Robinhood watchlists that name it.
+    lists: list[str] = Field(default_factory=list)
+    latest: ResearchRecord | None = None
+    running: ResearchJob | None = None
+    start: ResearchStart
+
+
+class ResearchSubjectsSnapshot(BaseModel):
+    """How old the Robinhood reading behind the owner's holdings and watchlists is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    read: bool = False
+    fetched_at: str | None = None
+    age_seconds: float | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class ResearchSubjects(BaseModel):
+    """What research is about: what the owner holds, then what the owner added."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked_at: str
+    held: list[ResearchSubject] = Field(default_factory=list)
+    added: list[ResearchSubject] = Field(default_factory=list)
+    snapshot: ResearchSubjectsSnapshot = Field(default_factory=ResearchSubjectsSnapshot)
+    errors: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------- evaluation
 class Evaluation(BaseModel):
     """The forward record for one scope, or its NOT_STARTED shape.

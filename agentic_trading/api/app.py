@@ -55,6 +55,7 @@ from ..service.shapes import (
     ProposalSummary,
     ResearchJob,
     ResearchRecord,
+    ResearchSubjects,
     RouteQuality,
 )
 from ..state_db import StateConflict
@@ -201,6 +202,11 @@ async def security_boundary(request: Request, call_next):
     # outliving any decision about where the console lives.
     if response is None and path == "/" and request.method in ("GET", "HEAD"):
         response = RedirectResponse("/ui/", status_code=307)
+    # Research became part of the Lab on 2026-09-23. A link written before then -- a bookmark,
+    # a notification already delivered -- still reaches the report it named, with its query.
+    if response is None and path == "/ui/research.html" and request.method in ("GET", "HEAD"):
+        response = RedirectResponse("/ui/lab.html" + (f"?{request.url.query}" if request.url.query else ""),
+                                    status_code=307)
     if response is None and unsafe and (
                 not _auth.allowed_origin(request.headers.get("origin"))
                 or request.headers.get("sec-fetch-site") == "cross-site"
@@ -706,6 +712,12 @@ def research_roster() -> dict[str, Any]:
     return _ok(_service.research_roster)
 
 
+@app.get("/research/subjects", tags=["research"],
+         summary="What research is about: what the owner holds, then what the owner added")
+def research_subjects() -> ResearchSubjects:
+    return _ok(_service.research_subjects)
+
+
 class CancelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str | None = Field(None, max_length=500)
@@ -883,7 +895,7 @@ def main() -> None:
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
 _PRIMARY_PAGES = ("index", "portfolio", "advisor", "more", "risk", "activity", "evaluation",
-                  "profile", "notifications", "system", "approvals", "research", "lab", "settings")
+                  "profile", "notifications", "system", "approvals", "lab", "settings")
 
 
 class ConsoleFiles(StaticFiles):

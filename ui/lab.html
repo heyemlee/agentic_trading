@@ -23,28 +23,6 @@
     </header>
 
     <div class="lab-workspace">
-      <div class="lab-pick">
-        <!-- The native picker lies invisibly over the capsule, so a tap opens the phone's own list. -->
-        <div class="lab-run">
-          <span id="run-orb" class="lab-orb" aria-hidden="true">—</span>
-          <span class="lab-run-copy">
-            <span class="lab-run-line"><strong id="symbol">—</strong><span id="instrument" class="lab-tag" hidden></span></span>
-            <span id="run-label" class="lab-run-sub"></span>
-          </span>
-          <span class="lab-chevron" aria-hidden="true"></span>
-          <select id="mode" aria-label="Which run to show"></select>
-        </div>
-        <p class="lab-demo-note" hidden></p>
-      </div>
-
-      <section class="lab-now" aria-label="Current activity" aria-live="polite">
-        <span id="mode-badge" class="lab-mode"></span>
-        <strong id="now-title"></strong>
-        <span id="now-caption"></span>
-        <p id="rest-note" class="lab-rest-note" hidden></p>
-        <a id="lab-report" class="lab-pill lab-report" hidden data-i18n="ai.fullReport">Read full report</a>
-      </section>
-
       <section class="lab-office" aria-labelledby="office-title">
         <h2 id="office-title" class="sr-only"></h2>
         <div class="lab-scene" id="scene"><div class="lab-scene-canvas">
@@ -66,6 +44,41 @@
           </div>
         </div></div>
         <div class="lab-scene-foot"><span id="scene-caption"></span><button id="walk" class="lab-pill" type="button" data-i18n="lab.walk">Walk the handoff ↗</button></div>
+      </section>
+
+      <!-- The run the office is drawing: which one, how it went, and its report. -->
+      <div class="lab-status">
+        <section class="lab-now" aria-label="Current activity" aria-live="polite">
+          <div class="lab-now-head">
+            <span id="mode-badge" class="lab-mode"></span>
+            <strong id="symbol">—</strong><span id="instrument" class="lab-tag" hidden></span>
+            <span class="lab-now-gap"></span>
+            <button id="lab-report" class="lab-pill lab-report" type="button" hidden data-i18n="lab.readReport">Report</button>
+          </div>
+          <strong id="now-title"></strong>
+          <span id="now-caption"></span>
+          <div class="lab-now-actions">
+            <button id="lab-cancel" class="lab-pill" type="button" hidden data-i18n="rs.cancel">Stop this run</button>
+            <button id="lab-back-live" class="lab-pill" type="button" hidden data-i18n="lab.backToLive">Back to the run in progress</button>
+          </div>
+          <p id="rest-note" class="lab-rest-note" hidden></p>
+        </section>
+        <p class="lab-demo-note" hidden></p>
+      </div>
+
+      <!-- What research is about: what the owner holds, then what the owner added. -->
+      <section class="lab-card lab-subjects-card lab-held" aria-labelledby="held-title">
+        <div class="lab-card-head"><h2 id="held-title" data-i18n="lab.held">What I hold</h2><span id="held-count" class="lab-count"></span></div>
+        <div id="held-list" class="lab-subjects"></div>
+      </section>
+      <section class="lab-card lab-subjects-card lab-added" aria-labelledby="added-title">
+        <div class="lab-card-head"><h2 id="added-title" data-i18n="lab.added">What I added</h2><button id="added-how" class="lab-pill lab-add" type="button" aria-expanded="false" aria-controls="added-help" data-i18n="lab.add">+ Add</button></div>
+        <div id="added-help" class="lab-added-help" hidden>
+          <p data-i18n="lab.addHelp">Add a stock to a watchlist in the Robinhood app. It appears here after the next reading of Robinhood.</p>
+          <button id="subjects-refresh" class="lab-pill" type="button" data-i18n="lab.readRobinhood">Read Robinhood now</button>
+        </div>
+        <div id="added-list" class="lab-subjects"></div>
+        <p id="subjects-note" class="lab-fine lab-subjects-note" role="status"></p>
       </section>
 
       <section class="lab-card lab-desk" id="desk-card" aria-live="polite">
@@ -100,12 +113,30 @@
     </div>
   </div>
 </main>
+
+<!-- One run's report: its record, and each desk's own words. -->
+<dialog class="sheet" data-sheet id="trace-sheet" data-od-id="trace-sheet">
+  <div class="sheet-inner">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="sheet-scroll">
+      <div class="trace-head" id="trace-head"></div>
+      <div id="trace-actions" class="lab-trace-actions"></div>
+      <div id="trace-record"></div>
+      <p class="body-sm" id="trace-read-status" role="status" hidden></p>
+      <button type="button" class="btn btn-secondary btn-sm" id="trace-read-retry" data-i18n="rs.openedRetry" hidden>Save read receipt</button>
+      <div id="trace-steps"></div>
+    </div>
+    <button class="btn btn-secondary" id="trace-close" style="margin-top:16px;" data-i18n="common.close">Close</button>
+  </div>
+</dialog>
+
 <script src="assets/i18n.js"></script>
 <script src="assets/data.js"></script>
 <script src="assets/api.js"></script>
 <script src="assets/console.js"></script>
 <script src="assets/navigation.js"></script>
 <script src="assets/lab/pixel-office.js"></script>
+<script src="assets/lab/report.js"></script>
 <script src="assets/pages/lab.js"></script>
 </body>
 </html>

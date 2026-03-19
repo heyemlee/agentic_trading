@@ -154,7 +154,8 @@ body.pf-glass {
   content: ''; position: absolute; top: 0; left: 62px; right: 10px; height: 1px; background: var(--pf-line);
 }
 .pf-card.pf-rows { padding: 6px; }
-.pf-card.pf-rows .pf-row + .pf-row::before { left: 10px; }
+.pf-card.pf-rows .pf-row + .pf-row::before,
+.pf-row + .pf-row:not(:has(> .pf-orb))::before { left: 10px; }
 a.pf-row:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
 @media (hover: hover) { a.pf-row:hover { background: var(--pf-fill); } }
 a.pf-row:active { background: rgba(33, 54, 38, .07); transform: scale(.985); }
@@ -170,14 +171,13 @@ a.pf-row:hover::before, a.pf-row:active::before, a.pf-row:hover + .pf-row::befor
 }
 div.pf-row .pf-chevron { display: none; }
 
-/* a glass bead with the symbol's initial: company logos would be a request elsewhere */
+/* an icon bead on the Me page's rows; a stock row has none, and its divider starts at the text */
 .pf-orb {
   flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
   font-size: 16px; font-weight: 650; line-height: 1; color: var(--pf-ink);
   background: radial-gradient(130% 130% at 30% 18%, #fff 0%, #f1f5ee 52%, #e2eadc 100%);
   box-shadow: inset 0 1px 1px #fff, inset 0 -2px 3px rgba(33, 54, 38, .07), 0 1px 2px rgba(33, 54, 38, .08);
 }
-.pf-orb-lg { width: 52px; height: 52px; font-size: 21px; }
 
 .pf-empty-line { margin-top: 14px; }
 /* what the last read could not do, one tap away rather than loose between the accounts */

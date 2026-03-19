@@ -154,9 +154,8 @@ window.Console.page('portfolio', function (document) {
   const signedUsd = n => (n > 0 ? '+' : '') + C.usd(n);
   const signedPct = (n, digits) => (n > 0 ? '+' : '') + C.pct(n, digits);
   const shares = q => Number(q).toLocaleString('en-US', { maximumFractionDigits: 6 });
-  const orb = symbol => h(String(symbol || '?').charAt(0));
   const link = params => 'portfolio.html?' + new URLSearchParams(params) + (window.CT_DEMO ? '&demo=1' : '');
-  const reportLink = (runId, account) => 'research.html?' + new URLSearchParams({ scope: 'personal', account,
+  const reportLink = (runId, account) => 'lab.html?' + new URLSearchParams({ scope: 'personal', account,
     include_all_personal: 'true', run: runId }) + (window.CT_DEMO ? '&demo=1' : '');
   const stat = (label, value) => '<div class="pf-stat"><dt>' + h(label) + '</dt><dd>' + h(value) + '</dd></div>';
   const delta = (n, text, label) => n == null ? '' : '<span class="pf-delta' + tone(n) + '">' + h(text) + '</span>' +
@@ -166,7 +165,6 @@ window.Console.page('portfolio', function (document) {
   function holdingRow(account, p) {
     return '<a class="pf-row" href="' + h(link({ scope: 'robinhood', account: account.id, ticker: p.symbol })) +
       '" data-od-id="holding-' + h(p.symbol) + '">' +
-      '<span class="pf-orb" aria-hidden="true">' + orb(p.symbol) + '</span>' +
       '<span class="pf-row-main"><span class="pf-row-title">' + h(p.symbol) + '</span>' +
         '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) })) + '</span></span>' +
       '<span class="pf-row-side"><span class="pf-row-value">' + money(p.market_value_usd) + '</span>' +
@@ -240,7 +238,6 @@ window.Console.page('portfolio', function (document) {
   function renderHolding(target) {
     const x = holdingState(target), pos = x.position;
     $('holding-symbol').textContent = target.ticker;
-    $('holding-orb').textContent = String(target.ticker).charAt(0);
     $('holding-where').textContent = x.account ? C.t('pf.accountLabel', { label: x.account.label }) : C.t('pf.robinhood');
     $('holding-robinhood').href = 'https://robinhood.com/stocks/' + encodeURIComponent(target.ticker);
 
@@ -398,7 +395,7 @@ window.Console.page('portfolio', function (document) {
     C.setHTML($('bucket-cards'), shown.map((key) => {
       const b = B[key];
       const rows = b.positions.map((pos) =>
-        '<div class="pf-row"><span class="pf-orb" aria-hidden="true">' + orb(pos.symbol) + '</span>' +
+        '<div class="pf-row">' +
           '<span class="pf-row-main"><span class="pf-row-title">' + h(pos.symbol) + '</span>' +
           '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(pos.quantity) }) + ' @ ' + C.usd(pos.price) +
             (pos.classification ? ' · ' + pos.classification : '')) + '</span></span>' +
@@ -442,7 +439,7 @@ window.Console.page('portfolio', function (document) {
      risk rules run on, follows below with its own date. A figure the venue did not give stays
      a gap: no balance is ever drawn as $0, and no holding is valued at its cost. */
   function liveRow(p) {
-    return '<div class="pf-row" data-od-id="live-' + h(p.symbol) + '"><span class="pf-orb" aria-hidden="true">' + orb(p.symbol) + '</span>' +
+    return '<div class="pf-row" data-od-id="live-' + h(p.symbol) + '">' +
       '<span class="pf-row-main"><span class="pf-row-title">' + h(p.symbol) + '</span>' +
         '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) }) + (p.price == null ? '' : ' @ ' + C.usd(p.price))) + '</span></span>' +
       '<span class="pf-row-side"><span class="pf-row-value">' + money(p.market_value_usd) + '</span>' +
