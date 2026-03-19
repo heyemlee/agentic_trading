@@ -528,9 +528,9 @@ def test_attention_and_the_opened_mark_are_published(auth_client, monkeypatch, s
     assert body["readable"] is True
 
     manager = sandbox_service._research_manager(sandbox_service.profiles())
-    manager.create(run_key="advisor_seen", ticker="ASSISTANT", bucket="advisory",
+    manager.create(run_key="advisor_seen", ticker="VTI", bucket="advisory",
                    trade_date="2026-09-17", instrument_type="auto", trigger="manual",
-                   task={"kind": "portfolio_review", "account_id": None, "language": "zh"})
+                   task={"kind": "analysis", "account_id": None, "language": "zh"})
     # Not finished: nothing to have seen yet.
     early = auth_client.post("/research/advisor_seen/opened", json={})
     assert early.status_code == 409, early.text

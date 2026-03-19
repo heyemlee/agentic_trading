@@ -337,15 +337,13 @@ window.CT_API = (function () {
     const scoped = { scope: next.scope, account_scope_kind: next.scope === 'agentic' || next.account ? 'single' : 'all_personal',
       account_id: next.scope === 'agentic' ? 'micro_live' : next.account || null, account_label: next.scope === 'agentic' ? 'Agentic' : '' };
     const base = next.scope === 'personal' && window.CT.advisor;
-    if (!base) return { ...scoped, jobs: [], decisions: [], conversation_summaries: [], latest_review: null };
+    if (!base) return { ...scoped, jobs: [], decisions: [], conversation_summaries: [] };
     const covers = task => !next.account || task?.account_id === next.account ||
       task?.account_scope_kind === 'all_personal' && (task.account_ids || []).includes(next.account);
     const jobs = (base.jobs || []).filter(job => covers(job.task));
-    const review = base.latest_review;
     return { ...base, ...scoped, jobs,
       snapshot: { ...base.snapshot, accounts: (base.snapshot?.accounts || []).filter(account => !next.account || account.id === next.account) },
-      decisions: (base.decisions || []).filter(d => !next.account || d.account_id === next.account || d.account_scope_kind === 'all_personal'),
-      latest_review: review && (!next.account || jobs.some(job => job.run_key === review.run_key)) ? review : null };
+      decisions: (base.decisions || []).filter(d => !next.account || d.account_id === next.account || d.account_scope_kind === 'all_personal') };
   }
   // Clear the previous account before starting a scoped read. Late responses are rejected above.
   function selectAssistant(filter) {

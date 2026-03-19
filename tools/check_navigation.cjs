@@ -221,10 +221,6 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#content').count(),1);
  assert.equal(await page.locator('#startup').count(),0, 'route changes must not replay the startup');
  await selectTab('portfolio');
- await page.locator('a[href="advisor.html?prompt=holdings-risk"]').click();
- assert.ok(page.url().includes('prompt=holdings-risk'));
- // Typed text is preserved, including when opening an analysis deep link.
- assert.equal(await page.locator('#chat-input').inputValue(),'Draft stays across tabs');
  await selectTab('dashboard');
 
  // Assistant is a header action; the Lab occupies the third tab. Returning from

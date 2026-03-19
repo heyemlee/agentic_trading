@@ -80,7 +80,7 @@ EXIT_INCOMPLETE_HOURS = 72.0
 
 #: The personal tasks a person asked for by name. A chat or a refresh that failed is announced
 #: like any failure, but it is not something Home keeps asking about.
-PERSONAL_REQUESTED = ("analysis", "portfolio_review")
+PERSONAL_REQUESTED = ("analysis",)
 
 
 @dataclass
@@ -353,14 +353,11 @@ class NotificationsMixin:
                         notify_kind="research_limit", notify_link="/ui/lab.html", **base))
                 elif (job["state"] == "COMPLETE" and personal and task_kind in PERSONAL_REQUESTED
                       and not job.get("opened_at") and age_hours is not None and age_hours <= DONE_HOURS):
-                    review = task_kind == "portfolio_review"
                     out.append(Condition(
                         id=f"personal_task_done:{job['run_key']}", kind="personal_task_done",
-                        title=("portfolio review finished" if review
-                               else f"review of {job['ticker']} finished"),
+                        title=f"review of {job['ticker']} finished",
                         detail=f"finished {job.get('finished_at')}; open it to see the result",
-                        link=(_link("advisor", scope="personal") if review
-                              else _link("research", run=job["run_key"])), **base))
+                        link=_link("research", run=job["run_key"]), **base))
 
         def venue() -> None:
             # A fill is not announced from here. Robinhood tells the account holder about every

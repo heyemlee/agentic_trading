@@ -22,7 +22,7 @@ window.LabReport = function (document, C, hooks) {
   let epoch = 0, reading = null;
 
   const recordName = (row) => row.account_label || row.account_id || C.t('rs.unknown');
-  const typeName = (row) => ['full_research', 'analysis', 'portfolio_review'].includes(row.task_type)
+  const typeName = (row) => ['full_research', 'analysis'].includes(row.task_type)
     ? C.t('rs.type.' + row.task_type) : row.task_type || C.t('rs.unknown');
   const visible = () => !document.hidden && sheet.open && !sheet.classList.contains('is-closing');
 
@@ -132,8 +132,8 @@ window.LabReport = function (document, C, hooks) {
         (t.analysts || []).length ? t.analysts.join(' + ') : null,
       ].filter(Boolean).map(h).join(' · ') + '</p>';
     /* Strategy research and a personal analysis both ran the desks, so either can be watched
-       again in the office; a portfolio review ran none. A name the owner still holds or
-       watches can be researched again from here. */
+       again in the office. A name the owner still holds or watches can be researched again
+       from here. */
     const replay = ['full_research', 'analysis'].includes(about.task_type || 'full_research');
     const again = hooks.canStart(t.ticker || about.ticker);
     $('trace-actions').innerHTML = (replay ? '<button type="button" class="btn btn-secondary btn-sm" data-replay="' +
@@ -156,19 +156,12 @@ window.LabReport = function (document, C, hooks) {
     }).join('');
     const failed = job && FAILED.includes(job.state);
     const result = job?.assistant_result;
-    const review = result?.review;
-    const reviewHtml = review ? '<p class="body-sm">' + h([review.account_label,
-      review.snapshot_at ? C.dateTime(review.snapshot_at) : null, review.analysed_at ? C.dateTime(review.analysed_at) : null].filter(Boolean).join(' · ')) + '</p>' +
-      (review.priorities || []).map((item) => '<article class="card"><h3>' + h(item.symbol) + '</h3><p>' +
-        h(item.recommendation) + '</p><p>' + h(item.rationale) + '</p><p class="body-sm">' +
-        h((item.missing || []).join('; ')) + '</p></article>').join('') +
-      '<p class="body-sm">' + h((review.limitations || []).join('; ')) + '</p>' : '';
     const answer = result?.answer ? '<div class="md">' + C.md(result.answer) + '</div>' : '';
     const failure = failed ? '<p class="body-sm">' + h(job.error || C.code(job.state)) + '</p>' : '';
     const list = $('trace-steps');
-    list.innerHTML = failure + reviewHtml + answer + steps || '<p class="body-sm body-muted" style="padding-top:12px;">' +
+    list.innerHTML = failure + answer + steps || '<p class="body-sm body-muted" style="padding-top:12px;">' +
       C.t(job && ['QUEUED', 'RUNNING'].includes(job.state) ? 'rs.jobRunning' : 'rs.resultMissing') + '</p>';
-    reading.shown = !!(failure || reviewHtml || answer || steps || t.final_action);
+    reading.shown = !!(failure || answer || steps || t.final_action);
 
     list.querySelectorAll('.trace-step').forEach((btn) => {
       btn.addEventListener('click', () => {

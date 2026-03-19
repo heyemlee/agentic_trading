@@ -69,10 +69,10 @@ window.Console.page('lab', function (document) {
   const roster = () => D.labRoster;
   /* Only runs about the owner's own money: never a Demo book's, never one bound to nothing. */
   const ownRun = (row) => !['demo', 'unspecified'].includes(row.scope);
-  /* Conversations, shortlists, refreshes and portfolio reviews share the queue but run no
-     desks, so they have no office to draw. Strategy research and a personal analysis do. */
+  /* Conversations, shortlists and refreshes share the queue but run no desks, so they have no
+     office to draw. Strategy research and a personal analysis do. */
   const graphJobs = () => (D.researchJobs || []).filter((j) => ownRun(j) && (!j.task || j.task.kind === 'analysis'));
-  const history = () => (D.research || []).filter((r) => ownRun(r) && r.task_type !== 'portfolio_review');
+  const history = () => (D.research || []).filter(ownRun);
 
   function runList() {
     const records = history(), out = [], seen = new Set();

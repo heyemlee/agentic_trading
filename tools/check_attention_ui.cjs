@@ -12,12 +12,12 @@ const ui = path.resolve(__dirname, '../ui');
   const fixture = { URLSearchParams, window: { location: { search: '?demo=1' } } };
   vm.runInNewContext(await fs.readFile(path.join(ui, 'assets/data.js'), 'utf8'), fixture);
   const data = fixture.window.CT, now = new Date().toISOString();
-  const run = '20260918_REVIEW_attention';
-  const job = { run_key: run, state: 'COMPLETE', created_at: now, opened_at: null,
-    assistant_result: { answer: 'Synthetic portfolio review: concentration needs another look.' } };
+  const run = '20260918_ANALYSIS_attention';
+  const job = { run_key: run, ticker: 'NVDA', state: 'COMPLETE', created_at: now, opened_at: null,
+    assistant_result: { answer: 'Synthetic analysis: the position is a meaningful weight; hold.' } };
   const item = { id: 'personal_task_done:' + run, kind: 'personal_task_done', priority: 5,
     severity: 'info', requires_person: false, subject: run, since: now, account_label: 'Personal account',
-    title: 'Portfolio review finished', detail: 'A result is ready to read.', link: { page: 'advisor', params: { scope: 'personal' } } };
+    title: 'review of NVDA finished', detail: 'A result is ready to read.', link: { page: 'research', params: { run } } };
   const attention = { checked_at: now, readable: true, unreadable: [], items: [item], top: item };
   const expired = { ...data.proposalDetail, proposal_id: 'expired-attention', status: 'EXPIRED', created_at: now };
   const payload = {
@@ -59,7 +59,7 @@ const ui = path.resolve(__dirname, '../ui');
         assert.deepEqual(request.postDataJSON(), {});
         assert.equal(request.headers()['x-csrf-token'], 'test-only');
         assert.equal(await page.locator('#trace-steps').isVisible(), true);
-        assert.match(await page.locator('#trace-steps').innerText(), /Synthetic portfolio review/);
+        assert.match(await page.locator('#trace-steps').innerText(), /Synthetic analysis/);
         posts.push(url.pathname); job.opened_at = new Date().toISOString();
         attention.items = []; attention.top = null; body = job;
       }

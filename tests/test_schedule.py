@@ -659,7 +659,7 @@ def test_a_personal_review_can_only_be_scheduled_by_the_schedule(tmp_path, monke
     service = Service(cfg_dir)
     service.state_db().write_meta(SNAPSHOT, owner_snapshot())
     with pytest.raises(ServiceError, match="only a holding analysis can be scheduled"):
-        service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()), trigger="scheduled")
+        service.start_advisor(kind="refresh", request_id=str(uuid.uuid4()), trigger="scheduled")
     with pytest.raises(ServiceError, match="only a holding analysis can be scheduled"):
         service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="AAPL",
                               account_id="a" * 20, trigger="event")

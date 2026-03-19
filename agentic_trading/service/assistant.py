@@ -25,9 +25,9 @@ from .shapes import (
 CONVERSATIONS = "advisor.conversations"
 SCOPES = ("personal", "agentic")
 #: What the assistant may be asked for the Agentic account: an explanation of what is
-#: recorded. Discovery, refreshes, holding analyses and portfolio reviews are personal.
+#: recorded. Discovery, refreshes and holding analyses are personal.
 AGENTIC_KINDS = ("chat",)
-KINDS = ("refresh", "chat", "shortlist", "analysis", "portfolio_review")
+KINDS = ("refresh", "chat", "shortlist", "analysis")
 #: Personal tasks the console asks for by name and is told about when they finish.
 CONVERSATIONAL = ("chat", "shortlist")
 
@@ -218,7 +218,6 @@ class AssistantMixin:
             shown = {}
         elif account_id is not None:
             shown["accounts"] = [a for a in snapshot.get("accounts") or [] if a.get("id") == account_id]
-        review = self._latest_review(helper_jobs, snapshot)
         coverage = ("The Agentic account's recorded research, proposals and authority; the assistant "
                     "explains and cannot act." if scope == "agentic" else
                     "All Robinhood brokerage accounts, stocks/ETFs only; analysis is read-only.")
@@ -233,25 +232,9 @@ class AssistantMixin:
             decisions=self.advisor_decisions(scope=scope, account_id=account_id),
             coverage=coverage,
             scope=scope, account_scope_kind=kind, account_id=bound_account, account_ids=account_ids,
-            account_label=label, latest_review=review,
+            account_label=label,
             coverage_info={"scope": scope, "instruments": "stocks_and_etfs", "note": coverage},
             conversation_summaries=summaries[:50])
-
-    def _latest_review(self, jobs: list[dict[str, Any]], snapshot: dict[str, Any]) -> dict[str, Any] | None:
-        """The newest finished portfolio review among these jobs, marked stale against the
-        snapshot now: a refreshed portfolio does not make an old review new."""
-        for job in jobs:                                     # newest first
-            if (job.get("task") or {}).get("kind") != "portfolio_review" or job.get("state") != "COMPLETE":
-                continue
-            result = self._advisor_result(job["run_key"]) or {}
-            review = result.get("review")
-            if not review:
-                continue
-            fetched = snapshot.get("fetched_at")
-            return {**review, "run_key": job["run_key"],
-                    "stale": bool(fetched and review.get("snapshot_at") and
-                                  str(review["snapshot_at"]) < str(fetched))}
-        return None
 
     def advisor_notes(self, text: str, revision: int) -> PersonalNotes:
         from ..advisor import NOTES
@@ -348,8 +331,7 @@ class AssistantMixin:
                 if analyses_today(jobs, cfg) >= int(cfg["max_analyses_per_day"]):
                     raise ServiceError("Today's full-research budget is used; try again next trading day.")
             elif kind != "refresh":
-                assistant_jobs = [j for j in jobs if j.get("task", {}).get("kind")
-                                  in (*CONVERSATIONAL, "portfolio_review")]
+                assistant_jobs = [j for j in jobs if j.get("task", {}).get("kind") in CONVERSATIONAL]
                 # These short calls have their own cap while sharing the existing concurrency pool.
                 stamp = utcnow().date().isoformat()
                 if sum(j["created_at"].startswith(stamp) for j in assistant_jobs) >= 30:

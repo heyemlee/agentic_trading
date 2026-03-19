@@ -163,6 +163,13 @@ a.pf-row:hover::before, a.pf-row:active::before, a.pf-row:hover + .pf-row::befor
 .pf-row-main { flex: 1 1 auto; min-width: 0; }
 .pf-row-title { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.012em; line-height: 1.3; }
 .pf-row-sub { display: block; margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--pf-ink-2); overflow-wrap: anywhere; }
+/* where research stands on a holding, after its share count: the verdict in ink, a run in flight
+   with Home's live dot, a run that did not finish in the danger ink */
+.pf-research strong { font-weight: 600; color: var(--pf-ink); }
+.pf-research.is-failed { color: var(--danger-ink); }
+.pf-dot { position: relative; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--green); vertical-align: 1px; }
+.pf-dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--green); animation: pf-pulse 1.7s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pf-dot::after { animation: none; } }
 .pf-row-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
 .pf-row-value { font-size: 16px; font-weight: 600; letter-spacing: -.012em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pf-chevron {
@@ -213,6 +220,10 @@ div.pf-row .pf-chevron { display: none; }
 .pf-btn:active:not(:disabled) { transform: scale(.98); }
 .pf-btn:disabled { cursor: not-allowed; color: var(--meta); background: var(--pf-fill); box-shadow: none; }
 .pf-btn:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
+/* the same request once a conclusion stands: asking again is the second choice, not the lead */
+.pf-btn.is-quiet { color: var(--pf-ink); background: rgba(255, 255, 255, .85); box-shadow: inset 0 0 0 1px var(--pf-line); }
+@media (hover: hover) { .pf-btn.is-quiet:hover:not(:disabled) { background: var(--pf-fill); } }
+.pf-btn.is-quiet:disabled { color: var(--meta); background: var(--pf-fill); box-shadow: none; }
 .pf-btn-note { margin-top: 10px; text-align: center; }
 .pf-quiet {
   flex: none; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 999px;
@@ -267,7 +278,6 @@ div.pf-row .pf-chevron { display: none; }
 .pf-verdict-soft { color: var(--pf-ink); background: rgba(33, 54, 38, .07); }
 .pf-row .pf-verdict { min-height: 26px; font-size: 12px; }
 .pf-thesis { margin-top: 14px; font-size: 16px; line-height: 1.62; letter-spacing: -.005em; }
-.pf-aside { margin-top: 10px; }
 .pf-more { margin-top: 14px; border-top: 1px solid var(--pf-line); }
 .pf-more + .pf-more { margin-top: 0; }
 .pf-more > summary {

@@ -15,9 +15,9 @@ window.Console.page('index', function (document) {
 
   /* Runs on a hidden bucket stay out of Home, as they stay out of every headline. */
   /* Research about the owner's own money only: never a Demo book's, never a record bound to no
-     account, and never a portfolio review, which studied no one symbol. */
+     account. */
   const visibleRuns = () => (D.research || []).filter((r) => C.showsBucket(r.bucket) &&
-    !['demo', 'unspecified'].includes(r.scope) && r.task_type !== 'portfolio_review');
+    !['demo', 'unspecified'].includes(r.scope));
 
   /* ── what is not normal ────────────────────────────────────────────
      Each row names its own page. An unknown order is the attention collector's to report;
@@ -78,10 +78,7 @@ window.Console.page('index', function (document) {
       return;
     }
     const card = item => {
-      // Until the Assistant has a result deep link, open the exact finished review here.
-      const link = item.kind === 'personal_task_done' && item.link?.page === 'advisor' && item.subject
-        ? { page: 'research', params: { run: item.subject } } : item.link;
-      const href = C.taskLink(link);
+      const href = C.taskLink(item.link);
       const kindKey = 'at.kind.' + item.kind;
       const label = C.t(kindKey) === kindKey ? C.t('at.item') : C.t(kindKey);
       const tone = ['critical', 'high', 'normal', 'info'].includes(item.severity) ? item.severity : 'normal';
@@ -128,7 +125,7 @@ window.Console.page('index', function (document) {
   }
 
   function renderResearch() {
-    /* Conversations, shortlists, refreshes and reviews share the queue but run no desks, so
+    /* Conversations, shortlists and refreshes share the queue but run no desks, so
        they have no office to open; strategy research and a personal analysis do. */
     const running = (D.researchJobs || []).filter((j) => (!j.task || j.task.kind === 'analysis') &&
       C.showsBucket(j.bucket) && !['demo', 'unspecified'].includes(j.scope) && ['QUEUED', 'RUNNING'].includes(j.state));

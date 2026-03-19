@@ -12,7 +12,7 @@ import math
 import re
 import time
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
@@ -328,70 +328,6 @@ def answer(profiles, context, message, history, language="zh", llm=None):
     return reply.model_dump()
 
 
-RECOMMENDATIONS = ("hold", "consider_change", "wait_for_evidence", "needs_full_research")
-
-
-class ReviewCitation(BaseModel):
-    kind: Literal["run", "snapshot", "profile"]
-    run_id: str | None = None
-    as_of: str | None = None
-
-
-class ReviewPriority(BaseModel):
-    symbol: str
-    recommendation: Literal["hold", "consider_change", "wait_for_evidence", "needs_full_research"]
-    rationale: str = Field(max_length=1200)
-    citations: list[ReviewCitation] = Field(default_factory=list, max_length=6)
-    missing: list[str] = Field(default_factory=list, max_length=6)
-
-
-class PortfolioReview(BaseModel):
-    """At most three things worth the person's attention, each saying what it rests on."""
-
-    priorities: list[ReviewPriority] = Field(default_factory=list, max_length=3)
-    limitations: list[str] = Field(default_factory=list, max_length=8)
-
-
-def review_portfolio(profiles, context, language="zh", llm=None):
-    """One structured pass over the observed holdings, reusing what is already known.
-
-    The review reuses the snapshot, the confirmed profile and the research that is still
-    valid; it starts no research of its own and produces no order. Its four recommendations
-    are advice about attention, not actions, and ``consider_change`` says which way only in
-    its rationale. What it could not know goes in ``missing`` and ``limitations``, never into
-    a confident-sounding line.
-    """
-    llm = llm or ClaudeCodeChatModel(
-        model=profiles.tradingagents.quick_think_llm, effort=profiles.llm.quick_effort,
-        timeout_seconds=min(profiles.llm.timeout_seconds, 300), max_turns=8,
-        claude_bin=profiles.llm.claude_bin,
-        work_dir=str(profiles.project_dir / "runs" / ".advisor_workdir"),
-        config_dir=str(profiles.config_dir), role="personal_assistant",
-        tool_names=["get_verified_market_snapshot", "get_news", "get_fundamentals", "get_indicators"],
-    )
-    system = (
-        "You review the user's observed Robinhood holdings and name at most three priorities: "
-        "which holdings deserve attention now and why. Reply in "
-        + ("Simplified Chinese" if language == "zh" else "English") + ". "
-        + UNTRUSTED_CONTENT_NOTICE + " "
-        "Use the supplied snapshot, the confirmed profile and the existing research decisions; cite "
-        "them by run id and date. Each priority carries one of four recommendations: hold, "
-        "consider_change (say the direction and the reason in the rationale), wait_for_evidence, or "
-        "needs_full_research. These are advice about attention, never orders. Do not invent target "
-        "prices, cost bases, tax lots or personal goals; put what you would need under missing. "
-        "Any TODO/unresolved profile field and its recommended_default is an unconfirmed suggestion, "
-        "not a personal fact. Prefer fewer priorities over weak ones; an empty list is a valid answer "
-        "when nothing needs attention.\n" + profiles.mandate_context()
-    )
-    messages = [{"role": "system", "content": system},
-                {"role": "user", "content": "Observed context:\n" + json.dumps(context, ensure_ascii=False)},
-                {"role": "user", "content": "Review these holdings now."}]
-    review = llm.with_structured_output(PortfolioReview).invoke(messages)
-    out = review.model_dump()
-    out["priorities"] = [p for p in out["priorities"] if SYMBOL.fullmatch(str(p["symbol"]).upper())][:3]
-    return out
-
-
 def read_only_research(profiles, job, snapshot, notes):
     """Reuse the full upstream graph and the same policy mapping; never call an order store."""
     from .evidence import check_evidence, collect_evidence
@@ -477,7 +413,7 @@ def run_task(profiles, job):
                 snapshot = fetch_snapshot(profiles)
                 db.write_meta(SNAPSHOT, snapshot)
             except BrokerError:
-                if task["kind"] in ("refresh", "analysis", "portfolio_review"):
+                if task["kind"] in ("refresh", "analysis"):
                     raise
                 snapshot = {**snapshot, "stale": True, "errors": [
                     *snapshot.get("errors", []), "Robinhood refresh unavailable; saved data may be stale."]}
@@ -520,21 +456,6 @@ def run_task(profiles, job):
         elif task["kind"] == "analysis":
             record = read_only_research(profiles, job, snapshot, notes)
             record["scope"] = scope
-        elif task["kind"] == "portfolio_review":
-            review = review_portfolio(profiles, context, task.get("language", "zh"))
-            review.update(scope="personal", account_scope_kind=task.get("account_scope_kind"),
-                          account_id=account_id, account_ids=task.get("account_ids") or [],
-                          account_label=next((a.get("label") for a in snapshot.get("accounts") or []
-                                              if a.get("id") == account_id), None) if account_id
-                          else "all personal accounts",
-                          snapshot_at=snapshot.get("fetched_at"), analysed_at=now(),
-                          route={"name": "assistant", "package_version": None,
-                                 "models": {"quick": profiles.tradingagents.quick_think_llm}})
-            record["assistant_result"] = {
-                "answer": (f"{len(review['priorities'])} priorit"
-                           f"{'y' if len(review['priorities']) == 1 else 'ies'}; "
-                           f"{len(review['limitations'])} limitation(s)"),
-                "review": review}
         else:
             # Bound the shortlist, explicitly stating coverage. Never silently call it all-market.
             if scope != "agentic":
@@ -557,7 +478,7 @@ def run_task(profiles, job):
         record["account_ids"] = list(task.get("account_ids") or (
             [] if account_id else [a["id"] for a in snapshot.get("accounts") or [] if a.get("id")]))
         # Which route produced it: the read-only analysis runs the TradingAgents graph; the
-        # conversation, the review and the refresh are the assistant's own single call.
+        # conversation and the refresh are the assistant's own single call.
         record["route"] = {"name": "tradingagents" if task["kind"] == "analysis" else "assistant",
                            "skill_version": None}
         record["elapsed_seconds"] = round(time.monotonic() - started, 1)

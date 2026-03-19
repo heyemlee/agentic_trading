@@ -392,9 +392,8 @@ test('the demo assistant is the one advisor fixture, narrowed to an account the 
     snapshot: { accounts: [{ id: A, positions: [] }, { id: B, positions: [] }], candidates: [{ symbol: 'VTI', sources: ['profile:core'] }] },
     jobs: [{ run_key: 'mine', task: { kind: 'analysis', account_id: A, account_scope_kind: 'single' } },
       { run_key: 'all', task: { kind: 'analysis', account_id: null, account_scope_kind: 'all_personal', account_ids: [A, B] } },
-      { run_key: 'review', task: { kind: 'portfolio_review', account_id: B, account_scope_kind: 'single' } }],
-    decisions: [{ run_id: 'da', account_id: A, account_scope_kind: 'single' }, { run_id: 'db', account_id: B, account_scope_kind: 'single' }],
-    latest_review: { run_key: 'review' } };
+      { run_key: 'theirs', task: { kind: 'analysis', account_id: B, account_scope_kind: 'single' } }],
+    decisions: [{ run_id: 'da', account_id: A, account_scope_kind: 'single' }, { run_id: 'db', account_id: B, account_scope_kind: 'single' }] };
   c.CT_API.selectAssistant({ scope: 'personal', account: A });
   const scoped = c.CT.assistant;
   assert.equal(c.CT_API.matchesAssistant(scoped), true);
@@ -402,7 +401,6 @@ test('the demo assistant is the one advisor fixture, narrowed to an account the 
   assert.deepEqual(scoped.snapshot.candidates.map(x => x.symbol), ['VTI'], 'the candidate pool belongs to no one account');
   assert.deepEqual(scoped.jobs.map(j => j.run_key), ['mine', 'all']);
   assert.deepEqual(scoped.decisions.map(d => d.run_id), ['da']);
-  assert.equal(scoped.latest_review, null, "another account's review stays with it");
   c.CT_API.selectAssistant({ scope: 'agentic' });
   assert.equal(c.CT.assistant.snapshot, undefined, 'Agentic carries no personal snapshot');
 });
@@ -616,6 +614,41 @@ test('a holding shows its position and only the analyses bound to its account', 
   assert.equal(c.element('holding-analyze').disabled, false);
 });
 
+/* The list says where research stands on each holding, so the one that wants a look shows
+   without opening every row. A row starts nothing: an analysis spends one of the day's full
+   analyses, and a row is easy to tap in passing while scrolling. */
+test('each holding row says where research stands for its own account, and starts nothing itself', () => {
+  const year = new Date().getUTCFullYear();
+  const aapl = { ...nvda, symbol: 'AAPL' }, msft = { ...nvda, symbol: 'MSFT' }, amd = { ...nvda, symbol: 'AMD' };
+  const job = (ticker, state) => ({ run_key: 'run_' + ticker, ticker, state, created_at: year + '-09-05T01:00:00Z',
+    error: state === 'FAILED' ? 'boom' : null, task: { kind: 'analysis', account_scope_kind: 'single', account_id: holdingAccount } });
+  const c = holdingPage({ stale: false, snapshot: holdingSnapshot([nvda, aapl, msft, amd]),
+    jobs: [job('AAPL', 'RUNNING'), job('AMD', 'FAILED')],
+    decisions: [decided('mine', holdingAccount, 'single', 'HOLD', year + '-09-04T01:00:00Z', 'Hold'),
+                decided('theirs', otherAccount, 'single', 'SELL', '2020-09-03T01:00:00Z', 'Another account')] }, { search: '' });
+  const html = c.element('broker-accounts').innerHTML;
+  const cards = html.split('<article class="pf-card pf-account"').slice(1);
+  const row = (card, symbol) => card.split('<a class="pf-row"').find(r => r.includes('data-od-id="holding-' + symbol + '"'));
+  assert.match(row(cards[0], 'NVDA'), /hd\.sharesN 40 · <span class="pf-research"><strong>Hold<\/strong> · Sep 4<\/span>/,
+               'this year\'s date needs no year');
+  assert.match(row(cards[1], 'NVDA'), /<strong>Sell<\/strong> · Sep 3, 2020/, 'each account\'s row reads its own analyses');
+  assert.match(row(cards[0], 'AAPL'), /<span class="pf-research is-running"><span class="pf-dot" aria-hidden="true"><\/span>hd\.rowRunning/);
+  assert.match(row(cards[0], 'MSFT'), /<span class="pf-research">hd\.rowNone<\/span>/);
+  assert.match(row(cards[0], 'AMD'), /<span class="pf-research is-failed">hd\.rowFailed<\/span>/);
+  assert.doesNotMatch(html, /<button|data-start/, 'a row is one link to its holding, with no button in it');
+});
+
+test('the analysis button leads before the first conclusion and is the quiet choice after it', () => {
+  const first = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot() });
+  assert.equal(first.element('holding-analyze').textContent, 'hd.analyze');
+  assert.equal(first.element('holding-analyze').classList.contains('is-quiet'), false);
+  const again = holdingPage({ stale: false, jobs: [], snapshot: holdingSnapshot(),
+    decisions: [decided('mine', holdingAccount, 'single', 'HOLD', '2026-09-04T01:00:00Z', 'Hold')] });
+  assert.equal(again.element('holding-analyze').textContent, 'hd.analyzeAgain');
+  assert.equal(again.element('holding-analyze').classList.contains('is-quiet'), true);
+  assert.equal(again.element('holding-analyze').hidden, false);
+});
+
 test('analysing a holding sends the assistant request bound to its account, once per tap', async () => {
   let fail = true; const sent = [];
   const c = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot() }, {
@@ -635,12 +668,13 @@ test('analysing a holding sends the assistant request bound to its account, once
   assert.equal(c.reread, 1, 'the queue is read again so the run shows up');
 });
 
-test('an analysis in flight holds the button and can be stopped; another account\'s run cannot', async () => {
+test('an analysis in flight has its own card with a Stop in place of the button; another account\'s run does not', async () => {
   const running = { run_key: 'advisor_running', ticker: 'NVDA', state: 'RUNNING', created_at: '2026-09-04T20:40:00Z',
                     task: { kind: 'analysis', account_scope_kind: 'single', account_id: holdingAccount } };
   const c = holdingPage({ stale: false, decisions: [], snapshot: holdingSnapshot(), jobs: [
     { ...running, run_key: 'elsewhere', task: { ...running.task, account_id: otherAccount } }, running] });
-  assert.equal(c.element('holding-analyze').disabled, true);
+  assert.equal(c.element('holding-analyze').hidden, true, 'the run card is the one control while it runs');
+  assert.equal(c.element('holding-analysis').innerHTML, '', 'nor does a first run sit above a card saying none has run');
   assert.match(c.element('holding-job').innerHTML, /data-stop="advisor_running"/);
   assert.doesNotMatch(c.element('holding-job').innerHTML, /elsewhere/);
   await c.element('holding-job').events.click({ target: { closest: () => ({ getAttribute: () => 'advisor_running' }) } });
@@ -678,18 +712,6 @@ test('an incomplete account, or a session that cannot write, cannot start an ana
   assert.match(readOnly.element('holding-analyze-note').textContent, /hd.unavailable/);
   readOnly.element('holding-analyze').events.click();
   assert.equal(readOnly.posts.length, 0);
-});
-
-test('the portfolio review speaks about a holding only when it covered that account', () => {
-  const review = { account_scope_kind: 'single', account_id: otherAccount, analysed_at: '2026-09-04T02:00:00Z',
-                   run_key: 'advisor_review', priorities: [{ symbol: 'NVDA', recommendation: 'consider_change',
-                                                             rationale: 'Trim it', missing: [] }] };
-  const other = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot(), latest_review: review });
-  assert.equal(other.element('holding-review-block').hidden, true);
-  const covering = holdingPage({ stale: false, jobs: [], decisions: [], snapshot: holdingSnapshot(),
-    latest_review: { ...review, account_scope_kind: 'all_personal', account_id: null, account_ids: [holdingAccount, otherAccount] } });
-  assert.equal(covering.element('holding-review-block').hidden, false);
-  assert.match(covering.element('holding-review').innerHTML, /Trim it/);
 });
 
 /* The ledger fails closed once nothing has confirmed it for max_age_days, and the API then
@@ -1783,9 +1805,9 @@ test('task links only allow known pages and parameter keys, encoding every value
   assert.equal(c.Console.taskLink({ page: 'research', params: { run: 'A&scope=agentic' } }), 'lab.html?run=A%26scope%3Dagentic',
     'the collector still names research; its reports are in the Lab');
   const home = homePage();
-  home.CT.attention = attentionPayload([attentionItem({ kind: 'personal_task_done', subject: 'review-A',
-    link: { page: 'advisor', params: { scope: 'personal' } } })]); home.render();
-  assert.match(home.element('needs-you-slot').innerHTML, /lab.html\?run=review-A/);
+  home.CT.attention = attentionPayload([attentionItem({ kind: 'personal_task_done', subject: 'analysis-A',
+    link: { page: 'research', params: { run: 'analysis-A' } } })]); home.render();
+  assert.match(home.element('needs-you-slot').innerHTML, /lab.html\?run=analysis-A/);
 });
 
 test('More only offers approvals for collector items requiring a proposal decision', () => {
@@ -1890,7 +1912,6 @@ test('the room never draws a Demo book’s run, or a record bound to no account'
     research: [
       { run_id: 'paper', ticker: 'VXUS', scope: 'demo', bucket: 'core', trade_date: '2026-09-18', instrument_type: 'etf', task_type: 'full_research' },
       { run_id: 'lost', ticker: 'BND', scope: 'unspecified', trade_date: '2026-09-17', task_type: 'full_research' },
-      { run_id: 'review', ticker: 'ASSISTANT', scope: 'personal', task_type: 'portfolio_review', trade_date: '2026-09-16' },
       { run_id: 'mine', ticker: 'VTI', scope: 'agentic', account_label: 'Agentic', bucket: 'micro_live', trade_date: '2026-09-14',
         instrument_type: 'etf', task_type: 'full_research' }],
     jobs: [{ run_key: 'paper-live', ticker: 'BND', scope: 'demo', bucket: 'core', state: 'RUNNING', trade_date: '2026-09-23' }],
@@ -3461,31 +3482,15 @@ test('a mismatched conversation cannot show messages or accept another send', as
 test('Agentic submits only chats, hides personal context, and preserves rejected drafts', async () => {
   const sent = [];
   const c = advisorPage(async (url, body) => { sent.push({ url, body }); const e = Error('Changed account'); e.status = 409; throw e; }, { search: '?scope=agentic' });
-  await flush(); assert.equal(c.element('review-panel').hidden, true); assert.equal(c.element('view-discover').hidden, true);
+  await flush(); assert.equal(c.element('view-discover').hidden, true);
   assert.equal(c.element('personal-notes').value, ''); assert.equal(c.element('notes-preview').textContent, '');
-  c.element('shortlist').events.click(); c.element('review-start').events.click(); c.element('save-notes').events.click();
+  c.element('shortlist').events.click(); c.element('save-notes').events.click();
   c.element('symbol-input').value = 'VTI'; c.element('symbol-form').events.submit({ preventDefault() {} }); await flush();
   assert.equal(sent.length, 0);
   c.element('chat-input').value = 'Explain the research'; c.element('chat-form').events.submit({ preventDefault() {} }); await flush();
   assert.equal(sent.length, 1); assert.equal(sent[0].body.scope, 'agentic'); assert.equal(sent[0].body.account_id, null);
   assert.equal(c.element('chat-input').value, 'Explain the research'); assert.match(c.element('advisor-status').textContent, /ai.conflict/);
   c.render(); await flush(); assert.equal(sent.length, 1, 'polling must not retry a rejected write');
-});
-
-test('portfolio review needs an explicit start and receipt waits for the visible complete result', async () => {
-  const sent = [], opened = [];
-  const c = advisorPage(async (_, body) => { sent.push(body); return {}; }, { search: '?scope=personal&account=aaaaaaaaaaaaaaaaaaaa',
-    fetchJSON: async url => url.startsWith('/research/') ? { run_key: 'review-a', state: 'COMPLETE' } : { conversation_id: url.split('/').at(-1), messages: [] } });
-  c.CT_API.markOpened = async key => { opened.push(key); };
-  c.CT.advisor.latest_review = { run_key: 'review-a', account_label: 'A', stale: true,
-    snapshot_at: '2026-09-17', analysed_at: '2026-09-18', priorities: [{ symbol: 'VTI', rationale: '<script>test</script>', citations: [] }] };
-  c.render(); await flush(); assert.equal(sent.length, 0); assert.equal(opened.length, 0);
-  assert.match(c.element('review-stale').textContent, /ai.reviewStale/);
-  await c.element('review-open').events.click(); await flush();
-  assert.deepEqual(opened, ['review-a']); assert.match(c.element('decision-detail').innerHTML, /&lt;script&gt;/);
-  c.render(); await flush(); assert.equal(opened.length, 1);
-  c.element('review-start').events.click(); await flush();
-  assert.equal(sent.length, 1); assert.equal(sent[0].kind, 'portfolio_review'); assert.equal(sent[0].account_id, 'aaaaaaaaaaaaaaaaaaaa');
 });
 
 test('scoped assistant resource rejects old and mismatched data without repointing Portfolio', async () => {

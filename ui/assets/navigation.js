@@ -25,7 +25,7 @@
   function eligible(url) {
     return url.origin === base.origin && url.pathname.startsWith(base.pathname) &&
       routes.has(routeName(url)) && (url.searchParams.get('demo') === '1') === !!window.CT_DEMO &&
-      [...url.searchParams.keys()].every(key => ['demo', 'view', 'sheet', 'prompt', 'ticker', 'run',
+      [...url.searchParams.keys()].every(key => ['demo', 'view', 'sheet', 'ticker', 'run',
         'scope', 'account', 'include_all_personal', 'conversation', 'task_type', 'proposal', 'subject', 'kind', 'cursor', 'change', 'section'].includes(key));
   }
   function makeView(name, body, title) {

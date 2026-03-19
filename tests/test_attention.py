@@ -152,8 +152,8 @@ def test_a_withdrawn_autonomy_and_a_cooling_change_are_told_apart(service):
 
 
 # ------------------------------------------------------------------ personal tasks
-def personal_job(service, *, kind="portfolio_review", state="COMPLETE", finished_ago_hours=1.0,
-                 ticker="ASSISTANT", account_id=None, run_key=None):
+def personal_job(service, *, kind="analysis", state="COMPLETE", finished_ago_hours=1.0,
+                 ticker="VTI", account_id=None, run_key=None):
     manager = service._research_manager(service.profiles())
     run_key = run_key or f"advisor_{kind}_{ticker}_{int(finished_ago_hours * 100)}"
     manager.create(run_key=run_key, ticker=ticker, bucket="advisory", trade_date="2026-09-17",
@@ -172,7 +172,7 @@ def test_a_finished_review_stands_until_it_is_opened_not_until_it_is_polled(serv
     item = report["items"][0]
     assert item["scope"] == "personal" and item["account_scope_kind"] == "all_personal"
     assert item["account_label"] == "all personal accounts" and item["requires_person"] is False
-    assert item["link"] == {"page": "advisor", "params": {"scope": "personal"}}
+    assert item["link"] == {"page": "research", "params": {"run": job["run_key"]}}
 
     # Reading the run is what the console does every few seconds; it is not the person looking.
     service.research_run(job["run_key"])

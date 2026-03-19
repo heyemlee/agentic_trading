@@ -152,8 +152,8 @@ Missing, stale or partially readable results say "cannot confirm", never "nothin
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
 a visible sheet; polling never marks it. Failed receipts offer an explicit retry and are not
-queued. A successful receipt refreshes attention. Until Assistant supports a specific review
-deep link, a finished portfolio review opens its exact run in the Lab's report sheet.
+queued. A successful receipt refreshes attention. A finished analysis opens its exact run in the
+Lab's report sheet.
 
 `node tools/check_attention_ui.cjs` exercises the mobile attention-to-result flow with a static
 server and intercepted API responses. Like the approval check, it needs Playwright and Chrome
@@ -245,14 +245,22 @@ in. Everything on it comes from the `/advisor` read the page already polls:
 - the recorded analyses of that symbol bound to that account, plus all-account ones, which
   say so. A record whose account binding is unknown is left out, as it is in the Lab;
 - a queued or running analysis, with Stop, and the newest failure until a newer analysis
-  replaces it;
-- the latest portfolio review's line for the symbol, only when that review covered the
-  account.
+  replaces it.
 
-Analyze sends the Assistant's own `POST /advisor/jobs {kind: 'analysis', ticker, account_id}`.
-A second tap while one is in flight sends nothing, and an explicit retry after a lost response
-reuses its request id. Charts, news and trading stay in Robinhood, which the view links to
-rather than repeats.
+The analyses come before the position's figures, which Robinhood shows as well. Analyze sends
+the Assistant's own `POST /advisor/jobs {kind: 'analysis', ticker, account_id}`. It is the
+green lead only until the first conclusion; after that it is the quiet "Analyze again", and
+while a run is in flight the run's own card, with Stop, takes its place. A second tap while one
+is in flight sends nothing, and an explicit retry after a lost response reuses its request id.
+Charts, news and trading stay in Robinhood, which the view links to rather than repeats.
+
+Each row of the holdings list says where research stands on that holding for that account: the
+last verdict and its date, queued or researching, a run that did not finish, or not researched.
+The row starts nothing itself. An analysis spends one of the day's full analyses and a list row
+is easy to tap in passing, so starting one is a tap further, on the holding's view. The Lab's
+"what I hold" list, the research tab, is where a name never studied has a button of its own.
+There is no "analyze my holdings" entry: a whole-portfolio glance is what Robinhood Cortex
+gives the owner for the same accounts, so it was removed with the portfolio review (2026-09-23).
 
 ## Agent trace
 
@@ -309,13 +317,11 @@ its server binding; drafts, selected conversations and explicit retry IDs are st
 account in tab storage. Switching or reloading never submits a request.
 
 Personal context notes remain shared across personal accounts. Agentic hides personal tools
-and only submits explanation chats. Portfolio review is an explicit personal action, bound
-to the selected account scope. Snapshot refresh does not rerun it; an old review keeps its
-snapshot/analysis times and stale warning. The completed result is marked opened only after
-its detail sheet is visible, using the independent idempotent `/opened` write.
+and only submits explanation chats. A completed analysis is marked opened only after its detail
+sheet is visible, using the independent idempotent `/opened` write.
 
-`node tools/check_assistant_ui.cjs` verifies account switching, retained drafts, Agentic chat,
-explicit review and opened receipts with synthetic APIs, including phone layout.
+`node tools/check_assistant_ui.cjs` verifies account switching, retained drafts, Agentic chat
+and prompt drafts with synthetic APIs, including phone layout.
 
 The Assistant chat is a mobile-first, single-viewport layout. Its welcome prompts fill
 an editable draft. The account in view is the header's title: a glass capsule, the way
@@ -324,8 +330,8 @@ hollow while it loads and amber when the picker has something to say. The capsul
 the account picker, one row per scope; one tap switches, because each row is a link to
 this page for that scope. Chat and Discover share one glass segmented switch below it,
 hidden for Agentic, which has only Chat; history and a new conversation show in Chat only.
-Portfolio reviews and supporting tools open from the composer's + button, in a sheet that
-names its account and hands over to the picker. Messages scroll independently above the composer,
+Supporting tools open from the composer's + button, in a sheet that names its account and
+hands over to the picker. Messages scroll independently above the composer,
 with a jump-to-latest control that does not interrupt someone reading older replies.
 The composer grows with its draft, respects IME composition, and keeps Enter as a newline
 on touch devices (desktop Enter sends; Shift+Enter adds a line). The visual viewport keeps

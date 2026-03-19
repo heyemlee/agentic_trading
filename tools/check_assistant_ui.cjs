@@ -37,18 +37,15 @@ const ui = path.resolve(__dirname, '../ui');
         if (url.pathname === '/advisor/jobs') {
           if (sent.kind === 'chat') bindings.set(sent.conversation_id, { scope: sent.scope, account_scope_kind: sent.account_id || sent.scope === 'agentic' ? 'single' : 'all_personal', account_id: sent.account_id });
           body = { run_key: sent.kind === 'chat' ? 'chat-preview' : 'submitted' };
-        } else { assert.equal(url.pathname, '/research/review-a/opened'); body = { run_key: 'review-a', opened_at: now }; }
+        } else assert.fail('unexpected POST ' + url.pathname);
       } else if (url.pathname === '/auth/session') body = { authenticated: true, username: 'preview', csrf_token: 'test-only' };
       else if (url.pathname === '/health') body = { status: 'READY', checked_at: now, warnings: [] };
       else if (url.pathname === '/proposals') body = [];
       else if (url.pathname === '/accounts') body = { checked_at: now, accounts: accounts.map((account_id, i) => ({ scope: 'personal', account_scope_kind: 'single', account_id, account_label: 'Account ' + (i ? 'B' : 'A') })), personal_snapshot: { stale: false } };
       else if (url.pathname === '/advisor') body = { scope, account_scope_kind: account || scope === 'agentic' ? 'single' : 'all_personal', account_id: scope === 'agentic' ? 'micro_live' : account,
         account_label: scope === 'agentic' ? 'Agentic' : account === accounts[0] ? 'Account A' : account === accounts[1] ? 'Account B' : 'All personal',
-        snapshot: { fetched_at: now, accounts: [], candidates: [] }, notes: { text: 'Shared personal plan', revision: 1 }, jobs: chatJobs, decisions: [], conversation_summaries: [],
-        latest_review: account === accounts[0] ? { run_key: 'review-a', account_label: 'Account A', snapshot_at: '2026-09-17T12:00:00Z', analysed_at: now, stale: true,
-          priorities: [{ symbol: 'VTI', recommendation: 'Review concentration', rationale: 'Synthetic rationale <untrusted>', citations: [], missing: ['No current quote'] }], limitations: ['Saved snapshot only'] } : null };
+        snapshot: { fetched_at: now, accounts: [], candidates: [] }, notes: { text: 'Shared personal plan', revision: 1 }, jobs: chatJobs, decisions: [], conversation_summaries: [] };
       else if (url.pathname.startsWith('/advisor/conversations/')) { const id = url.pathname.split('/').at(-1); body = { conversation_id: id, messages: messages.get(id) || [], ...bindings.get(id) }; }
-      else if (url.pathname === '/research/review-a') body = { run_key: 'review-a', state: 'COMPLETE', opened_at: null };
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
     await page.goto(origin + '/ui/advisor.html');
@@ -92,8 +89,8 @@ const ui = path.resolve(__dirname, '../ui');
     await capture('assistant-history-phone');
     await page.locator('[data-close-sheet="conversation-sheet"]').click();
     await page.waitForFunction(() => !document.getElementById('conversation-sheet').open);
-    await page.locator('#ask-risk').click();
-    assert.equal(await page.locator('#chat-input').inputValue(), '我的持仓有哪些风险？');
+    await page.locator('#ask-research').click();
+    assert.equal(await page.locator('#chat-input').inputValue(), '研究团队对我的持仓怎么看？');
     assert.equal(posts.length, 0, 'Suggestions fill a draft without submitting');
     await page.locator('#chat-input').press('Enter');
     assert.match(await page.locator('#chat-input').inputValue(), /\n/);
@@ -119,30 +116,14 @@ const ui = path.resolve(__dirname, '../ui');
     assert.equal(await page.locator('#chat-input').inputValue(), 'Account A draft');
     assert.equal(posts.length, 0);
     await openContext();
-    await page.locator('#review-panel summary').click();
     await capture('assistant-account-phone');
-    assert.match(await page.locator('#review-stale').innerText(), /旧快照/);
-    const receipt = page.waitForResponse(res => res.url().endsWith('/research/review-a/opened'));
-    await page.locator('#review-open').click();
-    await page.waitForFunction(() => document.getElementById('decision-sheet').open);
-    await receipt;
-    assert.match(await page.locator('#decision-detail').innerText(), /<untrusted>/);
-    assert.equal(await page.locator('#decision-detail script').count(), 0);
-    await page.locator('[data-close-sheet="decision-sheet"]').click();
-    await openContext();
-    await page.locator('#review-start').click();
-    await page.waitForFunction(() => document.getElementById('advisor-status').textContent.includes('加入'));
-    const review = posts.find(p => p.body.kind === 'portfolio_review');
-    assert.equal(review.body.scope, 'personal'); assert.equal(review.body.account_id, accounts[0]);
     // The tools sheet names its account and hands over to the picker.
-    await openContext();
     assert.equal(await page.locator('#context-account-name').innerText(), 'Account A');
     await page.locator('#context-account').click();
     await page.waitForFunction(() => document.getElementById('account-sheet').open && !document.getElementById('context-sheet').open);
     await page.locator('[data-close-sheet="account-sheet"]').click();
     await page.waitForFunction(() => !document.getElementById('account-sheet').open);
     await select('agentic', 'micro_live');
-    assert.equal(await page.locator('#review-panel').isVisible(), false);
     assert.equal(await page.locator('#view-discover').isVisible(), false);
     assert.equal(await page.locator('#assistant-subhead').isVisible(), false, 'Agentic has one view, so no switch');
     assert.equal(await page.locator('#assistant-account-label').innerText(), 'Agentic');
@@ -393,7 +374,7 @@ const ui = path.resolve(__dirname, '../ui');
     }
     await capture('assistant-iphone-after-keyboard');
     assert.deepEqual(errors, []);
-    console.log('Assistant browser check passed: isolated accounts, review receipts, prompt drafts, pending/completed replies, copy, send/reply following, independent history scroll, stale viewport restoration, 320px/keyboard-height/landscape/desktop layouts.');
+    console.log('Assistant browser check passed: isolated accounts, prompt drafts, pending/completed replies, copy, send/reply following, independent history scroll, stale viewport restoration, 320px/keyboard-height/landscape/desktop layouts.');
   } catch (error) { console.error(await page?.evaluate(() => document.body.innerText.slice(-4000))); throw error; }
   finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

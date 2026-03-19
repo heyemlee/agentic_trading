@@ -27,8 +27,6 @@ PURPOSES = ("review_holding", "candidate", "exit_review")
 HELD_PURPOSES = ("review_holding", "exit_review")
 #: How much of the bear case a list row carries; the full text is in the run's trace.
 COUNTER_EVIDENCE_CHARS = 600
-#: The personal tasks whose records are research records rather than conversation.
-RECORD_TASKS = ("analysis", "portfolio_review")
 
 
 class ResearchMixin:
@@ -563,7 +561,7 @@ def _route(explicit: Any, *, bucket: str | None, task_kind: str | None,
     record = record or {}
     if isinstance(explicit, dict) and explicit.get("name"):
         name, inferred = str(explicit["name"]), False
-    elif bucket == "advisory" or task_kind in ("chat", "shortlist", "refresh", "portfolio_review"):
+    elif bucket == "advisory" or task_kind in ("chat", "shortlist", "refresh"):
         name, inferred = ("tradingagents" if task_kind == "analysis" else "assistant"), True
     else:
         name, inferred = "tradingagents", True
@@ -656,8 +654,6 @@ def _supersede_key(row: dict[str, Any]) -> tuple | None:
         return ("full_research", row["scope"], row["bucket"], row["ticker"], row.get("purpose"))
     if kind == "analysis":
         return ("analysis", row["scope"], row["account_scope_kind"], row["account_id"], row["ticker"])
-    if kind == "portfolio_review":
-        return ("portfolio_review", row["scope"], row["account_scope_kind"], row["account_id"])
     return None
 
 

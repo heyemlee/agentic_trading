@@ -75,7 +75,7 @@ def test_the_agentic_assistant_explains_and_admits_nothing_else(service):
     with pytest.raises(ServiceError, match="only explains what is recorded"):
         service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="VTI", scope="agentic")
     with pytest.raises(ServiceError, match="only explains"):
-        service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()), scope="agentic")
+        service.start_advisor(kind="refresh", request_id=str(uuid.uuid4()), scope="agentic")
     with pytest.raises(ServiceError, match="names no personal account"):
         service.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="why?", scope="agentic",
                               account_id=A)
@@ -90,12 +90,12 @@ def test_a_personal_task_is_bound_to_one_observed_account_or_to_all_of_them(serv
         service.start_advisor(kind="chat", request_id=str(uuid.uuid4()), message="hi", account_id="c" * 20)
     one = service.start_advisor(kind="analysis", request_id=str(uuid.uuid4()), ticker="VTI", account_id=A)
     assert one["task"]["account_scope_kind"] == "single" and one["task"]["account_ids"] == []
-    every = service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()))
-    assert every["task"]["kind"] == "portfolio_review" and every["ticker"] == "ASSISTANT"
+    every = service.start_advisor(kind="refresh", request_id=str(uuid.uuid4()))
+    assert every["task"]["kind"] == "refresh" and every["ticker"] == "ASSISTANT"
     assert every["task"]["account_scope_kind"] == "all_personal" and every["task"]["account_ids"] == [A, B]
     # A replay under the same id returns the same task even if the snapshot has since changed.
     service.state_db().write_meta(SNAPSHOT, {**snapshot(), "accounts": snapshot()["accounts"][:1]})
-    again = service.start_advisor(kind="portfolio_review", request_id=every["run_key"].removeprefix("advisor_")
+    again = service.start_advisor(kind="refresh", request_id=every["run_key"].removeprefix("advisor_")
                                   and str(uuid.UUID(every["run_key"].removeprefix("advisor_"))))
     assert again["run_key"] == every["run_key"] and again["deduplicated"] is True
 
@@ -197,31 +197,13 @@ def test_each_scope_sees_its_own_records_and_nothing_of_another(service, records
     agentic = service.advisor_state(scope="agentic")
     assert agentic.snapshot.accounts == [] and agentic.snapshot.fetched_at is None
     assert [d.run_id for d in agentic.decisions] == ["micro_vti"] and agentic.decisions[0].scope == "agentic"
-    assert agentic.account_id == "micro_live" and agentic.latest_review is None
+    assert agentic.account_id == "micro_live"
     assert agentic.coverage_info["scope"] == "agentic" and "cannot act" in agentic.coverage
 
     with pytest.raises(ServiceError, match="unknown assistant scope"):
         service.advisor_state(scope="demo")
     with pytest.raises(ServiceError, match="one observed personal account"):
         service.advisor_state(scope="agentic", account_id=A)
-
-
-def test_a_review_is_shown_with_its_own_time_and_goes_stale_when_the_snapshot_moves_on(service):
-    job = service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()))
-    review = {"scope": "personal", "account_scope_kind": "all_personal", "account_id": None,
-              "account_ids": [A, B], "account_label": "all personal accounts",
-              "snapshot_at": snapshot()["fetched_at"], "analysed_at": now(),
-              "priorities": [{"symbol": "VTI", "recommendation": "hold", "rationale": "unchanged",
-                              "citations": [], "missing": []}], "limitations": []}
-    finish(service, job, assistant_result={"answer": "1 priority; 0 limitation(s)", "review": review})
-    latest = service.advisor_state().latest_review
-    assert latest["run_key"] == job["run_key"] and latest["stale"] is False
-    assert latest["priorities"][0]["recommendation"] == "hold"
-    # Refreshing the portfolio does not make the old review new: it is marked, and kept.
-    service.state_db().write_meta(SNAPSHOT, snapshot(fetched_at="2030-01-01T00:00:00+00:00"))
-    assert service.advisor_state().latest_review["stale"] is True
-    assert service.advisor_state(account_id=A).latest_review["run_key"] == job["run_key"]  # it covered A
-    assert service.advisor_state(scope="agentic").latest_review is None
 
 
 # ------------------------------------------------------------------ what a model is told
@@ -262,35 +244,6 @@ def test_a_single_account_conversation_is_told_that_account_alone(service, recor
     assert [a["id"] for a in captured["snapshot"]["accounts"]] == [A]
     assert {d["run_id"] for d in captured["research"]} == {"adv_a", "adv_all"}   # never legacy, never Agentic
     assert "risk" not in captured and "authority" not in captured
-
-
-def test_a_portfolio_review_reuses_what_is_known_and_records_what_it_rests_on(service, monkeypatch):
-    seen = {}
-
-    def review(profiles, context, language="zh", llm=None):
-        seen.update(context)
-        return {"priorities": [{"symbol": "VTI", "recommendation": "needs_full_research",
-                                "rationale": "23% in one name", "citations": [], "missing": ["cost basis"]}],
-                "limitations": ["options are not read"]}
-
-    monkeypatch.setattr("agentic_trading.advisor.review_portfolio", review)
-    job = service.start_advisor(kind="portfolio_review", request_id=str(uuid.uuid4()))
-    assert run_task(service.profiles(), job) == 0
-    assert seen["scope"] == "personal" and seen["account"]["account_scope_kind"] == "all_personal"
-    written = json.loads((service.profiles().project_dir / "runs" / job["run_key"] / "decision_record.json").read_text())
-    out = written["assistant_result"]["review"]
-    assert out["account_scope_kind"] == "all_personal" and out["account_ids"] == [A, B]
-    assert out["snapshot_at"] == snapshot()["fetched_at"][:10] + out["snapshot_at"][10:]  # the snapshot's own time
-    assert out["analysed_at"] and out["route"]["name"] == "assistant"
-    assert out["priorities"][0]["recommendation"] == "needs_full_research"
-    assert written["task_kind"] == "portfolio_review" and written["route"]["name"] == "assistant"
-    # The worker, not run_task, records the terminal state; until then the review is not shown.
-    assert service.advisor_state().latest_review is None
-    service._research_manager(service.profiles()).store.update(job["run_key"], {"state": "COMPLETE"})
-    assert service.advisor_state().latest_review["run_key"] == job["run_key"]
-    # It is a research record too, findable by type, and it never became a proposal.
-    assert [r["run_id"] for r in service.research_history(task_type="portfolio_review")] == [job["run_key"]]
-    assert not service._store(service.profiles()).all()
 
 
 # ------------------------------------------------------------------ the switcher

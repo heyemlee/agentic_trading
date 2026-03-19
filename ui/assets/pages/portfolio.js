@@ -161,12 +161,31 @@ window.Console.page('portfolio', function (document) {
   const delta = (n, text, label) => n == null ? '' : '<span class="pf-delta' + tone(n) + '">' + h(text) + '</span>' +
     (label ? ' <span class="pf-delta-label">' + h(label) + '</span>' : '');
 
-  /* ── one Robinhood account: its figure, then its holdings by value ─── */
+  /* ── one Robinhood account: its figure, then its holdings by value ───
+     Each row also says where research stands on the holding -- being studied, what the last
+     analysis concluded, or never studied -- so the list shows which one wants a look without
+     opening each. It offers no button to start one: an analysis spends one of the day's full
+     analyses, and a row is easy to tap in passing while scrolling. Starting it is one tap
+     further, on the holding's own view, beside the result it would replace. */
+  const rowDate = (iso) => {
+    const day = new Date(iso);
+    return day.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC',
+      ...(day.getUTCFullYear() === new Date().getUTCFullYear() ? {} : { year: 'numeric' }) });
+  };
+  function researchState(account, p) {
+    const x = holdingState({ account: account.id, ticker: p.symbol });
+    if (x.running) return '<span class="pf-research is-running"><span class="pf-dot" aria-hidden="true"></span>' +
+      h(C.t(x.running.state === 'QUEUED' ? 'hd.rowQueued' : 'hd.rowRunning')) + '</span>';
+    if (x.failed) return '<span class="pf-research is-failed">' + h(C.t('hd.rowFailed')) + '</span>';
+    if (!x.latest) return '<span class="pf-research">' + h(C.t('hd.rowNone')) + '</span>';
+    return '<span class="pf-research"><strong>' + h(x.latest.action ? C.code(x.latest.action) : C.t('ac.incomplete')) +
+      '</strong>' + (x.latest.trade_date ? ' · ' + h(rowDate(x.latest.trade_date)) : '') + '</span>';
+  }
   function holdingRow(account, p) {
     return '<a class="pf-row" href="' + h(link({ scope: 'robinhood', account: account.id, ticker: p.symbol })) +
       '" data-od-id="holding-' + h(p.symbol) + '">' +
       '<span class="pf-row-main"><span class="pf-row-title">' + h(p.symbol) + '</span>' +
-        '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) })) + '</span></span>' +
+        '<span class="pf-row-sub">' + h(C.t('hd.sharesN', { n: shares(p.quantity) })) + ' · ' + researchState(account, p) + '</span></span>' +
       '<span class="pf-row-side"><span class="pf-row-value">' + money(p.market_value_usd) + '</span>' +
         (p.unrealized_pct == null ? '<span class="pf-delta">—</span>' : delta(p.unrealized_pct, signedPct(p.unrealized_pct))) +
       '</span><span class="pf-chevron" aria-hidden="true"></span></a>';
@@ -186,10 +205,10 @@ window.Console.page('portfolio', function (document) {
 
   /* ── one holding: the position, and what the research concluded about it ─
      Everything here is read from the /advisor state this page already polls: the snapshot
-     for the position, the recorded decisions for the analyses, the queue for a run in
-     flight, the latest portfolio review for its line about this symbol. Records that never
-     said which account they were about are left out, as the research page leaves them out
-     of a single-account view; an all-accounts analysis of the same symbol is kept and says so. */
+     for the position, the recorded decisions for the analyses, and the queue for a run in
+     flight. Records that never said which account they were about are left out, as the
+     research page leaves them out of a single-account view; an all-accounts analysis of the
+     same symbol is kept and says so. */
   function holdingState(target) {
     const saved = D.advisor || {}, snapshot = saved.snapshot || {};
     const account = (snapshot.accounts || []).find(a => a.id === target.account) || null;
@@ -203,14 +222,9 @@ window.Console.page('portfolio', function (document) {
     const latest = analyses[0] || null;
     const failed = !running && jobs[0] && jobs[0].state !== 'COMPLETE' &&
       (!latest || String(jobs[0].created_at) > String(latest.created_at)) ? jobs[0] : null;
-    const review = saved.latest_review;
-    const covered = review && (review.account_scope_kind === 'single' ? review.account_id === target.account
-      : review.account_scope_kind === 'all_personal' && (review.account_ids || []).includes(target.account));
-    const reviewItem = covered ? (review.priorities || []).find(p => String(p.symbol).toUpperCase() === target.ticker) || null : null;
     const reason = !D.advisor ? 'loading' : !position ? 'missing' : !account.complete ? 'incomplete'
       : running ? 'running' : !API.writesEnabled || !API.isLive('advisor') ? 'unavailable' : null;
-    return { saved, account, position, analyses, latest, running, failed, review: reviewItem && review, reviewItem,
-             reason, canAnalyze: !reason };
+    return { saved, account, position, analyses, latest, running, failed, reason, canAnalyze: !reason };
   }
 
   function analysisCard(d, target) {
@@ -267,32 +281,21 @@ window.Console.page('portfolio', function (document) {
           (stopping || !API.writesEnabled ? ' disabled' : '') + '>' + h(C.t('ai.cancel')) + '</button></div>'
       : '<div class="pf-job is-failed"><div class="pf-job-copy"><strong>' + h(C.t('hd.failed')) + '</strong><span class="pf-verbatim">' +
           h(job.error || C.code(job.state)) + '</span></div></div>');
-    C.setHTML($('holding-analysis'), x.latest ? analysisCard(x.latest, target)
+    C.setHTML($('holding-analysis'), x.latest ? analysisCard(x.latest, target) : x.running ? ''
       : '<div class="pf-card pf-empty"><span class="pf-empty-mark" aria-hidden="true">' + C.ICON.assistant + '</span>' +
           '<p class="pf-notice-title">' + h(C.t('hd.notAnalyzed')) + '</p><p class="pf-fine">' + h(C.t('hd.notAnalyzedBody')) + '</p></div>');
+    /* A first analysis is what this view is for, so it leads in green. Once there is a
+       conclusion, asking again is the quieter choice, and while a run is in flight its own
+       card above, with its Stop, is the only control. */
     const button = $('holding-analyze');
-    button.textContent = C.t(analyzing ? 'hd.starting' : x.running ? 'hd.analyzing' : x.latest ? 'hd.analyzeAgain' : 'hd.analyze');
+    button.textContent = C.t(analyzing ? 'hd.starting' : x.latest ? 'hd.analyzeAgain' : 'hd.analyze');
     button.disabled = analyzing || !x.canAnalyze;
-    button.hidden = x.reason === 'missing';
+    button.hidden = x.reason === 'missing' || !!x.running;
+    button.classList.toggle('is-quiet', !!x.latest);
     $('holding-analyze-note').textContent = analyzeStatus || ({
       loading: '', missing: '', running: '', incomplete: C.t('hd.incomplete'),
       unavailable: C.t(window.CT_DEMO ? 'hd.demo' : 'hd.unavailable'),
     }[x.reason] ?? C.t('hd.analyzeNote'));
-
-    /* The portfolio review's line about this symbol, only when the review covered this account. */
-    $('holding-review-block').hidden = !x.reviewItem;
-    C.setHTML($('holding-review'), !x.reviewItem ? '' :
-      '<article class="pf-card pf-analysis"><div class="pf-card-head"><span class="pf-verdict pf-verdict-soft">' +
-        h(C.t('hd.rec.' + x.reviewItem.recommendation) === 'hd.rec.' + x.reviewItem.recommendation
-          ? C.titleise(x.reviewItem.recommendation) : C.t('hd.rec.' + x.reviewItem.recommendation)) + '</span>' +
-        '<span class="pf-fine">' + h(x.review.analysed_at ? C.dateOnly(x.review.analysed_at) : '') + '</span></div>' +
-        '<p class="pf-thesis pf-verbatim">' + h(x.reviewItem.rationale || '') + '</p>' +
-        ((x.reviewItem.missing || []).length ? '<p class="pf-fine pf-aside pf-verbatim">' + h(C.t('rs.meta.missing') + ': ' +
-          x.reviewItem.missing.join('; ')) + '</p>' : '') +
-        (x.review.stale ? '<p class="pf-fine pf-aside">' + h(C.t('ai.reviewOld')) + '</p>' : '') +
-        (x.review.run_key ? '<a class="pf-text-link" href="' + h(reportLink(x.review.run_key, target.account)) + '">' +
-          h(C.t('ai.fullReport')) + '<span class="pf-chevron" aria-hidden="true"></span></a>' : '') +
-      '</article>');
 
     const earlier = x.analyses.slice(1, 6);
     $('holding-history-block').hidden = !earlier.length;

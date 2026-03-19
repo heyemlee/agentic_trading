@@ -45,7 +45,7 @@
         <div class="chat-scroll" id="chat-scroll">
           <div id="chat-welcome" class="chat-welcome">
             <div class="prompt-cards">
-              <button id="ask-risk" class="prompt-card"><span class="prompt-icon" data-icon="risk" aria-hidden="true"></span><span><strong data-i18n="ai.riskTitle">看懂持仓风险</strong><span data-i18n="ai.askRisk">我的持仓有哪些风险？</span></span><span class="prompt-arrow" aria-hidden="true">↗</span></button>
+              <button id="ask-research" class="prompt-card"><span class="prompt-icon" data-icon="lab" aria-hidden="true"></span><span><strong data-i18n="ai.researchTitle">看研究结论</strong><span data-i18n="ai.askResearch">研究团队对我的持仓怎么看？</span></span><span class="prompt-arrow" aria-hidden="true">↗</span></button>
               <button id="ask-scenario" class="prompt-card"><span class="prompt-icon" data-icon="evaluation" aria-hidden="true"></span><span><strong data-i18n="ai.scenarioTitle">推演市场变化</strong><span data-i18n="ai.askScenario">如果股票跌 5% 呢？</span></span><span class="prompt-arrow" aria-hidden="true">↗</span></button>
             </div>
             <button class="context-card" data-open-sheet="context-sheet" aria-haspopup="dialog"><span data-icon="portfolio" aria-hidden="true"></span><span><strong data-i18n="ai.contextTitle">围绕你的账户聊</strong><span id="assistant-context-summary"></span></span><span class="ux-chevron" aria-hidden="true"></span></button>
@@ -121,10 +121,6 @@
   </button>
   <p id="assistant-coverage" class="context-fine"></p>
   <p id="assistant-chat-note" class="context-fine"></p>
-  <section class="section" style="padding-top:0;" id="review-panel"><div class="container"><details class="card app-disclosure"><summary data-i18n="ai.portfolioReview">Portfolio review</summary><p id="review-summary" class="body-sm body-muted"></p>
-    <p id="review-stale" class="body-sm" role="status"></p>
-    <div class="advisor-actions"><button id="review-start" class="btn btn-secondary btn-sm" data-i18n="ai.reviewStart">Review this portfolio</button><button id="review-open" class="btn btn-secondary btn-sm" data-i18n="ai.reviewOpen" hidden>View review</button></div>
-  </details></div></section>
   <section class="section" id="agentic-records-panel" hidden><div class="container"><details class="card app-disclosure"><summary data-i18n="rs.runs">Research</summary><div id="agentic-records"></div></details></div></section>
   <div class="context-tools">
     <button class="context-tool" data-open-sheet="sources-sheet"><span data-icon="info" aria-hidden="true"></span><span data-i18n="ux.sources">数据来源</span><span class="ux-chevron" aria-hidden="true"></span></button>

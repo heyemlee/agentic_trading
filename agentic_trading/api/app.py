@@ -629,7 +629,7 @@ def micro_live() -> MicroLive:
 # ----------------------------------------------------------------- research
 class AdvisorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["refresh", "chat", "shortlist", "analysis", "portfolio_review"]
+    kind: Literal["refresh", "chat", "shortlist", "analysis"]
     request_id: str
     message: str = Field("", max_length=4000)
     conversation_id: str = Field("default", max_length=64)
@@ -752,7 +752,7 @@ def research_trace(run_id: str,
 def research_history(limit: Annotated[int, Query(ge=1, le=100)] = 20,
                      scope: Literal["agentic", "demo", "personal", "unspecified"] | None = None,
                      account_id: Annotated[str | None, Query(max_length=40)] = None,
-                     task_type: Literal["full_research", "analysis", "portfolio_review"] | None = None,
+                     task_type: Literal["full_research", "analysis"] | None = None,
                      include_all_personal: bool = False) -> list[ResearchRecord]:
     return _ok(_service.research_history, limit, scope=scope, account_id=account_id,
                task_type=task_type, include_all_personal=include_all_personal)

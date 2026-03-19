@@ -683,9 +683,6 @@ class AdvisorState(BaseModel):
     account_id: str | None = None
     account_ids: list[str] = Field(default_factory=list)
     account_label: str | None = None
-    #: The most recent portfolio review for this scope, or None when none was ever asked for.
-    #: The review's own serialisation, passed through whole.
-    latest_review: dict[str, Any] | None = None
     coverage_info: dict[str, Any] | None = None
     conversation_summaries: list[dict[str, Any]] = Field(default_factory=list)
 

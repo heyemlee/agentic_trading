@@ -159,7 +159,6 @@ window.Console.page('advisor', function (document) {
     });
   }
   const params = new URLSearchParams(location.search);
-  let entryPromptPending = params.get('prompt') === 'holdings-risk';
   if (params.get('view') === 'holdings') location.replace('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''));
   showView(params.get('view'));
   function fitViewport() {
@@ -296,34 +295,7 @@ window.Console.page('advisor', function (document) {
     el('agentic-records-panel').hidden = binding.scope !== 'agentic';
     document.querySelectorAll('[data-open-sheet="personal-sheet"]').forEach(button => { button.hidden = binding.scope !== 'personal'; });
     el('panel-personal').hidden = binding.scope !== 'personal' || el('panel-chat').hidden;
-    el('review-panel').hidden = binding.scope !== 'personal';
-    const review = state.latest_review;
-    el('review-summary').textContent = review ? [review.account_label,
-      t('ai.reviewTimes', { snapshot: C.dateTime(review.snapshot_at), analysed: C.dateTime(review.analysed_at) })].filter(Boolean).join(' · ') : t('ai.noReview');
-    el('review-stale').textContent = review?.stale ? t('ai.reviewStale', { current: C.dateTime(state.snapshot?.fetched_at) }) : '';
-    el('review-open').hidden = !review?.run_key;
   }
-  function reviewMarkup(review) {
-    const citation = item => item.kind === 'run' && item.run_id ? '<a href="' + h(scopeLink('research', { run: item.run_id, include_all_personal: 'true' })) + '">' + h(item.run_id) + '</a>' : h([item.kind, item.as_of].filter(Boolean).join(' · '));
-    return '<h3>' + h(review.account_label || t('ai.portfolioReview')) + '</h3><p class="body-sm">' +
-      h(t('ai.reviewTimes', { snapshot: C.dateTime(review.snapshot_at), analysed: C.dateTime(review.analysed_at) })) + '</p>' +
-      (review.stale ? '<p class="banner">' + t('ai.reviewOld') + '</p>' : '') +
-      (review.priorities || []).map(item => '<article class="card" style="margin-block:16px;"><h3>' + h(item.symbol) + '</h3><p>' + h(item.recommendation) + '</p><p>' + h(item.rationale) +
-        '</p><p class="body-sm">' + h((item.missing || []).join('; ')) + '</p><p class="body-sm">' + (item.citations || []).map(citation).join(' · ') + '</p></article>').join('') +
-      '<p class="body-sm">' + h((review.limitations || []).join('; ')) + '</p>';
-  }
-  el('review-open').addEventListener('click', async () => {
-    const review = currentState()?.latest_review;
-    if (!review?.run_key || binding.scope !== 'personal') return;
-    const epoch = scopeEpoch, run = review.run_key;
-    shownDecision = run; shownDecisionJob = null; decisionReadAttempted = false;
-    el('decision-detail').innerHTML = reviewMarkup(review); C.openSheet('decision-sheet');
-    if (!window.CT_DEMO) {
-      try { const job = await A.fetchJSON('/research/' + encodeURIComponent(run));
-        if (epoch === scopeEpoch && shownDecision === run) { shownDecisionJob = job; markDecisionRead(); }
-      } catch (error) { if (epoch === scopeEpoch) status(t('rs.openedFailed', { err: error.message })); }
-    }
-  });
   /* Discover lists the candidate pool from the last snapshot. A source reads
      "watchlists:<list>", "scans:<screener>" or "profile:<group>" (advisor.fetch_snapshot);
      the list or group name is the owner's own text and renders verbatim. A row starts
@@ -440,10 +412,6 @@ window.Console.page('advisor', function (document) {
   }
   function render() {
     restoreSession();
-    if (entryPromptPending) {
-      if (!el('chat-input').value) el('chat-input').value = t('ai.askRisk');
-      remember(); entryPromptPending = false;
-    }
     const state = currentState() || {}, snapshot = state.snapshot || {}, jobs = state.jobs || [];
     renderScope(state);
     const decisions = state.decisions || [];
@@ -518,7 +486,6 @@ window.Console.page('advisor', function (document) {
     el('chat-welcome').hidden = shownMessages.length > 0 || chatting;
     resizeComposer(); updateSend();
     el('shortlist').disabled = shortlistOff();
-    el('review-start').disabled = busy || binding.scope !== 'personal' || !available() || jobs.some(j => active(j) && j.task?.kind === 'portfolio_review');
     syncResearchButtons();
     const signature = conversation + JSON.stringify(jobs.filter(j => j.task?.conversation_id === conversation).map(j => [j.run_key, j.state]));
     if (currentState() && signature !== conversationSignature) loadConversation(signature);
@@ -586,10 +553,9 @@ window.Console.page('advisor', function (document) {
     el('chat-input').value = t(key); resizeComposer(); updateSend(); remember();
     el('chat-input').focus();
   }
-  el('ask-risk').addEventListener('click', () => usePrompt('ai.askRisk'));
+  el('ask-research').addEventListener('click', () => usePrompt('ai.askResearch'));
   el('ask-scenario').addEventListener('click', () => usePrompt('ai.askScenario'));
   el('shortlist').addEventListener('click', () => { showView('chat'); send('shortlist', { message: t('ai.shortlistPrompt') }); });
-  el('review-start').addEventListener('click', () => send('portfolio_review'));
   el('symbol-form').addEventListener('submit', async e => {
     e.preventDefault();
     const typed = el('symbol-input').value, ticker = typed.trim().toUpperCase();
@@ -731,7 +697,7 @@ window.Console.page('advisor', function (document) {
       candidateFilter = 'all'; candidateQuery = ''; candidateLimit = CANDIDATE_PAGE;
       el('symbol-input').value = ''; discoverSay('');
       ['personal-sheet', 'conversation-sheet', 'decision-sheet', 'jobs-sheet', 'context-sheet', 'account-sheet'].forEach(id => el(id).close());
-      document.querySelectorAll('#review-panel details, #agentic-records-panel details').forEach(node => { node.open = false; });
+      document.querySelectorAll('#agentic-records-panel details').forEach(node => { node.open = false; });
       paintMessages();
     }
     accountChoice = binding.scope === 'agentic' ? 'agentic' : 'personal:' + binding.account;
@@ -741,10 +707,6 @@ window.Console.page('advisor', function (document) {
     if (requestedConversation && session?.validId(requestedConversation)) { chooseConversation(requestedConversation); requestedConversation = null; }
     if (changed || next.has('view')) showView(next.get('view'));
     if (next.get('sheet') === 'jobs') C.openSheet('jobs-sheet');
-    if (next.get('prompt') === 'holdings-risk') {
-      showView('chat');
-      entryPromptPending = true;
-    }
     render();
   }
   document.addEventListener('ct:route', routeEntry);
