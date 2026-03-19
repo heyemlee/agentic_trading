@@ -143,6 +143,83 @@ def test_investor_and_calendar_guards(config_dir):
     assert cc.classify(CALENDAR, cal, moved)["classification"] == cc.IMMEDIATE
 
 
+# ----------------------------------------------------------------- the autonomy switches
+# The deployment's own switches are not read here: whether this machine is armed today is an
+# operational fact the suite must not depend on either way.
+SWITCHES = """\
+buckets:
+  micro_live:
+    autonomy:
+      open:
+        enabled: false                     # ARM LAST, and separately from reduce
+        max_pct_of_account: 20
+        classes: [broad_diversified_etf, bond_or_cash_like_etf]
+        max_new_positions_per_day: 1
+      reduce:
+        enabled: false                     # ARM SEPARATELY, and only once positions exist
+        min_confidence: 80
+        max_positions_reduced_per_day: 1
+    require_stock_eligibility_screen: true
+"""
+
+
+def test_a_switch_turned_on_is_confirmed_rather_than_cooled_and_sets_its_number():
+    spec, new, verdict = cc.switch_change(SWITCHES, "reduce", True, 50)
+    assert verdict["classification"] == cc.CONFIRMED
+    assert set(verdict["reasons"]) == {"buckets.micro_live.autonomy.reduce.enabled",
+                                       "buckets.micro_live.autonomy.reduce.min_remaining_pct_of_opened"}
+    assert spec.file == RISK and spec.set == {"buckets.micro_live.autonomy.reduce.enabled": True,
+                                              "buckets.micro_live.autonomy.reduce.min_remaining_pct_of_opened": 50}
+    lines = [line for line in cc.unified_diff(SWITCHES, new, RISK).splitlines()
+             if line[:1] in "+-" and line[:3] not in ("+++", "---")]
+    assert lines == [
+        "-        enabled: false                     # ARM SEPARATELY, and only once positions exist",
+        "+        enabled: true                      # ARM SEPARATELY, and only once positions exist",
+        "+        min_remaining_pct_of_opened: 50",
+    ]
+    _, opened, verdict = cc.switch_change(new, "open", True, 85)
+    assert verdict["classification"] == cc.CONFIRMED
+    assert yaml.safe_load(opened)["buckets"]["micro_live"]["autonomy"]["open"]["min_confidence"] == 85
+    # Off is a tightening: at once, for anyone signed in, with no password.
+    _, off, verdict = cc.switch_change(opened, "reduce", False)
+    assert verdict["classification"] == cc.IMMEDIATE
+    reduce = yaml.safe_load(off)["buckets"]["micro_live"]["autonomy"]["reduce"]
+    assert reduce["enabled"] is False and reduce["min_remaining_pct_of_opened"] == 50
+    # On again keeps the number it has; raising it tightens and needs no password either.
+    assert cc.switch_change(off, "reduce", True)[2]["classification"] == cc.CONFIRMED
+    assert cc.switch_change(new, "reduce", True, 60)[2]["classification"] == cc.IMMEDIATE
+
+
+@pytest.mark.parametrize("block, on, value, match", [
+    ("sell", True, 50, "no autonomy switch named"),
+    ("reduce", True, 0, "between 1 and 99"),
+    ("reduce", True, 100, "between 1 and 99"),
+    ("reduce", True, True, "whole number"),
+    ("open", True, 79, "between 80 and 100"),
+    ("open", True, 101, "between 80 and 100"),
+    ("reduce", False, 50, "only when a switch is turned on"),
+    ("reduce", True, None, "does not declare min_remaining_pct_of_opened"),
+    ("open", True, None, "does not declare min_confidence"),
+])
+def test_a_switch_refuses_what_it_could_not_honour(block, on, value, match):
+    with pytest.raises(cc.ConfigChangeError, match=match):
+        cc.switch_change(SWITCHES, block, on, value)
+
+
+def test_the_same_keys_edited_by_hand_still_cool_and_may_not_invent_a_key():
+    by_hand = cc.set_values(SWITCHES, {"buckets.micro_live.autonomy.open.enabled": True})
+    assert cc.classify(RISK, SWITCHES, by_hand)["classification"] == cc.COOLING
+    lowered = cc.set_values(SWITCHES, {"buckets.micro_live.autonomy.reduce.min_confidence": 70})
+    assert cc.classify(RISK, SWITCHES, lowered)["classification"] == cc.COOLING
+    with pytest.raises(cc.ConfigChangeError, match="no such setting"):
+        cc.set_values(SWITCHES, {"buckets.micro_live.autonomy.reduce.min_remaining_pct_of_opened": 50})
+    # A lower share kept is a looser floor; a higher one a tighter floor.
+    kept = cc.switch_change(SWITCHES, "reduce", True, 50)[1]
+    for share, expected in ((40, cc.COOLING), (60, cc.IMMEDIATE)):
+        moved = cc.set_values(kept, {"buckets.micro_live.autonomy.reduce.min_remaining_pct_of_opened": share})
+        assert cc.classify(RISK, kept, moved)["classification"] == expected
+
+
 # --------------------------------------------------------------------------- validation
 def test_validation_uses_the_real_loader(sandbox):
     text = read(sandbox, RISK)
@@ -279,6 +356,88 @@ def test_cashflow_and_autonomy_controls(sandbox):
     assert {"cashflow_recorded", "autonomy_stopped", "autonomy_resumed"} <= kinds
 
 
+def _switched(service, block):
+    return service.profiles().risk_cfg("buckets", "micro_live", "autonomy", block, "enabled") is True
+
+
+def test_a_switch_turned_on_applies_at_once_on_the_password_and_says_so(sandbox):
+    # From off, whatever this deployment's own file says today.
+    sandbox.autonomy_switch("reduce", False, identity="owner")
+    text = read(sandbox, RISK)
+    with pytest.raises(ServiceError, match="console password"):
+        sandbox.autonomy_switch("reduce", True, value=50, identity="owner")
+    assert read(sandbox, RISK) == text and not _switched(sandbox, "reduce")
+
+    result = sandbox.autonomy_switch("reduce", True, value=50, identity="owner", confirmed=True)
+    change = result["change"]
+    assert result["changed"] is True and change["status"] == cc.APPLIED
+    assert change["classification"] == cc.CONFIRMED and change["apply_after"] is None
+    assert change["switch"] == {"block": "reduce", "on": True}
+    assert _switched(sandbox, "reduce")
+    assert sandbox.profiles().risk_cfg("buckets", "micro_live", "autonomy", "reduce",
+                                       "min_remaining_pct_of_opened") == 50
+    authority = sandbox.effective_authority()
+    assert authority["switches"]["reduce"] is True
+    assert "not_enabled" not in {b["code"] for b in authority["actions"]["REDUCE"]["autonomous"]["blocked_by"]}
+    assert sandbox.config_overview()["pending"] == []
+    assert sandbox.config_overview()["recent"][0]["id"] == change["id"]
+    # Pushed under a kind the deployment already sends (notifications.events), urgently.
+    notices = [n for n in sandbox.collect_notifications() if n.key.startswith("autonomy_switched_on:")]
+    assert len(notices) == 1 and notices[0].urgent and notices[0].kind == "config_change_applied"
+    assert notices[0].title == "autonomous selling was switched on"
+    assert notices[0].link == "/ui/portfolio.html?scope=agentic"
+    events = sandbox.activity(kinds=("config_changed",))["events"]
+    assert any((e.get("detail") or {}).get("switch") == {"block": "reduce", "on": True} for e in events)
+
+    # Asked again: already so, nothing written or recorded.
+    again = sandbox.autonomy_switch("reduce", True, identity="owner", confirmed=True)
+    assert again == {"block": "reduce", "on": True, "changed": False, "change": None}
+    # Off needs no password, applies at once and raises no notice of its own.
+    off = sandbox.autonomy_switch("reduce", False, identity="owner")
+    assert off["change"]["classification"] == cc.IMMEDIATE and not _switched(sandbox, "reduce")
+    assert len([n for n in sandbox.collect_notifications()
+                if n.key.startswith("autonomy_switched_on:")]) == 1
+
+
+def test_a_switch_waits_for_a_change_to_it_still_cooling_but_stopping_never_does(sandbox):
+    sandbox.autonomy_switch("open", False, identity="owner")
+    parked = sandbox.submit_config_change(
+        file=RISK, set={"buckets.micro_live.autonomy.open.max_pct_of_account": 30},
+        identity="owner", confirmed=True)
+    assert parked["status"] == cc.PENDING
+    with pytest.raises(ServiceConflict, match="still cooling"):
+        sandbox.autonomy_switch("open", True, value=80, identity="owner", confirmed=True)
+    sandbox.cancel_config_change(parked["id"], identity="owner")
+    opened = sandbox.autonomy_switch("open", True, value=80, identity="owner", confirmed=True)
+    assert opened["change"]["classification"] == cc.CONFIRMED and _switched(sandbox, "open")
+    with pytest.raises(ServiceError, match="between 80 and 100"):
+        sandbox.autonomy_switch("open", True, value=70, identity="owner", confirmed=True)
+
+    # Stopping is never held up by what is waiting.
+    waiting = sandbox.submit_config_change(
+        file=RISK, set={"buckets.micro_live.autonomy.open.max_pct_of_account": 30},
+        identity="owner", confirmed=True)
+    closed = sandbox.autonomy_switch("open", False, identity="owner")
+    assert closed["changed"] is True and not _switched(sandbox, "open")
+    sandbox.cancel_config_change(waiting["id"], identity="owner")
+
+
+def test_a_switch_refuses_to_write_over_a_file_that_moved_under_it(sandbox, monkeypatch):
+    sandbox.autonomy_switch("reduce", False, identity="owner")
+    reads, real = [], sandbox._config_text
+
+    def moving(profiles, file):
+        text = real(profiles, file)
+        reads.append(file)
+        return text + "\n" if len(reads) > 1 else text      # edited elsewhere between the reads
+
+    monkeypatch.setattr(sandbox, "_config_text", moving)
+    before = read(sandbox, RISK)
+    with pytest.raises(ServiceConflict, match="changed while the switch was being set"):
+        sandbox.autonomy_switch("reduce", True, value=50, identity="owner", confirmed=True)
+    assert read(sandbox, RISK) == before and cc.records(sandbox.state_db()) == []
+
+
 # ---------------------------------------------------------------------------------- API
 def test_api_routes_step_up_and_shape(auth_client, monkeypatch, sandbox):
     monkeypatch.setattr("agentic_trading.api.app._service", sandbox)
@@ -339,13 +498,36 @@ def test_password_change_rotates_and_signs_out(auth_client, monkeypatch, sandbox
     assert console_auth.verify_password("test-owner", "Test-Only-Console-Pw1") == "invalid"
 
 
+def test_the_switch_route_asks_the_password_to_turn_on_and_only_then(auth_client, monkeypatch, sandbox):
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox)
+    assert auth_client.post("/autonomy/switch", json={"block": "reduce", "on": False}).status_code == 200
+    body = {"block": "reduce", "on": True, "value": 50}
+    bare = auth_client.post("/autonomy/switch", json=body)
+    assert bare.status_code == 400 and "console password" in bare.json()["detail"]
+    wrong = auth_client.post("/autonomy/switch", json={**body, "password": "not-it"})
+    assert wrong.status_code == 400 and "did not match" in wrong.json()["detail"]
+    for refused in ({**body, "block": "sell"}, {**body, "value": 101}, {**body, "on": "maybe"},
+                    {**body, "pasword": "typo"}):
+        assert auth_client.post("/autonomy/switch", json=refused).status_code == 422, refused
+    out_of_range = auth_client.post("/autonomy/switch", json={**body, "value": 0, "password": "Test-Only-Console-Pw1"})
+    assert out_of_range.status_code == 400 and "between 1 and 99" in out_of_range.json()["detail"]
+    on = auth_client.post("/autonomy/switch", json={**body, "password": "Test-Only-Console-Pw1"})
+    assert on.status_code == 200 and on.json()["change"]["classification"] == cc.CONFIRMED
+    assert on.json()["change"]["requested_by"] == "test-owner"
+    assert auth_client.get("/config/authority").json()["switches"]["reduce"] is True
+    off = auth_client.post("/autonomy/switch", json={"block": "reduce", "on": False})
+    assert off.status_code == 200 and off.json()["change"]["classification"] == cc.IMMEDIATE
+    assert auth_client.get("/config/authority").json()["switches"]["reduce"] is False
+
+
 def test_config_writes_need_a_session_and_csrf(auth_client, monkeypatch):
     calls = []
     module = import_module("agentic_trading.api.app")
     monkeypatch.setattr(module, "_service", type("S", (), {
         "submit_config_change": lambda self, **k: calls.append("submit"),
+        "autonomy_switch": lambda self, *a, **k: calls.append("switch"),
         "record_cashflow": lambda self, **k: calls.append("cash")})())
-    for path in ("/config/changes", "/portfolio/cashflow"):
+    for path in ("/config/changes", "/autonomy/switch", "/portfolio/cashflow"):
         assert auth_client.post(path, headers={"X-CSRF-Token": "wrong"}, json={}).status_code == 403
         assert auth_client.post(path, headers={"Origin": "https://attacker.example"}, json={}).status_code == 403
     assert calls == []

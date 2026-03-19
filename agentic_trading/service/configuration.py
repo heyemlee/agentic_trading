@@ -183,6 +183,61 @@ class ConfigurationMixin:
                               "classification": record["classification"]})
         return cc.public(record)
 
+    def autonomy_switch(self, block: str, on: bool, *, value: int | None = None, reason: str = "",
+                        identity: str | None = None, confirmed: bool = False) -> dict[str, Any]:
+        """Turn one of the Agentic account's two autonomy switches on or off, at once.
+
+        On needs the console password (``confirmed``) and may set the switch's number in the
+        same change; off needs neither. Both are written, recorded and committed like any other
+        console change, so the trail and Settings' recent changes show them, and turning one on
+        raises an urgent notice to every signed-in device (see notifications.changes). See
+        ``config_changes.switch_change`` for why these two apply at once and nothing else does.
+        """
+        from .. import config_changes as cc
+
+        profiles = self.profiles()
+        if on and not confirmed:
+            raise ServiceError("turning autonomy on needs the console password")
+        file = "risk_profile.yaml"
+        current = self._config_text(profiles, file)
+        floor = int(profiles.confidence.minimum_to_open.get("autonomous_any", 80))
+        try:
+            spec, new_text, verdict = cc.switch_change(current, block, on, value, confidence_floor=floor)
+            cc.validate(profiles.config_dir, file, new_text)
+        except cc.ConfigChangeError as exc:
+            raise ServiceError(str(exc)) from exc
+        if current == new_text:
+            # Asked twice, or from two devices: already so, and nothing to record.
+            return {"block": block, "on": on, "changed": False, "change": None}
+        db = self.state_db(profiles)
+        if on:
+            # A change to this switch still cooling would land on top of this one tomorrow, from
+            # a premise that no longer holds, so it is withdrawn from Settings first. Never for
+            # off: stopping is one gesture whatever else is waiting.
+            prefix = f"buckets.{cc.SWITCH_BUCKET}.autonomy.{block}."
+            for pending in cc.records(db):
+                if pending["status"] == cc.PENDING and any(str(p).startswith(prefix)
+                                                           for p in pending.get("paths") or []):
+                    raise ServiceConflict(f"change {pending['id']} to this switch is still cooling; "
+                                          "withdraw it in Settings first")
+        record = cc.new_record(spec, base=cc.base_of(current, spec), verdict=verdict,
+                               identity=identity or "console", reason=reason[:500])
+        record["switch"] = {"block": block, "on": bool(on)}
+        # The whole file is rewritten, so one written from elsewhere since it was read here would
+        # be lost under this one. Asked again, the switch reads the file as it now is.
+        if self._config_text(profiles, file) != current:
+            raise ServiceConflict(f"{file} changed while the switch was being set; try again")
+        record["outcome"] = self._write_config(profiles, file, new_text, record)
+        with db.transaction() as conn:
+            items = cc.records(db)
+            items.append(record)
+            cc.save(db, items, conn)
+        self._journal(profiles, kind="config_changed", subject=record["id"],
+                      actor=identity or "console", outcome=record["status"],
+                      detail={"file": file, "paths": record["paths"][:20],
+                              "classification": record["classification"], "switch": record["switch"]})
+        return {"block": block, "on": on, "changed": True, "change": cc.public(record)}
+
     def _write_config(self, profiles: Profiles, file: str, new_text: str,
                       record: dict[str, Any]) -> dict[str, Any]:
         """Write the file, commit it locally, and re-register launchd if the schedule moved."""

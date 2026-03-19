@@ -123,9 +123,10 @@ def test_preflight_the_gate_and_the_authority_agree_or_the_disagreement_is_named
         world, pf04_human, open_enabled, has_floor):
     """The eight combinations of PF04's inputs, the open switch and its confidence floor.
 
-    PF04 reads micro_live_execution alone and the gate reads buckets.*.autonomy alone, so they
-    can pass and permit independently. The authority object follows the gate, which is what
-    would act, and names every combination where preflight would tell a different story.
+    PF04 passes on micro_live_execution alone and the gate reads buckets.*.autonomy alone, so
+    they can pass and permit independently. The authority object follows the gate, which is
+    what would act, and PF04's detail says which way opening goes, so preflight never describes
+    opening as a person's while code may open on its own.
     """
     profiles, db = world
     profiles.stage = 6                                  # the one stage that allows autonomy at all
@@ -144,18 +145,31 @@ def test_preflight_the_gate_and_the_authority_agree_or_the_disagreement_is_named
     gate = autonomy.permits(profiles, bucket=MICRO, action="BUY", confidence=99,
                             limit_class="broad_diversified_etf")
     assert gate.permitted is expected, gate.reasons
+    assert ("the open switch is on" in pf04.detail) is open_enabled
+    assert ("every opening waits for a person" in pf04.detail) is (not open_enabled)
     names = {c["code"] for c in a["consistency"]}
-    assert ("open_enabled_unseen_by_preflight" in names) is (open_enabled and pf04_human)
+    assert "open_enabled_unseen_by_preflight" not in names
     assert ("open_without_min_confidence" in names) is (not has_floor)
 
 
-def test_autonomy_switched_on_below_the_stage_that_allows_it_is_named(world):
+def test_the_switches_decide_whatever_the_stage(world):
+    """Owner's decision, 2026-09-23: on the Agentic account the two switches decide, which is
+    what the gate always did. This object used to add a stage block the gate never read, so the
+    console could call autonomy off while the loop acted on it."""
     profiles, db = world
-    profiles.risk["buckets"][MICRO]["autonomy"]["reduce"]["enabled"] = True
+    profiles.risk["buckets"][MICRO]["autonomy"]["reduce"].update(
+        enabled=True, min_remaining_pct_of_opened=50)
     a = authority(profiles, db)
-    assert profiles.stage < 6
-    assert "stage" in codes(a["actions"]["REDUCE"]["autonomous"])
-    assert "autonomy_not_gated_by_stage" in {c["code"] for c in a["consistency"]}
+    assert profiles.stage < 6 and "autonomous" not in a["stage_allows"]
+    assert a["switches"] == {"reduce": True, "open": False}
+    assert a["actions"]["REDUCE"]["mode"] == "autonomous"
+    assert a["actions"]["REDUCE"]["autonomous"] == {"permitted": True, "blocked_by": []}
+    assert codes(a["actions"]["BUY"]["autonomous"]) == {"not_enabled", "no_min_confidence"}
+    assert "autonomy_not_gated_by_stage" not in {c["code"] for c in a["consistency"]}
+    # The human side still reads the stage: below 3, nobody may approve anything.
+    profiles.stage = 2
+    human = authority(profiles, db)["actions"]["REDUCE"]["human_approval"]
+    assert human["permitted"] is False and "stage" in codes(human)
 
 
 def test_a_change_still_cooling_is_shown_against_the_switch_it_would_move(world):

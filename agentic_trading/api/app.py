@@ -616,6 +616,25 @@ def autonomy_resume(body: AutonomyResume, request: Request) -> dict[str, Any]:
     return _ok(_service.autonomy_resume, body.reason, identity=request.state.identity)
 
 
+class AutonomySwitch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    block: Literal["reduce", "open"]
+    on: bool
+    # The switch's number, set in the same change when turning it on: the share of a holding
+    # kept for reduce, the confidence needed for open. The service checks each one's range.
+    value: int | None = Field(default=None, ge=0, le=100)
+    password: str | None = Field(default=None, max_length=1024)
+    reason: str = Field(default="", max_length=500)
+
+
+@app.post("/autonomy/switch", tags=["configuration"],
+          summary="Turn one Agentic autonomy switch on (with the password, at once) or off")
+def autonomy_switch(body: AutonomySwitch, request: Request) -> dict[str, Any]:
+    confirmed = _step_up(request, body.password)
+    return _ok(_service.autonomy_switch, body.block, body.on, value=body.value, reason=body.reason,
+               identity=request.state.identity, confirmed=confirmed)
+
+
 @app.get("/risk", tags=["portfolio"], summary="Drawdown ladders and the market regime")
 def risk_state() -> dict[str, Any]:
     return _ok(_service.risk_state)

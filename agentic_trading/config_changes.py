@@ -53,7 +53,9 @@ RECORD = "config_changes"
 MAX_RECORDS = 200
 
 PENDING, APPLIED, CANCELLED, FAILED = "pending", "applied", "cancelled", "failed"
-IMMEDIATE, COOLING = "immediate", "cooling"
+#: How a change lands: at once, after the cooling period, or -- for the two autonomy switches
+#: alone (see ``switch_change``) -- at once because the console password confirmed a loosening.
+IMMEDIATE, COOLING, CONFIRMED = "immediate", "cooling", "confirmed"
 TIGHTENING, LOOSENING, NEUTRAL, UNKNOWN = "tightening", "loosening", "neutral", "unknown"
 
 _MISSING = object()
@@ -158,13 +160,17 @@ def _yaml() -> YAML:
     return rt
 
 
-def set_values(text: str, updates: dict[str, Any]) -> str:
+def set_values(text: str, updates: dict[str, Any], *, create: frozenset[str] = frozenset()) -> str:
     """The file with each dotted path set, comments and layout preserved.
 
     A path that lands on a ``{value, recommended_default}`` node sets its ``value``, so the
     reasoning kept beside a recommended default survives the decision to replace it.
+
+    A path that does not exist is refused -- a misspelt key would otherwise become a new setting
+    nothing reads -- unless it is named in ``create``, which adds it to the end of its parent
+    mapping. Only code that names its keys itself passes ``create``; no request text reaches it.
     """
-    changed = _dump_with(text, updates)
+    changed = _dump_with(text, updates, create)
     if not updates:
         return changed
     # ruamel re-aligns flow mappings and spells `null` its own way on the way out, which would
@@ -182,7 +188,7 @@ def set_values(text: str, updates: dict[str, Any]) -> str:
     return "\n".join(out) + ("\n" if changed.endswith("\n") else "")
 
 
-def _dump_with(text: str, updates: dict[str, Any]) -> str:
+def _dump_with(text: str, updates: dict[str, Any], create: frozenset[str] = frozenset()) -> str:
     rt = _yaml()
     try:
         doc = rt.load(text)
@@ -200,9 +206,9 @@ def _dump_with(text: str, updates: dict[str, Any]) -> str:
                 raise ConfigChangeError(f"no such setting: {path}")
             node = node[part]
         leaf = parts[-1]
-        if not hasattr(node, "get") or leaf not in node:
+        if not hasattr(node, "get") or (leaf not in node and path not in create):
             raise ConfigChangeError(f"no such setting: {path}")
-        target = node[leaf]
+        target = node.get(leaf)
         if (hasattr(target, "get") and "value" in target and "recommended_default" in target
                 and not isinstance(value, dict)):
             target["value"] = _plain(value)
@@ -349,6 +355,7 @@ RULES: tuple[tuple[str, Any], ...] = (
     ("buckets.*.autonomy.*.classes", LONGER_LOOSER),
     ("buckets.*.autonomy.*.max_*", HIGHER_LOOSER),
     ("buckets.*.autonomy.*.min_confidence", LOWER_LOOSER),
+    ("buckets.*.autonomy.*.min_remaining_pct_of_opened", LOWER_LOOSER),
     ("buckets.*.require_stock_eligibility_screen", FALSE_LOOSER),
     ("buckets.*.order_rules.regular_hours_only", FALSE_LOOSER),
     ("buckets.*.order_rules.broker_side_stop_for_equities", FALSE_LOOSER),
@@ -634,6 +641,80 @@ def paths_of(spec: ChangeSpec, changes: list[dict[str, Any]]) -> list[str]:
     return [spec.key] if spec.kind == "section" else list(spec.set)
 
 
+# ------------------------------------------------------------------ the autonomy switches
+#: The Agentic account's two autonomy switches, each with the one number it cannot act without:
+#: how much of a holding code must leave in place, and how sure research must be before code
+#: buys on its own.
+#:
+#: Owner's decision, 2026-09-23: turning either switch on applies the moment the console
+#: password confirms it, instead of after the cooling period. The switch is the whole of that
+#: decision, so a day of waiting only delayed it. What stands in for the wait is the password,
+#: an urgent notice to every signed-in device, and an off that is one gesture and applies at
+#: once. Every other loosening still waits -- including these same keys edited as section text,
+#: which goes through ``classify`` like any other change.
+SWITCH_BUCKET = "micro_live"
+SWITCHES: dict[str, str] = {"reduce": "min_remaining_pct_of_opened", "open": "min_confidence"}
+
+#: What each block must declare before ``autonomy.permits`` will ever say yes. A switch that is
+#: on without them would read as on while nothing could act, so it is not turned on at all.
+SWITCH_REQUIRES: dict[str, tuple[str, ...]] = {
+    "reduce": ("min_confidence", "max_positions_reduced_per_day", "min_remaining_pct_of_opened"),
+    "open": ("classes", "min_confidence", "max_new_positions_per_day"),
+}
+
+
+def switch_path(block: str, leaf: str) -> str:
+    return f"buckets.{SWITCH_BUCKET}.autonomy.{block}.{leaf}"
+
+
+def switch_change(current: str, block: str, on: bool, value: int | None = None, *,
+                  confidence_floor: int = 80) -> tuple[ChangeSpec, str, dict[str, Any]]:
+    """One switch turned on or off: the change, the rebuilt risk_profile.yaml and its verdict.
+
+    Turning a switch on may set its number in the same change, and creates the key when the file
+    never declared it. The verdict is the ordinary classification, except that a loosening made
+    of this switch and its number alone becomes ``CONFIRMED`` rather than ``COOLING``: the caller
+    applies it at once, and only on the console password. Off is a tightening and needs neither.
+    """
+    if block not in SWITCHES:
+        raise ConfigChangeError(f"no autonomy switch named {block!r}; the switches are "
+                                + " and ".join(sorted(SWITCHES)))
+    number = SWITCHES[block]
+    updates: dict[str, Any] = {switch_path(block, "enabled"): bool(on)}
+    if value is not None:
+        if not on:
+            raise ConfigChangeError("a number is set only when a switch is turned on")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigChangeError(f"{number} must be a whole number")
+        if block == "reduce" and not 1 <= value <= 99:
+            raise ConfigChangeError("the share of each holding kept must be between 1 and 99 per cent")
+        if block == "open" and not confidence_floor <= value <= 100:
+            # Below the floor would change nothing: confidence_requirements.minimum_to_open
+            # .autonomous_any holds every autonomous action at it, so the number would lie.
+            raise ConfigChangeError(f"the confidence needed to buy must be between {confidence_floor} "
+                                    f"and 100; confidence_requirements holds every autonomous action "
+                                    f"at {confidence_floor} or more")
+        updates[switch_path(block, number)] = value
+    new_text = set_values(current, updates, create=frozenset({switch_path(block, number)}))
+    if on:
+        declared = get_value(_parse(new_text), f"buckets.{SWITCH_BUCKET}.autonomy.{block}")
+        declared = declared if isinstance(declared, dict) else {}
+        missing = [key for key in SWITCH_REQUIRES[block] if declared.get(key) in (None, [], "")]
+        if missing:
+            raise ConfigChangeError(
+                f"buckets.{SWITCH_BUCKET}.autonomy.{block} does not declare {', '.join(missing)}; "
+                "turned on without it, the switch would read as on while nothing could ever act")
+    verdict = classify("risk_profile.yaml", current, new_text)
+    if verdict["classification"] == COOLING:
+        allowed = {switch_path(block, "enabled"), switch_path(block, number)}
+        stray = [path for path in verdict["reasons"] if path not in allowed]
+        if stray:   # nothing above can produce one; refused rather than carried along at once
+            raise ConfigChangeError("only the switch and its number may change at once; also "
+                                    "changed: " + ", ".join(stray))
+        verdict = {**verdict, "classification": CONFIRMED}
+    return ChangeSpec(file="risk_profile.yaml", set=updates), new_text, verdict
+
+
 # ------------------------------------------------------------------------------ records
 def new_record(spec: ChangeSpec, *, base: Any, verdict: dict[str, Any], identity: str,
                reason: str, now: datetime | None = None) -> dict[str, Any]:
@@ -692,7 +773,7 @@ def public(record: dict[str, Any]) -> dict[str, Any]:
     """A record as the console sees it: no section text, which can be long, and no base."""
     keep = ("id", "file", "kind", "key", "classification", "changes", "reasons", "paths",
             "requested_at", "requested_by", "reason", "apply_after", "status", "applied_at",
-            "outcome", "error")
+            "outcome", "error", "switch")
     return {k: record.get(k) for k in keep}
 
 

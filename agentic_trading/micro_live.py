@@ -233,13 +233,21 @@ def run_preflight(profiles: Profiles, broker: Any | None = None) -> Preflight:
     # The assertion is deliberately about OPENING a position, not about every order. Reducing
     # one may be autonomous where the bucket's own config says so — see buckets.<bucket>
     # .autonomy.reduce — because the worst outcome of an unwanted reduction is being out of a
-    # trade. Anything that takes on risk still needs a person, and this is what proves it: a
-    # config that tried to open autonomously fails preflight, which blocks execution outright
-    # rather than quietly permitting it.
+    # trade. Opening may be too, but by one route only: the bucket's own open switch, with the
+    # instrument classes and the confidence floor autonomy.permits reads beside it (the switches
+    # decide on this account: owner's decision, 2026-09-23). A blanket setting that would let
+    # code open anything — an autonomous execution mode, allow_autonomous_opening — still fails
+    # preflight, which blocks execution outright rather than quietly permitting it. The detail
+    # says which way opening goes today, so this gate never describes opening as a person's
+    # while code may open on its own.
     mode = str(micro.get("execution_mode", "human_approval"))
-    check("PF04", "human approval active for opening a position",
+    opening = profiles.risk_cfg("buckets", BUCKET, "autonomy", "open", default={}) or {}
+    classes = ", ".join(str(c) for c in opening.get("classes") or []) or "nothing"
+    check("PF04", "opening a position: a person, or the bounded open switch only",
           mode == "human_approval" and not bool(micro.get("allow_autonomous_opening", False)),
-          f"execution_mode={mode}, autonomous opening={micro.get('allow_autonomous_opening', False)}")
+          f"execution_mode={mode}, blanket autonomous opening={micro.get('allow_autonomous_opening', False)}; "
+          + (f"the open switch is on: code may open {classes} within its own limits"
+             if opening.get("enabled") is True else "the open switch is off: every opening waits for a person"))
 
     fresh_classes = (profiles.risk.get("proposal_freshness") or {}).get("classes") or {}
     check("PF05", "stale-proposal protection active", bool(fresh_classes),

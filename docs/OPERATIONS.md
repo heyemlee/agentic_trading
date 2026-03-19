@@ -334,15 +334,15 @@ reach the venue instead of stopping at a simulated one. The emergency control fr
 
 ### Autonomy
 
-Autonomy is built and entirely switched off. Nothing in this section is running today; it is
-written down so that arming it is a decision with a checklist rather than a flag someone finds.
+Autonomy is built, and off until the owner switches it on. This section is written down so that
+arming it is a decision with a checklist rather than a flag someone finds.
 
 Two blocks configure it, and they are independent:
 
 | Config | Capabilities | State |
 | --- | --- | --- |
-| `execution_policy.autonomy` | `defensive`, `conservative`, `experimental` — the conceptual buckets | all `enabled: false` |
-| `buckets.micro_live.autonomy` | `reduce`, `open` — the real-money pair | both `enabled: false` |
+| `execution_policy.autonomy` | `defensive`, `conservative`, `experimental` — the conceptual buckets | all `enabled: false`; no code reads them |
+| `buckets.micro_live.autonomy` | `reduce`, `open` — the real-money pair | switched from Assets → Agentic; `/config/authority` says which is on |
 
 `reduce` and `open` are separate switches because they are different acts: one cuts risk, the
 other creates it, and the cost of getting each wrong is not the same. Turning one on never turns
@@ -365,11 +365,29 @@ and the approval records rather than stored in a counter, so a restart cannot lo
 the fills do not account for — transferred in, seeded, or approved before `approved_via` was
 recorded — has no baseline and is refused rather than guessed at.
 
+**Switching from the console.** The Agentic account's view in Assets carries both switches
+(owner's decision, 2026-09-23). Turning one on asks for the console password and applies **at
+once**, not after the cooling period below; it sets the switch's one number in the same change —
+the share of each holding kept for `reduce`, the confidence needed for `open` (80 or more, since
+`confidence_requirements.minimum_to_open.autonomous_any` holds every autonomous action there) —
+and refuses rather than turn on a block that `autonomy.permits` would never let act. Every
+signed-in device is told at once, urgently. Off is one gesture, needs no password and also applies
+at once. The route is `POST /autonomy/switch`; each change is committed and journaled like any
+other console change, and one still cooling for the same switch has to be withdrawn first. The
+same keys edited as section text in Settings still wait the day.
+
+On this account the switches decide, not `execution_policy.stage`: `permits()` never read the
+stage, and `/config/authority` no longer reports one as a block on the autonomous side (it still
+does on the human side, where stage 3 is what lets a person approve at all). Preflight PF04 still
+fails on a blanket setting — an autonomous `execution_mode`, `allow_autonomous_opening` — and its
+detail says whether the bounded `open` switch is on.
+
 **Arming order.** Each step is a separate decision, and none of them is code work:
 
 1. Positions exist, bought by hand, and their decision records read well.
 2. Declare `reduce.min_remaining_pct_of_opened`. Until it is declared, arming `reduce` does
-   nothing, which is the intended order: the floor is decided before the switch.
+   nothing, which is the intended order: the floor is decided before the switch. The console's
+   switch asks for it as it turns `reduce` on, so the two cannot be taken apart.
 3. Arm `reduce` only. Watch it on real fills until the daily loss gate has been seen to work.
 4. Populate `config/event_calendar.yaml` and set `maintained_through`. An autonomous open fails
    closed while that calendar is empty or expired, which is the current state and is deliberate:
@@ -521,6 +539,11 @@ to every device as `config_change_pending`, it can be withdrawn from the Setting
 it applies, and it applies against the file as it is then, failing rather than re-raising a
 ceiling from a stale premise if the part it touches was edited meanwhile. The rule table fails
 closed: a guarded path whose direction it cannot tell counts as loosening.
+
+One exception, and only one: the Agentic account's two autonomy switches, turned on from Assets
+(see [Autonomy](#autonomy)), apply at once on the password instead of waiting, and are recorded
+as `confirmed` rather than `cooling`. Only the switch and its own number may travel that way; the
+same keys edited through a form or a section still wait.
 
 Every applied change is committed locally to this checkout (`git log -- config/`), author
 `<user> via console`, never pushed; and journaled as `config_changed` in the audit trail with

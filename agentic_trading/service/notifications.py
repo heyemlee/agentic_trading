@@ -473,6 +473,25 @@ class NotificationsMixin:
                         link=_link("settings", change=change["id"]),
                         attention=change["status"] == cc.FAILED and recent,
                         notify_kind="config_change_applied", notify_link="/ui/settings.html"))
+                elif (change["status"] == cc.APPLIED and change["classification"] == cc.CONFIRMED
+                      and (change.get("switch") or {}).get("on") is True):
+                    # An autonomy switch turned on applies at once, so there is no cooling period
+                    # in which the other devices would hear of it: they hear now, urgently. Told
+                    # for a day; after that it is Settings' recent changes, not news.
+                    applied = _parse(change.get("applied_at"))
+                    if applied is None or (now - applied).total_seconds() / 3600 > DONE_HOURS:
+                        continue
+                    what = "selling" if change["switch"].get("block") == "reduce" else "buying"
+                    out.append(Condition(
+                        id=f"autonomy_switched_on:{change['id']}", kind="autonomy_switched_on",
+                        title=f"autonomous {what} was switched on",
+                        detail=f"by {change['requested_by']}, in force at once; switch it off on "
+                               "the Agentic account in Assets",
+                        scope="agentic", account_id=MICRO_BUCKET, account_label=_label("agentic", MICRO_BUCKET),
+                        subject=change["id"], since=change.get("applied_at"),
+                        link=_link("portfolio", scope="agentic"), attention=False,
+                        notify_kind="config_change_applied",
+                        notify_link="/ui/portfolio.html?scope=agentic", urgent=True))
 
         def acted() -> None:
             for proposal in stored.values():

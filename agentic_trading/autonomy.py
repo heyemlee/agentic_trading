@@ -528,8 +528,8 @@ NEEDS_ACKNOWLEDGEMENT = frozenset({LOOSENED, MIXED, UNKNOWN_CHANGE})
 HUMAN_BLOCKS = ("kill_switch", "real_money_disabled", "mode_recommend_only", "stage", "preflight",
                 "ladder_halt", "config_error")
 #: Reasons only deterministic code may not take it. A person still can.
-AUTONOMOUS_BLOCKS = ("not_enabled", "no_min_confidence", "no_classes", "withdrawn",
-                     "never_autonomous", "pending_change", "authority_changed")
+AUTONOMOUS_BLOCKS = ("not_enabled", "no_min_confidence", "no_min_remaining", "no_classes",
+                     "withdrawn", "never_autonomous", "pending_change", "authority_changed")
 
 ACTIONS = ("BUY", "ADD", "REDUCE", "SELL")
 
@@ -823,9 +823,10 @@ def effective_authority(profiles: Profiles, *, inputs: dict[str, Any], version: 
         if withdrawn.get("tripped") and action != "SELL":
             own.append({"code": "withdrawn",
                         "detail": f"autonomy was withdrawn and needs a manual reset: {withdrawn.get('reason')}"})
-        if "autonomous" not in stage_allows and action != "SELL":
-            own.append({"code": "stage",
-                        "detail": f"stage {profiles.stage} does not allow autonomous execution"})
+        # No stage block on this side. The owner's decision of 2026-09-23: on the Agentic account
+        # the two switches decide, as permits() -- which never read the stage -- always had it.
+        # This object used to add "stage N does not allow autonomous execution" here, so the
+        # console could call autonomy off while the loop was acting on it.
         blocking_own = [b for b in own if b["code"] != "pending_change"]
         autonomous_ok = not human and not blocking_own
         human_ok = not human
@@ -836,7 +837,7 @@ def effective_authority(profiles: Profiles, *, inputs: dict[str, Any], version: 
             "limits": limits,
         }
 
-    consistency = _consistency(profiles, bucket, micro, stage_allows)
+    consistency = _consistency(profiles, bucket)
     return {
         "checked_at": (now or datetime.now(UTC)).isoformat(),
         "version": version,
@@ -849,6 +850,10 @@ def effective_authority(profiles: Profiles, *, inputs: dict[str, Any], version: 
         "execution_mode": str(micro.get("execution_mode", "human_approval")),
         "kill_switch": dict(kill),
         "withdrawn": dict(withdrawn),
+        # The two switches as the file has them. Whether code may act is ``actions``; this is
+        # what a person set, which is what a switch on a screen shows.
+        "switches": {block: _cfg(profiles, bucket, block).get("enabled") is True
+                     for block in ("reduce", "open")},
         "actions": actions,
         "limits": _account_limits(profiles, bucket, micro),
         "pending_changes": list(pending_changes),
@@ -859,26 +864,19 @@ def effective_authority(profiles: Profiles, *, inputs: dict[str, Any], version: 
     }
 
 
-def _consistency(profiles: Profiles, bucket: str, micro: dict[str, Any],
-                 stage_allows: list[str]) -> list[dict[str, str]]:
+def _consistency(profiles: Profiles, bucket: str) -> list[dict[str, str]]:
     """Where the three readers of "does this need a person" can disagree, as data."""
+    # Two entries that used to be here are settled rather than named. The stage: the switches
+    # decide on this account (owner's decision, 2026-09-23), so the stage is no longer a reader
+    # that can disagree. PF04: it reports the open switch in its own detail now, so preflight no
+    # longer describes opening as a person's while code may open on its own.
     out: list[dict[str, str]] = []
     opening = _cfg(profiles, bucket, "open")
-    reducing = _cfg(profiles, bucket, "reduce")
     if opening and opening.get("min_confidence") is None:
         out.append({"code": "open_without_min_confidence",
-                    "detail": f"buckets.{bucket}.autonomy.open has no min_confidence; PF04 does not read autonomy.open.enabled",
-                    "effect": "enabling autonomy.open would pass preflight and still be refused by permits()"})
-    pf04 = (str(micro.get("execution_mode", "human_approval")) == "human_approval"
-            and not bool(micro.get("allow_autonomous_opening", False)))
-    if opening.get("enabled") is True and pf04:
-        out.append({"code": "open_enabled_unseen_by_preflight",
-                    "detail": f"buckets.{bucket}.autonomy.open.enabled is true while PF04 passes on micro_live_execution alone",
-                    "effect": "preflight reports human approval for opening while code may open on its own"})
-    if any(block.get("enabled") is True for block in (opening, reducing)) and "autonomous" not in stage_allows:
-        out.append({"code": "autonomy_not_gated_by_stage",
-                    "detail": f"buckets.{bucket}.autonomy is switched on at stage {profiles.stage}, which allows {stage_allows}",
-                    "effect": "permits() does not read execution_policy.stage; the switch alone decides"})
+                    "detail": f"buckets.{bucket}.autonomy.open has no min_confidence",
+                    "effect": "switching autonomy.open on in the file would still be refused by permits(); "
+                              "the console's switch sets the floor in the same change"})
     if profiles.risk_cfg("execution_policy", "autonomy", default=None):
         out.append({"code": "execution_policy_autonomy_unread",
                     "detail": "execution_policy.autonomy.* is read by no code; only buckets.<bucket>.autonomy is",

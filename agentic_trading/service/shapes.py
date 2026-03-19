@@ -785,6 +785,9 @@ class Authority(BaseModel):
     execution_mode: str | None = None
     kill_switch: dict[str, Any] | None = None
     withdrawn: dict[str, Any] | None = None
+    #: The two autonomy switches as the file has them, ``reduce`` and ``open``: what a person
+    #: set. Whether code may act on one is ``actions``, which also counts every other block.
+    switches: dict[str, bool] = Field(default_factory=dict)
     actions: dict[str, AuthorityAction] = Field(default_factory=dict)
     limits: dict[str, Any] = Field(default_factory=dict)
     pending_changes: list[dict[str, Any]] = Field(default_factory=list)
