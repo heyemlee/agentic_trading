@@ -342,7 +342,7 @@ Two blocks configure it, and they are independent:
 | Config | Capabilities | State |
 | --- | --- | --- |
 | `execution_policy.autonomy` | `defensive`, `conservative`, `experimental` — the conceptual buckets | all `enabled: false`; no code reads them |
-| `buckets.micro_live.autonomy` | `reduce`, `open` — the real-money pair | switched from Assets → Agentic; `/config/authority` says which is on |
+| `buckets.micro_live.autonomy` | `reduce`, `open` — the real-money pair | switched from Home → Agentic; `/config/authority` says which is on |
 
 `reduce` and `open` are separate switches because they are different acts: one cuts risk, the
 other creates it, and the cost of getting each wrong is not the same. Turning one on never turns
@@ -365,7 +365,7 @@ and the approval records rather than stored in a counter, so a restart cannot lo
 the fills do not account for — transferred in, seeded, or approved before `approved_via` was
 recorded — has no baseline and is refused rather than guessed at.
 
-**Switching from the console.** The Agentic account's view in Assets carries both switches
+**Switching from the console.** The Agentic account's view on Home carries both switches
 (owner's decision, 2026-09-23). Turning one on asks for the console password and applies **at
 once**, not after the cooling period below; it sets the switch's one number in the same change —
 the share of each holding kept for `reduce`, the confidence needed for `open` (80 or more, since
@@ -540,7 +540,7 @@ it applies, and it applies against the file as it is then, failing rather than r
 ceiling from a stale premise if the part it touches was edited meanwhile. The rule table fails
 closed: a guarded path whose direction it cannot tell counts as loosening.
 
-One exception, and only one: the Agentic account's two autonomy switches, turned on from Assets
+One exception, and only one: the Agentic account's two autonomy switches, turned on from Home
 (see [Autonomy](#autonomy)), apply at once on the password instead of waiting, and are recorded
 as `confirmed` rather than `cooling`. Only the switch and its own number may travel that way; the
 same keys edited through a form or a section still wait.

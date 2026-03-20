@@ -2,11 +2,12 @@
    are prefetched; account data and retained DOM live in this tab's memory only. */
 (function () {
   'use strict';
-  const routes = new Set(['index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
+  const routes = new Set(['index', 'advisor', 'more', 'risk', 'activity',
     'evaluation', 'profile', 'notifications', 'system', 'approvals', 'lab', 'settings']);
-  /* Research moved into the Lab. A link written before then, or one the server still names,
-     opens the Lab with its query, here and on a cold load alike (api/app.py redirects). */
-  const aliases = { research: 'lab' };
+  /* Research moved into the Lab, and Assets became Home. A link written before then, or one
+     the server still names, opens the page it moved to with its query, here and on a cold load
+     alike (api/app.py redirects). */
+  const aliases = { research: 'lab', portfolio: 'index' };
   const dependencies = { advisor: ['advisor-session.js'], notifications: ['push.js'],
     approvals: ['approval-intent.js'], lab: ['lab/pixel-office.js', 'lab/report.js'] };
   const views = new Map(), factories = new Map(), pending = new Map();
@@ -192,7 +193,7 @@
     const alias = url.pathname.slice(base.pathname.length).replace(/\.html$/, '');
     if (Object.hasOwn(aliases, alias)) url = new URL(aliases[alias] + '.html' + url.search + url.hash, base);
     if (routeName(url) === 'advisor' && url.searchParams.get('view') === 'holdings') {
-      url = new URL('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''), base);
+      url = new URL('index.html' + (window.CT_DEMO ? '?demo=1' : ''), base);
     }
     const name = routeName(url), view = views.get(name);
     // This path is synchronous: a prepared tab never waits for a request or microtask.

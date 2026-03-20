@@ -368,15 +368,15 @@ dialog.sheet[open]::backdrop { animation: fade-in var(--motion-base) var(--ease)
   background: var(--surface-2); margin: var(--space-2) auto var(--space-3);
 }
 
-/* ─── Me: a page of links, drawn in Assets' glass ──────────────────────
+/* ─── Me: a page of links, drawn in Home's glass ────────────────────────
    <body class="theme-mono pf-glass"> brings in the material from portfolio.css: the
    grey field, the glass card, rows with a bead, the ink call to action. What follows is
    only what a page of links adds to it: the system's state as the card's figure, an
    icon in the bead, and rows that are buttons. The state's dot is the one colour on the
    page, and it means something: ready, paused or neither. */
-/* The same glass in ink. portfolio.css draws Assets in Home's green on body.pf-glass alone; a
+/* The same glass in ink. portfolio.css draws Home in green on body.pf-glass alone; a
    page that also carries theme-mono gets the material in black and white, whatever those
-   tokens say for Assets. Two classes outrank one, so this holds in either load order. */
+   tokens say for Home. Two classes outrank one, so this holds in either load order. */
 body.theme-mono.pf-glass {
   --pf-ink: #0d0d0d; --pf-ink-2: #5d5d5d; --pf-ink-3: #8f8f8f;
   --pf-line: rgba(13, 13, 13, .08); --pf-fill: rgba(13, 13, 13, .045);
@@ -420,6 +420,7 @@ html:has(> body.theme-mono.pf-glass) { background: #fbfbfc; }
 .me-dot.is-warn { background: var(--warn-ink); box-shadow: 0 0 0 4px color-mix(in oklab, var(--warn-ink) 16%, transparent); }
 .me-dot.is-bad { background: var(--danger); box-shadow: 0 0 0 4px color-mix(in oklab, var(--danger) 16%, transparent); }
 .me-copy { display: block; margin-top: 8px; }
+.me-notices { display: block; margin-top: 4px; }
 .me-rows { margin: 16px -10px -8px; padding-top: 6px; border-top: 1px solid var(--pf-line); }
 /* a section label sits close to the rows it names */
 .me-page .pf-card-head + .pf-holdings { margin-top: 6px; }
@@ -959,8 +960,6 @@ html:has(dialog[open]) .assistant-launcher::before { animation-play-state: pause
 .app-segments { display: flex; gap: 4px; padding: 5px; background: #eaf0e7; border-radius: 25px; margin-top: 22px; }
 .app-segments button { flex: 1; min-height: 44px; border: 0; border-radius: 21px; color: #555b56; background: transparent; font-size: 15px; font-weight: 600; }
 .app-segments [aria-selected="true"] { background: #fff; color: #172218; box-shadow: 0 2px 8px #23351d12, inset 0 1px 0 #fff; }
-/* Today: what is not normal is a short list. */
-.home-page .home-conditions { padding-block: 0 8px; }
 @view-transition { navigation: auto; }
 ::view-transition-old(root) { animation-duration: 120ms; }
 ::view-transition-new(root) { animation-duration: 180ms; }
@@ -1077,7 +1076,6 @@ html:has(dialog[open]) { overflow: hidden; }
 
 /* Persistent, inline notifications. Only decorative layers overlap: every real
    item stays in normal flow, with native disclosure for touch and keyboard. */
-.home-page .home-attention { padding-block: 8px 20px; }
 .attention-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .attention-heading h2 { font-size: 13px; font-weight: 600; color: var(--muted); }
 .attention-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -1131,10 +1129,6 @@ html:has(dialog[open]) { overflow: hidden; }
   .home-attention-item { padding: 14px; gap: 10px; grid-template-columns: 28px minmax(0, 1fr); }
   .home-attention-item .attention-icon { width: 28px; height: 28px; border-radius: 9px; }
 }
-.home-page .agent-strip { display: flex; align-items: center; gap: 12px; color: inherit; }
-.home-page .agent-strip > div { flex: 1; }
-.home-page .pagehead { padding-block: 12px; }
-.home-page .app-quick-actions { margin: 12px 0; }
 .assistant-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .assistant-shortcuts [aria-selected="true"] { background: var(--green-tint); color: var(--green-ink); }
 

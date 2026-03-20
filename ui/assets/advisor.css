@@ -82,7 +82,7 @@
 .scope-chevron { flex: none; width: 7px; height: 7px; margin: -4px 1px 0; border: solid var(--dc-ink-2); border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
 
 /* ─── Chat and Discover: one glass track, one lens that slides ──────────
-   The shape of the Assets account switch in the assistant's ink: a track sunk a little into the
+   The shape of Home's account switch in the assistant's ink: a track sunk a little into the
    white, and a white lens with a lit top edge that glides to the chosen view. */
 .assistant-subhead { padding: 4px 0 10px; }
 .view-switch {

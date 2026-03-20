@@ -385,7 +385,7 @@ def test_a_switch_turned_on_applies_at_once_on_the_password_and_says_so(sandbox)
     notices = [n for n in sandbox.collect_notifications() if n.key.startswith("autonomy_switched_on:")]
     assert len(notices) == 1 and notices[0].urgent and notices[0].kind == "config_change_applied"
     assert notices[0].title == "autonomous selling was switched on"
-    assert notices[0].link == "/ui/portfolio.html?scope=agentic"
+    assert notices[0].link == "/ui/index.html?scope=agentic"
     events = sandbox.activity(kinds=("config_changed",))["events"]
     assert any((e.get("detail") or {}).get("switch") == {"block": "reduce", "on": True} for e in events)
 

@@ -457,7 +457,7 @@ test('portfolio keeps broker snapshots separate from strategy money and labels s
       { symbol: 'AAPL', quantity: 3, average_cost: 200, market_value_usd: 600, unrealized_pct: 0 }
     ] }
   ] } };
-  c.run('pages/portfolio.js');
+  c.run('pages/index.js');
   assert.equal(optional[0], 'advisor');
   assert.ok(optional.includes('microLive'), 'the Agentic account is read live from the venue');
   assert.match(c.element('broker-accounts').innerHTML, /Account &lt;img&gt;/);
@@ -482,7 +482,7 @@ test('portfolio account cards switch the entire visible view without mixing bala
     c.posts = [];
     c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => {},
       post: async path => { c.posts.push(path); return { run_key: 'refresh' }; } };
-    c.run('pages/portfolio.js');
+    c.run('pages/index.js');
     return c;
   };
   const personal = open('robinhood');
@@ -505,7 +505,7 @@ function portfolioPage(post, advisor) {
   c.Console.live = (keys, render) => { c.render = render; render(); };
   c.CT_API = { isLive: () => true, writesEnabled: true, readOnce: async () => {}, post };
   c.CT.advisor = advisor;
-  c.run('pages/portfolio.js');
+  c.run('pages/index.js');
   return c;
 }
 const savedSnapshot = { fetched_at: '2026-09-09T12:00:00Z', accounts: [] };
@@ -564,7 +564,7 @@ function holdingPage(advisor, { post, writes = true,
   c.CT_API = { isLive: () => true, writesEnabled: writes, readOnce: async () => { c.reread++; },
     post: post || (async (path, body) => { c.posts.push([path, body]); return { run_key: 'advisor_new' }; }) };
   c.CT.advisor = advisor;
-  c.run('pages/portfolio.js');
+  c.run('pages/index.js');
   return c;
 }
 const nvda = { symbol: 'NVDA', quantity: 40, average_cost: 98.5, price: 131.4, market_value_usd: 5256,
@@ -582,7 +582,7 @@ test('a Robinhood holding opens its own view, never the strategy research form',
   const c = holdingPage({ stale: false, jobs: [], decisions: [],
     snapshot: { ...holdingSnapshot(), errors: ['Scan <b>: only the first candidate page was read.'] } }, { search: '' });
   const list = c.element('broker-accounts').innerHTML;
-  assert.match(list, /href="portfolio\.html\?scope=robinhood&amp;account=a{20}&amp;ticker=NVDA"/);
+  assert.match(list, /href="index\.html\?scope=robinhood&amp;account=a{20}&amp;ticker=NVDA"/);
   assert.doesNotMatch(list, /research\.html/);
   assert.match(list, /<details class="pf-card pf-more pf-notes"><summary>pf\.readNotes 1<\/summary>/,
                'what the read could not do is kept, one tap away');
@@ -741,7 +741,7 @@ function ledgerPage(post, portfolio, fetchJSON) {
                fetchJSON: fetchJSON || (async () => ({})) };
   c.CT.advisor = { stale: false, jobs: [], snapshot: { fetched_at: '2026-09-11T12:00:00Z', accounts: [] } };
   c.CT.portfolio = portfolio;
-  c.run('pages/portfolio.js');
+  c.run('pages/index.js');
   return c;
 }
 const heldBack = {
@@ -940,7 +940,7 @@ test('turning a switch on asks for its number and the password, and sends them t
   c.element('pfa-value').value = '40';
   c.element('pfa-sheet-confirm').events.click(); await flush();
   assert.deepEqual(plain(sent), [['/autonomy/switch', { block: 'reduce', on: true, value: 40, password: 'pw',
-                                                        reason: 'switched on from Assets' }]]);
+                                                        reason: 'switched on from Home' }]]);
   assert.match(c.element('pfa-status').textContent, /pfa.doneOn/);
   assert.equal(c.reread, true, 'the switch is read back, not assumed');
 
@@ -975,7 +975,7 @@ test('off, pause and resume take a second tap and follow the server’s answer',
   assert.equal(sent.length, 0, 'the first tap only arms');
   assert.match(c.element('pfa-rows').innerHTML, /data-pfa="off:reduce">pf.tapAgain/);
   press(c, 'off:reduce'); await flush();
-  assert.deepEqual(plain(sent[0]), ['/autonomy/switch', { block: 'reduce', on: false, reason: 'switched off from Assets' }]);
+  assert.deepEqual(plain(sent[0]), ['/autonomy/switch', { block: 'reduce', on: false, reason: 'switched off from Home' }]);
   assert.match(c.element('pfa-status').textContent, /pfa.doneOff/);
 
   press(c, 'pause'); press(c, 'pause'); await flush();
@@ -1002,7 +1002,7 @@ test('autonomy the system withdrew is shown as stopped and restored only with th
   assert.equal(c.element('pfa-value-field').hidden, true);
   c.element('pfa-password').value = 'pw';
   c.element('pfa-sheet-confirm').events.click(); await flush();
-  assert.deepEqual(plain(sent), [['/autonomy/resume', { reason: 'restored from Assets', password: 'pw' }]]);
+  assert.deepEqual(plain(sent), [['/autonomy/resume', { reason: 'restored from Home', password: 'pw' }]]);
 });
 
 test('a reader who cannot write sees the switches but cannot move them', () => {
@@ -1651,7 +1651,7 @@ function homePage(portfolio, showConceptual = false) {
   if (portfolio) c.CT.portfolio = portfolio;
   c.Console.mount = c.Console.wireTabs = () => {};
   c.Console.live = (keys, render, extra = []) => { c.reads = [...keys, ...extra]; c.render = render; render(); };
-  c.CT_API = { canAct: () => true, readOnce: async () => {}, isLive: () => true };
+  c.CT_API = { canAct: () => true, readOnce: async () => {}, isLive: () => true, writesEnabled: true, post: async () => ({}) };
   c.run('pages/index.js');
   return c;
 }
@@ -1869,24 +1869,27 @@ test('home hides the entire attention section only when the collector is readabl
   assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /at.clear/);
 });
 
-test('home counts system notices on one line to System, never among the to-dos', () => {
+test('a system notice is never one of Home\'s to-dos; Me counts them beside the state', () => {
   const c = homePage();
   c.CT.attention = attentionPayload([attentionItem()]);
   c.CT.health.warnings = ['Optional data <source> unavailable', 'A second notice'];
   c.render();
-  const html = c.element('needs-you-slot').innerHTML;
   assert.equal(c.element('home-attention').hidden, false);
-  assert.doesNotMatch(html, /Optional data|A second notice|at.more/, 'a notice is not a to-do');
-  const line = c.element('conditions-list').innerHTML;
-  assert.equal(c.element('home-conditions').hidden, false);
-  assert.match(line, /system\.html" data-od-id="condition-notices"/);
-  assert.match(line, /list-value">2</);
-  assert.doesNotMatch(line, /Optional data/, 'System holds the text; Home only counts it');
+  assert.doesNotMatch(c.element('needs-you-slot').innerHTML, /Optional data|A second notice|at.more/, 'a notice is not a to-do');
+  assert.equal(c.element('home-conditions').hidden, true, 'nor is it something abnormal, above the accounts');
   c.CT.attention = attentionPayload(); c.render();
   assert.equal(c.element('home-attention').hidden, true, 'a notice alone does not keep the to-dos open');
-  assert.equal(c.element('home-conditions').hidden, false);
-  c.CT.health.warnings = []; c.render();
-  assert.equal(c.element('home-conditions').hidden, true);
+
+  const me = context(true); me.run('console.js'); me.Console.mount = () => {};
+  me.Console.live = (keys, render) => { me.render = render; render(); };
+  me.CT_API = { authenticated: true, state: {}, isLive: () => true };
+  me.CT.health.warnings = ['Optional data <source> unavailable', 'A second notice'];
+  me.run('pages/more.js');
+  assert.equal(me.element('more-notices').hidden, false);
+  assert.match(me.element('more-notices').textContent, /more.notices 2/);
+  assert.doesNotMatch(me.element('more-notices').textContent, /Optional data/, 'System holds the text; Me only counts it');
+  me.CT.health.warnings = []; me.render();
+  assert.equal(me.element('more-notices').hidden, true);
 });
 
 test('home lists only what is not normal, each row on the page that owns it', () => {
@@ -1906,31 +1909,6 @@ test('home lists only what is not normal, each row on the page that owns it', ()
   c.CT.health.micro_live_enabled = false; c.render();
   assert.doesNotMatch(c.element('conditions-list').innerHTML, /condition-preflight/,
     'real money switched off by choice is not a problem to report');
-});
-
-test('home leads with running research, then conclusions, each naming its account', () => {
-  const c = homePage(); c.CT_DEMO = false;
-  c.CT.attention = attentionPayload();
-  c.CT.researchJobs = [
-    { run_key: '2026-09-25_VTI_live', ticker: 'VTI', bucket: 'micro_live', scope: 'agentic', account_label: 'Agentic', state: 'RUNNING' },
-    { run_key: 'chat-1', task: { kind: 'chat' }, state: 'RUNNING' },
-  ];
-  c.CT.research = [
-    { run_id: '2026-09-18_BND_x', ticker: 'BND', bucket: 'micro_live', scope: 'agentic', account_label: 'Agentic',
-      final_action: 'NO_TRADE', confidence: 45, trade_date: '2026-09-18' },
-    { run_id: '2026-09-18_VXUS_demo', ticker: 'VXUS', bucket: 'core', scope: 'demo', account_label: 'Demo',
-      final_action: 'NO_TRADE', trade_date: '2026-09-18' },
-    { run_id: 'advisor_1', ticker: 'NVDA', bucket: 'advisory', scope: 'personal', account_label: 'Robinhood ••••1111',
-      account_scope_kind: 'single', account_id: 'A', final_action: 'NO_TRADE', trade_date: '2026-09-15' },
-  ];
-  c.render();
-  const html = c.element('research-list').innerHTML;
-  assert.ok(html.indexOf('lab.html?run=2026-09-25_VTI_live') < html.indexOf('BND'), 'a running study leads');
-  assert.doesNotMatch(html, /chat-1/, 'an assistant job runs no desks, so it has no office to open');
-  assert.doesNotMatch(html, /VXUS/, 'the hidden Demo book stays off Home');
-  assert.match(html, /lab.html\?run=2026-09-18_BND_x&amp;scope=agentic/);
-  assert.match(html, /run=advisor_1&amp;scope=personal&amp;account=A/);
-  assert.match(html, /Robinhood ••••1111/);
 });
 
 test('home preserves collector priority, displays partial items, and removes resolved items', () => {
@@ -1973,8 +1951,10 @@ test('More only offers approvals for collector items requiring a proposal decisi
   c.run('pages/more.js');
   c.CT.attention = attentionPayload([attentionItem({ kind: 'config_change_pending', requires_person: false })]); c.render();
   assert.equal(c.element('more-approvals').hidden, true);
+  assert.equal(c.element('more-rows').hidden, true, 'no empty row block under the state');
   c.CT.attention = attentionPayload([attentionItem()]); c.render();
   assert.equal(c.element('more-approvals').hidden, false);
+  assert.equal(c.element('more-rows').hidden, false);
   assert.match(c.element('more-approvals').href, /approvals.html\?proposal=A/);
   const unfinished = attentionItem({ kind: 'exit_incomplete', actions: ['continue_exit', 'open'],
     link: { page: 'approvals', params: { proposal: 'exit-root' } } });
@@ -1984,7 +1964,7 @@ test('More only offers approvals for collector items requiring a proposal decisi
   const home = homePage(); home.CT.attention = attentionPayload([unfinished]); home.render();
   assert.match(home.element('needs-you-slot').innerHTML, /proposal=exit-root/);
   c.CT.attention.readable = false; c.render();
-  assert.equal(c.element('more-attention-copy').textContent, 'at.unknown');
+  assert.equal(c.element('more-approvals-copy').textContent, 'at.unknown');
 });
 
 test('reading or polling a finished run never marks it opened; explicit receipts deduplicate with CSRF', async () => {
@@ -2319,20 +2299,26 @@ test('Assistant marks a completed decision only while its result sheet remains v
   }
 });
 
-/* Home carried a card of the Agentic ledger: equity, its high-water mark, funding, source. Every
-   figure repeated Assets', and the card read only the ledger, so it went blank whenever the
-   ledger was held back while Assets led with the live balance. The owner had it removed
-   (2026-09-23). A ladder that moves, a halt and an unconfirmed ledger reach Home as attention
-   or as a condition; the account's figures are Assets' alone. */
-test('Home draws no account figures, and does not read the ledger to draw them', () => {
-  for (const showConceptual of [false, true]) {
-    const c = homePage(null, showConceptual);
-    assert.ok(!c.reads.includes('portfolio'), 'Home asked for the ledger it no longer draws');
-  }
+/* The owner's three tabs (2026-09-23): Home, the Lab, Me. Home is the accounts, with what needs
+   you and what is not normal above them, only while there is something; it was the Assets tab,
+   and Today's summary card had repeated its figures. Research is the Lab's, and the notices
+   System holds are counted on Me. */
+test('Home is the accounts, with what needs you above them, and the tab bar has three tabs', () => {
+  const c = homePage();
+  assert.deepEqual([...c.Console.NAV.filter(n => n.tab).map(n => n.href)], ['index.html', 'lab.html'],
+    'Home and the Lab, then Me');
+  assert.ok(!fs.existsSync(path.join(root, 'ui/portfolio.html')), 'Assets is Home now');
   const html = uiFile('index.html');
-  for (const id of ['account-card', 'equity-value', 'hwm-foot', 'funding-kv', 'equity-source', 'account-list']) {
-    assert.ok(!html.includes('id="' + id + '"'), 'the account card is back on Home: #' + id);
-  }
+  assert.ok(html.indexOf('id="home-attention"') < html.indexOf('id="home-conditions"'));
+  assert.ok(html.indexOf('id="home-conditions"') < html.indexOf('id="pf-switch"'), 'to-dos come before the accounts');
+  assert.ok(!html.includes('id="research-list"'), 'research is the Lab\'s');
+  for (const read of ['portfolio', 'advisor', 'attention', 'risk', 'orders']) assert.ok(c.reads.includes(read), read);
+  for (const read of ['research', 'researchJobs', 'schedule']) assert.ok(!c.reads.includes(read), read + ' is the Lab\'s');
+  const plain = context(); plain.run('console.js');
+  assert.equal(plain.Console.taskLink({ page: 'portfolio', params: { scope: 'agentic' } }), 'index.html?scope=agentic',
+    'a link that still names Assets opens Home');
+  assert.equal(plain.Console.taskLink({ page: 'index', params: { scope: 'robinhood', account: 'A', ticker: 'VOO' } }),
+    'index.html?scope=robinhood&account=A&ticker=VOO');
 });
 
 test('a drawdown ladder away from normal stays in view on Home; a halt is left to status and attention', () => {
@@ -2358,7 +2344,7 @@ test('a drawdown ladder away from normal stays in view on Home; a halt is left t
   assert.match(shown.element('conditions-list').innerHTML, /condition-ladder-core/, 'with the Demo book shown, its ladders are too');
 });
 
-test('Assets shows money paid in as funding, and the result against it, never one as the other', () => {
+test('Home shows money paid in as funding, and the result against it, never one as the other', () => {
   const c = context(true); c.location.search = '?scope=agentic&demo=1'; c.run('console.js');
   c.Console.mount = () => {};
   c.Console.live = (keys, render) => { c.render = render; render(); };
@@ -2366,7 +2352,7 @@ test('Assets shows money paid in as funding, and the result against it, never on
   c.CT.advisor = { stale: false, jobs: [], snapshot: savedSnapshot };
   Object.assign(c.CT.portfolio.accounts.micro_live,
     { equity_usd: 110, net_deposits_usd: 100, investment_pnl_usd: 10, return_pct: 10 });
-  c.run('pages/portfolio.js');
+  c.run('pages/index.js');
   assert.equal(c.element('pf-total').textContent, '$110.00');
   assert.match(c.element('account-cards').innerHTML, /home\.funded<\/dt><dd>\$100\.00</, 'funding is its own figure');
   const result = c.element('pf-result').innerHTML;
@@ -3158,23 +3144,10 @@ test('unchanged account markup is not replaced when another resource updates', (
   assert.equal(replacements, 0);
 });
 
-test('home opens a running study in its office', () => {
-  const c = homePage(); c.CT_DEMO = false;
-  c.CT.attention = null;
-  let watched = 0; c.CT_API.watchRun = () => { watched++; };
-  c.CT.researchJobs = [{ run_key: '2026-09-15_VTI_test', state: 'RUNNING' }]; c.render();
-  assert.match(c.element('research-list').innerHTML, /lab\.html\?run=2026-09-15_VTI_test"/);
-  assert.match(c.element('research-list').innerHTML, /agent.studying VTI/);
-  assert.equal(watched, 0, 'Home lists the queue; the office is what follows a run');
-  c.CT.researchJobs = []; c.CT.proposals = []; c.render();
-  assert.doesNotMatch(c.element('research-list').innerHTML, /agent.studying/, 'nothing running, nothing to watch');
-  assert.match(c.element('needs-you-slot').innerHTML, /at.unknown/, 'only the attention collector decides what needs action');
-});
-
 function loadingPage(fetch) {
   const c = context();
-  c.location.pathname = '/ui/portfolio.html';
-  c.element('content').dataset.i18nTitle = 'pf.title';
+  c.location.pathname = '/ui/index.html';
+  c.element('content').dataset.i18nTitle = 'home.title';
   c.element('blank-state').remove = function () { this.removed = true; };
   c.fetch = fetch;
   c.run('api.js'); c.run('console.js');
@@ -3193,7 +3166,7 @@ test('slow navigation shows a titled skeleton, reads in parallel and never claim
   });
   assert.ok(calls.includes('/portfolio'), 'page reads must not wait for session confirmation');
   assert.equal(c.element('content').hidden, true);
-  assert.match(c.element('blank-state').innerHTML, /pf.title.*ux.loadingPage/);
+  assert.match(c.element('blank-state').innerHTML, /home.title.*ux.loadingPage/);
   assert.ok(!c.element('blank-state').innerHTML.includes('ux.signedOutBody'));
   assert.equal(c.CT_API.writesEnabled, false);
   portfolio(response({ buckets: {}, accounts: {} })); await flush();

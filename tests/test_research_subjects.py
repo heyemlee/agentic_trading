@@ -143,3 +143,9 @@ def test_the_route_answers_in_its_shape_and_old_research_links_land_in_the_lab(a
     assert moved.status_code == 307
     assert moved.headers["location"] == "/ui/lab.html?run=R1&scope=agentic"
     assert auth_client.get("/ui/research.html", follow_redirects=False).headers["location"] == "/ui/lab.html"
+
+    # Assets became Home: a holding's address, or a delivered notification, keeps its view.
+    moved = auth_client.get("/ui/portfolio.html?scope=robinhood&account=A&ticker=VOO", follow_redirects=False)
+    assert moved.status_code == 307
+    assert moved.headers["location"] == "/ui/index.html?scope=robinhood&account=A&ticker=VOO"
+    assert auth_client.get("/ui/portfolio.html", follow_redirects=False).headers["location"] == "/ui/index.html"

@@ -1,12 +1,13 @@
 /* ─────────────────────────────────────────────────────────────────────────
- * Assets — liquid glass, in Home's Robinhood palette.
+ * Home — the accounts, as liquid glass in the console's Robinhood palette.
  *
- * The page opts in with <body class="pf-glass">. Like Home, it carries no theme class, so the
- * shared components keep the console's own green, and this file draws the page's own from the
- * same values Home uses: its green-tinted field, card fill, hairlines and soft shadow. Every
- * rule is scoped to a .pf- class or to body.pf-glass, because the server ships this sheet
- * with every console page (api/app.py, primary_templates) so a tap from another tab can
- * show Assets before any stylesheet has to be fetched.
+ * Home was the Assets tab until 2026-09-23; the pf- prefix is its name from then. The page
+ * opts in with <body class="pf-glass">. It carries no theme class, so the shared components
+ * keep the console's own green, and this file draws the page's own from the same values:
+ * the green-tinted field, card fill, hairlines and soft shadow. Every rule is scoped to a .pf-
+ * class, to body.pf-glass or to Home's own sections, because the server ships this sheet with
+ * every console page (api/app.py, primary_templates) so a tap from another tab can show Home
+ * before any stylesheet has to be fetched.
  *
  * Glass here is a material, not a blur. A card is a translucent white body over a soft
  * grey field, with a lit top edge, a darker bottom edge and a long soft shadow. That
@@ -80,6 +81,10 @@ body.pf-glass {
 .pf-stack { display: flex; flex-direction: column; gap: 16px; }
 .pf-body { padding-top: 0; }
 .pf-head { padding-bottom: 16px; }
+
+/* ─── what needs you, then what is not normal: between the title and the accounts ─── */
+.pf-head .home-attention { margin-top: 18px; }
+.pf-head .home-conditions { margin-top: 14px; padding: 4px 20px; }
 .pf-badge {
   display: inline-flex; align-items: center; min-height: 26px; padding: 3px 11px; border-radius: 999px;
   font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--pf-ink-2); background: var(--pf-fill);

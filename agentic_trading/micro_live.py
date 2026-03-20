@@ -106,7 +106,7 @@ def read_venue(broker: Any, checked_at: str) -> VenueReading:
     (docs/SELL_CONTRACT_2026-09-19.md), and asking here keeps them on the one reading the
     console already keeps between polls instead of opening a session per request. A failure to
     read them is kept as text and never raised: it must not cost preflight its account gates.
-    So are a quote per holding, for the Assets screen's real-time view of the account.
+    So are a quote per holding, for Home's real-time view of the account.
     """
     try:
         account = broker.get_account()

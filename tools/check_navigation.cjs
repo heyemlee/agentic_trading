@@ -14,7 +14,7 @@ from agentic_trading.api.app import ConsoleFiles
 ui = Path('ui')
 files = ConsoleFiles(ui)
 print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_text(), name)
-                  for name in ('index', 'portfolio', 'advisor', 'more', 'risk', 'activity',
+                  for name in ('index', 'advisor', 'more', 'risk', 'activity',
                                'evaluation', 'profile', 'notifications', 'system', 'approvals', 'lab', 'settings')}))
 `], {cwd: root, encoding:'utf8', maxBuffer: 8 * 1024 * 1024}));
 (async () => {
@@ -72,7 +72,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  await page.route('**/*', async route=>{
   const url = new URL(route.request().url());
   if(url.pathname.startsWith('/ui/')) {
-    if (/assets\/pages\/(portfolio|advisor|more)\.js/.test(url.pathname)) await new Promise(r=>setTimeout(r,900));
+    if (/assets\/pages\/(lab|advisor|more)\.js/.test(url.pathname)) await new Promise(r=>setTimeout(r,900));
     return route.continue();
   }
   if(url.pathname==='/favicon.ico') return route.fulfill({status:204});
@@ -108,7 +108,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  }
 
  const times=[];
- for(const tab of ['portfolio','advisor','more','dashboard','portfolio','advisor']) {
+ for(const tab of ['lab','advisor','more','dashboard','lab','advisor']) {
    const t = await page.evaluate(tab=>{
     const before = performance.now();
     document.querySelector(tab === 'advisor' ? '#assistant-launcher' : '[data-od-id="tab-'+tab+'"]').click();
@@ -124,7 +124,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  if (!safari) assert.equal(await page.locator('#content').evaluate(el => el === document.activeElement), true);
  assert.equal(await page.locator('#assistant-back').isVisible(), true);
  await page.locator('#chat-input').fill('Draft stays across tabs');
- await selectTab('portfolio');
+ await selectTab('dashboard');
  // iOS keeps a scrolled page's visual offset while the next view changes the
  // shared body to fixed positioning. Entering chat must clear it first.
  const previousScroll = await page.evaluate(() => {
@@ -187,7 +187,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
    document.body.append(link); link.click(); link.remove();
  });
  await page.locator('#assistant-back').click();
- await page.waitForURL('**/portfolio.html');
+ await page.waitForURL('**/index.html');
  assert.equal(await page.locator('.tabbar').isVisible(), true);
  await selectTab('advisor');
  // Leave while the keyboard is open; close it on another page, then return
@@ -200,7 +200,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  });
  await page.waitForFunction(() => document.body.classList.contains('assistant-keyboard'));
  await page.locator('#assistant-back').click();
- await page.waitForURL('**/portfolio.html');
+ await page.waitForURL('**/index.html');
  assert.equal(await page.locator('.tabbar').isVisible(), true);
  assert.equal(await page.evaluate(() => getComputedStyle(document.body).position), 'static');
  await page.evaluate(() => { delete visualViewport.height; delete visualViewport.offsetTop; });
@@ -220,13 +220,13 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('.tabbar').count(),1);
  assert.equal(await page.locator('#content').count(),1);
  assert.equal(await page.locator('#startup').count(),0, 'route changes must not replay the startup');
- await selectTab('portfolio');
+ await selectTab('lab');
  await selectTab('dashboard');
 
- // Assistant is a header action; the Lab occupies the third tab. Returning from
+ // Assistant is a header action; the Lab occupies the second tab. Returning from
  // Assistant must restore the Lab, including its selected navigation state.
  assert.deepEqual(await page.locator('.tabbar .tabitem').evaluateAll(tabs => tabs.map(el => el.getAttribute('href'))),
-   ['index.html', 'portfolio.html', 'lab.html', 'more.html']);
+   ['index.html', 'lab.html', 'more.html']);
  assert.equal(await page.locator('.tabbar a[href="advisor.html"]').count(), 0);
  await selectTab('lab');
  await page.waitForFunction(() => !document.getElementById('content').inert);
@@ -263,53 +263,53 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  });
  assert.equal(slide.same, true, 'Routing preserves the animated lens');
  assert.ok(slide.middle > slide.from + 1 && slide.middle < slide.to - 1, 'Selection slides rather than jumping');
- await selectTab('portfolio'); // Reverse while the previous animation is in flight.
+ await selectTab('dashboard'); // Reverse while the previous animation is in flight.
  await lensAligned();
  assert.equal(await page.evaluate(() => window.navigationLens === document.querySelector('.tab-indicator')), true);
- const portfolioTab = await page.locator('[data-od-id="tab-portfolio"]').boundingBox();
+ const homeTab = await page.locator('[data-od-id="tab-dashboard"]').boundingBox();
  const labTab = await page.locator('[data-od-id="tab-lab"]').boundingBox();
  const cx = box => box.x + box.width / 2;
- const cy = portfolioTab.y + portfolioTab.height / 2;
+ const cy = homeTab.y + homeTab.height / 2;
  const depthBeforeDrag = await page.evaluate(() => history.state.ctDepth);
- await page.mouse.move(cx(portfolioTab), cy);
+ await page.mouse.move(cx(homeTab), cy);
  await page.mouse.down();
- await page.mouse.move((cx(portfolioTab) + cx(labTab)) / 2, cy, {steps:4});
- assert.ok(page.url().endsWith('portfolio.html'), 'A drag does not navigate before release');
+ await page.mouse.move((cx(homeTab) + cx(labTab)) / 2, cy, {steps:4});
+ assert.ok(page.url().endsWith('index.html'), 'A drag does not navigate before release');
  const dragLeft = await page.locator('.tab-indicator').evaluate(el => el.getBoundingClientRect().left);
- assert.ok(dragLeft > portfolioTab.x + 5 && dragLeft < labTab.x - 5, 'Lens tracks the finger between tabs');
+ assert.ok(dragLeft > homeTab.x + 5 && dragLeft < labTab.x - 5, 'Lens tracks the finger between tabs');
  await page.mouse.move(cx(labTab), cy, {steps:4});
  await page.mouse.up();
  await page.waitForURL('**/lab.html');
  await lensAligned();
  assert.equal(await page.evaluate(() => history.state.ctDepth), depthBeforeDrag + 1, 'Drag commits one route');
  await page.goBack();
- await page.waitForURL('**/portfolio.html');
+ await page.waitForURL('**/index.html');
  await lensAligned();
  // Exercise native touch panning as well as mouse pointer capture in Chrome.
  if (!safari) {
    const cdp = await context.newCDPSession(page);
-   await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{x:cx(portfolioTab),y:cy}]});
+   await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[{x:cx(homeTab),y:cy}]});
    for (let step = 1; step <= 6; step++) {
      await cdp.send('Input.dispatchTouchEvent', {type:'touchMove',
-       touchPoints:[{x:cx(portfolioTab) + (cx(labTab) - cx(portfolioTab)) * step / 6,y:cy}]});
+       touchPoints:[{x:cx(homeTab) + (cx(labTab) - cx(homeTab)) * step / 6,y:cy}]});
    }
-   assert.ok(page.url().endsWith('portfolio.html'));
+   assert.ok(page.url().endsWith('index.html'));
    await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
    await page.waitForURL('**/lab.html');
    await lensAligned();
    await page.goBack();
-   await page.waitForURL('**/portfolio.html');
+   await page.waitForURL('**/index.html');
    await lensAligned();
    await cdp.detach();
  }
  // Pointer cancellation restores the current section without committing a route.
- await page.mouse.move(cx(portfolioTab), cy);
+ await page.mouse.move(cx(homeTab), cy);
  await page.mouse.down();
  await page.mouse.move(cx(labTab), cy, {steps:4});
  await page.locator('.tabbar').dispatchEvent('pointercancel', {pointerId:1});
  await page.mouse.up();
  await lensAligned();
- assert.ok(page.url().endsWith('portfolio.html'));
+ assert.ok(page.url().endsWith('index.html'));
  await page.emulateMedia({reducedMotion:'reduce'});
  await selectTab('lab');
  await lensAligned();
@@ -359,7 +359,9 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
        await page.screenshot({path:path.join(path.resolve(process.env.CT_UI_CAPTURE_DIR), 'system-clean-header.png'), animations:'disabled'});
      }
    }
-   if (name === 'risk') {
+   // Home reads /risk and /micro-live itself, so Risk opens on data already read; Devices still
+   // waits on reads of its own, and shows the blades over its layout meanwhile.
+   if (name === 'notifications') {
      assert.equal(await page.locator('#page-loader').isVisible(), true);
      assert.equal(await page.locator('#page-loader .lightsaber').count(), 2);
      assert.equal((await page.locator('#page-loader').innerText()).trim(), '');
@@ -429,7 +431,7 @@ print(json.dumps({name: files.primary_templates((ui / (name + '.html')).read_tex
  assert.equal(await page.locator('#content').isVisible(), false);
  calls.length = 0;
  await page.goto(origin + '/ui/index.html?demo=1');
- for (const tab of ['advisor', 'portfolio', 'more', 'dashboard']) {
+ for (const tab of ['advisor', 'lab', 'more', 'dashboard']) {
    await selectTab(tab);
    assert.ok(page.url().includes('demo=1'));
    assert.equal(await page.locator('#content').isVisible(), true);

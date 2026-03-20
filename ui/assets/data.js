@@ -896,7 +896,7 @@ window.CT = (function () {
   };
 
   /* GET /advisor with no account: the saved Robinhood snapshot and what the assistant has
-     recorded about it. One fixture for every screen that reads it: Assets draws the accounts
+     recorded about it. One fixture for every screen that reads it: Home draws the accounts
      and each holding's analyses; the Assistant's Discover reads the candidates and jobs.
      Every figure inside a holding agrees with the others: value = quantity x price, weight
      = value / the account's equity, return = price / average cost - 1. */

@@ -1,17 +1,16 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
-asset layer, no build step.
+Frontend for the local API in `agentic_trading`. Thirteen pages, one shared
+asset layer, no build step. The tab bar is Home, Lab and Me; the Assistant is the header's action.
 
 ```
-index.html       Home      Today: what needs you, what is not normal, research conclusions
-portfolio.html   Assets     Robinhood snapshots or the Agentic ledger, one switch; each Robinhood holding opens its own view; Agentic carries its automatic-trading switches
+index.html       Home      the accounts: Robinhood snapshots or the Agentic ledger, one switch, with what needs you and what is not normal above them; each Robinhood holding opens its own view; Agentic carries its automatic-trading switches
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, tracked orders, audit trail
 system.html      System    health, notices, kill switch
 advisor.html     Assistant personal context, holdings review, candidates, chat
-lab.html         Lab       the third tab: the office at work, then what I hold and what I added, each name's report
+lab.html         Lab       the second tab: the office at work, then what I hold and what I added, each name's report
 evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
 notifications.html Devices signed-in devices, push status and a test
@@ -20,7 +19,7 @@ settings.html    Settings  schedule, watchlist, calendar, cash flows, every conf
 login.html       Sign in   owner passphrase; the one page served without a session
 
 assets/console.css   tokens, components, motion
-assets/portfolio.css Assets only: liquid glass, ink on white
+assets/portfolio.css Home only: liquid glass in Home's green
 assets/console.js    chrome, formatting, live() binding
 assets/api.js        polling layer
 assets/i18n.js       interface language (EN / 中文)
@@ -59,7 +58,7 @@ start empty and never fall back to fixtures.
 
 ## Console navigation
 
-All thirteen console pages share one document through `assets/navigation.js`, including
+All twelve console pages share one document through `assets/navigation.js`, including
 the tools reached from More and their return links. Login remains a separate document.
 The initial response includes the static layouts as inert templates, with shared styles.
 Page factories are prefetched; even before they arrive a first tap can show the layout.
@@ -112,7 +111,7 @@ explicitly with the same in-memory request id. Conflicts refresh readings and re
 confirmation. Page/quantity/authority changes invalidate a pending confirmation. Nothing is
 queued or replayed offline. Existing continuations are reachable through the chain links.
 Approval results render `exit_result` using its post-submission three-state closure reading;
-`EXECUTED` alone never means the position is closed. Home and More link `exit_incomplete`
+`EXECUTED` alone never means the position is closed. Home and Me link `exit_incomplete`
 attention to its proposal. The browser check covers creation through separate approval on
 mobile; the frontend suite covers conflicts, lost responses, late responses and chain amounts.
 REDUCE also displays `exit.autonomous`: the configured retained percentage, holding high-water
@@ -137,17 +136,18 @@ Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposal
 read only on pages that use it and opens no venue session. No websocket; the
 backend offers none and none is needed.
 
-Home and More read current attention from `/attention`, preserving server priority. Home shows
-those items alone, and hides them after a current, readable empty result; a native disclosure
-shows additional cards. Below them, Home lists only what is not normal, each row opening the page
-that owns it: a status other than READY (System), a preflight block while real money is armed
-(Risk), a drawdown ladder away from NORMAL short of a halt (Risk; the attention list keeps only
-a halt), an order still working at the venue (Activity), and the number of `/health.warnings`
-(System, which holds their text). Nothing there means nothing is abnormal. Research follows: a
-running study opens the Lab on it, a finished one its report in the Lab, each naming its account;
-the paper book and records bound to no account stay off Home. Home draws no account figures
-and does not read `/portfolio`: equity, funding and the high-water mark are Assets' alone. A
-ladder reaches Home from `/risk` as above, and a halt or a ledger left unconfirmed as attention.
+Home is the accounts, and above them, only while there is something, what needs you and what is
+not normal (2026-09-23: Assets became Home, and Today's summary moved onto it). What needs you
+is `/attention`, in server priority: those items alone, hidden after a current, readable empty
+result; a native disclosure shows additional cards. Below them Home lists only what is not
+normal, each row opening the page that owns it: a status other than READY (System), a
+preflight block while real money is armed (Risk), a drawdown ladder away from NORMAL short of a
+halt (Risk, read from `/risk`; the attention list keeps only a halt), and an order still working
+at the venue (Activity). Nothing there means nothing needs you, and a quiet day shows the
+accounts alone. Research is the Lab's. Me counts `/health.warnings` beside the system's state
+(System holds their text), and keeps a row only for a proposal waiting on a decision.
+`portfolio.html` and `research.html` still answer, with their query, as Home and the Lab
+(`navigation.js` aliases in-app, `api/app.py` redirects a cold load).
 Missing, stale or partially readable results say "cannot confirm", never "nothing to do". Links retain
 the referenced proposal, activity subject, configuration change or research run. A finished
 report is marked with `POST /research/{run_key}/opened` only after its result is displayed in
@@ -222,20 +222,20 @@ as capacity available to holding and exit reviews. The screen is read-only; sche
 continue through the reviewed Settings flow.
 One healthy endpoint cannot clear another endpoint's error. A ledger that has
 gone unconfirmed still answers, with its buckets emptied and the reason in
-`errors`, and the Portfolio page shows that gap rather than a zero. Approval
+`errors`, and Home shows that gap rather than a zero. Approval
 requires all of its critical resources to be current.
 
-One screen also writes without being asked. The Robinhood block on the
-Portfolio screen is a snapshot maintained by an assistant `refresh` job, and
+One screen also writes without being asked. The Robinhood block on
+Home is a snapshot maintained by an assistant `refresh` job, and
 the button that starts one is on the Assistant screen — so when that snapshot
-is already stale on arrival, the Portfolio page posts a single refresh for it,
+is already stale on arrival, Home posts a single refresh for it,
 with the tab in front, never while one is already queued or running, and at
 most once a minute. The wait and any failure are written into the timestamp
 line above the accounts. Nothing else in the console posts without a click,
 and this one reaches no order, proposal or approval.
 
 A Robinhood holding opens its own view on the same page,
-`portfolio.html?scope=robinhood&account=<id>&ticker=<symbol>`, so it has a link, Back returns
+`index.html?scope=robinhood&account=<id>&ticker=<symbol>`, so it has a link, Back returns
 to the same place in the list, and a reload lands on it again. It used to open Research,
 which with no scope in the link came up in the Agentic scope with the strategy form filled
 in. Everything on it comes from the `/advisor` read the page already polls:
@@ -303,8 +303,8 @@ every neutral is a `color-mix()` of them. `--danger` is a local choice, not a
 brand value. Pure green never carries text (1.9:1 on white) — green text uses
 `--green-ink`.
 
-Assets is drawn in Home's palette (`<body class="pf-glass">`, `assets/portfolio.css`): Home's
-green-tinted field, card fill and shadow, and green for the leading action, the selected
+Home is drawn as glass in the console's palette (`<body class="pf-glass">`, `assets/portfolio.css`):
+the green-tinted field, card fill and shadow, and green for the leading action, the selected
 account and anything live. Glass cards are drawn without blur. Gain and loss are mixed from the
 brand values and measured above 5:1.
 

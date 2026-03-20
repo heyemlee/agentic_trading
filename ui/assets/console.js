@@ -143,11 +143,12 @@
 
   /* ─── navigation ──────────────────────────────────────────────────── */
   const NAV = [
+    /* Three tabs: Home, Lab, Me. Home is the accounts, with what needs you above them; it was
+       the Assets tab, and a link to portfolio.html is a link to Home (navigation.js, api/app.py). */
     { href: 'index.html',     key: 'dashboard', icon: 'home',      tab: true },
-    { href: 'portfolio.html', key: 'portfolio', icon: 'portfolio', tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'assistant' },
-    /* The Lab is the third tab: the office at work, then what it studies -- what the owner
+    /* The Lab is the second tab: the office at work, then what it studies -- what the owner
        holds and what they added -- and each run's report over it. Research lives here; a link
        to research.html is a link to the Lab (navigation.js, api/app.py). */
     { href: 'lab.html',       key: 'lab',       icon: 'lab',       tab: true },
@@ -875,7 +876,7 @@
     }, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
   }
   const LINK_PARAMS = {
-    index: ['scope'], portfolio: ['scope', 'account', 'ticker'],
+    index: ['scope', 'account', 'ticker'], portfolio: ['scope', 'account', 'ticker'],
     advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'include_all_personal'],
     lab: ['run', 'scope', 'account', 'include_all_personal'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
     settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'],
@@ -889,8 +890,8 @@
       params.set(key, value);
     }
     if (window.CT_DEMO) params.set('demo', '1');
-    /* The collector still names research, the page a report used to open on; it is the Lab's now. */
-    return (link.page === 'research' ? 'lab' : link.page) + '.html' + (params.size ? '?' + params : '');
+    /* A link may still name a page that moved: research is the Lab's now, and Assets is Home. */
+    return ({ research: 'lab', portfolio: 'index' }[link.page] || link.page) + '.html' + (params.size ? '?' + params : '');
   }
   function attentionState() {
     const data = D.attention;

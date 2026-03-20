@@ -551,7 +551,8 @@ def test_a_ledger_the_check_refused_is_reported_as_the_venue_and_the_book_disagr
     events = [e for e in service.collect_notifications() if e.key.startswith("ledger_unconfirmed")]
     assert [e.key for e in events] == ["ledger_unconfirmed:micro_live:2026-09-17"]
     assert events[0].kind == "reconciliation_error" and "$250.00" in events[0].detail
-    assert events[0].link.endswith("#ledger-notice")
+    # The notice is on the Agentic view; a link without the scope opened the Robinhood view.
+    assert events[0].link == "/ui/index.html?scope=agentic#ledger-notice"
 
     # A check that later agreed -- the job's, the CLI's or the console button's -- clears it.
     db.write_meta(REPORT, {"date": "2026-09-17", "confirmed": True, "at": "2026-09-17T10:50:00+00:00",

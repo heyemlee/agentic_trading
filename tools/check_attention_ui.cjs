@@ -112,10 +112,9 @@ const ui = path.resolve(__dirname, '../ui');
     await page.evaluate(() => CT_API.readOnce('attention'));
     assert.equal(await page.locator('[data-attention-id="order"]').isVisible(), true);
     assert.equal(await page.locator('[data-attention-id="proposal"]').isVisible(), false);
-    // A notice is counted on its own line to System, never dealt among the to-dos.
+    // A notice is never dealt among the to-dos, nor listed above the accounts: Me counts it.
     assert.equal(await page.locator('#needs-you-slot [data-od-id^="warning"]').count(), 0);
-    assert.equal(await page.locator('[data-od-id="condition-notices"]').isVisible(), true);
-    assert.match(await page.locator('[data-od-id="condition-notices"]').getAttribute('href'), /system\.html/);
+    assert.equal(await page.locator('#home-conditions [data-od-id="condition-notices"]').count(), 0);
     await screenshot('attention-stack-phone.png');
     await page.locator('#attention-rest summary').focus();
     await page.keyboard.press('Enter');
@@ -139,6 +138,9 @@ const ui = path.resolve(__dirname, '../ui');
     assert.match(await page.locator('#attention-rest summary').innerText(), /2 more items/);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.equal(await page.locator('[data-attention-id="order"]').evaluate(el => getComputedStyle(el).animationName), 'none');
+    await page.goto(origin + '/ui/more.html');
+    await page.waitForFunction(() => !document.getElementById('more-notices').hidden);
+    assert.equal(await page.locator('#more-notices').innerText(), 'Open notices: 1');
     await page.goto(origin + '/ui/approvals.html?proposal=' + expired.proposal_id);
     await page.waitForFunction(() => document.getElementById('d-id').textContent === 'expired-attention');
     assert.equal(await page.locator('#btn-approve').isDisabled(), true);

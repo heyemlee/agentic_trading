@@ -105,7 +105,7 @@ config/              profiles, the mandate, the prompt context — live, read by
   examples/          state/*.yaml templates a setup script copies into the live ledger
 state/               ledgers, audit database, tokens — a symlink outside the checkout; untracked
 runs/                research artefacts and logs — a symlink outside the checkout; untracked
-ui/                  the console: fourteen pages, no build step, served at /ui by the API
+ui/                  the console: thirteen pages, no build step, served at /ui by the API
 deploy/macos/        launchd install, release/rollback, backup, maintenance, selfcheck
 tools/               developer utilities that are not part of the deployment
 docs/                current documentation; docs/archive/ is point-in-time and unmaintained

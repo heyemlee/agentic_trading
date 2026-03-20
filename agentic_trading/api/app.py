@@ -207,6 +207,11 @@ async def security_boundary(request: Request, call_next):
     if response is None and path == "/ui/research.html" and request.method in ("GET", "HEAD"):
         response = RedirectResponse("/ui/lab.html" + (f"?{request.url.query}" if request.url.query else ""),
                                     status_code=307)
+    # Assets became Home the same day. A holding's address, or a notification already delivered,
+    # still opens the account view it named.
+    if response is None and path == "/ui/portfolio.html" and request.method in ("GET", "HEAD"):
+        response = RedirectResponse("/ui/index.html" + (f"?{request.url.query}" if request.url.query else ""),
+                                    status_code=307)
     if response is None and unsafe and (
                 not _auth.allowed_origin(request.headers.get("origin"))
                 or request.headers.get("sec-fetch-site") == "cross-site"
@@ -913,7 +918,7 @@ def main() -> None:
 # Absent `ui/`, the API runs exactly as before.
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
-_PRIMARY_PAGES = ("index", "portfolio", "advisor", "more", "risk", "activity", "evaluation",
+_PRIMARY_PAGES = ("index", "advisor", "more", "risk", "activity", "evaluation",
                   "profile", "notifications", "system", "approvals", "lab", "settings")
 
 

@@ -488,7 +488,7 @@ def test_every_write_to_a_migrated_table_names_its_columns():
 def test_primary_layouts_arrive_before_navigation_without_executable_scripts(console_auth):
     """The first tap must not wait for another HTML request, even on a cold connection."""
     client = TestClient(app, base_url='https://testserver')
-    names = {'index', 'portfolio', 'advisor', 'more', 'risk', 'activity', 'evaluation',
+    names = {'index', 'advisor', 'more', 'risk', 'activity', 'evaluation',
              'profile', 'notifications', 'system', 'approvals', 'lab', 'settings'}
     for name in names:
         page = client.get(f'/ui/{name}.html?demo=1')
@@ -500,7 +500,7 @@ def test_primary_layouts_arrive_before_navigation_without_executable_scripts(con
             assert 'id="startup"' not in markup, 'route changes must not bring the startup curtain back'
         assert page.text.index('<template ') < page.text.index('<script src="assets/navigation.js')
         assert 'href="assets/advisor.css?v=' in page.text
-        assert page.text.count('href="assets/portfolio.css?v=') == 1, 'Assets draws from its own sheet'
+        assert page.text.count('href="assets/portfolio.css?v=') == 1, 'Home draws from its own sheet'
         assert page.text.count('id="startup"') == 1
         assert 'data-ct-starting' in page.text
         assert page.text.index('assets/startup.js') < page.text.index('assets/i18n.js')
@@ -515,7 +515,7 @@ def test_editing_an_embedded_layout_invalidates_the_host_page_etag(tmp_path):
 
     ui = tmp_path / 'ui'
     ui.mkdir()
-    for name in ('index', 'portfolio', 'advisor', 'more'):
+    for name in ('index', 'lab', 'advisor', 'more'):
         (ui / f'{name}.html').write_text('<html><head><title>Page</title></head><body>'
                                        '<main id="content">Original</main>'
                                        '<script src="assets/i18n.js"></script></body></html>')
@@ -523,7 +523,7 @@ def test_editing_an_embedded_layout_invalidates_the_host_page_etag(tmp_path):
     probe.mount('/ui', ConsoleFiles(ui))
     with TestClient(probe) as client:
         original = client.get('/ui/index.html')
-        target = ui / 'portfolio.html'
+        target = ui / 'lab.html'
         target.write_text(target.read_text().replace('Original', 'Updated holdings layout'))
         changed = client.get('/ui/index.html', headers={'If-None-Match': original.headers['etag']})
         assert changed.status_code == 200

@@ -12,7 +12,7 @@
  * server ships this sheet with every console page (api/app.py, primary_templates), so
  * every rule is scoped to .lab-page or to body.lab-glass.
  *
- * The glass is the material Assets and Discover use: a translucent card over a soft
+ * The glass is the material Home and Discover use: a translucent card over a soft
  * field, with a lit top edge and a long soft shadow, which reads as glass without a
  * blur. Only the two controls that float over the office blur what is behind them,
  * because only there is something behind them to blur, and both are small: the motion

@@ -293,3 +293,4 @@ def test_a_refusal_raises_one_item_and_not_two(service):
     assert len(unconfirmed) == 1
     assert unconfirmed[0]["severity"] == "critical" and unconfirmed[0]["priority"] == 1
     assert "CashMismatch" in unconfirmed[0]["detail"]
+    assert unconfirmed[0]["link"] == {"page": "index", "params": {"scope": "agentic"}}, "Home holds the ledger's notice"

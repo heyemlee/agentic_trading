@@ -159,7 +159,7 @@ window.Console.page('advisor', function (document) {
     });
   }
   const params = new URLSearchParams(location.search);
-  if (params.get('view') === 'holdings') location.replace('portfolio.html' + (window.CT_DEMO ? '?demo=1' : ''));
+  if (params.get('view') === 'holdings') location.replace('index.html' + (window.CT_DEMO ? '?demo=1' : ''));
   showView(params.get('view'));
   function fitViewport() {
     viewportFrame = null;

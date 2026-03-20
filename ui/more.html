@@ -26,7 +26,7 @@
   <section class="section pf-body me-body">
     <div class="container pf-stack">
 
-      <!-- the system's state, and what is waiting on you -->
+      <!-- the system's state, its open notices, and a decision waiting on you -->
       <article class="pf-card me-hero" data-od-id="more-overview">
         <a class="me-status" href="system.html" data-od-id="more-status">
           <span class="pf-card-head">
@@ -38,13 +38,9 @@
             <span class="pf-figure me-word" id="more-status-word">—</span>
           </span>
           <span class="pf-fine me-copy" id="more-status-copy">—</span>
+          <span class="pf-fine me-notices" id="more-notices" hidden></span>
         </a>
-        <div class="pf-rows me-rows">
-          <a class="pf-row" href="index.html">
-            <span class="pf-orb me-orb" data-icon="activity" aria-hidden="true"></span>
-            <span class="pf-row-main"><span class="pf-row-title" data-i18n="at.title">Current attention</span><span class="pf-row-sub" id="more-attention-copy">—</span></span>
-            <span class="pf-chevron" aria-hidden="true"></span>
-          </a>
+        <div class="pf-rows me-rows" id="more-rows" hidden>
           <a class="pf-row" href="approvals.html" id="more-approvals" hidden>
             <span class="pf-orb me-orb" data-icon="lock" aria-hidden="true"></span>
             <span class="pf-row-main"><span class="pf-row-title" data-i18n="ap.title">Approvals</span><span class="pf-row-sub" id="more-approvals-copy">—</span></span>

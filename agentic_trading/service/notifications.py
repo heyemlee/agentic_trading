@@ -413,8 +413,11 @@ class NotificationsMixin:
                     title=f"the {ledger} ledger could not be confirmed", detail=str(error)[:300],
                     scope=scope, account_id=account, account_label=_label(scope, account),
                     subject=ledger, since=report.get("at"),
-                    link=_link("portfolio", scope=scope if scope != "system" else "agentic"),
-                    notify_kind="reconciliation_error", notify_link="/ui/portfolio.html#ledger-notice"))
+                    link=_link("index", scope=scope if scope != "system" else "agentic"),
+                    # The notice is on the account's own view; without the scope a tap opened
+                    # the Robinhood view, where it is hidden.
+                    notify_kind="reconciliation_error",
+                    notify_link=f"/ui/index.html?scope={scope if scope != 'system' else 'agentic'}#ledger-notice"))
 
         def operations() -> None:
             for activity in self.operations()["activities"]:
@@ -486,12 +489,12 @@ class NotificationsMixin:
                         id=f"autonomy_switched_on:{change['id']}", kind="autonomy_switched_on",
                         title=f"autonomous {what} was switched on",
                         detail=f"by {change['requested_by']}, in force at once; switch it off on "
-                               "the Agentic account in Assets",
+                               "the Agentic account on Home",
                         scope="agentic", account_id=MICRO_BUCKET, account_label=_label("agentic", MICRO_BUCKET),
                         subject=change["id"], since=change.get("applied_at"),
-                        link=_link("portfolio", scope="agentic"), attention=False,
+                        link=_link("index", scope="agentic"), attention=False,
                         notify_kind="config_change_applied",
-                        notify_link="/ui/portfolio.html?scope=agentic", urgent=True))
+                        notify_link="/ui/index.html?scope=agentic", urgent=True))
 
         def acted() -> None:
             for proposal in stored.values():
