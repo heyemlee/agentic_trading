@@ -3762,3 +3762,130 @@ test('an unchanged connection tick writes nothing to the page', async () => {
   c.Console.paintConnection(); c.Console.paintConnection();
   assert.equal(writes, first, 'the one-second tick repaints only what changed');
 });
+
+/* Press feedback. Safari on iOS paints :active only under a touch listener, and then holds it
+   while a finger that landed on a row scrolls the list; ui/assets/press.js sets .is-pressed
+   instead, and every stylesheet styles that. A tap also leaves :hover on what it touched until
+   the next tap, so a hover style outside @media (hover: hover) stays on after the finger lifts. */
+test('stylesheets style .is-pressed, never :active, and hover only where a pointer hovers', () => {
+  for (const file of fs.readdirSync(path.join(root, 'ui/assets')).filter(name => name.endsWith('.css'))) {
+    const css = fs.readFileSync(path.join(root, 'ui/assets', file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(css, /:active\b/, file + ' styles :active; write .is-pressed');
+    const open = [], sticky = [];
+    let prelude = '';
+    for (const ch of css) {
+      if (ch === '{') {
+        const rule = prelude.trim();
+        if (/:hover\b/.test(rule) && !open.some(outer => /^@media\b[^{]*\(\s*hover\s*:\s*hover\s*\)/.test(outer))) sticky.push(rule);
+        open.push(rule); prelude = '';
+      } else if (ch === '}') { open.pop(); prelude = ''; }
+      else if (ch === ';') prelude = '';
+      else prelude += ch;
+    }
+    assert.deepEqual(sticky, [], file + ' has :hover outside @media (hover: hover)');
+  }
+  for (const page of fs.readdirSync(path.join(root, 'ui')).filter(name => name.endsWith('.html'))) {
+    const html = fs.readFileSync(path.join(root, 'ui', page), 'utf8');
+    assert.ok(html.indexOf('<script src="assets/press.js"></script>') >= 0 &&
+      html.indexOf('<script src="assets/press.js"></script>') < html.indexOf('<script src="assets/i18n.js"></script>'),
+      page + ' loads press.js before anything else');
+  }
+});
+
+function pressContext() {
+  let now = 0, seq = 0;
+  const timers = new Map(), listeners = {};
+  const on = (name, fn) => { (listeners[name] ||= []).push(fn); };
+  const fire = (name, event = {}) => (listeners[name] || []).forEach(fn => fn({ type: name, ...event }));
+  const make = ({ bar = false, disabled = false } = {}) => {
+    const classes = new Set();
+    const el = { classList: { add: n => classes.add(n), remove: n => classes.delete(n) },
+      matches: selector => selector === ':disabled' ? disabled : false, getAttribute: () => null,
+      get pressed() { return classes.has('is-pressed'); } };
+    el.closest = selector => selector.includes('.tabbar') ? (bar ? {} : null) : selector === '[inert]' ? null : el;
+    return el;
+  };
+  const ctx = vm.createContext({
+    document: { addEventListener: on }, addEventListener: on, performance: { now: () => now },
+    setTimeout: (fn, ms) => { timers.set(++seq, { fn, at: now + ms }); return seq; }, clearTimeout: id => timers.delete(id),
+    Math,
+  });
+  ctx.window = ctx;
+  vm.runInContext(fs.readFileSync(path.join(root, 'ui/assets/press.js'), 'utf8'), ctx, { filename: 'press.js' });
+  const advance = ms => {
+    const end = now + ms;
+    for (;;) {
+      const due = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      timers.delete(due[0]); now = due[1].at; due[1].fn();
+    }
+    now = end;
+  };
+  const pointer = (name, target, extra = {}) => fire(name, { target, isPrimary: true, button: 0, pointerId: 1,
+    pointerType: 'touch', clientX: 100, clientY: 200, ...extra });
+  return { make, advance, pointer, fire };
+}
+
+test('a press shows once the finger rests, and never under a scroll or a drift', () => {
+  const p = pressContext();
+  let row = p.make();
+  p.pointer('pointerdown', row);
+  assert.equal(row.pressed, false, 'not while a scroll could still be starting');
+  p.advance(80);
+  assert.equal(row.pressed, true, 'a resting finger presses');
+  p.advance(200); p.pointer('pointerup', row);
+  assert.equal(row.pressed, false, 'and lifting after a long press releases at once');
+
+  row = p.make();
+  p.pointer('pointerdown', row); p.advance(100); p.pointer('pointerup', row);
+  assert.equal(row.pressed, true, 'a tap that lifts just after its press showed is still seen');
+  p.advance(89);
+  assert.equal(row.pressed, true);
+  p.advance(1);
+  assert.equal(row.pressed, false, 'for 110 ms in all');
+
+  row = p.make();
+  p.pointer('pointerdown', row); p.advance(30); p.pointer('pointerup', row);
+  assert.equal(row.pressed, true, 'a quick tap still shows the press as it lifts');
+  p.advance(110);
+  assert.equal(row.pressed, false, 'briefly');
+
+  row = p.make();
+  p.pointer('pointerdown', row); p.advance(40); p.fire('scroll'); p.advance(80);
+  assert.equal(row.pressed, false, 'a scroll that starts on a row does not light it');
+  p.pointer('pointerup', row);
+  assert.equal(row.pressed, false);
+
+  row = p.make();
+  p.advance(200);
+  p.pointer('pointerdown', row); p.pointer('pointermove', row, { clientY: 212 }); p.advance(80);
+  assert.equal(row.pressed, false, 'a finger that drifts off is no longer pressing');
+
+  row = p.make();
+  p.pointer('pointerdown', row); p.advance(80); p.pointer('pointercancel', row);
+  assert.equal(row.pressed, false, 'the browser taking the gesture releases it');
+});
+
+test('a mouse, a key and the fixed bars press at once; a disabled control never does', () => {
+  const p = pressContext();
+  let el = p.make();
+  p.pointer('pointerdown', el, { pointerType: 'mouse' });
+  assert.equal(el.pressed, true);
+  p.pointer('pointerup', el, { pointerType: 'mouse' });
+  assert.equal(el.pressed, false, 'a mouse release has nothing to flash');
+
+  el = p.make({ bar: true });
+  p.pointer('pointerdown', el);
+  assert.equal(el.pressed, true, 'the tab bar cannot scroll away under the finger');
+  p.pointer('pointerup', el);
+
+  el = p.make({ disabled: true });
+  p.pointer('pointerdown', el, { pointerType: 'mouse' });
+  assert.equal(el.pressed, false);
+
+  el = p.make();
+  p.fire('keydown', { key: 'Enter', target: el });
+  assert.equal(el.pressed, true);
+  p.fire('keyup', { key: 'Enter', target: el });
+  assert.equal(el.pressed, false);
+});

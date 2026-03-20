@@ -144,8 +144,12 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
   transition: opacity 160ms ease;
 }
 /* A zone's sign steps aside while a desk in its row shows its name above it. */
-.lab-scene:has(.person[data-zone="trade"]:is(:hover, :focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="trade"],
-.lab-scene:has(.person[data-zone="risk"]:is(:hover, :focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="risk"] { opacity: 0; }
+.lab-scene:has(.person[data-zone="trade"]:is(:focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="trade"],
+.lab-scene:has(.person[data-zone="risk"]:is(:focus-visible, [aria-pressed="true"], [data-state="thinking"], [data-state="research"], [data-state="stalled"], [data-state="error"])) .lab-office-labels [data-zone="risk"] { opacity: 0; }
+@media (hover: hover) {
+  .lab-scene:has(.person[data-zone="trade"]:hover) .lab-office-labels [data-zone="trade"],
+  .lab-scene:has(.person[data-zone="risk"]:hover) .lab-office-labels [data-zone="risk"] { opacity: 0; }
+}
 
 /* A desk is a button over its chair. Its name shows while it is working, picked, pointed
    at, or in trouble; otherwise the room is left to speak for itself. */
@@ -162,13 +166,13 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
   background: var(--lab-surface); box-shadow: 0 0 0 1px #d9ded4, 0 6px 16px -8px rgba(32, 56, 36, .4);
   visibility: hidden; opacity: 0; transition: opacity 160ms ease, visibility 0s linear 160ms;
 }
-.lab-people .person:hover .desk-label,
 .lab-people .person:focus-visible .desk-label,
 .lab-people .person[aria-pressed="true"] .desk-label,
 .lab-people .person[data-state="thinking"] .desk-label,
 .lab-people .person[data-state="research"] .desk-label,
 .lab-people .person[data-state="stalled"] .desk-label,
 .lab-people .person[data-state="error"] .desk-label { visibility: visible; opacity: 1; transition: opacity 160ms ease; }
+@media (hover: hover) { .lab-people .person:hover .desk-label { visibility: visible; opacity: 1; transition: opacity 160ms ease; } }
 .lab-people .person[aria-pressed="true"] .desk-label { background: var(--lab-tint); box-shadow: 0 0 0 1.5px var(--lab-accent), 0 6px 16px -8px rgba(32, 56, 36, .45); }
 .lab-people .person[data-state="stalled"] .desk-label { color: var(--lab-warn); }
 .lab-people .person[data-state="error"] .desk-label { color: var(--lab-error); }
@@ -212,7 +216,7 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
 }
 .lab-motion svg { width: 18px; height: 18px; fill: currentColor; }
 .lab-motion[aria-pressed="true"] .lab-icon-play, .lab-motion:not([aria-pressed="true"]) .lab-icon-pause { display: none; }
-.lab-motion:active:not(:disabled) { transform: scale(.9); }
+.lab-motion.is-pressed:not(:disabled) { transform: scale(.9); }
 .lab-motion:disabled { cursor: default; opacity: .55; }
 .lab-motion:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 2px; border-radius: 50%; }
 
@@ -228,7 +232,7 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
 }
 .lab-replay svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 @media (hover: hover) { .lab-replay button:hover:not(:disabled) { background: rgba(13, 13, 13, .06); } }
-.lab-replay button:active:not(:disabled) { transform: scale(.88); background: rgba(13, 13, 13, .08); }
+.lab-replay button.is-pressed:not(:disabled) { transform: scale(.88); background: rgba(13, 13, 13, .08); }
 .lab-replay button:disabled { cursor: default; color: #b8b8b8; }
 .lab-replay button:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: -2px; border-radius: 50%; }
 .lab-replay #event-number { min-width: 84px; padding: 0 4px; text-align: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -242,7 +246,7 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
   -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--lab-spring), background 160ms ease, color 160ms ease;
 }
 @media (hover: hover) { .lab-pill:hover:not([aria-pressed="true"]) { background: #f6f6f6; } }
-.lab-pill:active { transform: scale(.96); }
+.lab-pill.is-pressed { transform: scale(.96); }
 .lab-pill[aria-pressed="true"] { color: #fff; background: var(--lab-ink); box-shadow: none; }
 .lab-pill:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 2px; border-radius: 999px; }
 
@@ -270,7 +274,7 @@ html:has(> body.lab-glass) { background: #f4f3ee; }
 }
 button.lab-subject-main { cursor: pointer; }
 @media (hover: hover) { button.lab-subject-main:hover { background: rgba(49, 90, 69, .05); } }
-button.lab-subject-main:active { transform: scale(.985); background: rgba(49, 90, 69, .07); }
+button.lab-subject-main.is-pressed { transform: scale(.985); background: rgba(49, 90, 69, .07); }
 button.lab-subject-main:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: -2px; }
 .lab-subject-copy { flex: 1; min-width: 0; }
 .lab-subject-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -361,7 +365,7 @@ button.lab-subject-main:focus-visible { outline: 2px solid var(--lab-ink); outli
   -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--lab-spring), background 160ms ease;
 }
 @media (hover: hover) { .lab-page .lab-approval:hover:not(:disabled) { background: #2a2a2a; } }
-.lab-page .lab-approval:active:not(:disabled) { transform: scale(.98); }
+.lab-page .lab-approval.is-pressed:not(:disabled) { transform: scale(.98); }
 .lab-page .lab-approval:disabled { cursor: default; color: #a3a3a3; background: rgba(13, 13, 13, .05); box-shadow: none; }
 .lab-page .lab-approval:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: 3px; }
 .lab-gate-note { margin-top: 10px; text-align: center; }
@@ -402,7 +406,7 @@ button.lab-subject-main:focus-visible { outline: 2px solid var(--lab-ink); outli
 .lab-page .role-button[data-state="error"]::before { background: var(--lab-error); }
 .lab-page .role-button[aria-pressed="true"] { background: var(--lab-tint); }
 @media (hover: hover) { .lab-page .role-button:hover:not([aria-pressed="true"]) { background: rgba(49, 90, 69, .05); } }
-.lab-page .role-button:active { transform: scale(.985); }
+.lab-page .role-button.is-pressed { transform: scale(.985); }
 .lab-page .role-button:focus-visible { outline: 2px solid var(--lab-ink); outline-offset: -2px; }
 .lab-page .role-button[data-state="disabled"] { color: var(--lab-ink-3); }
 .lab-page .role-summary {

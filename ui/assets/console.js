@@ -501,12 +501,18 @@
     syncTabIndicator();
   }
 
-  let chromeMounted = false;
+  let chromeMounted = false, topnavMarkup = '';
   function mount(activeKey) {
     if (chromeMounted) {
       const template = document.createElement('div');
       template.innerHTML = renderChrome(activeKey);
-      document.querySelector('.topnav').replaceWith(template.querySelector('.topnav'));
+      /* The bar is replaced only when it changes (a back arrow, the language). Replacing it on
+         every tab restarted the launcher's halo and laid the bar out again for nothing. */
+      const topnav = template.querySelector('.topnav');
+      if (topnav.outerHTML !== topnavMarkup) {
+        topnavMarkup = topnav.outerHTML;
+        document.querySelector('.topnav').replaceWith(topnav);
+      }
       const nextTabs = template.querySelectorAll('.tabitem');
       document.querySelectorAll('.tabitem').forEach((tab, index) => {
         for (const attr of ['aria-current', 'data-section-active']) {
@@ -541,6 +547,7 @@
       if (event.target.matches?.('dialog[data-sheet]')) { event.preventDefault(); closeSheet(event.target.id); }
     }, true);
     document.body.insertAdjacentHTML('afterbegin', renderChrome(activeKey));
+    topnavMarkup = document.querySelector('.topnav').outerHTML;
     wireTabIndicator();
     document.body.insertAdjacentHTML('beforeend', renderFoot());
     // Shared diagnostics stay mounted across routes, but only appear when
@@ -732,18 +739,20 @@
   }
 
   /* Write a number and, if it moved since the last poll, tick it once in the
-     direction it moved. Silent on first paint. */
+     direction it moved. Silent on first paint. The tick is an animation of the figure's own,
+     from green or red back to its own colour, and it happens once: a class stayed on the
+     figure and replayed whenever the figure was shown again (see console.css). */
   function tickValue(el, text) {
     if (!el) return;
     const before = el.dataset.prev;
     el.textContent = text;
-    if (before !== undefined && before !== text) {
+    if (before !== undefined && before !== text && typeof el.animate === 'function' &&
+        !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       const a = parseFloat(String(before).replace(/[^0-9.-]/g, ''));
       const b = parseFloat(String(text).replace(/[^0-9.-]/g, ''));
       if (!isNaN(a) && !isNaN(b) && a !== b) {
-        el.classList.remove('is-up', 'is-down');
-        void el.offsetWidth;                     /* restart the animation */
-        el.classList.add(b > a ? 'is-up' : 'is-down');
+        const from = getComputedStyle(el).getPropertyValue(b > a ? '--green-ink' : '--danger').trim();
+        if (from) el.animate([{ color: from }, {}], { duration: 900, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
       }
     }
     el.dataset.prev = text;

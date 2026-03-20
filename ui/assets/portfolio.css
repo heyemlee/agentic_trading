@@ -123,7 +123,7 @@ body.pf-glass {
 }
 .pf-seg.is-selected { color: var(--green-ink); }
 @media (hover: hover) { .pf-seg:not(.is-selected):hover { color: var(--pf-ink-2); } }
-.pf-seg:active { transform: scale(.96); }
+.pf-seg.is-pressed { transform: scale(.96); }
 .pf-seg:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -3px; }
 
 /* ─── round glass controls: refresh, back ─────────────────────────── */
@@ -137,7 +137,7 @@ body.pf-glass {
   -webkit-tap-highlight-color: transparent; transition: transform 260ms var(--pf-spring), opacity 160ms ease;
 }
 .pf-round svg { width: 20px; height: 20px; }
-.pf-round:active:not(:disabled) { transform: scale(.92); }
+.pf-round.is-pressed:not(:disabled) { transform: scale(.92); }
 .pf-round:disabled { cursor: default; opacity: .45; }
 .pf-round:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
 .pf-round.is-busy { opacity: 1; }
@@ -163,8 +163,9 @@ body.pf-glass {
 .pf-row + .pf-row:not(:has(> .pf-orb))::before { left: 10px; }
 a.pf-row:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
 @media (hover: hover) { a.pf-row:hover { background: var(--pf-fill); } }
-a.pf-row:active { background: rgba(33, 54, 38, .07); transform: scale(.985); }
-a.pf-row:hover::before, a.pf-row:active::before, a.pf-row:hover + .pf-row::before, a.pf-row:active + .pf-row::before { opacity: 0; }
+a.pf-row.is-pressed { background: rgba(33, 54, 38, .07); transform: scale(.985); }
+a.pf-row.is-pressed::before, a.pf-row.is-pressed + .pf-row::before { opacity: 0; }
+@media (hover: hover) { a.pf-row:hover::before, a.pf-row:hover + .pf-row::before { opacity: 0; } }
 .pf-row-main { flex: 1 1 auto; min-width: 0; }
 .pf-row-title { display: block; font-size: 16px; font-weight: 600; letter-spacing: -.012em; line-height: 1.3; }
 .pf-row-sub { display: block; margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--pf-ink-2); overflow-wrap: anywhere; }
@@ -204,7 +205,7 @@ div.pf-row .pf-chevron { display: none; }
   box-shadow: 0 10px 30px -22px rgba(33, 54, 38, .3), var(--pf-lit);
   -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring);
 }
-.pf-cta:active { transform: scale(.985); }
+.pf-cta.is-pressed { transform: scale(.985); }
 .pf-cta:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
 .pf-cta-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: var(--green-contrast); background: var(--green); }
 .pf-cta-icon svg { width: 18px; height: 18px; }
@@ -222,7 +223,7 @@ div.pf-row .pf-chevron { display: none; }
   -webkit-tap-highlight-color: transparent; transition: transform 280ms var(--pf-spring), background 160ms ease;
 }
 @media (hover: hover) { .pf-btn:hover:not(:disabled) { background: var(--green-press); } }
-.pf-btn:active:not(:disabled) { transform: scale(.98); }
+.pf-btn.is-pressed:not(:disabled) { transform: scale(.98); }
 .pf-btn:disabled { cursor: not-allowed; color: var(--meta); background: var(--pf-fill); box-shadow: none; }
 .pf-btn:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: 3px; }
 /* the same request once a conclusion stands: asking again is the second choice, not the lead */

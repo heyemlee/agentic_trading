@@ -143,7 +143,23 @@
     pending.set(name, task);
     return task;
   }
+  /* A page that comes back is not arriving. Putting its nodes back in the document restarts
+     every CSS animation in them, so each tab change faded the page in from nothing again, as if
+     it were being built, and so did Back to a list. What such a return starts is finished at
+     once: entrances and one-off flashes end in their final state, and anything that repeats (a
+     pulse, a spinner, the launcher's halo) carries on. A first visit, and a view a page opens
+     going forward (an account, a holding), still arrive. */
+  function settle(view) {
+    if (!document.getAnimations) return;
+    for (const animation of document.getAnimations()) {
+      const effect = animation.effect, target = effect && effect.target;
+      if (!animation.animationName || !target || effect.getTiming().iterations === Infinity) continue;
+      if (!view.nodes.some(node => node.contains(target))) continue;
+      try { animation.finish(); } catch (error) { /* a paused or zero-rate animation stays */ }
+    }
+  }
   function show(view, url, historyMode) {
+    const returning = historyMode === 'pop' || (active !== view && view.initialized);
     if (historyMode === 'push') {
       const depth = history.state?.ctDepth || 0;
       // Exit the whole assistant visit, including account changes within it.
@@ -184,6 +200,7 @@
     // A page draws once its data events of this task have settled (Console.live), so what an
     // anchor names, and the moment the page is really on screen, come after that draw.
     Promise.resolve().then(() => {
+      if (returning) settle(view);
       if (url.hash) document.getElementById(decodeURIComponent(url.hash.slice(1)))?.scrollIntoView();
       performance.mark('ct:navigation-visible');
     });

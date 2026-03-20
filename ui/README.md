@@ -21,6 +21,7 @@ login.html       Sign in   owner passphrase; the one page served without a sessi
 assets/console.css   tokens, components, motion
 assets/portfolio.css Home only: liquid glass in Home's green
 assets/console.js    chrome, formatting, live() binding
+assets/press.js      press feedback (.is-pressed), on every page
 assets/api.js        polling layer
 assets/i18n.js       interface language (EN / 中文)
 assets/data.js       sanitized fixtures, rendered with ?demo=1
@@ -80,6 +81,20 @@ and reduced-motion preferences disable its animation. No extra business request 
 Back/Forward and the header return button restore the previous page and scroll position.
 Page scripts are registered without running until entry; preloading never starts a write,
 push registration, or the research-room animation.
+A page that comes back, by its tab or by Back, is shown as it was left: re-attaching its nodes
+restarts their CSS animations, so `navigation.js` finishes the entrances and one-off flashes
+that restart (the pulses and the halo keep going). A first visit, and a view a page opens going
+forward (an account, a holding), still play their entrance.
+
+Presses are drawn with `.is-pressed`, never `:active`. Safari on iOS paints `:active` only
+where a touch listener covers the element, which left every row and button without feedback
+under the finger, and once one does, it keeps `:active` painted while that finger scrolls the
+list it landed on. `assets/press.js`, loaded first by every page, sets the class: at once for a
+mouse, a key and the fixed bars, after an 80 ms rest where the page scrolls, and never under a
+finger that drifts or scrolls. A tap shows its press for at least 110 ms. A press goes down at
+`--motion-press` whatever its control transitions, and settles back on the control's own
+transition. `:hover` styles live inside `@media (hover: hover)`, because a tap leaves `:hover`
+on what it touched until the next tap. `tests/frontend.test.cjs` fails on either mistake.
 
 The API client and its polling timers are shared. Switching tabs selects the active resources
 without repeating a successful session check or rereading fresh data. First entry shows the

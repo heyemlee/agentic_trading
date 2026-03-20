@@ -1881,20 +1881,27 @@ window.I18N = (function () {
     return s;
   }
 
-  /* Replace every marked string in the static markup. */
+  /* Replace every marked string in the static markup. It runs on every tab change, over the
+     whole page, so a string already in place is left alone: rewriting it replaced the text and
+     had the browser lay out again everything that holds it, for the same words. */
+  const appliedHTML = new WeakMap();
   function applyStatic(root) {
     const r = root || document;
     r.querySelectorAll('[data-i18n]').forEach((el) => {
-      el.textContent = t(el.getAttribute('data-i18n'));
+      const text = t(el.getAttribute('data-i18n'));
+      if (el.textContent !== text) el.textContent = text;
     });
     r.querySelectorAll('[data-i18n-html]').forEach((el) => {
-      el.innerHTML = t(el.getAttribute('data-i18n-html'));
+      const html = t(el.getAttribute('data-i18n-html'));
+      if (appliedHTML.get(el) !== html) { appliedHTML.set(el, html); el.innerHTML = html; }
     });
     r.querySelectorAll('[data-i18n-aria]').forEach((el) => {
-      el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria')));
+      const label = t(el.getAttribute('data-i18n-aria'));
+      if (el.getAttribute('aria-label') !== label) el.setAttribute('aria-label', label);
     });
     r.querySelectorAll('[data-i18n-ph]').forEach((el) => {
-      el.placeholder = t(el.getAttribute('data-i18n-ph'));
+      const placeholder = t(el.getAttribute('data-i18n-ph'));
+      if (el.placeholder !== placeholder) el.placeholder = placeholder;
     });
     document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : 'en';
     const title = document.querySelector('[data-i18n-title]');
