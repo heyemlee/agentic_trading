@@ -73,8 +73,13 @@ edit changes what the API loads on its next restart, and a worker spawned mid-ed
 different version from the process that spawned it. `release.sh` separates the two.
 
 A release is an immutable export of a git commit with its own virtual environment, under
-`~/Library/Application Support/agentic-trading/releases/<timestamp>-<sha>`. A `current` symlink
-says which one the launchd jobs run. **Config, state and runs stay in the data directory and are
+`agentic_trading_releases/<timestamp>-<sha>` beside the checkout (override with
+`CT_RELEASES_DIR`). A release's `.venv` bakes in its own absolute path, so a release is published
+where it will stay and is never moved. A `current` symlink says which one the launchd jobs run.
+
+If the checkout and releases sit in a macOS-protected folder (`~/Desktop`, `~/Documents`,
+`~/Downloads`), the launchd jobs need `/bin/zsh` in System Settings → Privacy & Security → Full
+Disk Access. Without it they fail silently with `Operation not permitted`. **Config, state and runs stay in the data directory and are
 never copied into a release**, so publishing and rolling back never touch a ledger.
 
 ```bash

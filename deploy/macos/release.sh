@@ -20,7 +20,9 @@ set -euo pipefail
 # swaps a symlink and starts it again.
 
 source_dir="$(cd "$(dirname "$0")/../.." && pwd -P)"
-releases_root="${CT_RELEASES_DIR:-$HOME/Library/Application Support/agentic-trading/releases}"
+# Beside the checkout, not inside it: `git clean` must not reach a release, and a release's .venv
+# bakes in its own absolute path, so a release is published where it will stay.
+releases_root="${CT_RELEASES_DIR:-$(dirname "$source_dir")/agentic_trading_releases}"
 current_link="$releases_root/current"
 launch_agents="$HOME/Library/LaunchAgents"
 data_dir="$source_dir"

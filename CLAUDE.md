@@ -6,8 +6,14 @@ Conventions that are not derivable from the code. Read this before changing anyt
 
 Four launchd jobs run against it: `com.local.agentic-trading.{api,research-weekly,backup-daily,maintenance-daily}`.
 Their `CT_DATA_DIR` is this directory. Code runs from an immutable release under
-`~/Library/Application Support/agentic-trading/releases/current`; `config/`, `state/`, `runs/`
-and `.env` are read live from here, as `CT_DATA_DIR` always was.
+`~/Desktop/Projects/agentic_trading_releases/current`, beside this checkout; `config/`, `state/`,
+`runs/` and `.env` are read live from here, as `CT_DATA_DIR` always was.
+
+Both live under `~/Desktop`, a macOS-protected folder, so the launchd jobs can read them only
+because `/bin/zsh` has Full Disk Access (System Settings → Privacy & Security). Revoke it and the
+jobs fail silently with `Operation not permitted`. Until 2026-09-23 the checkout was
+`~/Projects/agentic_trading` and the releases lived under
+`~/Library/Application Support/agentic-trading/releases`; the old checkout path is now a symlink.
 
 `state`, `runs` and `.env` are symlinks into
 `~/Library/Application Support/agentic-trading/data/`, put there on 2026-09-09 so that an
