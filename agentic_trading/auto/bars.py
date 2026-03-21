@@ -86,8 +86,14 @@ def read(symbols: Iterable[str], *, start: str, end: str,
 def digest(bars: dict[str, list[Bar]]) -> str:
     """What exactly was read, so a record can say which data its figures came from.
 
-    The vendor re-adjusts history when a dividend is paid, so the same window read a quarter
-    later is not the same data and does not get the same digest.
+    It identifies one read, not one window. The vendor re-adjusts history when a dividend is
+    paid, so the same window read a quarter later is not the same data. And its adjusted prices
+    are not stable to the last digit even between two downloads minutes apart: on 2026-10-06 a
+    close of 211.659897 came back as 211.659882 on the next request, about one part in ten
+    million, on hundreds of days of every fund. So a digest that differs says "another download",
+    not "the history was revised"; reads served by one cached download have the same digest,
+    and the upstream cache fetches again each day, and through the day for a window that ends
+    today. Nothing compares a stored digest with a fresh one.
     """
     import hashlib
 
