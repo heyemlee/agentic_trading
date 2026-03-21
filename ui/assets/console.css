@@ -759,6 +759,15 @@ a.list-row.is-pressed .chevron { transform: translateX(2px); }
 .gate-name { font-size: var(--text-base); font-weight: 500; letter-spacing: -0.01em; }
 .gate-name .gate-id { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--muted); font-weight: 400; margin-right: 6px; }
 .gate-detail { font-size: var(--text-sm); line-height: 1.45; color: var(--muted); margin-top: 3px; }
+/* Automatic trading: the reasons a mode is not open, and what a plan had to adjust. */
+.auto-reasons { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); }
+/* A chip that is a choice rather than a label: the mode of a plan being previewed. */
+button.chip { border: 0; font: inherit; font-size: var(--text-sm); cursor: pointer; }
+button.chip[disabled] { opacity: 0.45; cursor: default; }
+#auto-detail > * + * { margin-top: 24px; }
+#auto-actions:empty, #auto-result:empty, #auto-detail:empty, #auto-live-actions:empty { display: none; }
+/* A setting's path is one long word; it wraps rather than leaving the card. */
+#auto-plan .list-sub, #auto-changes .list-sub { overflow-wrap: anywhere; }
 
 /* ─── banner ────────────────────────────────────────────────────────── */
 .banner {

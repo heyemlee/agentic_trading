@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Automatic trading · Agentic Trading</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" type="image/svg+xml" href="icons/mark.svg" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Agentic Trading" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="stylesheet" href="assets/console.css" />
+</head>
+<body>
+<main id="content" hidden data-i18n-title="auto.title">
+  <section class="section pagehead" data-od-id="pagehead"><div class="container">
+    <h1 data-i18n="auto.title">Automatic trading</h1>
+    <p class="body-muted" data-i18n="auto.intro">You choose a mode, the money it may use and where it pauses. Research decides what to buy; rules decide when to leave.</p>
+    <!-- Which account is on screen: the simulated one, or the real one. A link each, so the
+         choice has an address, Back returns to it, and a notification can open the right one. -->
+    <nav id="auto-scopes" class="row row-wrap" style="gap:8px;margin-top:20px;" aria-label="Account"></nav>
+    <p id="auto-scope-note" class="body-sm body-muted" style="margin-top:12px;"></p>
+  </div></section>
+
+  <section class="section" style="padding-top:0;" data-od-id="auto-state"><div class="container stack stack-6">
+    <p id="auto-stale" class="banner" role="status" hidden></p>
+    <div id="auto-card"></div>
+    <div id="auto-actions" class="row row-wrap" style="gap:8px;"></div>
+    <!-- The outcome of the last action, outside anything that redraws when the state changes. -->
+    <p id="auto-result" class="body-sm" role="status" aria-live="polite"></p>
+    <div id="auto-detail"></div>
+  </div></section>
+
+  <!-- The real account only: every condition for starting there, as a line that holds or does not. -->
+  <section class="section" style="padding-top:0;" id="auto-gates-section" data-od-id="auto-gates" hidden><div class="container">
+    <div class="section-head"><h2 data-i18n="auto.gatesTitle">What starting on the real account takes</h2></div>
+    <p class="body-sm body-muted" id="auto-gates-lead"></p>
+    <div id="auto-gates" style="margin-top:12px;"></div>
+    <div id="auto-advisories" class="stack stack-4" style="margin-top:16px;"></div>
+    <div id="auto-changes" style="margin-top:16px;"></div>
+    <div id="auto-live-actions" class="row row-wrap" style="gap:8px;margin-top:16px;"></div>
+  </div></section>
+
+  <!-- The real account only: a strategy that has been simulated, against the one in force. -->
+  <section class="section" style="padding-top:0;" id="auto-replace-section" data-od-id="auto-replacement" hidden><div class="container">
+    <div class="section-head"><h2 data-i18n="auto.replaceTitle">Improving the strategy</h2></div>
+    <p class="body-sm body-muted" data-i18n="auto.replaceLead">A strategy that has been simulated takes over only after 180 valid sessions, an independent out-of-sample comparison, more after costs than the one in force and than buy-and-hold, and no deeper a drawdown.</p>
+    <div id="auto-replace-state" style="margin-top:12px;"></div>
+    <div id="auto-replace-actions" class="row row-wrap" style="gap:8px;margin-top:12px;"></div>
+    <div id="auto-replace-lines" style="margin-top:12px;"></div>
+  </div></section>
+
+  <section class="section" style="padding-top:0;" id="auto-performance-section" data-od-id="auto-performance" hidden><div class="container">
+    <div class="section-head"><h2 data-i18n="auto.performanceTitle">Against doing something simpler</h2></div>
+    <p class="body-sm body-muted" data-i18n="auto.performanceLead">The simulated record beside buying and holding the same funds, a simple rule, a 60/40 benchmark and cash, given the same money on the same days.</p>
+    <div class="row row-wrap" style="gap:8px;margin-top:12px;"><button class="btn btn-secondary btn-sm" type="button" data-auto-act="performance" data-i18n="auto.performanceLoad">Compare</button></div>
+    <p class="body-sm" id="auto-performance-status" role="status" aria-live="polite" style="margin-top:8px;"></p>
+    <div id="auto-performance" style="margin-top:12px;"></div>
+  </div></section>
+
+  <section class="section" style="padding-top:0;" data-od-id="auto-modes"><div class="container">
+    <div class="section-head"><h2 data-i18n="auto.modesTitle">The modes</h2></div>
+    <div id="auto-modes" class="stack stack-4"></div>
+  </div></section>
+
+  <!-- A plan is previewed before anything is started: what it could invest, why not more, and
+       every setting it would need. Starting it here is the simulated account only. -->
+  <section class="section" style="padding-top:0;" id="auto-plan-section" data-od-id="auto-plan"><div class="container">
+    <div class="section-head"><h2 data-i18n="auto.planTitle">Preview a plan</h2></div>
+    <p class="body-sm body-muted" data-i18n="auto.planLead">Nothing is started by previewing. You do not edit rules: you choose a mode and two figures, and the plan says what follows from them.</p>
+    <form id="auto-plan-form" class="stack stack-4" style="margin-top:12px;" onsubmit="return false;">
+      <div><p class="eyebrow" id="auto-mode-label" data-i18n="auto.mode">Mode</p>
+        <div id="auto-mode-choices" class="row row-wrap" style="gap:8px;margin-top:8px;" role="radiogroup" aria-labelledby="auto-mode-label"></div></div>
+      <div class="grid-2">
+        <div class="field"><label for="auto-capital" data-i18n="auto.capital">Money it may use (USD)</label>
+          <input class="input" id="auto-capital" type="number" inputmode="decimal" min="1" step="1" autocomplete="off" /></div>
+        <div class="field"><label for="auto-loss" data-i18n="auto.lossLine">Pause new positions at a loss of (%)</label>
+          <input class="input" id="auto-loss" type="number" inputmode="decimal" min="2" max="15" step="0.5" autocomplete="off" /></div>
+      </div>
+      <div class="row row-wrap" style="gap:8px;"><button class="btn btn-green" type="button" id="auto-preview" data-auto-act="preview" data-od-id="cta-auto-preview" data-i18n="auto.preview">Preview</button></div>
+    </form>
+    <p class="body-sm" id="auto-plan-status" role="status" aria-live="polite" style="margin-top:8px;"></p>
+    <div id="auto-plan" style="margin-top:16px;"></div>
+  </div></section>
+</main>
+
+<!-- Anything on the real account that takes the console password: starting, resuming, replacing,
+     letting a validated strategy take over by itself. What is about to happen is said first. -->
+<dialog class="modal" data-sheet id="auto-sheet" data-od-id="auto-sheet">
+  <form method="dialog" class="dialog-body" id="auto-sheet-form" onsubmit="return false;">
+    <h2 id="auto-sheet-title">—</h2>
+    <p class="body-sm body-muted" style="margin-top:8px;" id="auto-sheet-lead"></p>
+    <p class="body-sm" style="margin-top:12px;" id="auto-sheet-note"></p>
+    <div class="field" style="margin-top:12px;">
+      <label for="auto-password" data-i18n="cf.confirmPassword">Console password</label>
+      <input class="input" id="auto-password" type="password" autocomplete="current-password" />
+    </div>
+    <p class="body-sm" style="margin-top:8px;" id="auto-sheet-status" role="status" aria-live="polite"></p>
+  </form>
+  <div class="dialog-foot">
+    <button class="btn btn-green" id="auto-sheet-confirm" data-od-id="cta-auto-confirm">—</button>
+    <button class="btn btn-secondary" id="auto-sheet-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<script src="assets/press.js"></script>
+<script src="assets/i18n.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/console.js"></script>
+<script src="assets/navigation.js"></script>
+<script src="assets/pages/auto.js"></script>
+</body>
+</html>

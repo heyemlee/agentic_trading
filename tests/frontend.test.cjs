@@ -1911,6 +1911,21 @@ test('home lists only what is not normal, each row on the page that owns it', ()
     'real money switched off by choice is not a problem to report');
 });
 
+test('a to-do shows the engine\'s sentence in this console\'s language where it wrote one in both', () => {
+  const c = homePage();
+  const failed = attentionItem({ id: 'research_failed:r1', kind: 'research_failed', title: 'research on AMZN did not finish',
+    detail: 'the Claude login on this Mac has expired; sign in again',
+    detail_i18n: { en: 'The Claude login on this Mac has expired, so research cannot run.',
+                   zh: '这台 Mac 上的 Claude 登录已过期，研究无法运行。' } });
+  c.CT.attention = attentionPayload([failed]); c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /attention-detail">The Claude login on this Mac has expired, so research/);
+  c.I18N.lang = 'zh'; c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /attention-detail">这台 Mac 上的 Claude 登录已过期/);
+  // An item with only the one sentence is shown as it always was.
+  c.CT.attention = attentionPayload([attentionItem({ id: 'plain', detail: 'only this' })]); c.render();
+  assert.match(c.element('needs-you-slot').innerHTML, /attention-detail">only this/);
+});
+
 test('home preserves collector priority, displays partial items, and removes resolved items', () => {
   const c = homePage();
   const critical = attentionItem({ id: 'critical', kind: 'order_unknown', title: 'Unknown <script>', priority: 1,
@@ -2620,6 +2635,12 @@ test('the polling cadence stays within its budget, because two of these reads ca
     portfolio: 60000, risk: 60000, microLive: 60000, proposals: 15000, orders: 10000,
     research: 60000, researchSubjects: 60000, accounts: 60000, labRoster: 900000, researchJobs: 10000, researchRun: 5000,
     proposalDetail: 15000,
+    /* Automatic trading (2026-10-06). Both are local reads with no venue session. Measured on
+       the API: /auto-trading 6 ms; /auto-trading/live 14 ms once the plan's landing is kept
+       (it was 270 ms while every read rewrote and reloaded the risk profile, which is why the
+       service keeps it until the configuration moves). What they show changes when a pass
+       runs, once a minute, so nothing is gained by asking sooner. */
+    auto: 60000, autoLive: 120000,
   };
   assert.deepEqual(found, budget);
 
@@ -2921,6 +2942,73 @@ test('the gate reports the deterministic verdict and offers no approval without 
   assert.match(gate, /No Trade/);          // C.code() renders the engine's own verdict
   assert.match(gate, /38/);
   assert.equal(c.element('.lab-approval').disabled, true);
+});
+
+/* Why a run ended as it did. "No trade" used to stand for five different things; the API now
+   names which (its `diagnosis`), and the room shows the engine's own sentence for it. */
+const whyOf = (category, code, labelEn, labelZh, en, zh) => ({ category, code,
+  label: { en: labelEn, zh: labelZh }, summary: { en, zh },
+  reasons: [{ category, code, rule_id: null, text: { en, zh } }] });
+const BOXED_IN = whyOf('order_limit_conflict', 'target_below_minimum', 'Order limits conflict', '订单限制冲突',
+  'At the configured size this order is only $20.00, below the $25.00 minimum order.',
+  '按当前仓位比例这笔只有 $20.00，低于最低下单金额 $25.00。');
+const SIGNED_OUT = whyOf('research_failed', 'llm_login_expired', 'Research failed', '研究失败',
+  'The Claude login on this Mac has expired, so research cannot run.',
+  '这台 Mac 上的 Claude 登录已过期，研究无法运行。');
+
+test('a settled run says which kind of no-trade it was, in the engine\'s own sentence', async () => {
+  const row = { run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                policy_action: 'BUY', hard_risk_verdict: 'NO_ACTION', confidence: 72,
+                final_action: 'NO_TRADE', proposal_id: null, diagnosis: BOXED_IN };
+  const trace = { run_id: 'r1', ticker: 'VTI', instrument_type: 'etf', analysts: ['market', 'news'],
+                  policy_action: 'BUY', hard_risk_verdict: 'NO_ACTION', confidence: 72, steps: [] };
+  const c = labPage({ research: [row], fetchJSON: async () => trace });
+  await flush(); c.render();
+
+  // The line under the ticker names the kind of ending, not the bare action.
+  assert.match(c.element('#now-title').textContent, /^Sep 4, 2026 · Order limits conflict$/);
+  assert.doesNotMatch(c.element('#now-title').textContent, /No Trade/);
+  assert.match(c.element('#now-caption').textContent, /only \$20\.00, below the \$25\.00 minimum/);
+  const gate = c.element('#gate-result').innerHTML;
+  assert.match(gate, /data-why="order_limit_conflict"/);
+  assert.match(gate, /<strong>Order limits conflict<\/strong> At the configured size/);
+  assert.doesNotMatch(gate, /lab\.noTradeExplanation/, 'the one line that fitted every case is gone');
+
+  // The other language is the engine's other sentence, never a translation made here.
+  c.I18N.lang = 'zh'; c.render();
+  assert.match(c.element('#now-title').textContent, /订单限制冲突$/);
+  assert.match(c.element('#gate-result').innerHTML, /低于最低下单金额 \$25\.00/);
+});
+
+test('a run that never finished says why, not what the process exited with', async () => {
+  const c = labPage({ jobs: [{ run_key: 'f1', ticker: 'AMZN', trade_date: '2026-10-02', bucket: 'micro_live',
+                               instrument_type: 'stock', state: 'FAILED', error: 'research pipeline exited with code 1',
+                               failure_code: 'llm_login_expired', diagnosis: SIGNED_OUT }],
+                      fetchJSON: async () => ({ run_id: 'f1', steps: [] }) });
+  await flush(); c.render();
+  assert.match(c.element('#now-title').textContent, /^lab\.runStopped AMZN$/);
+  assert.match(c.element('#now-caption').textContent, /Claude login on this Mac has expired/);
+  assert.doesNotMatch(c.element('#now-caption').textContent, /exited with code/);
+});
+
+test('a name in the list carries the kind of ending its newest run had', () => {
+  const subjects = ownSubjects();
+  subjects.held[1].latest = { ...subjects.held[1].latest, final_action: 'NO_TRADE', diagnosis: BOXED_IN };
+  const held = labPage({ subjects }).element('#held-list').innerHTML;
+  assert.match(held, /Order limits conflict · lab\.confidenceShort 62/);
+  assert.doesNotMatch(held, /No Trade/);
+});
+
+test('an answer without a diagnosis is drawn as it always was', async () => {
+  // A response from before the field existed, or a fixture that never had it.
+  const row = { run_id: 'r1', ticker: 'VTI', trade_date: '2026-09-04', instrument_type: 'etf',
+                policy_action: 'NO_TRADE', final_action: 'NO_TRADE' };
+  const c = labPage({ research: [row], fetchJSON: async () => ({ run_id: 'r1', ticker: 'VTI', policy_action: 'NO_TRADE', steps: [] }) });
+  await flush(); c.render();
+  assert.match(c.element('#now-title').textContent, /^Sep 4, 2026 · No Trade$/);
+  assert.match(c.element('#gate-result').innerHTML, /lab\.noTradeExplanation/);
+  assert.equal(c.Console.why(null), null);
+  assert.equal(c.Console.said({ zh: '只有中文' }), '只有中文', 'one language on record is still shown');
 });
 
 test('an empty deployment says so instead of drawing a run that never happened', () => {
@@ -3888,4 +3976,293 @@ test('a mouse, a key and the fixed bars press at once; a disabled control never 
   assert.equal(el.pressed, true);
   p.fire('keyup', { key: 'Enter', target: el });
   assert.equal(el.pressed, false);
+});
+
+/* Automatic trading (auto.html): the plan, the simulated account and the real one. The page
+   computes nothing about money and decides nothing: it draws what the service answered, sends
+   what a person asked for, and asks for the console password before anything the service
+   requires one for. The fixtures are the demo's, used as the payloads a live read would bring. */
+const autoFixtures = () => plain(context(true).CT);
+const autoReads = () => (({ auto, autoLive }) => ({ auto, autoLive }))(autoFixtures());
+function autoPage(post, { search = '', demo = false, fetchJSON, data } = {}) {
+  const c = context(demo); c.run('console.js');
+  c.Console.mount = () => {};
+  c.Console.live = (keys, render, optional) => { c.keys = [keys, optional]; c.render = render; render(); };
+  c.location.search = (demo ? '?demo=1' : '') + (search ? (demo ? '&' : '?') + search : '');
+  c.reread = [];
+  c.CT_API = { isLive: () => true, writesEnabled: true, authenticated: true, post,
+    fetchJSON: fetchJSON || (async () => ({})), readOnce: async key => { c.reread.push(key); } };
+  if (!demo) Object.assign(c.CT, data || autoReads());
+  c.run('pages/auto.js');
+  return c;
+}
+const autoTap = (c, kind, value, disabled = false) => c.document.dispatchEvent({ type: 'click', target: {
+  closest: selector => selector === (kind === 'mode' ? '[data-auto-mode]' : '[data-auto-act]')
+    ? { dataset: kind === 'mode' ? { autoMode: value } : { autoAct: value }, disabled } : null } });
+
+test('the simulated account is drawn from what the service answered, reasons included', () => {
+  const c = autoPage(async () => ({}));
+  assert.deepEqual(plain(c.keys), [['auto'], ['autoLive']], 'the real account is read as well, and never required');
+  const scopes = c.element('auto-scopes').innerHTML;
+  assert.match(scopes, /href="auto.html\?scope=paper" aria-current="page"/);
+  assert.match(scopes, /href="auto.html\?scope=live"/);
+  const card = c.element('auto-card').innerHTML;
+  assert.match(card, /auto.sessionsChip 12 30/, 'how much of the record there is, against what is needed');
+  assert.match(card, /auto.strategyLine 3 33 80 10 90/);
+  assert.match(card, /A third each in three broad and bond funds/, 'why this strategy, in the engine\'s words');
+  assert.match(card, /auto.mayBuy VTI · VXUS · BND/);
+  for (const figure of ['\\$100\\.00', '\\$99\\.00', '\\$100\\.42', '\\+\\$0\\.42', '\\+0\\.42%', '-0\\.31%', '\\$10\\.00']) {
+    assert.match(card, new RegExp(figure), figure);
+  }
+  assert.match(card, /auto.lossLineNote 10/, 'what the loss line is not is said beside it');
+  const detail = c.element('auto-detail').innerHTML;
+  assert.match(detail, /VTI[\s\S]*auto.heldUnder sv-demo00000001[\s\S]*0\.087562/);
+  assert.match(detail, /2026-09-24[\s\S]*auto.problem.regime_unknown/, 'a session that did not count says why');
+  assert.match(detail, /does not currently study VXUS, BND/, 'a plan nobody researches is said to be one');
+  const modes = c.element('auto-modes').innerHTML;
+  assert.equal((modes.match(/<article/g) || []).length, 4, 'three modes and what is not a mode');
+  assert.match(modes, /auto-mode-swing[\s\S]*yours to decide/);
+  assert.match(modes, /auto-mode-intraday[\s\S]*auto.modeClosed[\s\S]*not built/);
+  assert.match(modes, /auto-mode-stocks[\s\S]*do not count for stocks/);
+  assert.doesNotMatch(modes, /auto.modeOpen/, 'nothing is called open that is not');
+  assert.equal(c.element('auto-gates-section').hidden, true, 'the real account\'s conditions are on its own view');
+});
+
+test('a simulation that has never been started says so and offers only a preview', () => {
+  const data = autoReads();
+  data.auto.simulation = { exists: false, plan: null, version: null, state: null,
+    note: { zh: '模拟账户还没有启动。', en: 'The simulated account has not been started.' } };
+  const c = autoPage(async () => ({}), { data });
+  assert.match(c.element('auto-card').innerHTML, /auto.notStarted[\s\S]*has not been started/);
+  assert.equal(c.element('auto-actions').innerHTML, '');
+  assert.equal(c.element('auto-performance-section').hidden, true);
+});
+
+test('pausing and stopping take a second tap, and the answer is read back', async () => {
+  const sent = [];
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return { paused: true }; });
+  assert.match(c.element('auto-actions').innerHTML, /data-auto-act="pause"[^>]*>auto.pause<[\s\S]*data-auto-act="stop"/);
+  autoTap(c, 'act', 'pause');
+  assert.equal(sent.length, 0, 'the first tap only arms');
+  assert.match(c.element('auto-actions').innerHTML, /data-auto-act="pause"[^>]*>auto.tapAgain</);
+  autoTap(c, 'act', 'pause'); await flush();
+  assert.deepEqual(plain(sent), [['/auto-trading/pause', { reason: '', scope: 'paper' }]]);
+  assert.match(c.element('auto-result').textContent, /auto.pausedDone/);
+  assert.deepEqual(plain(c.reread), ['auto', 'autoLive'], 'the state is read again, not assumed');
+
+  c.CT.auto.simulation.state = { paused: true, reason: 'paused by hand', kind: 'person' }; c.render();
+  assert.match(c.element('auto-card').innerHTML, /auto.paused[\s\S]*auto.pausedByHand paused by hand/);
+  assert.match(c.element('auto-actions').innerHTML, /data-auto-act="resume"[^>]*>auto.resume</);
+  autoTap(c, 'act', 'stop'); autoTap(c, 'act', 'stop'); await flush();
+  assert.deepEqual(plain(sent[1]), ['/auto-trading/stop', { reason: '', scope: 'paper' }]);
+});
+
+test('resuming the simulation says where the loss line now starts', async () => {
+  const c = autoPage(async () => ({ changed: true, loss_line_moved: { from: 0, to: -6.4 } }));
+  c.CT.auto.simulation.state = { paused: true, reason: 'down $6.40', kind: 'loss_line' }; c.render();
+  assert.match(c.element('auto-card').innerHTML, /auto.pausedAtLine down \$6.40/);
+  autoTap(c, 'act', 'resume'); await flush();
+  assert.match(c.element('auto-result').textContent, /auto.resumedMoved \$0.00 -\$6.40/);
+});
+
+test('a plan is previewed from a mode and two figures, and started as it was previewed', async () => {
+  const sent = [];
+  const example = autoFixtures().autoPlanExample;
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return path.endsWith('/plan') ? example : { started: true }; });
+  const choices = c.element('auto-mode-choices').innerHTML;
+  assert.match(choices, /data-auto-mode="steady"/);
+  assert.match(choices, /data-auto-mode="intraday" disabled/, 'a mode that is not built cannot be chosen');
+  assert.equal(c.element('auto-plan').innerHTML, '');
+  autoTap(c, 'mode', 'swing');
+  c.element('auto-capital').value = '250'; c.element('auto-loss').value = '5';
+  autoTap(c, 'act', 'preview'); await flush();
+  assert.deepEqual(plain(sent), [['/auto-trading/plan', { mode: 'swing', capital_usd: 250, loss_pause_pct: 5 }]]);
+  const plan = c.element('auto-plan').innerHTML;
+  assert.match(plan, /about \$99 of the \$100 can actually be invested/, 'what it comes to, in the engine\'s sentence');
+  assert.match(plan, /auto.deployToday[\s\S]*\$0\.00[\s\S]*auto.deployPlan[\s\S]*\$99\.00/);
+  assert.match(plan, /auto.kind.boundary[\s\S]*managed_exit.enabled[\s\S]*auto.valueOn[\s\S]*auto.waits24/,
+               'a switch reads as on, and what loosens says it waits');
+  assert.match(plan, /not a guarantee of the most that can be lost/);
+  assert.match(plan, /auto.simChangesNothing/);
+
+  autoTap(c, 'act', 'start-paper'); await flush();
+  assert.deepEqual(plain(sent[1]), ['/auto-trading/start', { mode: 'swing', capital_usd: 250, loss_pause_pct: 5,
+    plan_id: example.plan_id, strategy: example.strategy, scope: 'paper' }]);
+  assert.match(c.element('auto-plan-status').textContent, /auto.startedPaper/);
+  assert.equal(c.element('auto-plan').innerHTML, '', 'a started preview is no longer a preview');
+  // Left empty, the two figures are not sent at all: the service has its own defaults.
+  autoTap(c, 'mode', 'steady'); c.element('auto-capital').value = ''; c.element('auto-loss').value = '';
+  autoTap(c, 'act', 'preview'); await flush();
+  assert.deepEqual(plain(sent[2]), ['/auto-trading/plan', { mode: 'steady' }]);
+});
+
+test('the real account lists every condition and offers no start while one does not hold', () => {
+  const c = autoPage(async () => ({}), { search: 'scope=live' });
+  assert.equal(c.element('auto-gates-section').hidden, false);
+  assert.match(c.element('auto-card').innerHTML, /auto.noPlan[\s\S]*auto.noPlanBody.live/);
+  const gates = c.element('auto-gates').innerHTML;
+  assert.equal((gates.match(/class="gate is-fail"/g) || []).length, 3);
+  assert.equal((gates.match(/class="gate is-pass"/g) || []).length, 3);
+  assert.match(gates, /auto.waitsOn.record[\s\S]*has 12 valid simulated session\(s\) and needs 30/);
+  assert.match(c.element('auto-advisories').innerHTML, /not a guarantee of the most that can be lost/);
+  assert.match(c.element('auto-changes').innerHTML, /autonomy.open.enabled[\s\S]*take effect after 24 hours/);
+  const actions = c.element('auto-live-actions').innerHTML;
+  assert.match(actions, /data-auto-act="start-live" disabled/);
+  assert.match(actions, /auto.notYet/);
+  assert.equal(c.element('auto-replace-section').hidden, true, 'nothing is in force, so nothing to replace');
+  assert.equal(c.element('auto-performance-section').hidden, true);
+});
+
+test('starting on the real account says what will happen and takes the password, once', async () => {
+  const sent = [];
+  const data = autoReads();
+  data.autoLive.candidate.may_confirm = true;
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return { started: false, waiting: {} }; },
+                     { search: 'scope=live', data });
+  assert.doesNotMatch(c.element('auto-live-actions').innerHTML, /disabled/);
+  autoTap(c, 'act', 'start-live');
+  assert.equal(c.element('auto-sheet').open, true);
+  assert.match(c.element('auto-sheet-lead').textContent, /auto.startLiveLead Steady \$100.00 \$10.00/);
+  assert.match(c.element('auto-sheet-note').textContent, /auto.startLiveWaits 2/, 'settings wait their day first');
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  assert.match(c.element('auto-sheet-status').textContent, /auto.passwordNeeded/);
+  assert.equal(sent.length, 0);
+  c.element('auto-password').value = 'pw';
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  const inputs = data.autoLive.candidate.inputs;
+  assert.deepEqual(plain(sent), [['/auto-trading/start', { ...inputs, scope: 'live', password: 'pw' }]]);
+  assert.equal(c.element('auto-password').value, '', 'the password is not kept on the page');
+  assert.match(c.element('auto-result').textContent, /auto.requestedLive/);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(c.element('auto-sheet').open, false);
+});
+
+test('a refused password keeps the sheet open, and a start that is waiting can be withdrawn', async () => {
+  const data = autoReads();
+  data.autoLive.candidate.may_confirm = true;
+  const sent = [];
+  const c = autoPage(async (path, body) => {
+    sent.push([path, body]);
+    if (path.endsWith('/start')) throw Object.assign(Error('the console password did not match'), { status: 400 });
+    return { withdrawn: true };
+  }, { search: 'scope=live', data });
+  autoTap(c, 'act', 'start-live');
+  c.element('auto-password').value = 'wrong';
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  assert.match(c.element('auto-sheet-status').textContent, /did not match/);
+  assert.equal(c.element('auto-sheet').open, true);
+  assert.equal(c.element('auto-sheet-confirm').disabled, false, 'and it can be tried again');
+
+  c.CT.autoLive.request = { plan_id: 'demo0plan0steady', status: 'waiting', expires_at: '2026-10-09T17:00:00+00:00',
+    waiting_for: ['a', 'b'], last_reason: '2 setting(s) the plan needs are not in force' };
+  c.render();
+  assert.match(c.element('auto-card').innerHTML, /auto.waitingTitle[\s\S]*auto.waitingBody[\s\S]*not in force/);
+  assert.match(c.element('auto-live-actions').innerHTML, /auto.requestStands/);
+  assert.doesNotMatch(c.element('auto-live-actions').innerHTML, /start-live/, 'not confirmed a second time');
+  autoTap(c, 'act', 'withdraw'); autoTap(c, 'act', 'withdraw'); await flush();
+  assert.deepEqual(plain(sent.at(-1)), ['/auto-trading/live/withdraw', { reason: '' }]);
+});
+
+const autoInForce = () => {
+  const data = autoReads();
+  data.autoLive.plan = { ...data.auto.simulation.plan };
+  data.autoLive.account_mark = { equity_usd: 96.0, result_usd: -4.0, result_pct: -4.0, at: '2026-10-05T19:58:00+00:00' };
+  data.autoLive.last_pass = { at: '2026-10-05T19:58:00+00:00', error: null, market_open: true };
+  return data;
+};
+
+test('a real plan paused at its loss line is resumed only with the password, told what resuming allows', async () => {
+  const sent = [];
+  const data = autoInForce();
+  data.autoLive.state = { paused: true, reason: 'the plan is down $10.20', kind: 'loss_line' };
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return { changed: true, loss_line_moved: { from: 0, to: -10.2 } }; },
+                     { search: 'scope=live', data });
+  assert.match(c.element('auto-card').innerHTML, /auto.paused[\s\S]*auto.pausedAtLine the plan is down \$10.20/);
+  assert.match(c.element('auto-actions').innerHTML, /data-auto-act="resume"[^>]*>auto.resumeLive</);
+  autoTap(c, 'act', 'resume');
+  assert.equal(sent.length, 0, 'nothing is sent before the password');
+  assert.match(c.element('auto-sheet-lead').textContent, /auto.resumeLineLead/);
+  c.element('auto-password').value = 'pw';
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  assert.deepEqual(plain(sent), [['/auto-trading/resume', { reason: '', scope: 'live', password: 'pw' }]]);
+  assert.match(c.element('auto-result').textContent, /auto.resumedMoved \$0.00 -\$10.20/);
+  // Stopping never asks for it.
+  autoTap(c, 'act', 'stop'); autoTap(c, 'act', 'stop'); await flush();
+  assert.deepEqual(plain(sent[1]), ['/auto-trading/stop', { reason: '', scope: 'live' }]);
+});
+
+test('a pass that failed is said to have failed, and a strategy that passed waits for the password', async () => {
+  const sent = [];
+  const data = autoInForce();
+  data.autoLive.last_pass = { at: '2026-10-05T19:58:00+00:00', error: 'PortfolioError: the ledger is stale' };
+  data.autoLive.replacement = { automatic: false, looked: 1, last: { outcome: 'passed', at: '2026-10-04T22:00:00+00:00',
+    lines: [{ code: 'beats_incumbent_after_costs', ok: true, waits_on: 'record', text: { zh: '候选更高。', en: 'the candidate is higher.' } }] } };
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return { outcome: 'replaced', lines: [] }; },
+                     { search: 'scope=live', data });
+  assert.match(c.element('auto-detail').innerHTML, /auto.lastPassFailed[\s\S]*the ledger is stale/);
+  assert.equal(c.element('auto-replace-section').hidden, false);
+  assert.match(c.element('auto-replace-state').innerHTML, /auto.replaceAsk[\s\S]*auto.outcome.passed/);
+  assert.match(c.element('auto-replace-lines').innerHTML, /gate is-pass[\s\S]*the candidate is higher/);
+  const actions = c.element('auto-replace-actions').innerHTML;
+  assert.match(actions, /data-auto-act="replace"/);
+  assert.match(actions, /data-auto-act="auto-replace-on"/);
+  autoTap(c, 'act', 'replace');
+  assert.equal(sent.length, 0);
+  c.element('auto-password').value = 'pw';
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  assert.deepEqual(plain(sent), [['/auto-trading/candidate/replace', { password: 'pw' }]]);
+  assert.match(c.element('auto-result').textContent, /auto.outcome.replaced/);
+  autoTap(c, 'act', 'auto-replace-on');
+  c.element('auto-password').value = 'pw';
+  c.element('auto-sheet-confirm').events.click(); await flush();
+  assert.deepEqual(plain(sent[1]), ['/auto-trading/replacement', { on: true, password: 'pw' }]);
+});
+
+test('the comparison is asked for, never polled, and a missing result is not drawn as zero', async () => {
+  const asked = [];
+  const example = autoFixtures().autoPerformanceExample;
+  example.simulation.rows.benchmark = { figures: null, says: { zh: '基准', en: 'Benchmark' }, why_not: { zh: '没有历史', en: 'no history in the window' } };
+  const c = autoPage(async () => ({}), { fetchJSON: async path => { asked.push(path); return example; } });
+  assert.equal(asked.length, 0);
+  assert.equal(c.element('auto-performance').innerHTML, '');
+  autoTap(c, 'act', 'performance'); await flush();
+  assert.deepEqual(asked, ['/auto-trading/performance']);
+  const table = c.element('auto-performance').innerHTML;
+  assert.match(table, /auto.row.strategy[\s\S]*\+0\.42%[\s\S]*auto.ddShort -0\.31%/);
+  assert.match(table, /auto.row.benchmark[\s\S]*no history in the window[\s\S]*auto.noResult/);
+  const benchmark = table.slice(table.indexOf('auto.row.benchmark'), table.indexOf('auto.row.cash'));
+  assert.doesNotMatch(benchmark, /%/, 'no figure is put where there is none');
+  assert.match(table, /not evidence that the strategy works/);
+  c.render();
+  assert.equal(asked.length, 1, 'drawing the page again asks nothing');
+});
+
+test('the automatic-trading demo draws its fixtures and sends nothing', async () => {
+  let posts = 0;
+  const c = autoPage(async () => { posts++; return { blocked: true }; }, { demo: true,
+    fetchJSON: async () => { throw Error('the demo read the API'); } });
+  assert.match(c.element('auto-scopes').innerHTML, /auto.html\?scope=live&amp;demo=1/);
+  assert.match(c.element('auto-card').innerHTML, /auto.sessionsChip 12 30/);
+  autoTap(c, 'act', 'preview'); await flush();
+  assert.equal(posts, 0, 'a demo preview is the sample plan');
+  assert.match(c.element('auto-plan').innerHTML, /about \$99 of the \$100/);
+  autoTap(c, 'act', 'performance'); await flush();
+  assert.match(c.element('auto-performance').innerHTML, /auto.row.passive/);
+  autoTap(c, 'act', 'start-paper'); await flush();
+  assert.match(c.element('auto-plan-status').textContent, /auto.demoBlocked/);
+});
+
+test('automatic trading is a page of the console everywhere a page is listed', () => {
+  assert.match(uiFile('assets/navigation.js'), /'settings', 'auto'\]\)/);
+  assert.match(fs.readFileSync(path.join(root, 'agentic_trading/api/app.py'), 'utf8'), /_PRIMARY_PAGES = \([\s\S]*?"settings", "auto"\)/);
+  const shared = uiFile('assets/console.js');
+  assert.match(shared, /auto:\s+'index.html\?scope=agentic'/, 'Back returns to the Agentic account it was opened from');
+  assert.match(shared, /evaluation: \['scope'\], auto: \['scope'\]/, 'a to-do may link to it, and only with a scope');
+  assert.match(uiFile('index.html'), /href="auto.html" id="pfa-plan"/);
+  const page = uiFile('auto.html');
+  assert.doesNotMatch(page, /theme-mono/, 'opened from Home, it keeps Home\'s palette');
+  assert.match(page, /type="password" autocomplete="current-password"/);
+  const c = context(); c.run('console.js');
+  assert.equal(c.Console.taskLink({ page: 'auto', params: { scope: 'live' } }), 'auto.html?scope=live');
+  assert.equal(c.Console.taskLink({ page: 'auto', params: { plan: 'x' } }), null, 'no other parameter is carried');
 });

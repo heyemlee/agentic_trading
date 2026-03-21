@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   const routes = new Set(['index', 'advisor', 'more', 'risk', 'activity',
-    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'lab', 'settings']);
+    'evaluation', 'profile', 'notifications', 'system', 'approvals', 'lab', 'settings', 'auto']);
   /* Research moved into the Lab, and Assets became Home. A link written before then, or one
      the server still names, opens the page it moved to with its query, here and on a cold load
      alike (api/app.py redirects). */

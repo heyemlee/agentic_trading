@@ -97,6 +97,11 @@ agentic_trading/     the package
                      places an order: `cli.py` (ct-approve) imports the same function but is
                      refused above `execution_policy.stage` 2, and execution_scenarios.py only
                      ever builds a SimulatedBroker. tests/test_money_paths.py holds all three
+  auto/              automatic trading: the plan a person confirms, strategy versions, the pass
+                     over an account, the simulated account (state under state/paper/, a venue
+                     that cannot be the real one), backtests, and the conditions in front of
+                     real money. Places no order: it writes proposals, and approvals.py is
+                     still the only thing that approves one. Off until a person starts a plan
   broker/            venue adapters (simulated, Robinhood)
   llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime
@@ -105,7 +110,7 @@ config/              profiles, the mandate, the prompt context — live, read by
   examples/          state/*.yaml templates a setup script copies into the live ledger
 state/               ledgers, audit database, tokens — a symlink outside the checkout; untracked
 runs/                research artefacts and logs — a symlink outside the checkout; untracked
-ui/                  the console: thirteen pages, no build step, served at /ui by the API
+ui/                  the console: fourteen pages, no build step, served at /ui by the API
 deploy/macos/        launchd install, release/rollback, backup, maintenance, selfcheck
 tools/               developer utilities that are not part of the deployment
 docs/                current documentation; docs/archive/ is point-in-time and unmaintained

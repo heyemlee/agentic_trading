@@ -72,6 +72,13 @@
   const sysCopy = (x) => t('sys.' + x);
   const psCopy = (x) => t('ps.' + x);
   const bucket = (k) => t('bucket.' + k);
+  /* A sentence the engine wrote in both languages ({zh, en}), in the one this console is
+     showing. Still the engine's own words, shown as they are: nothing here translates. */
+  const said = (pair) => (!pair || typeof pair !== 'object' ? ''
+    : String(pair[window.I18N.lang === 'zh' ? 'zh' : 'en'] || pair.en || pair.zh || ''));
+  /* Why a run ended as it did (the API's `diagnosis`): the kind of outcome, then the sentence. */
+  const why = (diagnosis) => (!diagnosis ? null
+    : { category: diagnosis.category || '', label: said(diagnosis.label), text: said(diagnosis.summary) });
 
   /* Ladders. The conceptual portfolios run five levels, Micro-Live three. */
   const LADDER_STEPS = {
@@ -147,6 +154,9 @@
        the Assets tab, and a link to portfolio.html is a link to Home (navigation.js, api/app.py). */
     { href: 'index.html',     key: 'dashboard', icon: 'home',      tab: true },
     { href: 'approvals.html', key: 'approvals', icon: 'approvals' },
+    /* Automatic trading is opened from the Agentic account on Home: the plan, the simulated
+       account and the real one. It has no tab of its own. */
+    { href: 'auto.html',      key: 'auto',      icon: 'portfolio' },
     { href: 'advisor.html',   key: 'advisor',   icon: 'assistant' },
     /* The Lab is the second tab: the office at work, then what it studies -- what the owner
        holds and what they added -- and each run's report over it. Research lives here; a link
@@ -170,6 +180,7 @@
      not the parent's name, because in-app it returns to wherever you came from. */
   const PARENT = {
     approvals:  'index.html',
+    auto:       'index.html?scope=agentic',
     risk:       'more.html',
     activity:   'more.html',
     evaluation: 'more.html',
@@ -183,7 +194,8 @@
   function renderChrome(activeKey) {
     const open = openCount();
     const overflow = NAV.filter((n) => !n.tab);
-    const section = activeKey === 'approvals' ? 'dashboard' : activeKey;
+    /* Approvals and automatic trading are opened from Home and belong to it. */
+    const section = ['approvals', 'auto'].includes(activeKey) ? 'dashboard' : activeKey;
     const inOverflow = overflow.some((n) => n.key === section);
 
     const tabs = NAV.filter((n) => n.tab).map((n) => {
@@ -888,7 +900,7 @@
     index: ['scope', 'account', 'ticker'], portfolio: ['scope', 'account', 'ticker'],
     advisor: ['scope', 'account', 'conversation', 'ticker'], research: ['scope', 'account', 'run', 'include_all_personal'],
     lab: ['run', 'scope', 'account', 'include_all_personal'], approvals: ['proposal'], activity: ['subject', 'kind', 'cursor'],
-    settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'],
+    settings: ['change', 'section'], risk: ['scope'], evaluation: ['scope'], auto: ['scope'],
     system: [], profile: [], notifications: [], more: [],
   };
   function taskLink(link) {
@@ -912,7 +924,7 @@
     page: (name, init) => window.CT_NAV ? CT_NAV.register(name, init) : init(document),
     D, ICON, CHEVRON, NAV, PARENT, LEVEL_TONE, LADDER_STEPS,
     SHOW_CONCEPTUAL, showsBucket, showsAccount,
-    t, code, sysCopy, psCopy, bucket,
+    t, code, sysCopy, psCopy, bucket, said, why,
     usd, pct, dateTime, dateOnly, duration, clock, titleise,
     snapshotNow, freshnessNow, ladderMarkup, listRow, gateRow, md, escapeHtml,
     isPaused, setPaused, systemStatus, paintNavStatus, openCount,

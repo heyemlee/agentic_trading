@@ -14,6 +14,7 @@ window.CT = (function () {
     portfolio: {buckets: {}, accounts: {}, errors: {}, combined: null}, risk: {}, microLive: {},
     schedule: null, operations: null, notifications: null, pushDevices: null, authSessions: null,
     config: null, authority: null, attention: null,
+    auto: null, autoLive: null,
     evaluation: null,
     activity: null,
     proposals: [], proposalDetail: null, research: [], researchJobs: [], researchSubjects: null, researchRun: null,
@@ -392,12 +393,23 @@ window.CT = (function () {
     message: "the world changed materially since the analysis; this idea needs fresh research rather than a re-priced old order",
   };
 
+  /* Why each of these runs ended as it did, in the shape the API returns it
+     (agentic_trading/diagnosis.py). All four were rated Hold with nothing held. */
+  const DECLINED = {
+    category: "strategy_no_trade", code: "rating_hold_no_position",
+    label: { zh: "策略选择不交易", en: "Strategy chose not to trade" },
+    summary: { zh: "研究评级为“持有”，目前没有持仓，所以不买入。",
+               en: "Research rated it Hold and nothing is held, so there is nothing to buy." },
+    reasons: [{ category: "strategy_no_trade", code: "rating_hold_no_position", rule_id: null,
+                text: { zh: "研究评级为“持有”，目前没有持仓，所以不买入。",
+                        en: "Research rated it Hold and nothing is held, so there is nothing to buy." } }],
+  };
   const research = [
     { run_id: "2026-09-04_VTI_873e64ae", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-04", instrument_type: "etf", created_at: "2026-09-05T06:18:43.090801+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 412.6 },
     { run_id: "2026-09-02_VTI_2bf5a8b5", ticker: "VTI", bucket: "micro_live", trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-04T00:09:52.569799+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 38, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 420.9 },
     { run_id: "2026-09-02_VTI_f819eaa6", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T21:05:24.598310+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 57, hard_risk_verdict: "NO_ACTION", final_action: "NO_TRADE", proposal_id: null, llm_calls: 13, elapsed_seconds: 582.7 },
     { run_id: "2026-09-02_VTI_56717678", ticker: "VTI", bucket: "core",       trade_date: "2026-09-02", instrument_type: "etf", created_at: "2026-09-03T20:37:50.909749+00:00", portfolio_manager_rating: "Hold", policy_action: "NO_TRADE", confidence: 44, hard_risk_verdict: null,        final_action: null,       proposal_id: null, llm_calls: 7,  elapsed_seconds: 302.9 },
-  ];
+  ].map((row) => ({ ...row, diagnosis: DECLINED }));
 
   const researchJobs = [{
     run_key: "2026-09-04_VTI_873e64ae", dedupe_key: "demo:VTI:2026-09-04",
@@ -1059,10 +1071,105 @@ window.CT = (function () {
     };
   })();
 
+  /* Automatic trading, as /auto-trading and /auto-trading/live answer. Invented: a steady plan
+     twelve sessions into its simulation, nothing in force on the real account, and the
+     conditions that stand in front of it. No figure here is a result of anything. */
+  const pair = (zh, en) => ({ zh, en });
+  const steady = { template: 'research_long_only', max_positions: 3, position_pct: 33.0, min_confidence: 80,
+    stop_loss_pct: 10.0, take_profit_pct: 0.0, max_holding_days: 90, trend_window: 0, universe: ['VTI', 'VXUS', 'BND'],
+    rationale: pair('三只宽基和债券基金各占三分之一，研究说买且把握度够才买。', 'A third each in three broad and bond funds, bought only when research says so with enough confidence.'),
+    suggested_by: 'template', suggestion_error: null };
+  const autoEnvelope = { mode: 'steady', capital_usd: 100.0, loss_pause_pct: 10.0, account: 'micro_live', loss_pause_usd: 10.0 };
+  const autoModes = [
+    { key: 'steady', order: 1, label: pair('稳健', 'Steady'), cadence: 'weekly', simulated_days: 12, open_for_real_money: false, can_simulate: true,
+      runs_as: pair('每周研究一次；研究说买且把握度够才买；跌到止损线或持有到期卖出。', 'Researched weekly; bought when research says so with enough confidence; sold at its stop or at the end of its holding period.'),
+      blockers: [
+        { code: 'simulation_record_short', waits_on: 'record', text: pair('实时模拟只有 12 个有效交易日，需要至少 30 个（等待样本）。', 'Only 12 session(s) of live simulation are on record; 30 are needed.') },
+        { code: 'exit_not_exercised', waits_on: 'record', text: pair('模拟账户里还没有完成过一次“买入→卖出”的完整流程。', 'The simulated account has not yet carried one position from purchase to sale.') }] },
+    { key: 'swing', order: 2, label: pair('波段', 'Swing'), cadence: 'daily', simulated_days: 0, open_for_real_money: false, can_simulate: true,
+      runs_as: pair('每个交易日研究一次；研究说买、并且收盘价在自己的均线上方才买；跌到止损线、跌破均线或持有到期卖出。', 'Researched every session; bought when research says so and the close is above its own average; sold at its stop, below that average, or at the end of a shorter holding period.'),
+      blockers: [
+        { code: 'earlier_mode_not_open', waits_on: 'record', text: pair('按顺序开放：需要先开放稳健模式。', 'Modes open in order: Steady must open first.') },
+        { code: 'swing_policy_undecided', waits_on: 'owner', text: pair('波段模式用趋势规则择时，是否属于“动量策略须人工确认”需要你来定。', 'Swing times purchases with a trend rule; whether that falls under the rule for momentum strategies is yours to decide.') }] },
+    { key: 'intraday', order: 3, label: pair('短线', 'Intraday'), cadence: 'intraday', simulated_days: 0, open_for_real_money: false, can_simulate: false,
+      runs_as: pair('开盘前由模型定一次当天的计划；盘中由本地规则执行。尚未实现。', 'A model sets the day\'s plan once before the open; local rules carry it out. Not built.'),
+      blockers: [{ code: 'intraday_not_built', waits_on: 'build', text: pair('分钟级行情接入、行情时效检查和盘中规则执行尚未实现。', 'Minute data, its freshness checks and the in-session rule runner are not built.') }] }];
+  const autoPlan = { plan_id: 'demo0plan0steady', envelope: autoEnvelope, strategy: steady, opening_version: 'sv-demo00000001',
+    managing: [], confirmed_at: '2026-09-18T20:05:00+00:00', confirmed_by: 'owner', deployable_usd: 99.0 };
+  const auto = {
+    checked_at: health.checked_at, account: { scope: 'agentic', account_id: 'micro_live' }, modes: autoModes,
+    extensions: [{ key: 'stocks', label: pair('美股个股', 'Single stocks'), open_for_real_money: false, can_simulate: false,
+      blockers: [{ code: 'stocks_need_their_own_record', waits_on: 'record', text: pair('ETF 模式的模拟记录和实盘开放不能算作个股的记录。', 'A fund mode\'s simulated record, and its being open, do not count for stocks.') }] }],
+    simulation: {
+      exists: true, plan: autoPlan, state: { paused: false, reason: null, kind: null, at: null, by: null, loss_baseline_usd: 0.0 },
+      record: { sessions: 12, from: '2026-09-18', to: '2026-10-05', net_return_pct: 0.42, max_drawdown_pct: -0.31,
+        equity_usd: 100.42, funded_usd: 100.0, result_usd: 0.42, average_exposure_pct: 33.1, measured_from: 'funding' },
+      version: { version_id: 'sv-demo00000001', mode: 'steady', validation: { status: 'simulating', simulated_days: 12, exits_verified: false } },
+      sessions: { counted: 12, needed_to_open: 30, needed_to_replace: 180, recorded: 13,
+        not_counted: [{ session: '2026-09-24', problems: ['regime_unknown'], open_passes: 9 }] },
+      account: { as_of: '2026-10-05', at: '2026-10-05T19:58:00+00:00', equity_usd: 100.42, cash_usd: 67.0, invested_usd: 33.42,
+        positions: 1, funded_usd: 100.0, result_usd: 0.42, result_pct: 0.42 },
+      funding: { net_usd: 100.0, deposits_usd: 100.0, withdrawals_usd: 0.0, cash_usd: 67.0 },
+      positions: [{ symbol: 'VTI', bucket: 'micro_live', managed_quantity: 0.087562, strategy_version: 'sv-demo00000001',
+        opened_at: '2026-09-22T14:02:00+00:00', cost_basis: 376.88, other_quantity: 0.0, reason: null }],
+      trades: [], signals: [],
+      research: { universe: ['VTI', 'VXUS', 'BND'], covered: ['VTI'], missing: ['VXUS', 'BND'], candidates_enabled: false, on_watchlist: ['VTI'],
+        text: pair('每周研究目前不会研究 VXUS、BND，所以模拟账户不会收到它们的买入信号。', 'Scheduled research does not currently study VXUS, BND, so the simulated account will get no signal to buy them.') },
+    },
+    real_account: { plan: null, open: false, mode: null, state: { paused: false }, opened_modes: [], request: null },
+  };
+  const autoGate = (code, ok, waits_on, zh, en) => ({ code, ok, waits_on, text: pair(zh, en) });
+  const autoChanges = [
+    { file: 'risk_profile.yaml', path: 'buckets.micro_live.autonomy.open.enabled', from: false, to: true, kind: 'boundary',
+      why: pair('打开“自动买入”开关。实盘上这一步需要你的控制台密码。', 'Turns the automatic-buying switch on. On the real account this takes your console password.') },
+    { file: 'risk_profile.yaml', path: 'buckets.micro_live.autonomy.managed_exit.enabled', from: null, to: true, kind: 'boundary',
+      why: pair('允许代码卖出它自己按方案买入的仓位。你自己买入的仓位不在其内。', 'Lets code sell positions it opened itself under the plan. Positions you bought are not covered.') }];
+  const autoPlanExample = {
+    plan_id: 'demo0plan0steady', envelope: autoEnvelope, mode: autoModes[0], strategy: steady, clamps: [],
+    summary: pair('按这个方案，可用资金 $100 里实际能投入约 $99：3 个仓位（$33.00、$33.00、$33.00）。亏损达到 $10.00（10%）时暂停新开仓。',
+      'Under this plan about $99 of the $100 can actually be invested: 3 position(s) ($33.00, $33.00, $33.00). New positions stop once the loss reaches $10.00 (10%).'),
+    account: { account_id: 'micro_live', equity_usd: 100.0, cash_usd: 100.0, positions: 0, as_of: '2026-10-05' },
+    today: { any_order: false, deployable_usd: 0.0, positions: 0, path: [] },
+    under_plan: { any_order: true, deployable_usd: 99.0, positions: 3,
+      path: [{ symbol: 'VTI', feasible: true, order_usd: 33.0, why_not: null }, { symbol: 'VXUS', feasible: true, order_usd: 33.0, why_not: null },
+        { symbol: 'BND', feasible: true, order_usd: 33.0, why_not: null }] },
+    changes: autoChanges,
+    landing: { classification: 'cooling', needs_password: true, cooling_hours: 24, errors: [],
+      changes: autoChanges.map(c => ({ file: c.file, path: c.path, effect: 'loosening', waits: true })),
+      summary: pair('其中 2 项会放宽现有限制：在实盘账户上需要控制台密码确认，并等待 24 小时后生效，期间可以撤回。', '2 of these loosen a limit: on the real account they need the console password and take effect after 24 hours, and can be withdrawn until then.') },
+    notes: { loss_line: pair('亏损暂停线（$10.00）是本地检查，不是最大亏损的保证。', 'The loss line ($10.00) is a local check. It is not a guarantee of the most that can be lost.') },
+  };
+  const autoLive = {
+    checked_at: health.checked_at, account: { scope: 'agentic', account_id: 'micro_live' },
+    plan: null, state: { paused: false, reason: null, kind: null }, record: null, request: null, ended: null,
+    positions: [], trades: [], account_mark: null, last_pass: null,
+    replacement: { automatic: false, last: null, looked: 0 },
+    candidate: { available: true, plan: autoPlanExample, version_id: 'sv-demo00000001', may_confirm: false, open: false,
+      inputs: { plan_id: 'demo0plan0steady', mode: 'steady', capital_usd: 100.0, loss_pause_pct: 10.0, strategy: steady },
+      gates: [
+        autoGate('simulation_record', false, 'record', '策略版本 sv-demo00000001 只有 12 个有效模拟交易日，需要至少 30 个（等待样本）。', 'Strategy version sv-demo00000001 has 12 valid simulated session(s) and needs 30.'),
+        autoGate('exit_exercised', false, 'record', '这个策略版本在模拟账户里还没有完成过一次“代码买入→代码卖出”的完整流程。', 'This strategy version has not yet carried one position from its own purchase to its own sale.'),
+        autoGate('real_money_on', true, 'owner', '这个账户的实盘执行开关是打开的。', 'Real-money execution is switched on for this account.'),
+        autoGate('orders_settled', true, 'account', '没有结果不明或尚未对账的订单。', 'No order is unresolved or waiting to be reconciled.'),
+        autoGate('book_confirmed', true, 'account', 'Agentic 账本已与券商核对一致（账本日期 2026-10-05）。', 'The Agentic ledger agrees with the venue (dated 2026-10-05).'),
+        autoGate('settings_pending', false, 'settings', '方案需要的 2 项设置还没有生效。放宽限制的需要控制台密码，并等待 24 小时后生效，期间可以撤回。', '2 setting(s) the plan needs are not in force. One that loosens a limit takes the console password and 24 hours.')],
+      advisories: [{ code: 'pause_is_not_a_guarantee', text: autoPlanExample.notes.loss_line }] },
+  };
+  const autoPerformanceExample = {
+    exists: true, note: pair('实时模拟和历史回测是两种不同的记录，分开列出，不相加。', 'The live simulation and the historical backtests are different kinds of record and are listed apart.'),
+    simulation: { comparators_unavailable: null,
+      caveat: pair('已记录 12 个交易日。这是发生过的事情的记录，不是策略有效的证据。', '12 session(s) on record. This is a record of what happened, not evidence that the strategy works.'),
+      rows: {
+        strategy: { figures: { net_return_pct: 0.42, max_drawdown_pct: -0.31 }, says: pair('策略：模拟账户自己的记录。', 'Strategy: the simulated account\'s own record.') },
+        passive: { figures: { net_return_pct: 0.61, max_drawdown_pct: -0.88 }, says: pair('被动持有：买入方案里同样的基金、同样的仓位，一直持有不卖。', 'Passive: the plan\'s own funds at the plan\'s own size, bought and held.') },
+        cash: { figures: { net_return_pct: 0.0, max_drawdown_pct: 0.0 }, says: pair('现金：钱放着不动。', 'Cash: the money left alone.') } } },
+  };
+
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
     approveExecuted, approveReanalysis, research, researchJobs, researchSubjects, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts, advisor,
+    auto, autoLive, autoPlanExample, autoPerformanceExample,
   };
 })();

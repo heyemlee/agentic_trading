@@ -97,6 +97,9 @@ window.Console.page('lab', function (document) {
       live: !!job && RUNNING.includes(job.state),
       broken: !!job && BROKEN.includes(job.state),
       error: job ? job.error : null,
+      /* Why it ended as it did. A finished run's record says; a job that never reached a
+         decision says why it has none. "No trade" alone was five different things. */
+      why: C.why((record && record.diagnosis) || (job && job.diagnosis)),
       policy: record ? record.policy_action : null,
       confidence: record ? record.confidence : null,
       hardRisk: record ? record.hard_risk_verdict : null,
@@ -112,7 +115,7 @@ window.Console.page('lab', function (document) {
        its own trace once it arrives, rather than another one in its place. */
     return { key: chosenRun, ticker: '—', bucket: null, account: null, scope: null, accountId: null,
              accountKind: null, date: null, instrument: null, state: 'COMPLETE', live: false,
-             broken: false, error: null, policy: null, confidence: null, hardRisk: null,
+             broken: false, error: null, why: null, policy: null, confidence: null, hardRisk: null,
              finalAction: null, proposalId: null, named: true };
   };
   const accountOf = (run) => run.account || (run.bucket ? label('bucket.' + run.bucket, run.bucket) : '');
@@ -200,8 +203,12 @@ window.Console.page('lab', function (document) {
       return { ...desk, state: 'waiting' };
     });
 
+    /* Why this run ended as it did: its row in the list says, and a run opened by a link that
+       the list does not hold says through its own trace. */
+    const why = (run && run.why) || C.why(loadedTrace && loadedTrace.diagnosis);
+
     return { team, run, live, progress, trace, loadedTrace, steps, position,
-             instrument, analysts, desks,
+             instrument, analysts, desks, why,
              mode: !run ? 'none' : run.live ? 'live'
                    : run.broken ? 'broken' : cursor === null ? 'done' : 'replay' };
   }
@@ -302,13 +309,15 @@ window.Console.page('lab', function (document) {
       caption = C.t('lab.runState', { state: C.code(v.run.state) });
     } else if (v.run.broken) {
       title = C.t('lab.runStopped', { ticker: v.run.ticker });
-      caption = v.run.error || C.t('lab.runState', { state: C.code(v.run.state) });
+      caption = (v.why && v.why.text) || v.run.error || C.t('lab.runState', { state: C.code(v.run.state) });
     } else {
-      /* The ticker heads the card, so the line under it is whose run, when, and how it ended. */
+      /* The ticker heads the card, so the line under it is whose run, when, and how it ended:
+         the kind of ending where the engine named one, the bare action otherwise. */
       title = [accountOf(v.run), v.run.date ? C.dateOnly(v.run.date) : '',
-               C.code(v.run.finalAction || v.run.policy || 'COMPLETE')].filter(Boolean).join(' · ');
-      caption = v.loadedTrace && v.loadedTrace.elapsed_seconds
-        ? C.t('lab.runTook', { t: C.clock(v.loadedTrace.elapsed_seconds) }) : C.t('lab.runArchived');
+               (v.why && v.why.label) || C.code(v.run.finalAction || v.run.policy || 'COMPLETE')]
+        .filter(Boolean).join(' · ');
+      caption = (v.why && v.why.text) || (v.loadedTrace && v.loadedTrace.elapsed_seconds
+        ? C.t('lab.runTook', { t: C.clock(v.loadedTrace.elapsed_seconds) }) : C.t('lab.runArchived'));
     }
     q('#now-title').textContent = title;
     q('#now-caption').textContent = caption;
@@ -484,8 +493,13 @@ window.Console.page('lab', function (document) {
             '<div><span>' + C.escapeHtml(C.t('lab.confidence')) + '</span><strong>' +
             C.escapeHtml(String(confidence)) + '</strong></div>') +
         '</div>' +
-        (policy === 'NO_TRADE'
-          ? '<p class="lab-caption">' + C.escapeHtml(C.t('lab.noTradeExplanation')) + '</p>' : '')
+        /* The reason in the engine's own sentence, under the kind of ending it was. The one
+           line this used to carry said the same thing whatever had happened. */
+        (v.why && v.why.text
+          ? '<p class="lab-caption lab-why" data-why="' + C.escapeHtml(v.why.category) + '"><strong>' +
+            C.escapeHtml(v.why.label) + '</strong> ' + C.escapeHtml(v.why.text) + '</p>'
+          : policy === 'NO_TRADE'
+            ? '<p class="lab-caption">' + C.escapeHtml(C.t('lab.noTradeExplanation')) + '</p>' : '')
       : '<p>' + C.escapeHtml(C.t('lab.awaitResearch')) + '</p>' +
         '<p class="lab-caption">' + C.escapeHtml(C.t('lab.awaitDecision')) + '</p>';
 
@@ -559,7 +573,8 @@ window.Console.page('lab', function (document) {
       open = ' data-watch="' + h(running.run_key) + '"';
     } else if (latest) {
       state = 'done';
-      status = [C.code(latest.final_action || latest.policy_action || 'COMPLETE'),
+      const ended = C.why(latest.diagnosis);
+      status = [(ended && ended.label) || C.code(latest.final_action || latest.policy_action || 'COMPLETE'),
                 latest.confidence == null ? '' : C.t('lab.confidenceShort', { n: latest.confidence })]
         .filter(Boolean).join(' · ');
       open = ' data-trace="' + h(latest.run_id) + '"';

@@ -51,6 +51,11 @@ window.CT_API = (function () {
     config: { path: () => '/config', ms: 60000 },
     authority: { path: () => '/config/authority', ms: 30000 },
     attention: { path: () => '/attention', ms: 30000 },
+    /* Automatic trading. Both are local reads of what the passes recorded, with the plan drawn
+       again against the ledger for the real account's conditions; neither opens a venue session.
+       A minute and two is plenty: what they show changes when a pass runs, once a minute. */
+    auto: { path: () => '/auto-trading', ms: 60000 },
+    autoLive: { path: () => '/auto-trading/live', ms: 120000 },
     accounts: { path: () => '/accounts', ms: 60000 },
     evaluation: { path: () => '/evaluation?scope=' + evaluationScope, ms: 300000 },
     portfolio: { path: () => '/portfolio', ms: 60000, staleAfter: 600000 },

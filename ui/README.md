@@ -1,10 +1,11 @@
 # Agentic Trading — console
 
-Frontend for the local API in `agentic_trading`. Thirteen pages, one shared
+Frontend for the local API in `agentic_trading`. Fourteen pages, one shared
 asset layer, no build step. The tab bar is Home, Lab and Me; the Assistant is the header's action.
 
 ```
 index.html       Home      the accounts: Robinhood snapshots or the Agentic ledger, one switch, with what needs you and what is not normal above them; each Robinhood holding opens its own view; Agentic carries its automatic-trading switches
+auto.html        Automatic trading  opened from the Agentic account: the plan, the simulated account, the real one and what starting there takes
 approvals.html   Approvals proposal detail, Hard Risk rules, approve / reject
 risk.html        Risk      regime, drawdown ladders, 15 preflight gates
 activity.html    Activity  fills, tracked orders, audit trail
@@ -59,7 +60,7 @@ start empty and never fall back to fixtures.
 
 ## Console navigation
 
-All twelve console pages share one document through `assets/navigation.js`, including
+All thirteen console pages share one document through `assets/navigation.js`, including
 the tools reached from More and their return links. Login remains a separate document.
 The initial response includes the static layouts as inert templates, with shared styles.
 Page factories are prefetched; even before they arrive a first tap can show the layout.
@@ -149,7 +150,22 @@ The demo includes all four states; `check_navigation.cjs` covers long failure te
 Reads poll on the cadence in `FRONTEND_HANDOFF.md` §15 — orders 10s, proposals
 15s, health/authority/attention 30s, portfolio/risk/research/micro-live 60s. Authority is
 read only on pages that use it and opens no venue session. No websocket; the
-backend offers none and none is needed.
+backend offers none and none is needed. Automatic trading reads `/auto-trading` every 60s and
+`/auto-trading/live` every 120s, on its own page only; both are local reads (6 ms and 14 ms
+measured), and its comparison (`/auto-trading/performance`, which reads price history) is
+fetched when asked for and never polled.
+
+Automatic trading (`auto.html`, `assets/pages/auto.js`) is opened from the Agentic account on
+Home and returns there. `?scope=paper|live` chooses the account on screen, so each has a link
+and a notification can open the right one. The page computes nothing about money: figures,
+conditions and reasons are the service's, and a sentence the engine wrote in both languages
+is shown as written. The simulated account can be previewed, started, paused, resumed and
+stopped from it. On the real account it shows every condition for starting as a line that
+holds or does not, and the start button is disabled while one does not; starting, resuming,
+replacing the strategy and letting a validated one take over by itself each open a sheet that
+says what will happen and asks for the console password. Pausing, stopping and withdrawing a
+start that is waiting take a second tap and no password. A figure that is absent is drawn as
+absent, never as zero.
 
 Home is the accounts, and above them, only while there is something, what needs you and what is
 not normal (2026-09-23: Assets became Home, and Today's summary moved onto it). What needs you

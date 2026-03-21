@@ -675,12 +675,14 @@ window.Console.page('index', function (document) {
       const icon = item.kind === 'proposal_waiting' ? C.ICON.approvals
         : item.kind === 'personal_task_done' ? C.ICON.check : C.ICON.info;
       const meta = [item.account_label, item.since ? C.dateTime(item.since) : null].filter(Boolean).join(' · ');
+      /* The engine's sentence in this console's language where it wrote one in both. */
+      const detail = C.said(item.detail_i18n) || item.detail;
       return '<article class="home-attention-item attention-' + tone + '" data-attention-id="' + h(item.id) + '">' +
         '<span class="attention-icon" aria-hidden="true">' + icon + '</span>' +
         '<div class="attention-copy"><div class="attention-kicker"><span>' + h(label) + '</span>' +
         '<span class="attention-state">' + C.t(item.requires_person ? 'at.person' : 'at.information') + '</span></div>' +
         '<h3>' + h(item.title) + '</h3>' +
-        (item.detail ? '<p class="attention-detail">' + h(item.detail) + '</p>' : '') +
+        (detail ? '<p class="attention-detail">' + h(detail) + '</p>' : '') +
         '<div class="attention-footer">' + (meta ? '<p class="attention-meta">' + h(meta) + '</p>' : '') +
         (href ? '<a class="attention-action" href="' + h(href) + '">' + C.t('at.open') + C.CHEVRON + '</a>' : '') +
         '</div></div></article>';
