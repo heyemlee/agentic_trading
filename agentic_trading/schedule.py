@@ -458,6 +458,16 @@ def decide(profiles, *, health_status: str, paused: bool, executed: dict[str, An
     trade_date, why = session_for(cfg, now)
     if trade_date is None:
         return no(why)
+    if not force and task.period == "daily":
+        # A daily period is keyed by the calendar date, and a day the market is shut analyses
+        # the session before it. So Saturday and Sunday each had a period of their own that
+        # nothing had executed, and each studied Friday's session again. What a daily task may
+        # do once is study a session, whichever days it is asked on.
+        mine = key.rsplit(":", 1)[0]
+        for other, record in (executed.get("periods") or {}).items():
+            if other.rsplit(":", 1)[0] == mine and record.get("trade_date") == trade_date:
+                return no(f"session {trade_date} was already studied for this task "
+                          f"({other}, at {record.get('at')})", trade_date)
 
     limit = int(cfg.get("max_analyses_per_day", 6))
     used = analyses_today(jobs, cfg, now)

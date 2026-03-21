@@ -18,9 +18,10 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import autonomy
+from . import autonomy, diagnosis
 from .broker import make_broker
 from .env import load_env
 from .evidence import collect_evidence, foreign_bucket_mentions
@@ -156,6 +157,28 @@ def _final(result, proposal: Proposal) -> dict:
     }
 
 
+def _deferred_to_plan(db, bucket: str, ticker: str, action: str | None) -> dict[str, Any] | None:
+    """Whether this conclusion belongs to an automatic-trading plan in force, and which.
+
+    Only a purchase, only in the account a plan is for, and only of a fund the plan may buy.
+    Everything else -- a sale, another account, a name outside the plan -- is written here as it
+    always was. With no plan in force this is one small read that finds nothing.
+    """
+    from .auto import store as auto_store
+    from .micro_live import BUCKET as MICRO_BUCKET
+
+    if bucket != MICRO_BUCKET or action not in autonomy.OPENING_ACTIONS:
+        return None
+    try:
+        plan = auto_store.active_plan(db)
+    except Exception:  # noqa: BLE001 - an unreadable plan record defers nothing
+        return None
+    universe = {str(s).upper() for s in ((plan or {}).get("strategy") or {}).get("universe") or []}
+    if plan is None or ticker.upper() not in universe:
+        return None
+    return {"deferred": True, "plan_id": plan["plan_id"], "opening_version": plan["opening_version"]}
+
+
 def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instrument_type: str,
             runs_dir: Path, debug: bool, *, run_id: str | None = None,
             authority_version_at_submit: str | None = None, purpose: str | None = None) -> int:
@@ -186,7 +209,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         snap, ladders, regime, portfolio_text = portfolio_context(profiles, trade_date, bucket)
     except PortfolioError as exc:
         _print(f"[{ticker}] STOPPED (fail closed): portfolio context unavailable: {exc}")
-        return 2
+        return diagnosis.EXIT_FAIL_CLOSED
     gov = ladders.for_bucket(bucket) if bucket != "core" else ladders.total
     _print(f"[{ticker}] ladder={gov.level} ({gov.drawdown_pct:+.2f}%) | regime={regime.level} | bucket cash=${snap.buckets[bucket].cash_usd:,.2f}")
 
@@ -199,9 +222,14 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
             _print(f"[{ticker}] STOPPED: Claude subscription limit reached ({exc}). "
                    "Wait for the reset and rerun the same ticker and date; the run resumes from its checkpoint. "
                    "No API fallback is configured.")
-            return 3
+            return diagnosis.EXIT_LIMIT
+        if exc.login_expired:
+            _print(f"[{ticker}] STOPPED: the Claude login on this Mac has expired ({exc}). "
+                   "Sign in again (run `claude`, then /login); the run is retried, and nothing "
+                   "was analysed or spent in the meantime.")
+            return diagnosis.EXIT_LOGIN
         _print(f"[{ticker}] FAILED: LLM backend error: {exc}")
-        return 1
+        return diagnosis.EXIT_PIPELINE
 
     report_path = graph.save_reports(final_state, ticker, run_dir / "reports")
     state_log = (
@@ -215,7 +243,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         )
     except ClaudeCodeError as exc:
         _print(f"[{ticker}] STOPPED during policy step: {exc}")
-        return 3
+        return diagnosis.EXIT_LOGIN if exc.login_expired else diagnosis.EXIT_LIMIT
 
     proposal_obj, result = hard_risk_for(profiles, policy, ticker, bucket, trade_date, snap, ladders,
                                          regime, final_state, llm_calls=list(USAGE_LOG))
@@ -244,7 +272,16 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     # why it was asked for. A future skill route writes its own name and version here.
     record["route"] = {"name": "tradingagents", "skill_version": None}
     record["purpose"] = purpose
-    if result.verdict == "APPROVE":
+    # Where an automatic-trading plan is in force for this account, a purchase of one of its
+    # funds is the plan's to write, not this run's: its proposal carries the strategy version
+    # the position will answer to, which is what lets code close what code opened. Two
+    # proposals for one conclusion would also hold each other up until both expired. The
+    # conclusion is all here in the record, where the plan's next pass reads it.
+    deferred = _deferred_to_plan(store.db, bucket, ticker, result.final_action) if (
+        result.verdict == "APPROVE") else None
+    if deferred is not None:
+        record["auto_plan"] = deferred
+    if result.verdict == "APPROVE" and deferred is None:
         proposal = new_proposal(
             authority_version=research_authority,
             authority_changed_during_research=authority_moved,
@@ -277,6 +314,11 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
                                 "foreign_mentions": off_book}
     record["llm_calls_audit_file"] = str(runs_dir / "llm_calls.jsonl")
     record["started_at"] = started_at
+    # Why it ended as it did, named once and kept with the record: every reader of "no trade"
+    # was left to work out which of five different things had happened.
+    # Under its own key: ``outcome`` is reserved for what came of the decision afterwards.
+    outcome = diagnosis.classify_record(record)
+    record["diagnosis"] = outcome.as_dict()
     record_path = write_record(run_dir / "decision_record.json", record)
     # The last line the console reads for this run: what the deterministic gate decided, which
     # is never what an agent decided.
@@ -284,7 +326,9 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
                                     "confidence": policy.confidence,
                                     "hard_risk": result.verdict,
                                     "final_action": final["action"],
-                                    "proposal_id": record.get("proposal_id")})
+                                    "proposal_id": record.get("proposal_id"),
+                                    "diagnosis": {"category": outcome.category,
+                                                  "code": outcome.code}})
     usage = record["llm_usage"]
     _print(f"[{ticker}] PM rating: {pm_signal} | policy: {policy.final_action} ({policy.size_hint}) "
            f"| confidence: {policy.confidence} | reviewer: {policy.llm_action}")
@@ -300,6 +344,7 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
     for a in result.advisories:
         _print(f"[{ticker}]   ! {a}")
     _print(f"[{ticker}] FINAL RECOMMENDATION: {final['action']}")
+    _print(f"[{ticker}] WHY: {outcome.category} / {outcome.code}: {outcome.lead.text()['en']}")
     if proposal is not None:
         state, why = proposal.freshness(profiles)
         _print(f"[{ticker}] PROPOSAL {proposal.proposal_id} created ({state}; {why})")

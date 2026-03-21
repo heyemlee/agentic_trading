@@ -9,7 +9,7 @@ from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .. import UPSTREAM_TRADINGAGENTS_COMMIT, __version__, agent_roster, autonomy
+from .. import UPSTREAM_TRADINGAGENTS_COMMIT, __version__, agent_roster, autonomy, diagnosis
 from ..micro_live import BUCKET as MICRO_BUCKET
 from ..proposals import utcnow
 from .base import _last_session
@@ -154,7 +154,20 @@ class ResearchMixin:
         out.setdefault("opened_at", None)
         out["route"] = _route(job.get("route"), bucket=job.get("bucket"), task_kind=out["task_type"])
         out["cancellable"] = job.get("state") in ("QUEUED", "RUNNING")
+        out.setdefault("failure_code", None)
+        # Why a job that is over produced no decision; None while it runs and when it completed,
+        # where the decision record carries the reason instead (research_history).
+        out["diagnosis"] = self._job_diagnosis(job, profiles)
         return out
+
+    def _job_diagnosis(self, job: dict[str, Any], profiles) -> dict[str, Any] | None:
+        tail = ""
+        if job.get("state") == "FAILED" and not job.get("failure_code"):
+            # A row from before the reason was stored with it. Its own log is the only place the
+            # reason survives, and there are only ever a handful of such rows to read it for.
+            tail = _log_tail(job.get("log"), (profiles.project_dir / "runs").resolve())
+        outcome = diagnosis.classify_job(job, log_tail=tail)
+        return outcome.as_dict() if outcome is not None else None
 
     def _personal_labels(self, profiles) -> dict[str, str]:
         from ..advisor import SNAPSHOT
@@ -303,6 +316,8 @@ class ResearchMixin:
             "final_action": (record.get("final_recommendation") or {}).get("action"),
             "proposal_id": record.get("proposal_id"),
             "error": record.get("error"),
+            # Absent a record there is nothing to diagnose here: the job row says why it has none.
+            "diagnosis": _record_diagnosis(record, profiles, None) if record else None,
             "steps": steps,
         }
 
@@ -628,7 +643,34 @@ def _describe_record(d: dict[str, Any], profiles, labels: dict[str, str]) -> dic
         "superseded_by": None,
         "applicable_floor": _applicable_floor(d, profiles, scope["scope"]),
     }
+    row["diagnosis"] = _record_diagnosis(d, profiles, row["applicable_floor"])
     return row
+
+
+def _record_diagnosis(d: dict[str, Any], profiles, floor: int | None) -> dict[str, Any]:
+    """Why this run ended as it did, read from the record's own facts every time.
+
+    The run writes the same reading into its record, for whoever opens the file. A screen is not
+    given that copy: a row is projected from a record written by whatever version produced it,
+    and reading the facts again means an older record is described in today's words and can
+    never hand the response model a shape it does not know.
+    """
+    return diagnosis.classify_record(
+        d, no_trade_below=profiles.confidence.no_trade_below, floor=floor).as_dict()
+
+
+def _log_tail(path: Any, runs_root: Path, max_bytes: int = 4096) -> str:
+    """The end of a job's own log, or nothing if it is not a file under the run directory."""
+    try:
+        log_path = Path(str(path)).resolve()
+        if runs_root not in log_path.parents:
+            return ""
+        with log_path.open("rb") as stream:
+            stream.seek(0, 2)
+            stream.seek(max(0, stream.tell() - max_bytes))
+            return stream.read().decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        return ""
 
 
 def _applicable_floor(d: dict[str, Any], profiles, scope: str) -> int | None:

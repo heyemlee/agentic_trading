@@ -309,6 +309,12 @@ class RobinhoodBroker:
     _failed = False
 
     def __init__(self, profiles, *, redirect_handler=None, callback_handler=None, connect: bool = True):
+        # The one place a session with the real venue comes into being, and so the one place the
+        # simulated account is locked out of it. Every caller choosing the right venue is the
+        # first line; this does not depend on any of them doing so.
+        from ..auto.paper import refuse_real_venue
+
+        refuse_real_venue(profiles, "opening a session with Robinhood")
         cfg = dict(profiles.risk.get("robinhood") or {})
         micro = dict(profiles.risk.get("micro_live_execution") or {})
         self.profiles = profiles

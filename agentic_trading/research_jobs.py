@@ -53,7 +53,11 @@ class ResearchJobStore:
             "deadline_at": None, "pid": None, "attempts": 0,
             "max_attempts": max_attempts, "timeout_seconds": timeout_seconds,
             "log": str(log_path), "exit_code": None, "error": None,
-            "limit_recoveries": 0, "proposal_created": False, "proposal_id": None,
+            # Which of the ways of not finishing a failed run was (agentic_trading.diagnosis).
+            # ``error`` is the sentence; this is what anything deciding on it reads.
+            "failure_code": None,
+            "limit_recoveries": 0, "login_recoveries": 0,
+            "proposal_created": False, "proposal_id": None,
             # The authority the run was submitted under; a proposal born under a different
             # one says so (see autonomy.effective_authority).
             "authority_version": authority_version,
@@ -130,7 +134,7 @@ class ResearchJobStore:
                     "deadline_at": (datetime.now(UTC) + timedelta(
                         seconds=int(job["timeout_seconds"]))).isoformat(),
                     "attempts": int(job.get("attempts", 0)) + 1, "pid": None,
-                    "finished_at": None, "exit_code": None, "error": None,
+                    "finished_at": None, "exit_code": None, "error": None, "failure_code": None,
                 })
                 changed = conn.execute(
                     "UPDATE research_jobs SET payload=?,state='RUNNING',updated_at=? "
@@ -154,6 +158,13 @@ class ResearchJobManager:
         self.max_attempts = max(1, int(settings.get("max_attempts", 2)))
         self.limit_retry_after = max(0.0, float(settings.get("claude_limit_retry_after_hours", 6)))
         self.max_limit_recoveries = max(0, int(settings.get("max_limit_recoveries", 2)))
+        # An expired login is the other failure that is a matter of time and not of the work.
+        # It defaults to the limit's own rhythm, so a deployment that declares neither key
+        # retries a run that met a signed-out CLI exactly as it retries one that met a limit.
+        self.login_retry_after = max(0.0, float(settings.get(
+            "claude_login_retry_after_hours", self.limit_retry_after)))
+        self.max_login_recoveries = max(0, int(settings.get(
+            "max_login_recoveries", self.max_limit_recoveries)))
 
     def create(self, *, run_key: str, ticker: str, bucket: str, trade_date: str,
                instrument_type: str, trigger: str,
@@ -190,6 +201,7 @@ class ResearchJobManager:
                 self.store.update(job["run_key"], {
                     "state": "FAILED", "finished_at": _now(),
                     "error": f"worker launch failed: {type(exc).__name__}: {exc}",
+                    "failure_code": "worker_crashed",
                 }, expected_states=("RUNNING",))
         return launched
 
@@ -236,6 +248,45 @@ class ResearchJobManager:
                 resumed.append(job["run_key"])
         return resumed
 
+    def resume_after_login(self, now: datetime) -> list[str]:
+        """Requeue jobs that stopped only because this Mac's Claude login had expired.
+
+        Like a limit, it is a condition of the moment and says nothing about the work: nothing
+        was analysed and nothing was spent. Unlike a limit it does not clear by itself, so the
+        retry is what finds out whether somebody has signed in again -- at the cost of one call
+        that is refused in seconds. Bounded the same way, because the trade date a job carries
+        is the session it was asked about, and a retry days later would study a session nobody
+        is waiting on any more.
+
+        A job whose question has since been asked again is left alone: the index that keeps one
+        active run per question refuses the requeue, and the newer run is the one that matters.
+        """
+        if not self.login_retry_after:
+            return []
+        resumed: list[str] = []
+        for job in self.store.list(states=("FAILED",), limit=200):
+            if job.get("failure_code") != "llm_login_expired":
+                continue
+            finished = _parse(job.get("finished_at")) or _parse(job.get("updated_at"))
+            recoveries = int(job.get("login_recoveries", 0))
+            if finished is None or recoveries >= self.max_login_recoveries:
+                continue
+            if now - finished < timedelta(hours=self.login_retry_after):
+                continue
+            try:
+                updated = self.store.update(job["run_key"], {
+                    "state": "QUEUED", "pid": None, "deadline_at": None, "finished_at": None,
+                    "attempts": 0, "login_recoveries": recoveries + 1,
+                    "error": f"the Claude login had expired; requeued after "
+                             f"{self.login_retry_after:g}h (retry {recoveries + 1}"
+                             f"/{self.max_login_recoveries})",
+                }, expected_states=("FAILED",))
+            except sqlite3.IntegrityError:
+                continue
+            if updated:
+                resumed.append(job["run_key"])
+        return resumed
+
     def tick(self) -> dict[str, Any]:
         """Recover orphaned workers, enforce deadlines, then fill free queue slots."""
         recovered: list[str] = []
@@ -265,6 +316,7 @@ class ResearchJobManager:
                 self.store.update(run_key, {
                     "state": "TIMED_OUT", "finished_at": _now(), "exit_code": 124,
                     "error": f"research exceeded {job['timeout_seconds']} seconds",
+                    "failure_code": "timeout",
                 }, expected_states=("RUNNING",))
                 timed_out.append(run_key)
                 continue
@@ -284,11 +336,14 @@ class ResearchJobManager:
                 self.store.update(run_key, {
                     "state": "FAILED", "finished_at": _now(),
                     "error": "worker exited without a result and recovery attempts are exhausted",
+                    "failure_code": "worker_crashed",
                 }, expected_states=("RUNNING",))
         resumed = self.resume_after_limit(now)
+        signed_in = self.resume_after_login(now)
         launched = self.dispatch()
         return {"recovered": recovered, "timed_out": timed_out,
-                "resumed_after_limit": resumed, "launched": launched}
+                "resumed_after_limit": resumed, "resumed_after_login": signed_in,
+                "launched": launched}
 
 
 def worker_command(config_dir: str | Path, run_key: str) -> list[str]:

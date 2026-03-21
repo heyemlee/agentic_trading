@@ -638,7 +638,10 @@ class ApprovalsMixin:
 
         store = self._store(profiles)
         everything = store.all()
-        actionable = (autonomy.AUTONOMOUS_ACTION, *autonomy.OPENING_ACTIONS)
+        # SELL is here for one case only: an exit from shares code itself bought, which the
+        # Hard Risk Layer stamps as not needing a person and ``permits`` then holds to the
+        # fills. Any other SELL carries requires_human_approval and never gets this far.
+        actionable = (autonomy.AUTONOMOUS_ACTION, *autonomy.OPENING_ACTIONS, "SELL")
         candidates = [p for p in everything
                       if p.status == PROPOSED and p.bucket == MICRO_BUCKET
                       and p.action in actionable and not p.requires_human_approval]
@@ -656,7 +659,12 @@ class ApprovalsMixin:
         # Read once for the pass, not once per candidate: the replay is the same log every time,
         # and this runs on a fifteen-second loop.
         fills = self._fills_for_replay(profiles) if any(
-            p.action == autonomy.AUTONOMOUS_ACTION for p in candidates) else []
+            p.action in autonomy.EXIT_ACTIONS for p in candidates) else []
+        # The automatic-trading plan in force for this account, if there is one. Read once.
+        from ..auto import store as auto_store
+
+        plan = auto_store.active_plan(store.db) if any(
+            p.action in autonomy.OPENING_ACTIONS for p in candidates) else None
         for proposal in candidates:
             if proposal.authority_version != current_authority:
                 born_under = proposal.authority_version or "no recorded version"
@@ -664,12 +672,49 @@ class ApprovalsMixin:
                           f"now {current_authority})")
                 report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [reason]})
                 continue
+            # One mode opens positions in an account at a time, and every position code opens
+            # answers to a strategy version. So a purchase is code's to approve only if it is
+            # the plan's own: written under the version that opens now. Anything else -- a
+            # purchase from outside the plan while one is in force, or one left over from a
+            # version or a plan that no longer opens -- waits for a person.
+            if proposal.action in autonomy.OPENING_ACTIONS:
+                opening = (plan or {}).get("opening_version")
+                why = None
+                if plan is not None and not proposal.strategy_version:
+                    why = ("an automatic-trading plan is in force for this account; a purchase "
+                           "from outside it waits for a person")
+                elif proposal.strategy_version and proposal.strategy_version != opening:
+                    why = (f"strategy version {proposal.strategy_version} no longer opens positions"
+                           + (f" ({opening} does)" if opening else "; no plan is in force"))
+                elif plan is not None:
+                    # Which modes code may open under is the owner's to say, in the risk
+                    # profile, and it is read here -- where the order would be approved -- and
+                    # not only where the plan was started.
+                    from ..auto import modes as auto_modes
+
+                    mode = str((plan.get("envelope") or {}).get("mode"))
+                    if mode not in auto_modes.allowed_modes(profiles, MICRO_BUCKET):
+                        why = (f"the {mode} mode is not among the modes code may open positions "
+                               f"under on its own (buckets.{MICRO_BUCKET}.autonomy.open.modes); "
+                               "this purchase waits for a person")
+                if why:
+                    report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [why]})
+                    continue
             held = ledger.position(proposal.ticker, MICRO_BUCKET)
             held_quantity = float(held.quantity) if held else None
+            # An exit that names the strategy version it acts for is judged on what that version
+            # bought, replayed from the fills; anything else on the floor under what a person did.
+            own = None
+            if proposal.strategy_version and proposal.action in autonomy.EXIT_ACTIONS:
+                from ..auto import positions as managed_positions
+
+                own = managed_positions.managed(
+                    fills=fills, proposals=everything, bucket=MICRO_BUCKET,
+                    symbol=proposal.ticker, ledger_quantity=held_quantity)
             floor = (autonomy.position_floor_for(
                 profiles, fills=fills, proposals=everything, bucket=MICRO_BUCKET,
                 symbol=proposal.ticker, ledger_quantity=held_quantity)
-                if proposal.action == autonomy.AUTONOMOUS_ACTION else None)
+                if proposal.action == autonomy.AUTONOMOUS_ACTION and own is None else None)
             decision = autonomy.permits(
                 profiles, bucket=MICRO_BUCKET, action=proposal.action,
                 confidence=proposal.confidence,
@@ -678,16 +723,22 @@ class ApprovalsMixin:
                 requested_quantity=proposal.sell_quantity,
                 reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET),
                 opened_today=autonomy.opened_today(everything, MICRO_BUCKET),
-                floor=floor)
+                floor=floor, managed=own,
+                exited_today=autonomy.exited_today(everything, MICRO_BUCKET))
             if not decision.permitted:
                 # Not a refusal to trade: the proposal stays in the queue for a person.
                 report["declined"].append({"proposal_id": proposal.proposal_id,
                                            "reasons": decision.reasons})
                 continue
+            # Which of the three things code may do this was, kept with the approval. A reduction
+            # keeps the name it has always had; an opening used to borrow it.
+            kind = ("exit" if own is not None else
+                    "open" if proposal.action in autonomy.OPENING_ACTIONS else
+                    autonomy.AUTONOMOUS_ACTION.lower())
             try:
                 response = self.approve(
                     proposal.proposal_id, note="; ".join(decision.reasons),
-                    identity=f"autonomy:{autonomy.AUTONOMOUS_ACTION.lower()}",
+                    identity=f"autonomy:{kind}",
                     version=proposal.version(), request_id=uuid.uuid4().hex,
                     terms={"ticker": proposal.ticker, "bucket": proposal.bucket,
                            "action": proposal.action, "notional_usd": proposal.notional_usd,
@@ -724,7 +775,9 @@ class ApprovalsMixin:
                 continue
             broker = None
             try:
-                if proposal.bucket == MICRO_BUCKET:
+                from ..auto import paper
+
+                if proposal.bucket == MICRO_BUCKET and not paper.is_paper(profiles):
                     from ..broker.robinhood import RobinhoodBroker
                     broker = RobinhoodBroker(profiles)
                 else:

@@ -87,6 +87,13 @@ def main():
         fail("BARE_MODE_USED: subscription login is disabled in bare mode")
     if "FORCE_LIMIT" in prompt:
         fail("You've hit your session limit \u00b7 resets 1:30pm (America/Los_Angeles)")
+    if "FORCE_LOGOUT" in prompt:
+        # The shape the real CLI answered with on 2026-10-02, subtype and all.
+        emit({"type": "result", "subtype": "success", "is_error": True,
+              "result": "Failed to authenticate: OAuth session expired and could not be refreshed",
+              "session_id": session, "num_turns": 1, "duration_ms": 1, "total_cost_usd": 0.0,
+              "usage": {}, "modelUsage": {}})
+        sys.exit(1)
 
     markers = [f"FAKE RESPONSE model={model}"]
     markers.append("BUILTIN_TOOLS_DISABLED" if opts.get("tools") == "" else "BUILTIN_TOOLS_ENABLED")

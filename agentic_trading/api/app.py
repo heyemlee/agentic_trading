@@ -130,8 +130,25 @@ async def lifespan(app):
                 logger.exception("renewing the kept readings failed")
             await asyncio.sleep(15)
 
+    async def simulation_loop():
+        """Runs automatic trading's pass once a minute, for whatever a person has started.
+
+        Its own loop, so that pricing a book can never sit in front of the fifteen seconds that
+        recover real orders. Until something has been started it makes a few small reads and
+        returns. A simulation that has been started cannot reach a real venue (auto.paper). A
+        plan a person put in force on the real account is read and decided here too, and writes
+        proposals only: approving them stays with reconcile_loop above, which is the one place
+        this account's orders have ever been approved from without a person.
+        """
+        while True:
+            try:
+                await asyncio.to_thread(_service.auto_tick)
+            except Exception:
+                logger.exception("the automatic-trading pass failed")
+            await asyncio.sleep(60)
+
     tasks = [asyncio.create_task(reconcile_loop()), asyncio.create_task(heartbeat_loop()),
-             asyncio.create_task(refresh_loop())]
+             asyncio.create_task(refresh_loop()), asyncio.create_task(simulation_loop())]
     try:
         yield
     finally:
@@ -640,6 +657,206 @@ def autonomy_switch(body: AutonomySwitch, request: Request) -> dict[str, Any]:
                identity=request.state.identity, confirmed=confirmed)
 
 
+# ----------------------------------------------------------------- automatic trading
+class AutoPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["steady", "swing", "intraday"] = "steady"
+    # Absent, the plan is drawn at the size the account already is.
+    capital_usd: float | None = Field(default=None, gt=0, le=10_000_000)
+    loss_pause_pct: float | None = Field(default=None, ge=0, le=100)
+    # Asks the model for the strategy's parameters, on the subscription research runs on.
+    # Off, the deterministic template is used and the plan says so.
+    ask_model: StrictBool = False
+
+
+@app.get("/auto-trading", tags=["automatic trading"],
+         summary="Where automatic trading stands: every mode, open or not, and why not")
+def auto_status() -> dict[str, Any]:
+    return _ok(_service.auto_status)
+
+
+@app.post("/auto-trading/plan", tags=["automatic trading"],
+          summary="Preview a plan: what could be invested, why not more, and what would have to change")
+def auto_plan(body: AutoPlanRequest) -> dict[str, Any]:
+    return _ok(_service.auto_plan, **body.model_dump())
+
+
+class AutoStartRequest(BaseModel):
+    """A previewed plan, handed back to be put in force. Nothing here is free text that is acted
+    on: the envelope is three figures, the strategy is clamped again, and ``plan_id`` has to
+    match what those produce or nothing is started."""
+
+    model_config = ConfigDict(extra="forbid")
+    plan_id: str = Field(min_length=8, max_length=64)
+    mode: Literal["steady", "swing", "intraday"] = "steady"
+    capital_usd: float | None = Field(default=None, gt=0, le=10_000_000)
+    loss_pause_pct: float | None = Field(default=None, ge=0, le=100)
+    # The strategy block of the preview, when a model suggested it: asking the model again
+    # would be asking a different question. Absent, the deterministic template.
+    strategy: dict[str, Any] | None = None
+    # The simulated account, or the real one. The real one is refused unless every condition in
+    # GET /auto-trading/live holds, and then takes the console password.
+    scope: Literal["paper", "live"] = "paper"
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class AutoReasonRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field("", max_length=500)
+    scope: Literal["paper", "live"] = "paper"
+    # Resuming on the real account takes it; pausing and stopping never do.
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class AutoFundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["deposit", "withdrawal"]
+    amount_usd: float = Field(gt=0, le=10_000_000)
+    note: str = Field("", max_length=200)
+
+
+class AutoAdjustRequest(BaseModel):
+    """What to change in the strategy of the plan in force. Every figure is clamped to the plan's
+    bounds, and one that would need a setting the plan does not carry is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_positions: int | None = Field(default=None, ge=1, le=50)
+    position_pct: float | None = Field(default=None, gt=0, le=100)
+    min_confidence: int | None = Field(default=None, ge=0, le=100)
+    stop_loss_pct: float | None = Field(default=None, ge=0, le=100)
+    take_profit_pct: float | None = Field(default=None, ge=0, le=1000)
+    max_holding_days: int | None = Field(default=None, ge=0, le=3650)
+    trend_window: int | None = Field(default=None, ge=0, le=400)
+    universe: list[str] | None = Field(default=None, max_length=50)
+    ask_model: StrictBool = False
+    reason: str = Field("", max_length=500)
+
+
+@app.get("/auto-trading/simulation", tags=["automatic trading"],
+         summary="The simulated account: its plan, its record, what it holds and why it waits")
+def auto_simulation() -> dict[str, Any]:
+    return _ok(_service.auto_simulation)
+
+
+@app.post("/auto-trading/start", tags=["automatic trading"],
+          summary="Put a previewed plan in force: simulated, or -- behind every condition -- real")
+def auto_start(body: AutoStartRequest, request: Request) -> dict[str, Any]:
+    # The password is only ever looked at for the real account, and only checked here: the
+    # service is told whether it matched, never what it was.
+    confirmed = _step_up(request, body.password) if body.scope == "live" else False
+    return _ok(_service.auto_start, **body.model_dump(exclude={"password"}),
+               identity=request.state.identity, confirmed=confirmed)
+
+
+@app.get("/auto-trading/live", tags=["automatic trading"],
+         summary="The real account: the plan in force, a start that is waiting, and every condition")
+def auto_live() -> dict[str, Any]:
+    return _ok(_service.auto_live)
+
+
+@app.post("/auto-trading/live/withdraw", tags=["automatic trading"],
+          summary="Take back a start that is waiting, with the settings it has not yet changed")
+def auto_withdraw_request(body: AutoReasonRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_withdraw_request, reason=body.reason, identity=request.state.identity)
+
+
+class AutoPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class AutoReplacementSetting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    on: StrictBool
+    # Turning it on takes the console password; turning it off takes nothing.
+    password: str | None = Field(default=None, max_length=1024)
+
+
+@app.post("/auto-trading/candidate/evaluate", tags=["automatic trading"],
+          summary="Look at the simulated candidate against the strategy in force; changes nothing "
+                  "unless the plan was set to replace by itself")
+def auto_evaluate_candidate(request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_evaluate_candidate, identity=request.state.identity)
+
+
+@app.post("/auto-trading/candidate/replace", tags=["automatic trading"],
+          summary="Replace the strategy in force with a candidate that passes every line")
+def auto_replace_candidate(body: AutoPasswordRequest, request: Request) -> dict[str, Any]:
+    confirmed = _step_up(request, body.password)
+    return _ok(_service.auto_evaluate_candidate, identity=request.state.identity, apply=True,
+               confirmed=confirmed)
+
+
+@app.post("/auto-trading/replacement", tags=["automatic trading"],
+          summary="Choose whether a validated candidate takes over by itself under this plan")
+def auto_replacement_setting(body: AutoReplacementSetting, request: Request) -> dict[str, Any]:
+    confirmed = _step_up(request, body.password) if body.on else False
+    return _ok(_service.auto_replacement_setting, on=body.on, identity=request.state.identity,
+               confirmed=confirmed)
+
+
+@app.post("/auto-trading/pause", tags=["automatic trading"],
+          summary="Stop a plan opening positions; what it holds is still looked after")
+def auto_pause(body: AutoReasonRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_pause, reason=body.reason, identity=request.state.identity,
+               scope=body.scope)
+
+
+@app.post("/auto-trading/resume", tags=["automatic trading"],
+          summary="Let a plan open positions again; says where the loss line now starts")
+def auto_resume(body: AutoReasonRequest, request: Request) -> dict[str, Any]:
+    confirmed = _step_up(request, body.password) if body.scope == "live" else False
+    return _ok(_service.auto_resume, note=body.reason, identity=request.state.identity,
+               scope=body.scope, confirmed=confirmed)
+
+
+@app.post("/auto-trading/stop", tags=["automatic trading"],
+          summary="Take a plan out of force; on the real account, a waiting start with it")
+def auto_stop(body: AutoReasonRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_stop, reason=body.reason, identity=request.state.identity,
+               scope=body.scope)
+
+
+@app.post("/auto-trading/fund", tags=["automatic trading"],
+          summary="Deposit into or withdraw from the simulated account, recorded as funding")
+def auto_fund(body: AutoFundRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_fund, **body.model_dump(), identity=request.state.identity)
+
+
+class AutoBacktestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Absent: the two years up to the last session that has finished.
+    start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+@app.get("/auto-trading/intraday-checks", tags=["automatic trading"],
+         summary="What an intraday mode would need that is missing: data, timeliness, venue, pace")
+def auto_intraday_checks() -> dict[str, Any]:
+    return _ok(_service.auto_intraday_checks)
+
+
+@app.get("/auto-trading/performance", tags=["automatic trading"],
+         summary="The simulated record beside passive, a simple rule, 60/40 and cash; backtests apart")
+def auto_performance() -> dict[str, Any]:
+    return _ok(_service.auto_performance)
+
+
+@app.post("/auto-trading/backtest", tags=["automatic trading"],
+          summary="Run the plan's comparators and recorded research over history, and keep the record")
+def auto_backtest(body: AutoBacktestRequest, request: Request) -> dict[str, Any]:
+    return _ok(_service.auto_backtest, start=body.start, end=body.end,
+               identity=request.state.identity)
+
+
+@app.post("/auto-trading/adjust", tags=["automatic trading"],
+          summary="Change the simulated plan's strategy inside its confirmed envelope")
+def auto_adjust(body: AutoAdjustRequest, request: Request) -> dict[str, Any]:
+    wanted = body.model_dump(exclude={"ask_model", "reason"}, exclude_none=True)
+    return _ok(_service.auto_adjust, strategy=wanted, ask_model=body.ask_model, reason=body.reason,
+               identity=request.state.identity)
+
+
 @app.get("/risk", tags=["portfolio"], summary="Drawdown ladders and the market regime")
 def risk_state() -> dict[str, Any]:
     return _ok(_service.risk_state)
@@ -919,7 +1136,7 @@ def main() -> None:
 _ASSET_REF = re.compile(r'((?:src|href)=")((?:assets|icons)/[^"?#]+)(?:\?[^"#]*)?(")')
 
 _PRIMARY_PAGES = ("index", "advisor", "more", "risk", "activity", "evaluation",
-                  "profile", "notifications", "system", "approvals", "lab", "settings")
+                  "profile", "notifications", "system", "approvals", "lab", "settings", "auto")
 
 
 class ConsoleFiles(StaticFiles):

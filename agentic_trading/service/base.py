@@ -86,6 +86,11 @@ class ServiceBase:
 
     def _broker(self, profiles: Profiles, bucket: str):
         """The venue that owns a bucket. Real money only ever comes from the Micro-Live path."""
+        from ..auto import paper
+
+        if paper.is_paper(profiles):
+            # The simulated account: one venue, and it is not a real one whatever the bucket.
+            return paper.venue(profiles)
         if bucket == MICRO_BUCKET:
             from ..broker.robinhood import RobinhoodBroker
 
@@ -156,8 +161,13 @@ class ServiceBase:
         return robinhood.session_key(self.profiles())
 
     def _read_venue_account(self) -> VenueReading:
+        from ..auto import paper
+
         profiles = self.profiles()
         checked_at = utcnow().isoformat()
+        if paper.is_paper(profiles):
+            # The simulated account's venue is in this process; there is no session to keep.
+            return read_venue(paper.venue(profiles), checked_at)
         try:
             return self._read_venue(profiles, lambda broker: read_venue(broker, checked_at))
         except SessionUnavailable as exc:  # not connected is a normal state, not a crash

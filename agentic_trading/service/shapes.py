@@ -814,6 +814,8 @@ class AttentionItem(BaseModel):
     subject: str | None = None
     title: str
     detail: str = ""
+    #: ``detail`` keyed by language, where the engine wrote the sentence in both.
+    detail_i18n: dict[str, str] | None = None
     since: str | None = None
     link: dict[str, Any] = Field(default_factory=dict)
     actions: list[str] = Field(default_factory=list)
@@ -884,6 +886,34 @@ class AccountScopes(BaseModel):
 
 
 # ---------------------------------------------------------------------------- research
+class DiagnosisReason(BaseModel):
+    """One thing that stood between a run and an order, in both languages the console speaks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: str
+    code: str
+    #: The Hard Risk rule behind it, where one decided it.
+    rule_id: str | None = None
+    text: dict[str, str] = Field(default_factory=dict)
+
+
+class Diagnosis(BaseModel):
+    """Why a run ended as it did (agentic_trading.diagnosis): the reason that leads, then all.
+
+    ``category`` is from a closed set and is what a screen branches on; ``summary`` is the
+    sentence for the leading reason, keyed by language, and is shown as it is.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: str
+    code: str
+    label: dict[str, str] = Field(default_factory=dict)
+    summary: dict[str, str] = Field(default_factory=dict)
+    reasons: list[DiagnosisReason] = Field(default_factory=list)
+
+
 class ResearchRoute(BaseModel):
     """Which route produced a record or will run a job, and the versions behind it."""
 
@@ -927,11 +957,7 @@ class ResearchJob(BaseModel):
     log: str | None = None
     exit_code: int | None = None
     error: str | None = None
-    #: Declared one release before anything writes them. Every model here forbids a field it
-    #: does not name, so a queue the next release has written to -- it stores which way a run
-    #: failed, and how often one was requeued after an expired sign-in -- could not be listed
-    #: by this one: a rollback would answer 500 for every job created since. Read first, write
-    #: second, and the release in between is one that can be rolled back to.
+    #: Which of the ways of not finishing a failed run was; ``error`` is the same in a sentence.
     failure_code: str | None = None
     limit_recoveries: int = 0
     login_recoveries: int = 0
@@ -950,6 +976,9 @@ class ResearchJob(BaseModel):
     task_type: str
     route: ResearchRoute
     cancellable: bool
+    #: Why a job that is over produced no decision. None while it runs, and when it completed:
+    #: the decision record then says why it ended as it did.
+    diagnosis: Diagnosis | None = None
     #: Only on the answer to POST /research: whether an identical active request was returned.
     deduplicated: bool | None = None
 
@@ -1002,6 +1031,8 @@ class ResearchRecord(BaseModel):
     refers_to_run_id: str | None = None
     superseded_by: str | None = None
     applicable_floor: int | None = None
+    #: Why the run ended as it did: a proposal, nothing to do, or which kind of "no trade".
+    diagnosis: Diagnosis | None = None
 
 
 class ResearchHolder(BaseModel):

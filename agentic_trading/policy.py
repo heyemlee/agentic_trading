@@ -68,6 +68,10 @@ class PolicyDecision:
     reasons: list[str] = field(default_factory=list)
     proposal: dict[str, Any] | None = None
     error: str | None = None
+    #: Why the mapping ended in NO_TRADE, as codes from agentic_trading.diagnosis with the
+    #: figures each was decided on. ``reasons`` is the same account in a sentence, kept for the
+    #: log and the record; nothing reads a sentence to learn what was decided.
+    reason_codes: list[dict[str, Any]] = field(default_factory=list)
 
 
 def deterministic_action(
@@ -81,10 +85,33 @@ def deterministic_action(
     has_position: bool = False,
 ) -> tuple[str, str, list[str]]:
     """Return (final_action, size_hint, reasons). Only ever more cautious than the PM."""
+    action, size_hint, reasons, _codes = decide(
+        pm_rating, confidence=confidence, llm_action=llm_action, bucket=bucket,
+        instrument_type=instrument_type, profiles=profiles, has_position=has_position)
+    return action, size_hint, reasons
+
+
+def decide(
+    pm_rating: str,
+    *,
+    confidence: int | None,
+    llm_action: str | None,
+    bucket: str,
+    instrument_type: str,
+    profiles: Profiles,
+    has_position: bool = False,
+) -> tuple[str, str, list[str], list[dict[str, Any]]]:
+    """``deterministic_action``, with the reason for a NO_TRADE as a code beside its sentence."""
     reasons: list[str] = []
+    codes: list[dict[str, Any]] = []
+
+    def stop(code: str, **facts: Any) -> tuple[str, str, list[str], list[dict[str, Any]]]:
+        codes.append({"code": code, **facts})
+        return "NO_TRADE", "none", reasons, codes
+
     if pm_rating not in RATING_TO_ACTION:
         reasons.append(f"portfolio manager rating {pm_rating!r} is not tradeable -> NO_TRADE")
-        return "NO_TRADE", "none", reasons
+        return stop("rating_not_tradeable")
 
     with_pos, without_pos = RATING_TO_ACTION[pm_rating]
     action = with_pos if has_position else without_pos
@@ -95,14 +122,15 @@ def deterministic_action(
     if action in ("BUY", "ADD"):
         if confidence is None:
             reasons.append("policy reviewer produced no confidence -> NO_TRADE")
-            return "NO_TRADE", "none", reasons
+            return stop("no_confidence")
         cfg = profiles.confidence
         if confidence < cfg.no_trade_below:
             reasons.append(f"confidence {confidence} below no-trade threshold {cfg.no_trade_below} -> NO_TRADE")
-            return "NO_TRADE", "none", reasons
+            return stop("confidence_below_no_trade", confidence=confidence,
+                        threshold=cfg.no_trade_below)
         if instrument_type == "crypto" and bucket == "core":
             reasons.append("crypto is never a core instrument -> NO_TRADE")
-            return "NO_TRADE", "none", reasons
+            return stop("instrument_not_permitted")
         normal_floor = cfg.floor(bucket, instrument_type, "normal")
         small_floor = cfg.floor(bucket, instrument_type, "small")
         if confidence >= normal_floor:
@@ -112,13 +140,18 @@ def deterministic_action(
             reasons.append(f"confidence {confidence} below full-size floor {normal_floor} -> small position only")
         else:
             reasons.append(f"confidence {confidence} below opening floor {small_floor} for {bucket} {instrument_type} -> NO_TRADE")
-            return "NO_TRADE", "none", reasons
+            return stop("confidence_below_floor", confidence=confidence, floor=small_floor)
         if llm_action in ("NO_TRADE", "HOLD", "REDUCE", "SELL"):
             reasons.append(f"policy reviewer recommended {llm_action} despite PM {pm_rating} -> NO_TRADE (most cautious view wins)")
-            return "NO_TRADE", "none", reasons
+            return stop("reviewer_cautious", reviewer=llm_action)
     elif llm_action and llm_action != action:
         reasons.append(f"policy reviewer suggested {llm_action}; deterministic mapping keeps {action}")
-    return action, size_hint, reasons
+    if action == "NO_TRADE":
+        # Reached only with nothing held: a rating that says hold, trim or sell has nothing to
+        # act on. Which of the two it was is the whole of what a person wants to know.
+        codes.append({"code": "rating_hold_no_position"} if pm_rating == "Hold"
+                     else {"code": "rating_bearish_no_position", "rating": pm_rating})
+    return action, size_hint, reasons, codes
 
 
 def render_state_for_policy(final_state: dict[str, Any]) -> str:
@@ -188,7 +221,10 @@ def run_policy(
     try:
         proposal = llm.with_structured_output(ConservativeProposal).invoke(messages)
     except ClaudeCodeError as exc:
-        if exc.rate_limited:
+        # Neither says anything about the idea: the subscription ran out, or this Mac's login
+        # lapsed. Recording either as a NO_TRADE decision would file "nobody could ask the
+        # reviewer" under "the reviewer said no", so the run stops and says which it was.
+        if exc.rate_limited or exc.login_expired:
             raise
         error = f"policy reviewer call failed: {exc}"
     except Exception as exc:  # noqa: BLE001 - fail closed, never crash the run
@@ -196,15 +232,16 @@ def run_policy(
 
     confidence = proposal.confidence if proposal else None
     llm_action = proposal.recommended_action if proposal else None
-    action, size_hint, reasons = deterministic_action(
+    action, size_hint, reasons, codes = decide(
         pm_rating, confidence=confidence, llm_action=llm_action, bucket=bucket,
         instrument_type=instrument_type, profiles=profiles, has_position=has_position,
     )
     if error:
         reasons.insert(0, error + " -> NO_TRADE")
         action, size_hint = "NO_TRADE", "none"
+        codes = [{"code": "policy_review_failed"}]
     return PolicyDecision(
         final_action=action, size_hint=size_hint, pm_rating=pm_rating, llm_action=llm_action,
         confidence=confidence, reasons=reasons,
-        proposal=proposal.model_dump() if proposal else None, error=error,
+        proposal=proposal.model_dump() if proposal else None, error=error, reason_codes=codes,
     )

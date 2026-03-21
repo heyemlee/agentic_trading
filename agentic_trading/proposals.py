@@ -168,6 +168,13 @@ class Proposal:
     # compares it with the authority of the moment; None means it predates the record.
     authority_version: str | None = None
     authority_changed_during_research: bool = False
+    #: The size a confirmed strategy asked for, as a share of the allocation (see
+    #: risk.Proposal.weight_override_pct). Carried so revalidation sizes the order by the same
+    #: request the proposal was sized by; None for anything research produced.
+    weight_override_pct: float | None = None
+    #: The automatic-trading strategy version this came from, when one did (agentic_trading.auto).
+    #: An order and the position it opens are traced to it; None for a person's or research's.
+    strategy_version: str | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
     _revision: int = field(default=0, repr=False, compare=False)
 

@@ -56,6 +56,8 @@ class SystemMixin:
             status = SystemStatus.HALTED
         elif claude.state == "LIMIT_REACHED":
             status = SystemStatus.CLAUDE_LIMIT_REACHED
+        elif claude.state == "LOGIN_REQUIRED":
+            status = SystemStatus.CLAUDE_LOGIN_REQUIRED
         elif paused:
             status = SystemStatus.PAUSED
         else:
@@ -77,6 +79,7 @@ class SystemMixin:
                 SystemStatus.PAUSED: "kill switch engaged: no orders will be submitted",
                 SystemStatus.HALTED: "a drawdown ladder halt is active and needs a manual reset",
                 SystemStatus.CLAUDE_LIMIT_REACHED: claude.detail,
+                SystemStatus.CLAUDE_LOGIN_REQUIRED: claude.detail,
                 SystemStatus.CONFIG_ERROR: "configuration error",
             }[status],
             paused=paused,
@@ -113,6 +116,14 @@ class SystemMixin:
         if jobs and jobs[0].get("state") == "CLAUDE_LIMIT_REACHED":
             state = "LIMIT_REACHED"
             detail = jobs[0].get("error") or "Claude subscription limit reached"
+        elif jobs and jobs[0].get("failure_code") == "llm_login_expired" and jobs[0].get(
+                "state") in ("FAILED", "QUEUED"):
+            # Read from the newest job, as the limit is: the next run that completes clears it.
+            # QUEUED counts because that is what a failed run becomes while it waits to be
+            # retried, and the login is no more valid for having a retry scheduled.
+            state = "LOGIN_REQUIRED"
+            detail = ("the Claude login on this Mac has expired; research cannot run until "
+                      "someone signs in again (run `claude`, then /login)")
         return ClaudeStatus(state=state, detail=detail,
                             billing="claude_subscription_no_api_charges",
                             calls_today=calls_today, last_call_at=last_call)

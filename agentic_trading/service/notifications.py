@@ -34,6 +34,11 @@ RANKING: dict[str, tuple[str, int, bool]] = {
     "credential_invalid": ("critical", 1, True),
     "risk_halt": ("critical", 2, True),
     "autonomy_withdrawn": ("high", 2, True),
+    # A plan on the real account that stopped itself, did not start, or is not being run. Beside
+    # a withdrawn autonomy because it is the same kind of fact: something that was acting
+    # without being asked no longer is, and only a person can say what happens next.
+    "auto_trading_stopped": ("high", 2, True),
+    "auto_trading_stalled": ("high", 2, True),
     "proposal_waiting": ("high", 3, True),
     "exit_incomplete": ("high", 3, True),
     "proposal_stale": ("normal", 3, True),
@@ -44,6 +49,9 @@ RANKING: dict[str, tuple[str, int, bool]] = {
     "personal_task_failed": ("normal", 4, True),
     "config_change_pending": ("info", 5, False),
     "personal_task_done": ("info", 5, False),
+    # A simulated strategy that passed every test to take over, under a plan whose owner did not
+    # choose for that to happen by itself. Nothing is wrong; it is theirs to decide when they like.
+    "auto_candidate_ready": ("info", 5, False),
 }
 
 #: What a screen may offer against each kind. A closed set: the console localises these.
@@ -54,6 +62,8 @@ ACTIONS: dict[str, list[str]] = {
     "credential_invalid": ["open"],
     "risk_halt": ["open"],
     "autonomy_withdrawn": ["reset_autonomy", "open"],
+    "auto_trading_stopped": ["open"],
+    "auto_trading_stalled": ["open"],
     "proposal_waiting": ["approve", "reject", "reanalyze"],
     "exit_incomplete": ["continue_exit", "open"],
     "proposal_stale": ["reanalyze", "reject"],
@@ -64,6 +74,7 @@ ACTIONS: dict[str, list[str]] = {
     "config_change_pending": ["withdraw_change"],
     "personal_task_done": ["open"],
     "personal_task_failed": ["retry", "open"],
+    "auto_candidate_ready": ["open"],
 }
 
 _SEVERITY_RANK = {"critical": 0, "high": 1, "normal": 2, "info": 3}
@@ -82,6 +93,10 @@ EXIT_INCOMPLETE_HOURS = 72.0
 #: like any failure, but it is not something Home keeps asking about.
 PERSONAL_REQUESTED = ("analysis",)
 
+#: How long a plan on the real account may go without a pass, while the market is open, before
+#: that is something a person is told. A pass is made every minute; ten is not a slow minute.
+AUTO_STALL_SECONDS = 600.0
+
 
 @dataclass
 class Condition:
@@ -97,6 +112,10 @@ class Condition:
     kind: str
     title: str
     detail: str = ""
+    #: ``detail`` in each language the console speaks, where the engine has the sentence in
+    #: both (a diagnosis does). A screen shows this in its own language and ``detail``
+    #: otherwise; a notification always carries ``detail``.
+    detail_i18n: dict[str, str] | None = None
     scope: str = "system"                     # agentic | personal | demo | system
     account_scope_kind: str = "single"        # single | all_personal | unknown
     account_id: str | None = None
@@ -134,8 +153,8 @@ class Condition:
     def item(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in (
             "id", "kind", "severity", "priority", "requires_person", "scope", "account_scope_kind",
-            "account_id", "account_ids", "account_label", "subject", "title", "detail", "since",
-            "link", "actions")}
+            "account_id", "account_ids", "account_label", "subject", "title", "detail",
+            "detail_i18n", "since", "link", "actions")}
 
 
 def _bucket_scope(bucket: str | None) -> tuple[str, str | None]:
@@ -339,6 +358,9 @@ class NotificationsMixin:
                         id=f"research_failed:{job['run_key']}", kind=kind,
                         title=f"research on {job['ticker']} did not finish",
                         detail=str(job.get("error") or job["state"])[:300],
+                        # Why it did not finish, where the job's diagnosis says: an expired
+                        # login and a defect used to read as the same exit code here.
+                        detail_i18n=(job.get("diagnosis") or {}).get("summary") or None,
                         link=_link("research", run=job["run_key"]), attention=listed,
                         notify_kind="research_failed", notify_link="/ui/lab.html", **base))
                 elif job["state"] == "CLAUDE_LIMIT_REACHED":
@@ -511,11 +533,149 @@ class NotificationsMixin:
                     attention=False, notify_kind="autonomy_acted", notify_link="/ui/activity.html",
                     urgent=proposal.bucket == MICRO_BUCKET))
 
+        def automatic() -> None:
+            """A plan on the real account that stopped itself, did not start, or is not being run.
+
+            A plan in force acts without asking, so when it stops acting a person has to hear of
+            it: nothing else on any screen would change. Each of these is read from the plan's
+            own record, like everything here, and none of them is raised for the simulated
+            account -- that one is looked at on its own page and is nobody's emergency. Costs
+            three small reads on a deployment where nobody has ever confirmed a plan.
+            """
+            from ..auto import paper, runner
+            from ..auto import store as plans
+
+            if paper.is_paper(profiles):
+                return
+            db = self.state_db(profiles)
+            record = plans.plan_record(db)
+            requests = plans.request_history(db)
+            if not record and not requests and plans.start_request(db) is None:
+                return
+            active = plans.active_plan(db)
+            base = {"scope": "agentic", "account_id": MICRO_BUCKET,
+                    "account_label": _label("agentic", MICRO_BUCKET),
+                    "link": _link("auto", scope="live"), "notify_link": "/ui/auto.html?scope=live"}
+
+            def recent(stamp: Any, hours: float) -> bool:
+                at = _parse(stamp)
+                return at is not None and (now - at).total_seconds() / 3600 <= hours
+
+            state = plans.state(db)
+            if active is not None and state["paused"] and state.get("kind") == plans.LOSS_LINE:
+                out.append(Condition(
+                    id=f"auto_paused:{state['at']}", kind="auto_trading_stopped",
+                    title="automatic trading paused itself at its loss line",
+                    detail=(f"{state['reason']}; nothing new is opened until you look and resume. "
+                            "What it holds still leaves on its own stop and term. The line is a "
+                            "local check, not a limit on what can be lost."),
+                    detail_i18n={
+                        "zh": "方案到了你设定的亏损暂停线，已停止新开仓，等你查看后恢复。已有仓位仍按各自的止损和期限退出。"
+                              "这条线是本地检查，不是最大亏损的保证。",
+                        "en": "The plan reached the loss line you set and has stopped opening "
+                              "positions until you look and resume. What it holds still leaves on "
+                              "its own stop and term. The line is a local check, not a limit on "
+                              "what can be lost."},
+                    since=state["at"], notify_kind="autonomy_withdrawn", urgent=True, **base))
+            last = next((row for row in reversed(record.get("history") or []) if isinstance(row, dict)), None)
+            if (active is None and last is not None and last.get("status") == "withdrawn"
+                    and last.get("withdrawn_by") == runner.CODE_CHANGED
+                    and recent(last.get("withdrawn_at"), FAILED_HOURS)):
+                out.append(Condition(
+                    id=f"auto_stopped:{last.get('withdrawn_at')}", kind="auto_trading_stopped",
+                    title="automatic trading stopped opening positions: the trading logic changed",
+                    detail=str(last.get("withdrawn_reason") or "")[:300],
+                    detail_i18n={
+                        "zh": "交易逻辑、模型或授权说明已经更新，原来验证过的策略版本不再是正在运行的版本。实盘方案已停止新开仓；"
+                              "已有仓位仍按原来的止损和期限退出。新版本在模拟账户里重新积累记录后，再由你确认启动。",
+                        "en": "The trading logic, the models or the mandate changed, so the "
+                              "strategy version that was validated is no longer what is running. "
+                              "The real plan has stopped opening positions; what it holds still "
+                              "leaves on its own terms. Once the new version has its own "
+                              "simulated record, starting it again is yours to confirm."},
+                    since=last.get("withdrawn_at"), notify_kind="autonomy_withdrawn", urgent=True, **base))
+            lapsed = requests[-1] if requests and requests[-1].get("status") == "lapsed" else None
+            if (lapsed is not None and active is None and plans.start_request(db) is None
+                    and recent(lapsed.get("ended_at"), FAILED_HOURS)):
+                out.append(Condition(
+                    id=f"auto_start_lapsed:{lapsed.get('ended_at')}", kind="auto_trading_stopped",
+                    title="the plan you confirmed for the real account did not start",
+                    detail=str(lapsed.get("ended_reason") or "")[:300],
+                    since=lapsed.get("ended_at"), notify_kind="autonomy_withdrawn", **base))
+            if active is not None and recent(active.get("confirmed_at"), DONE_HOURS):
+                # In force, possibly at an hour nobody was watching: the settings it waited for
+                # landed on their own. Told once, urgently, and never a to-do.
+                envelope = active.get("envelope") or {}
+                out.append(Condition(
+                    id=f"auto_started:{active['plan_id']}:{active.get('confirmed_at')}",
+                    kind="auto_plan_started",
+                    title="automatic trading is in force on the real account",
+                    detail=(f"{envelope.get('mode')} plan, up to "
+                            f"${float(envelope.get('capital_usd') or 0):,.0f}, confirmed by "
+                            f"{active.get('confirmed_by')}; pause or stop it from the automatic-"
+                            "trading page"),
+                    since=active.get("confirmed_at"), notify_kind="config_change_applied",
+                    urgent=True, **base))
+            # What the last look at a candidate strategy came to, where a person should know.
+            from ..auto import replacement
+
+            looks = replacement.history(db)
+            look = looks[-1] if looks else None
+            if look and look.get("outcome") == replacement.REPLACED and recent(look.get("at"), DONE_HOURS):
+                # The strategy deciding real orders changed and nobody was asked: told, urgently.
+                out.append(Condition(
+                    id=f"auto_replaced:{look.get('candidate')}:{look.get('at')}",
+                    kind="auto_strategy_replaced",
+                    title="the strategy opening positions on the real account was replaced",
+                    detail=(f"{look.get('candidate')} took over from {look.get('incumbent')} after "
+                            f"validation (experiment {look.get('card_id')}); what the old one "
+                            "bought stays with it until it is sold"),
+                    since=look.get("at"), notify_kind="config_change_applied", urgent=True, **base))
+            if (look and look.get("outcome") == replacement.PASSED and active is not None
+                    and active.get("opening_version") == look.get("incumbent")):
+                out.append(Condition(
+                    id=f"auto_candidate_ready:{look.get('candidate')}", kind="auto_candidate_ready",
+                    title="a simulated strategy passed every test to replace the one in force",
+                    detail=(f"{look.get('candidate')} against {look.get('incumbent')}, experiment "
+                            f"{look.get('card_id')}; replacing it is yours to confirm"),
+                    detail_i18n={
+                        "zh": "模拟账户里的候选策略已通过全部替换条件（180 个有效模拟日、独立样本外、扣成本后优于现用策略和被动持有、"
+                              "回撤不更深）。这个方案没有设为自动替换，是否更换由你确认。",
+                        "en": "The candidate in the simulated account has passed every line for "
+                              "replacement: 180 valid simulated sessions, an independent "
+                              "out-of-sample result, more after costs than the strategy in force "
+                              "and than buy-and-hold, and no deeper a drawdown. This plan is not "
+                              "set to replace by itself, so the change is yours to confirm."},
+                    since=look.get("at"), **base))
+            # A pass is expected for as long as there is a plan, or a version that may still hold
+            # something. One that has not happened, or keeps failing, while the market is open.
+            if (active is not None or plans.versions(db)) and self.market_status().is_open:
+                seen = plans.last_pass(db) or {}
+                at = _parse(seen.get("at"))
+                late = at is None or (now - at).total_seconds() > AUTO_STALL_SECONDS
+                if late or seen.get("error"):
+                    out.append(Condition(
+                        id=f"auto_stalled:{now.date()}", kind="auto_trading_stalled",
+                        title=("automatic trading is not being run" if late else
+                               "automatic trading's last pass failed"),
+                        detail=(f"last pass {seen.get('at') or 'never'}"
+                                + (f": {seen['error']}" if seen.get("error") else "")
+                                + "; exits and new research are not being looked at")[:300],
+                        detail_i18n={
+                            "zh": "实盘方案的后台运行" + ("已经超过 10 分钟没有执行" if late else "最近一次执行失败")
+                                  + "。期间不会检查持仓的止损和到期，也不会处理新的研究结论。请到系统页查看服务状态。",
+                            "en": "The real plan's background pass "
+                                  + ("has not run for over ten minutes" if late else "failed on its last run")
+                                  + ". Until it runs, stops and terms are not being checked and new "
+                                    "research is not acted on. See the System page."},
+                        since=seen.get("at"), notify_kind="backup_overdue", urgent=True, **base))
+
         for source, collector in (("proposals", proposals), ("exits", unfinished_exits),
                                   ("research", research), ("venue", venue),
                                   ("ladders", ladders), ("ledger_report", ledgers),
                                   ("operations", operations), ("autonomy", withdrawn),
-                                  ("config_changes", changes), ("autonomy_acted", acted)):
+                                  ("config_changes", changes), ("autonomy_acted", acted),
+                                  ("automatic_trading", automatic)):
             read(source, collector)
         return out, unreadable
 

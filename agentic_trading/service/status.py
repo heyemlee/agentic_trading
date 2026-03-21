@@ -38,6 +38,10 @@ class SystemStatus(str, Enum):
     PAUSED = "PAUSED"                          # kill switch on: no orders, research still allowed
     HALTED = "HALTED"                          # a drawdown ladder halt; needs a manual reset
     CLAUDE_LIMIT_REACHED = "CLAUDE_LIMIT_REACHED"
+    # This Mac's Claude sign-in lapsed: research cannot run until a person signs in again.
+    # Orders are untouched by it, which is why it is not one of schedule.BLOCKING_STATUS: a
+    # scheduled run that goes ahead costs one refused call, and is how recovery is noticed.
+    CLAUDE_LOGIN_REQUIRED = "CLAUDE_LOGIN_REQUIRED"
     CONFIG_ERROR = "CONFIG_ERROR"
 
 

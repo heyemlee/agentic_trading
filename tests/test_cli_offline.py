@@ -57,6 +57,14 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     # the fake reviewer returns confidence 0 -> policy NO_TRADE -> Hard Risk NO_ACTION, never an approval
     assert rec["policy"]["final_action"] == "NO_TRADE" and rec["hard_risk"]["verdict"] == "NO_ACTION"
     assert rec["final_recommendation"]["action"] == "NO_TRADE"
+    # And the record says which kind of "no trade" that was, in codes and in both languages:
+    # the reviewer's confidence of 0 is under the no-trade line, which is the strategy declining.
+    assert rec["policy"]["reason_codes"] == [
+        {"code": "confidence_below_no_trade", "confidence": 0, "threshold": 50}]
+    assert rec["diagnosis"]["category"] == "strategy_no_trade"
+    assert rec["diagnosis"]["code"] == "confidence_below_no_trade"
+    assert "50" in rec["diagnosis"]["summary"]["zh"] and rec["diagnosis"]["summary"]["en"]
+    assert rec["outcome"] is None                      # still reserved for what came of it later
     assert StateDB(state_dir / "risk_state.json").read_document(state_dir / "risk_state.json") is not None
 
     # The console reads this file, and only this file, while a run is still working: the
@@ -70,6 +78,7 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     assert closed["kind"] == "run_finished"
     assert closed["policy_action"] == "NO_TRADE" and closed["hard_risk"] == "NO_ACTION"
     assert closed["final_action"] == "NO_TRADE" and closed["proposal_id"] is None
+    assert closed["diagnosis"] == {"category": "strategy_no_trade", "code": "confidence_below_no_trade"}
     desks = {e["role"] for e in events if e["kind"] == "call_finished"}
     assert desks == {"market", "news", "bull", "bear", "manager", "trader",
                      "aggressive", "neutral", "conservative", "portfolio"}

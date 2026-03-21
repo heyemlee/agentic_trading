@@ -71,6 +71,7 @@ from .risk import (
 from .risk import Proposal as RiskProposal
 from .risk.ladder import escalated
 from .risk.regime import LEVELS as REGIME_ORDER
+from .sizing import minimum_order
 from .state_db import StateConflict, StateDB
 from .storage import file_lock
 
@@ -330,6 +331,7 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
         sell_quantity=proposal.sell_quantity,
         missing_information=proposal.missing_information,
         evidence=proposal.evidence,
+        weight_override_pct=proposal.weight_override_pct,
         # Read from the approval record, not passed in. The macro blackout and the autonomous
         # allowance both key on this, and both would be silently inert if the flag never made
         # it from the approval record to the rules that read it. `was_autonomous` reads the
@@ -370,7 +372,8 @@ def revalidate(profiles: Profiles, proposal: Proposal, broker: BrokerAdapter, *,
     approved = proposal.notional_usd or fresh_notional
     executable = min(fresh_notional, approved)
     min_ratio = float(reval_cfg.get("min_reduction_ratio", 0.5))
-    min_order = float((profiles.risk.get("sizing") or {}).get("min_order_usd", 25))
+    # The same reader the engine sized the proposal by, so the two cannot hold different lines.
+    min_order, _min_source = minimum_order(profiles, proposal.bucket)
     if executable < min_order:
         rv.outcome = OUT_INVALIDATED
         rv.reasons.append(f"the executable size ${executable:,.2f} is below the ${min_order:,.0f} minimum")
@@ -459,8 +462,11 @@ def _execute_new(profiles, proposal, broker, store, *, ledger_path=None, dry_run
                           rv.as_dict())
         proposal.status = {OUT_STALE: EXPIRED, OUT_REANALYZE: NEEDS_REANALYSIS,
                            OUT_INVALIDATED: INVALIDATED, OUT_REJECTED: REJECTED}.get(rv.outcome, INVALIDATED)
+        # ``retryable`` is kept with the verdict: it is what tells "the idea was refused" from
+        # "nothing could be sent at that moment", and whoever wrote the proposal may want to
+        # write it again in the second case (auto.trader does, a bounded number of times).
         proposal.note("revalidation_failed", f"{rv.outcome}: {rv.reasons[-1] if rv.reasons else ''}",
-                      outcome=rv.outcome, changes=rv.changes)
+                      outcome=rv.outcome, changes=rv.changes, retryable=bool(rv.retryable))
         store.save(proposal)
         return ExecutionResult(False, rv.outcome, proposal.proposal_id, rv.as_dict())
     if getattr(broker, "name", "") == "robinhood":

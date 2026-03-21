@@ -97,6 +97,30 @@ def _looks_limited(text: str, stderr: str) -> bool:
         return True
     return len(text or "") <= _LIMIT_NOTICE_MAX_CHARS and bool(_LIMIT_RE.search(text or ""))
 
+
+_LOGIN_RE = re.compile(
+    r"(failed to authenticate|oauth (session|token)[a-z ]{0,24}expired|authentication_error|"
+    r"please run /login|not logged in|invalid api key)",
+    re.IGNORECASE,
+)
+
+
+def _looks_logged_out(text: str, stderr: str) -> bool:
+    """Whether a failed call was refused because this Mac's Claude login is no longer valid.
+
+    On 2026-10-02 the CLI answered every call of the weekly research with "Failed to
+    authenticate: OAuth session expired and could not be refreshed". All three runs were stored as
+    "research pipeline exited with code 1", which reads exactly like a defect in the pipeline and
+    says nothing a person can act on. The remedy is not in this codebase at all -- somebody has to
+    sign in again on the machine -- so the one useful thing to do with it is to name it.
+
+    Held to the same shape as a limit notice, for the same reason: the notice is one short line,
+    and a long answer that happens to discuss authentication is the model's own text.
+    """
+    if _LOGIN_RE.search(stderr or ""):
+        return True
+    return len(text or "") <= _LIMIT_NOTICE_MAX_CHARS and bool(_LOGIN_RE.search(text or ""))
+
 USAGE_LOG: list[dict[str, Any]] = []
 
 
@@ -121,12 +145,17 @@ def usage_summary() -> dict[str, Any]:
 
 
 class ClaudeCodeError(RuntimeError):
-    """The CLI call failed. ``rate_limited`` marks a subscription-limit style failure."""
+    """The CLI call failed. ``rate_limited`` marks a subscription-limit style failure.
+
+    ``login_expired`` marks the other failure that says nothing about the work: the CLI's own
+    sign-in on this machine has lapsed, and every call will be refused until a person renews it.
+    """
 
     def __init__(self, message: str, *, rate_limited: bool = False, exit_code: int | None = None,
-                 stderr: str = ""):
+                 stderr: str = "", login_expired: bool = False):
         super().__init__(message)
         self.rate_limited = rate_limited
+        self.login_expired = login_expired
         self.exit_code = exit_code
         self.stderr = stderr
 
@@ -532,16 +561,22 @@ class ClaudeCodeChatModel(BaseChatModel):
         try:
             result, events = _parse_cli_output(proc.stdout or "")
         except ClaudeCodeError as exc:
+            limited = bool(_LIMIT_RE.search(stderr))
             raise ClaudeCodeError(
                 f"{exc} (exit {proc.returncode}; stderr: {stderr[:500]!r})",
-                rate_limited=bool(_LIMIT_RE.search(stderr)), exit_code=proc.returncode, stderr=stderr,
+                rate_limited=limited, exit_code=proc.returncode, stderr=stderr,
+                login_expired=not limited and bool(_LOGIN_RE.search(stderr)),
             ) from exc
 
         text = _text(result.get("result"))
         if proc.returncode != 0 or result.get("is_error"):
+            limited = _looks_limited(text, stderr)
             raise ClaudeCodeError(
                 f"claude failed (exit {proc.returncode}, subtype {result.get('subtype')!r}): {text[:500]}",
-                rate_limited=_looks_limited(text, stderr), exit_code=proc.returncode, stderr=stderr,
+                rate_limited=limited, exit_code=proc.returncode, stderr=stderr,
+                # A limit is the more specific reading and already has its own recovery, so a
+                # notice that somehow matched both is left to it.
+                login_expired=not limited and _looks_logged_out(text, stderr),
             )
 
         usage = result.get("usage") or {}

@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
+from . import diagnosis
 from .broker.base import BrokerError, BrokerUnavailable
 from .broker.robinhood import RobinhoodBroker, _first, _quote_rows, _rows, _unwrap
 from .llm.claude_code import ClaudeCodeChatModel, ClaudeCodeError
@@ -328,6 +329,16 @@ def answer(profiles, context, message, history, language="zh", llm=None):
     return reply.model_dump()
 
 
+class SubjectUnavailable(ValueError):
+    """What a review was asked to study is not there to study.
+
+    A scheduled review picks its holdings from the last reading of the owner's accounts, which
+    can be days old; the worker then reads the accounts afresh. A holding sold in between is not
+    a defect in anything, and on 2026-10-02 two of them ended as a traceback and a "research
+    failed" notice. It is its own ending, so the queue can say what happened.
+    """
+
+
 def read_only_research(profiles, job, snapshot, notes):
     """Reuse the full upstream graph and the same policy mapping; never call an order store."""
     from .evidence import check_evidence, collect_evidence
@@ -341,10 +352,10 @@ def read_only_research(profiles, job, snapshot, notes):
     account_id = task.get("account_id")
     account = next((a for a in snapshot["accounts"] if a["id"] == account_id), None)
     if account_id and (account is None or not account["complete"]):
-        raise ValueError("Selected account is unavailable or incomplete; refresh it before review.")
+        raise SubjectUnavailable("Selected account is unavailable or incomplete; refresh it before review.")
     has_position = bool(account and any(p["symbol"] == ticker for p in account["positions"]))
     if account_id and not has_position:
-        raise ValueError("This holding is no longer present; refresh the portfolio.")
+        raise SubjectUnavailable("This holding is no longer present; refresh the portfolio.")
     kind = classify_instrument(ticker, strict=True)
     if kind not in ("stock", "etf"):
         raise ValueError("Read-only reviews currently support stocks and ETFs.")
@@ -482,9 +493,18 @@ def run_task(profiles, job):
         record["route"] = {"name": "tradingagents" if task["kind"] == "analysis" else "assistant",
                            "skill_version": None}
         record["elapsed_seconds"] = round(time.monotonic() - started, 1)
+        if task["kind"] == "analysis":
+            record["diagnosis"] = diagnosis.classify_record(record).as_dict()
         write_record(profiles.project_dir / "runs" / job["run_key"] / "decision_record.json", record)
-        return 0
+        return diagnosis.EXIT_OK
+    except SubjectUnavailable as exc:
+        print(f"[{job['ticker']}] SKIPPED: {exc}", flush=True)
+        return diagnosis.EXIT_SUBJECT
     except ClaudeCodeError as exc:
         if exc.rate_limited:
-            return 3
+            return diagnosis.EXIT_LIMIT
+        if exc.login_expired:
+            print(f"[{job['ticker']}] STOPPED: the Claude login on this Mac has expired ({exc}). "
+                  "Sign in again (run `claude`, then /login); the task is retried.", flush=True)
+            return diagnosis.EXIT_LOGIN
         raise

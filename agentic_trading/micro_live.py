@@ -357,7 +357,17 @@ def bucket_is_executable(profiles: Profiles, bucket: str, broker_name: str) -> t
     Core and Sandbox are conceptual portfolios with no broker behind them. Sending one of their
     proposals to Robinhood would silently move conceptual money into a real account, so the
     binding between bucket and venue is checked explicitly rather than assumed.
+
+    The simulated account (agentic_trading.auto.paper) turns the binding round: it is the same
+    bucket under the same rules, and there it executes at the simulator and at nothing else.
     """
+    from .auto.paper import is_paper
+
+    if is_paper(profiles):
+        if broker_name != "simulated":
+            return False, (f"this is the simulated account: no order from it may reach {broker_name} "
+                           "or any other real venue")
+        return True, f"{bucket} executes at the simulator in the simulated account"
     if broker_name == "robinhood" and bucket != BUCKET:
         return False, (f"the {bucket} bucket has no real-money venue; only {BUCKET} executes at Robinhood. "
                        "Core and Sandbox remain Demo buckets until you decide otherwise.")

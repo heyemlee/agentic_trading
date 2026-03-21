@@ -8,6 +8,7 @@ import signal
 import sys
 
 from .cli import run_one
+from .diagnosis import EXIT_LIMIT, EXIT_OK, EXIT_TIMEOUT, failure_for_exit
 from .profile import load_profiles
 from .proposals import ProposalStore
 from .research_jobs import ResearchJobStore, _now
@@ -61,29 +62,30 @@ def main(argv: list[str] | None = None) -> int:
                 record = {}
         valid_record = (record.get("run_id") == args.run_key
                         and str(record.get("ticker", "")).upper() == job["ticker"])
-        state = ("COMPLETE" if code == 0 and valid_record else
-                 "CLAUDE_LIMIT_REACHED" if code == 3 else "FAILED")
-        error = None if state == "COMPLETE" else (
-            "Claude subscription limit reached; retry after reset" if code == 3
-            else "research exited without a matching decision record" if code == 0
-            else f"research pipeline exited with code {code}"
-        )
+        state = ("COMPLETE" if code == EXIT_OK and valid_record else
+                 "CLAUDE_LIMIT_REACHED" if code == EXIT_LIMIT else "FAILED")
+        # Which of the ways of not finishing this was, stored beside the sentence. The sentence
+        # alone was "exited with code 1" for an expired login and for a defect alike.
+        failure, error = (None, None) if state == "COMPLETE" else failure_for_exit(
+            code, has_record=valid_record)
         store.update(args.run_key, {
             "state": state, "finished_at": _now(), "exit_code": code, "error": error,
+            "failure_code": failure,
             "proposal_created": bool(valid_record and record.get("proposal_id")),
             "proposal_id": record.get("proposal_id") if valid_record else None,
         }, expected_states=("RUNNING",))
         return code
     except ResearchTimeout as exc:
         store.update(args.run_key, {
-            "state": "TIMED_OUT", "finished_at": _now(), "exit_code": 124,
-            "error": str(exc),
+            "state": "TIMED_OUT", "finished_at": _now(), "exit_code": EXIT_TIMEOUT,
+            "error": str(exc), "failure_code": "timeout",
         }, expected_states=("RUNNING",))
-        return 124
+        return EXIT_TIMEOUT
     except BaseException as exc:
         store.update(args.run_key, {
             "state": "FAILED", "finished_at": _now(), "exit_code": 1,
             "error": f"worker failed: {type(exc).__name__}: {exc}",
+            "failure_code": "worker_crashed",
         }, expected_states=("RUNNING",))
         raise
     finally:

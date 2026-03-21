@@ -159,8 +159,24 @@ class ConfigurationMixin:
         """
         from .. import config_changes as cc
 
-        profiles = self.profiles()
+        # Built from the request, so it can name no setting to create: see ChangeSpec.create.
         spec = cc.ChangeSpec(file=file, key=key, text=text, set=dict(set or {}))
+        return self._submit_change(spec, revision=revision, reason=reason, identity=identity,
+                                   confirmed=confirmed)
+
+    def _submit_change(self, spec, *, revision: str = "", reason: str = "",
+                       identity: str | None = None, confirmed: bool = False) -> dict[str, Any]:
+        """Put one change through the console's rules: classified, then applied or parked.
+
+        The one way a configuration change is made from inside the service, whoever built the
+        spec. A confirmed automatic-trading plan comes through here too (``service.auto``), which
+        is what "the plan's settings go through the console's confirmation" means: the same
+        classification, the same password for a loosening, the same day of waiting, the same
+        record in Settings where it can be withdrawn.
+        """
+        from .. import config_changes as cc
+
+        profiles = self.profiles()
         current, new_text, verdict = self._prepare_change(profiles, spec, revision)
         if current == new_text:
             raise ServiceError("nothing changed")

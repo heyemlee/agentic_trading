@@ -13,6 +13,7 @@ import json
 from contextlib import nullcontext
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -38,7 +39,12 @@ class SimulatedBroker:
                  prices: dict[str, float] | None = None, market_open: bool = True,
                  fill_mode: str = "full", reject_reason: str | None = None,
                  unavailable: bool = False, trading_blocked: bool = False, now: datetime | None = None,
-                 autoprice: bool = False, order_state_path: str | Path | None = None):
+                 autoprice: bool = False, order_state_path: str | Path | None = None,
+                 quantity_increment: float | None = None):
+        # The smallest quantity this venue trades, when it is asked to have one. A real venue
+        # fills a dollar amount in its own increment; left unset, a dollar amount fills at
+        # whatever the division gives, which is what the scenarios written before this expect.
+        self._quantity_increment = quantity_increment
         self._cash = cash
         self._positions = {s.upper(): (q, p) for s, (q, p) in (positions or {}).items()}
         self._prices = {s.upper(): p for s, p in (prices or {}).items()}
@@ -137,8 +143,16 @@ class SimulatedBroker:
         if not self._market_open and request.time_in_force == "day":
             raise BrokerRejection("market is closed for a day order", code="market_closed")
 
-        price = request.limit_price or self._price(request.symbol)
+        price = self._execution_price(request)
         qty = request.quantity if request.quantity is not None else (request.notional or 0.0) / price
+        if self._quantity_increment:
+            # Down, never to nearest: a dollar amount buys at most what it pays for, and a sale
+            # of a rounded-up quantity would be a sale of shares that are not there.
+            step = Decimal(str(self._quantity_increment))
+            qty = float((Decimal(str(qty)) / step).quantize(Decimal(1), rounding=ROUND_DOWN) * step)
+            if qty <= 0:
+                raise BrokerRejection("the order is smaller than the venue's smallest quantity",
+                                      code="below_increment")
         cost = qty * price
         if request.side == "buy" and cost > self._cash + 1e-6:
             raise BrokerRejection(f"insufficient buying power: need {cost:.2f}, have {self._cash:.2f}",
@@ -150,7 +164,7 @@ class SimulatedBroker:
                                       "(shorting disabled)", code="insufficient_position")
 
         order_id = f"sim-{uuid4().hex}" if self._order_state_path else f"sim-{next(self._ids):04d}"
-        filled = {"full": qty, "partial": round(qty / 2, 6), "none": 0.0}[self._fill_mode]
+        filled = self._filled_quantity(request, qty, price)
         status = "filled" if filled >= qty - 1e-9 else ("partially_filled" if filled > 0 else "new")
         order = BrokerOrder(order_id=order_id, client_order_id=request.client_order_id, symbol=request.symbol.upper(),
                             side=request.side, quantity=qty, notional=request.notional, order_type=request.order_type,
@@ -185,6 +199,17 @@ class SimulatedBroker:
                 return
 
     # -- internals -----------------------------------------------------------
+    def _execution_price(self, request: OrderRequest) -> float:
+        """What this order trades at. Here: its own limit, or the price on the screen.
+
+        A subclass that models what a fill costs answers this instead (``auto.venue``).
+        """
+        return request.limit_price or self._price(request.symbol)
+
+    def _filled_quantity(self, request: OrderRequest, quantity: float, price: float) -> float:
+        """How much of an accepted order fills at once: all, half or none, as the test asked."""
+        return {"full": quantity, "partial": round(quantity / 2, 6), "none": 0.0}[self._fill_mode]
+
     def _price(self, symbol: str) -> float:
         symbol = symbol.upper()
         if symbol in self._prices:

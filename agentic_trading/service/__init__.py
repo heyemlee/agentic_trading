@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .approvals import ApprovalsMixin
 from .assistant import AssistantMixin
+from .auto import AutoTradingMixin
 from .base import ServiceBase
 from .books import BooksMixin
 from .configuration import ConfigurationMixin
@@ -21,7 +22,7 @@ from .system import SystemMixin
 __all__ = ["Service", "ServiceConflict", "ServiceError"]
 
 
-class Service(ApprovalsMixin, AssistantMixin, BooksMixin, ConfigurationMixin,
+class Service(ApprovalsMixin, AssistantMixin, AutoTradingMixin, BooksMixin, ConfigurationMixin,
               NotificationsMixin, ResearchMixin, SystemMixin, ServiceBase):
     """One instance per process. Cheap to construct.
 

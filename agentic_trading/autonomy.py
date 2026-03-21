@@ -101,7 +101,7 @@ def is_armed(profiles: Profiles, bucket: str) -> bool:
     caller that then opens a venue session.
     """
     switched_on = any(_cfg(profiles, bucket, block).get("enabled") is True
-                      for block in ("reduce", "open"))
+                      for block in ("reduce", "open", "managed_exit"))
     return switched_on and not load_downgrade(profiles).tripped
 
 
@@ -156,22 +156,70 @@ def trip_for_outcome(profiles: Profiles, bucket: str, outcome: str, detail: str 
     return True
 
 
+#: The block that lets code sell what code itself bought under a confirmed plan.
+MANAGED_EXIT = "managed_exit"
+#: How a proposal says it is such an exit (``risk.Proposal.source``). Saying so is only what
+#: makes it eligible; whether the shares really are code's is decided in ``permits``, from the
+#: fills, and again at execution against the venue.
+MANAGED_EXIT_SOURCE = "auto:managed_exit"
+#: The actions that take risk off. Both may be a managed exit; neither is one by default.
+EXIT_ACTIONS = ("SELL", "REDUCE")
+
+
 def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | None,
             limit_class: str | None = None, held_quantity: float | None = None,
             requested_quantity: float | None = None, reduced_today: int = 0,
             opened_today: int = 0, now: datetime | None = None,
-            floor: PositionFloor | None = None) -> Decision:
+            floor: PositionFloor | None = None, managed: Any | None = None,
+            exited_today: int = 0) -> Decision:
     """Whether deterministic code may give this proposal its approval.
 
     Two blocks, separately switched, because they are different in kind: reducing cuts risk and
     opening creates it. Every refusal names the condition, because the caller records it and the
     next reader has to be able to tell "autonomy declined" from "the trade was refused".
+
+    ``managed`` makes it a third question, with its own switch: an exit from shares code itself
+    bought under a strategy version (``auto.positions.Managed``). That is the one case in which
+    a SELL may be autonomous, and it is bounded by provenance rather than by a fraction: code may
+    sell up to what it bought and not one share of what a person did. Given for anything else,
+    or with a quantity that could not be established, it permits nothing.
     """
     reasons: list[str] = []
 
     def refuse(reason: str) -> Decision:
         reasons.append(reason)
         return Decision(False, reasons)
+
+    if managed is not None:
+        if action not in EXIT_ACTIONS:
+            return refuse(f"{action} is not an exit; a managed position is only ever sold from")
+        cfg = _cfg(profiles, bucket, MANAGED_EXIT)
+        if cfg.get("enabled") is not True:
+            return refuse(f"buckets.{bucket}.autonomy.{MANAGED_EXIT}.enabled is not true")
+        downgrade = load_downgrade(profiles)
+        if downgrade.tripped:
+            return refuse(f"autonomy was withdrawn and needs a manual reset: {downgrade.reason}")
+        own = getattr(managed, "quantity", None)
+        if own is None:
+            return refuse("what code holds of this position could not be established: "
+                          + str(getattr(managed, "reason", None) or "nothing was derived"))
+        if own <= QUANTITY_TOLERANCE:
+            return refuse("code holds none of this position; what is left belongs to a person")
+        if not getattr(managed, "version_id", None):
+            return refuse("no strategy version opened this position, so it is not one code manages")
+        if (requested_quantity is None or isinstance(requested_quantity, bool)
+                or requested_quantity <= 0):
+            return refuse("an exit needs the quantity it would sell")
+        if requested_quantity > own + QUANTITY_TOLERANCE:
+            return refuse(f"{requested_quantity:g} shares is more than the {own:g} code itself "
+                          "bought; the rest belongs to a person")
+        per_day = cfg.get("max_exits_per_day")
+        if per_day is not None and exited_today >= int(per_day):
+            return refuse(f"{exited_today} position(s) already exited automatically today, at "
+                          f"the limit of {int(per_day)}")
+        reasons.append(f"exit of {requested_quantity:g} of the {own:g} shares code bought under "
+                       f"{managed.version_id}; nothing a person bought is touched")
+        return Decision(True, reasons)
 
     if action == AUTONOMOUS_ACTION:
         block = "reduce"
@@ -498,6 +546,12 @@ def reduced_today(proposals, bucket: str, now: datetime | None = None) -> int:
 
 def opened_today(proposals, bucket: str, now: datetime | None = None) -> int:
     return acted_today(proposals, bucket, OPENING_ACTIONS, now)
+
+
+def exited_today(proposals, bucket: str, now: datetime | None = None) -> int:
+    """Positions code closed or trimmed today out of what it had itself bought."""
+    own = [p for p in proposals if getattr(p, "strategy_version", None)]
+    return acted_today(own, bucket, EXIT_ACTIONS, now)
 
 
 # ---------------------------------------------------------------------------- effective authority

@@ -41,6 +41,16 @@ KINDS = {
     "autonomy_stopped": "autonomous action was stopped by hand",
     "autonomy_resumed": "autonomous action was restored by hand",
     "password_changed": "the console password was rotated",
+    "auto_plan_requested": "a plan for the real account was confirmed and waits for its settings",
+    "auto_plan_request_ended": "a plan waiting to start was withdrawn, or lapsed unstarted",
+    "auto_plan_started": "an automatic-trading plan was put in force",
+    "auto_plan_stopped": "an automatic-trading plan was taken out of force",
+    "auto_paused": "automatic trading was paused",
+    "auto_resumed": "automatic trading was resumed by hand",
+    "auto_strategy_adjusted": "the plan's strategy was changed inside its confirmed envelope",
+    "auto_strategy_replaced": "a validated strategy version replaced the one opening positions",
+    "auto_candidate_evaluated": "a candidate strategy version was put to its replacement tests",
+    "auto_experiment_recorded": "an experiment on a strategy version was run and its record kept",
 }
 
 #: Proposal history verbs, as written by Proposal.note(), mapped onto journal kinds.

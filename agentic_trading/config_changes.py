@@ -202,6 +202,14 @@ def _dump_with(text: str, updates: dict[str, Any], create: frozenset[str] = froz
             raise ConfigChangeError("a value needs a non-empty path")
         node = doc
         for part in parts[:-1]:
+            if (path in create and hasattr(node, "get") and part not in node
+                    and node is not doc):
+                # A block the file never declared, for a path this code names itself: the block
+                # is created with the setting. Never at the top level, where a new section is a
+                # different kind of change and is refused by ``validate``.
+                from ruamel.yaml.comments import CommentedMap
+
+                node[part] = CommentedMap()
             if not hasattr(node, "get") or node.get(part) is None or not hasattr(node[part], "get"):
                 raise ConfigChangeError(f"no such setting: {path}")
             node = node[part]
@@ -353,6 +361,9 @@ RULES: tuple[tuple[str, Any], ...] = (
     ("buckets.*.tiers.*.max_*", HIGHER_LOOSER),
     ("buckets.*.autonomy.*.enabled", TRUE_LOOSER),
     ("buckets.*.autonomy.*.classes", LONGER_LOOSER),
+    # The modes code may open positions under on its own (agentic_trading.auto.modes). A longer
+    # list is a wider authority, like a longer list of classes.
+    ("buckets.*.autonomy.*.modes", LONGER_LOOSER),
     ("buckets.*.autonomy.*.max_*", HIGHER_LOOSER),
     ("buckets.*.autonomy.*.min_confidence", LOWER_LOOSER),
     ("buckets.*.autonomy.*.min_remaining_pct_of_opened", LOWER_LOOSER),
@@ -382,6 +393,12 @@ RULES: tuple[tuple[str, Any], ...] = (
     ("drawdown_ladder.core.mirror_total_portfolio_levels", FALSE_LOOSER),
     ("sizing.core.baseline_sleeve_classes", LONGER_LOOSER),
     ("sizing.sizing_basis", NEUTRAL),
+    # Both let an order through that was being dropped, which is the direction that waits: a
+    # lower minimum admits smaller orders, and cutting to fit admits ones a limit used to
+    # refuse. Under the catch-all below a lower minimum read as a tightening and applied at once.
+    ("sizing.min_order_usd", LOWER_LOOSER),
+    ("sizing.fit_to_limits", TRUE_LOOSER),
+    ("sizing.*.fit_to_limits", TRUE_LOOSER),
     ("sizing.**", HIGHER_LOOSER),
     ("confidence_requirements.**", LOWER_LOOSER),
     # --- proposals, freshness, approval
@@ -574,12 +591,42 @@ def validate(config_dir: Path, file: str, new_text: str) -> None:
             profiles = load_profiles(cfg)
         except ProfileError as exc:
             raise ConfigChangeError(str(exc)) from exc
+        if file == "risk_profile.yaml":
+            _check_minimum_order(current, proposed, profiles)
         if file == "event_calendar.yaml":
             from .event_calendar import load_macro_calendar
 
             calendar = load_macro_calendar(profiles)
             if calendar.error:
                 raise ConfigChangeError(calendar.error)
+
+
+def _check_minimum_order(current: dict[str, Any], proposed: dict[str, Any], profiles) -> None:
+    """Refuse lowering the product's minimum order past, or without, the venue's own.
+
+    ``sizing.min_order_usd`` is this product's setting and may be lowered -- but only as far as
+    the minimum the real-money venue is on record as accepting (broker/requirements.py). Below
+    that every order would be refused by the venue one at a time; and where the venue's minimum
+    is not on record at all there is no floor to lower it toward, so it stays where it is.
+    Raising it, or leaving it, is never refused here.
+    """
+    from .broker import requirements
+    from .micro_live import BUCKET
+
+    before = get_value(current, "sizing.min_order_usd")
+    after = get_value(proposed, "sizing.min_order_usd")
+    try:
+        if before is None or after is None or float(after) >= float(before):
+            return
+    except (TypeError, ValueError) as exc:
+        raise ConfigChangeError("sizing.min_order_usd must be a number of dollars") from exc
+    lowest, why = requirements.lowest_product_minimum(profiles, BUCKET)
+    if lowest is None:
+        raise ConfigChangeError(f"sizing.min_order_usd cannot be lowered: {why}")
+    if float(after) < float(lowest):
+        raise ConfigChangeError(
+            f"sizing.min_order_usd cannot be set to ${float(after):,.2f}: {why}, and an order "
+            "below that would be refused by the venue")
 
 
 # ------------------------------------------------------------------------- change specs
@@ -591,6 +638,10 @@ class ChangeSpec:
     key: str | None = None
     text: str | None = None
     set: dict[str, Any] = field(default_factory=dict)
+    #: Paths among ``set`` that the file may not declare yet and that are created with their
+    #: value. Never taken from a request: only code that names its own keys fills this in, and
+    #: ``check`` holds it to :data:`CREATABLE` whoever did.
+    create: frozenset[str] = frozenset()
 
     @property
     def kind(self) -> str:
@@ -603,13 +654,32 @@ class ChangeSpec:
             raise ConfigChangeError("describe the change as one section's text or as values, not both")
         if self.key is not None and self.text is None:
             raise ConfigChangeError("a section change needs its text")
+        stray = sorted(set(self.create) - CREATABLE)
+        if stray:
+            raise ConfigChangeError("these settings may not be created from here: " + ", ".join(stray))
+        if self.create and self.file != "risk_profile.yaml":
+            raise ConfigChangeError("settings are only ever created in risk_profile.yaml")
+
+
+#: The settings a change may bring into being when the file has never declared them, because a
+#: confirmed automatic-trading plan needs them (agentic_trading.auto.plan). A closed list held
+#: here, beside the rules that classify each of them: a path outside it is a misspelt key, and
+#: is refused as one whether it arrives from a request, a stored record or a caller in this
+#: package. (The two autonomy switches create their own number through ``switch_change``.)
+CREATABLE: frozenset[str] = frozenset({
+    "sizing.fit_to_limits",
+    "buckets.micro_live.autonomy.open.max_usd",
+    "buckets.micro_live.autonomy.open.min_confidence",
+    "buckets.micro_live.autonomy.open.modes",
+    "buckets.micro_live.autonomy.managed_exit.enabled",
+})
 
 
 def build(current: str, spec: ChangeSpec) -> str:
     spec.check()
     if spec.kind == "section":
         return replace_section(current, spec.key, spec.text or "")
-    return set_values(current, spec.set)
+    return set_values(current, spec.set, create=spec.create & frozenset(spec.set))
 
 
 def base_of(current: str, spec: ChangeSpec) -> Any:
@@ -727,6 +797,7 @@ def new_record(spec: ChangeSpec, *, base: Any, verdict: dict[str, Any], identity
         "key": spec.key,
         "text": spec.text,
         "set": copy.deepcopy(spec.set) if spec.set else None,
+        "create": sorted(spec.create) if spec.create else None,
         "base": base,
         "classification": verdict["classification"],
         "changes": verdict["changes"],
@@ -744,8 +815,11 @@ def new_record(spec: ChangeSpec, *, base: Any, verdict: dict[str, Any], identity
 
 
 def spec_of(record: dict[str, Any]) -> ChangeSpec:
+    # A stored ``create`` is put back as it was written and checked again by ``build``: a record
+    # is data, and what it may create is still only what CREATABLE names.
     return ChangeSpec(file=record["file"], key=record.get("key"), text=record.get("text"),
-                      set=dict(record.get("set") or {}))
+                      set=dict(record.get("set") or {}),
+                      create=frozenset(str(path) for path in record.get("create") or []))
 
 
 def records(db) -> list[dict[str, Any]]:

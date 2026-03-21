@@ -283,6 +283,41 @@ def test_holdings_come_before_candidates_and_each_account_keeps_its_own_period(c
     assert [task.kind for task in schedule.tasks(off)] == [schedule.CANDIDATES]
 
 
+def test_a_daily_task_studies_a_session_once_whichever_days_it_is_asked_on(sandbox):
+    """A daily period is keyed by the calendar date; a shut market analyses the session before.
+
+    Without this Saturday and Sunday each studied Friday's session again, which is why nothing
+    was scheduled daily. A weekly task never needed it and is not touched by it.
+    """
+    service, db = sandbox
+    config = service.profiles().config_dir
+    profiles = accounts_config(config, {"micro_live": {
+        "candidates": {"period": "daily", "max_tickers_per_run": 2},
+        "watchlist": {"period": "weekly", "max_tickers_per_run": 1}}})
+    daily, weekly = schedule.tasks(schedule.settings(profiles))
+    assert (daily.kind, daily.period, weekly.period) == (schedule.CANDIDATES, "daily", "weekly")
+
+    def asked(when, task=daily, **more):
+        return decide(profiles, now=when, task=task, subjects=["VTI", "VXUS"],
+                      executed=db.read_meta(schedule.EXECUTIONS, {}), **more)
+
+    friday = asked(FRIDAY_AFTER_CLOSE)
+    assert friday.run is True and friday.trade_date == "2026-09-04"
+    assert schedule.claim(db, friday, now=FRIDAY_AFTER_CLOSE) is True
+    # Saturday is a new calendar day, and its period key is one nothing has executed ...
+    saturday = asked(SATURDAY)
+    assert saturday.period_key != friday.period_key
+    # ... but the session it would study is Friday's, which this task has already studied.
+    assert saturday.run is False and saturday.trade_date == "2026-09-04"
+    assert "session 2026-09-04 was already studied" in saturday.reason
+    assert asked(SATURDAY + timedelta(days=1)).run is False
+    # The next session is a new one, and a person can still ask for the old one again.
+    assert asked(FRIDAY_AFTER_CLOSE + timedelta(days=4)).run is True
+    assert asked(SATURDAY, force=True).run is True
+    # Another task's study of that session is not this task's.
+    assert asked(SATURDAY, task=weekly).run is True
+
+
 def test_a_holdings_review_reads_the_account_ledger_least_recently_researched_first(tmp_path):
     cfg_dir = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg_dir)

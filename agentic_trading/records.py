@@ -102,6 +102,9 @@ def build_record(
             "confidence": policy.confidence,
             "reviewer_action": policy.llm_action,
             "reasons": policy.reasons,
+            # The same account as codes (agentic_trading.diagnosis); absent on a policy object
+            # from before they existed, which is what a record reads as too.
+            "reason_codes": list(getattr(policy, "reason_codes", None) or []),
             "proposal": policy.proposal,
             "error": policy.error,
         },

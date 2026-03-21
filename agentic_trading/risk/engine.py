@@ -18,9 +18,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..autonomy import AUTONOMOUS_ACTION
+from .. import sizing
+from ..autonomy import AUTONOMOUS_ACTION, MANAGED_EXIT, MANAGED_EXIT_SOURCE
 from ..event_calendar import earnings_blackout, macro_blackout, yfinance_next_earnings
-from ..portfolio import InstrumentClass, Snapshot, realized_on
+from ..portfolio import BucketView, InstrumentClass, Snapshot, realized_on
 from ..profile import Profiles
 from .ladder import LadderStates, effective_core_level
 from .regime import RegimeResult
@@ -28,6 +29,22 @@ from .regime import RegimeResult
 OPENING_ACTIONS = ("BUY", "ADD")
 REDUCING_ACTIONS = ("REDUCE", "SELL")
 NEUTRAL_ACTIONS = ("HOLD", "NO_TRADE")
+
+
+@dataclass(frozen=True)
+class _Cap:
+    """One limit on how large an opening order may be, in the two forms it is needed in.
+
+    ``limit`` is the room it leaves in dollars, which is what an order is cut to. ``judge`` is
+    the rule itself, exactly as it has always been written, put to a given amount: whether it
+    passes, the sentence for the record, and the figures behind that sentence. Both come from
+    the same numbers, read once, so the room an order is cut to and the rule it is then held
+    to cannot drift apart.
+    """
+
+    limit: sizing.Limit
+    name: str
+    judge: Callable[[float], tuple[bool, str, dict[str, Any]]]
 
 
 @dataclass
@@ -52,6 +69,11 @@ class Proposal:
     # unattended code does not. Defaults to the safe answer, so a caller that forgets to say
     # gets the human-approved treatment and never the autonomous exemption.
     autonomous: bool = False
+    # The size a confirmed strategy asks for, as a share of the allocation, in place of the
+    # size hint's own table. It can only ask for less than that table would give at full size:
+    # anything above the configured normal size is held to it, and every limit on an order
+    # still applies afterwards. None, which is what research produces, sizes from the hint.
+    weight_override_pct: float | None = None
 
 
 @dataclass
@@ -61,6 +83,9 @@ class RuleResult:
     passed: bool
     detail: str
     blocking: bool = True
+    #: The figures ``detail`` was written from, for a reader that has to say the same thing in
+    #: another language (agentic_trading.diagnosis). Nothing reads ``detail`` for a number.
+    facts: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -84,6 +109,12 @@ class HardRiskResult:
     requires_human_approval: bool = True
     human_approval_reason: str = "stage 2 produces recommendations only; nothing is executable"
     proposed_quantity: float | None = None
+    #: One code per entry of ``fail_closed_reasons``, in the same order: what the engine closed
+    #: on, for a reader that must not parse the sentence to find out.
+    fail_closed_codes: list[str] = field(default_factory=list)
+    #: How the size of an opening order was arrived at (agentic_trading.sizing), once sizing was
+    #: reached; None for a reduction, a neutral action, or a proposal refused before it.
+    sizing: dict[str, Any] | None = None
 
     @property
     def failed_rules(self) -> list[RuleResult]:
@@ -125,28 +156,45 @@ class HardRiskEngine:
             return True, f"halt file present: {self.halt_file}"
         return False, "kill switch clear"
 
+    def _hint_weight(self, prop: Proposal, hint: str) -> tuple[float, str]:
+        """(target weight, where it came from) for a size hint, from the sizing table."""
+        settings = self.p.risk.get("sizing") or {}
+        if prop.bucket != "core":
+            key = "normal_pct_of_allocation" if hint == "normal" else "small_pct_of_allocation"
+            weight = float((settings.get(prop.bucket) or {}).get(key, 30 if hint == "normal" else 15))
+            return weight, f"{prop.bucket} {key}"
+        core = settings.get("core") or {}
+        if prop.cls.limit_class in (core.get("baseline_sleeve_classes") or ["broad_diversified_etf", "bond_or_cash_like_etf"]):
+            baseline = self._cfg("buckets", "core", "baseline_allocation_pct_of_core", default={}) or {}
+            weight = float(baseline.get(prop.ticker.upper(), core.get("unlisted_baseline_fallback_pct_of_core", 10)))
+            basis = "baseline weight" if prop.ticker.upper() in baseline else "unlisted baseline fallback"
+            if hint != "normal":
+                weight /= 2.0
+                basis += ", halved for small size"
+            return weight, basis
+        key = "satellite_normal_pct_of_core" if hint == "normal" else "satellite_small_pct_of_core"
+        return float(core.get(key, 5 if hint == "normal" else 2.5)), f"core {key}"
+
     def _size(self, prop: Proposal, snap: Snapshot) -> tuple[float, float, str]:
         """Return (notional_usd, target_weight_pct_of_allocation, basis)."""
-        sizing = self.p.risk.get("sizing") or {}
         bucket = snap.buckets[prop.bucket]
         alloc = bucket.allocation_usd
-        if prop.bucket != "core":
-            key = "normal_pct_of_allocation" if prop.size_hint == "normal" else "small_pct_of_allocation"
-            weight = float((sizing.get(prop.bucket) or {}).get(key, 30 if prop.size_hint == "normal" else 15))
-            basis = f"{prop.bucket} {key}"
-        else:
-            core = sizing.get("core") or {}
-            if prop.cls.limit_class in (core.get("baseline_sleeve_classes") or ["broad_diversified_etf", "bond_or_cash_like_etf"]):
-                baseline = self._cfg("buckets", "core", "baseline_allocation_pct_of_core", default={}) or {}
-                weight = float(baseline.get(prop.ticker.upper(), core.get("unlisted_baseline_fallback_pct_of_core", 10)))
-                basis = "baseline weight" if prop.ticker.upper() in baseline else "unlisted baseline fallback"
-                if prop.size_hint != "normal":
-                    weight /= 2.0
-                    basis += ", halved for small size"
-            else:
-                key = "satellite_normal_pct_of_core" if prop.size_hint == "normal" else "satellite_small_pct_of_core"
-                weight = float(core.get(key, 5 if prop.size_hint == "normal" else 2.5))
-                basis = f"core {key}"
+        weight, basis = self._hint_weight(prop, prop.size_hint)
+        asked = prop.weight_override_pct
+        if asked is not None:
+            # A strategy's own size, held to the table's full size: the table is the setting a
+            # person confirmed, and a strategy may ask for less than it but never for more.
+            # The engine's own reasons for a small size (thin evidence, a tense regime, a
+            # confidence short of the full-size floor) halve it exactly as they halve the table.
+            ceiling, _source = self._hint_weight(prop, "normal")
+            if not math.isfinite(float(asked)) or float(asked) <= 0:
+                raise ValueError(f"a strategy's target weight must be a positive number, got {asked!r}")
+            weight = min(float(asked), ceiling)
+            basis = ("strategy target weight" if float(asked) <= ceiling + 1e-9 else
+                     f"strategy target weight, held to the configured {ceiling:g}% normal size")
+            if prop.size_hint != "normal":
+                weight /= 2.0
+                basis += ", halved for small size"
         target_value = alloc * weight / 100.0
         current = bucket.market_value_of(prop.ticker)
         notional = max(0.0, target_value - current)
@@ -166,29 +214,45 @@ class HardRiskEngine:
                 fail_closed_reasons=[f"exception: {type(exc).__name__}: {exc}", traceback.format_exc()[-800:]],
                 requires_human_approval=True,
                 human_approval_reason="risk engine failed; nothing may proceed without a human",
+                fail_closed_codes=["engine_exception", "engine_exception"],
             )
 
     def _evaluate(self, prop: Proposal, snap: Snapshot, ladders: LadderStates, regime: RegimeResult) -> HardRiskResult:
         rules: list[RuleResult] = []
         advisories: list[str] = []
         fail_closed: list[str] = []
+        closed_codes: list[str] = []
         ticker = prop.ticker.upper()
 
-        def rule(rid: str, name: str, passed: bool, detail: str, blocking: bool = True) -> bool:
-            rules.append(RuleResult(rid, name, passed, detail, blocking))
+        def rule(rid: str, name: str, passed: bool, detail: str, blocking: bool = True,
+                 facts: dict[str, Any] | None = None) -> bool:
+            rules.append(RuleResult(rid, name, passed, detail, blocking, dict(facts or {})))
             return passed
+
+        def closed(code: str, reason: str) -> None:
+            """Refuse on something no rule names, saying which thing it was beside the sentence."""
+            fail_closed.append(reason)
+            closed_codes.append(code)
+
+        def done(verdict: str, action: str, notional: float, target_weight: float,
+                 post_weight: float, **more: Any) -> HardRiskResult:
+            return self._stamp(HardRiskResult(
+                verdict, action, ticker, prop.bucket, notional, target_weight, post_weight, rules,
+                ladder_view, reg, advisories, list(self.p.defaults_used), fail_closed,
+                fail_closed_codes=closed_codes, **more), prop)
 
         # HR00 preconditions: complete proposal, fresh snapshot, known bucket
         ok = prop.bucket in snap.buckets and prop.action in OPENING_ACTIONS + REDUCING_ACTIONS + NEUTRAL_ACTIONS
         rule("HR00", "preconditions", ok, "proposal complete and bucket known" if ok else f"bad bucket/action: {prop.bucket}/{prop.action}")
         if not ok:
-            fail_closed.append("incomplete proposal")
+            closed("incomplete_proposal", "incomplete proposal")
         if snap.warnings:
             rule("HR00b", "snapshot warnings", False, "; ".join(snap.warnings))
-            fail_closed.append("portfolio snapshot warnings")
+            closed("snapshot_warnings", "portfolio snapshot warnings")
         max_age = int((self.p.risk.get("portfolio_state") or {}).get("max_price_age_trading_days", 3))
         rule("HR13", "price freshness", snap.max_price_age_trading_days <= max_age,
-             f"oldest holding price is {snap.max_price_age_trading_days} trading day(s) old (limit {max_age})")
+             f"oldest holding price is {snap.max_price_age_trading_days} trading day(s) old (limit {max_age})",
+             facts={"age": snap.max_price_age_trading_days, "max": max_age})
 
         ladder_level = (effective_core_level(ladders) if prop.bucket == "core"
                         else ladders.for_bucket(prop.bucket).level)
@@ -206,18 +270,16 @@ class HardRiskEngine:
                  "real-money execution is enabled for the Agentic bucket" if live_on
                  else "micro_live_execution.enabled is false: real money is disabled")
             if not live_on:
-                fail_closed.append("micro-live execution disabled")
+                closed("real_money_disabled", "micro-live execution disabled")
 
         if prop.bucket not in snap.buckets:
-            fail_closed.append(f"bucket {prop.bucket!r} does not exist in the portfolio")
-            return self._stamp(HardRiskResult("REJECT", "NO_TRADE", ticker, prop.bucket, 0.0, 0.0, 0.0, rules,
-                                              ladder_view, reg, advisories, list(self.p.defaults_used), fail_closed), prop)
+            closed("bucket_missing", f"bucket {prop.bucket!r} does not exist in the portfolio")
+            return done("REJECT", "NO_TRADE", 0.0, 0.0, 0.0)
 
         # Neutral actions: nothing to check, NO_ACTION
         if prop.action in NEUTRAL_ACTIONS:
-            return self._stamp(HardRiskResult("NO_ACTION", "NO_TRADE", ticker, prop.bucket, 0.0, 0.0,
-                                              snap.buckets[prop.bucket].weight_of(ticker) if prop.bucket in snap.buckets else 0.0,
-                                              rules, ladder_view, reg, advisories, list(self.p.defaults_used), fail_closed), prop)
+            return done("NO_ACTION", "NO_TRADE", 0.0, 0.0,
+                        snap.buckets[prop.bucket].weight_of(ticker) if prop.bucket in snap.buckets else 0.0)
 
         # Risk-reducing actions: allowed whenever the position exists in that bucket
         if prop.action in REDUCING_ACTIONS:
@@ -242,10 +304,8 @@ class HardRiskEngine:
             current = bucket.market_value_of(ticker)
             notional = current * quantity / position.quantity if position and verdict == "APPROVE" else 0.0
             remaining_weight = max(0.0, current - notional) / bucket.allocation_usd * 100.0
-            return self._stamp(HardRiskResult(verdict, action, ticker, prop.bucket, notional,
-                                              remaining_weight, remaining_weight, rules, ladder_view, reg,
-                                              advisories, list(self.p.defaults_used), fail_closed,
-                                              proposed_quantity=quantity if verdict == "APPROVE" else None), prop)
+            return done(verdict, action, notional, remaining_weight, remaining_weight,
+                        proposed_quantity=quantity if verdict == "APPROVE" else None)
 
         # ---------------- opening actions ----------------
         bucket = snap.buckets[prop.bucket]
@@ -260,7 +320,8 @@ class HardRiskEngine:
             if prop.bucket == "sandbox":
                 blocked = blocked or ladders.total.level != "NORMAL"
             rule("HR02", f"drawdown ladder ({prop.bucket})", not blocked,
-                 f"{prop.bucket} ladder level {ladder_level}; total ladder level {ladders.total.level}")
+                 f"{prop.bucket} ladder level {ladder_level}; total ladder level {ladders.total.level}",
+                 facts={"level": ladder_level})
         else:
             if ladder_level in ("RISK_REDUCTION", "HARD_HALT", "EMERGENCY"):
                 rule("HR02", "drawdown ladder (core)", False, f"level {ladder_level}: no opening positions in any bucket"
@@ -278,9 +339,10 @@ class HardRiskEngine:
         gates = (self.p.risk.get("market_regime") or {}).get("gates") or {}
         gate = gates.get(regime.level)
         if isinstance(gate, str) and gate == "no_new_opening_positions":
-            rule("HR03", "market regime", False, f"regime {regime.level}: {regime.detail}")
+            rule("HR03", "market regime", False, f"regime {regime.level}: {regime.detail}",
+                 facts={"level": regime.level})
             if regime.level == "UNKNOWN":
-                fail_closed.append("market regime data unavailable")
+                closed("regime_unavailable", "market regime data unavailable")
         elif isinstance(gate, dict):
             gate_min_conf = max(gate_min_conf or 0, int(gate.get("min_confidence_to_open", 0)))
             size_cap_small = size_cap_small or gate.get("size_cap") == "small"
@@ -297,7 +359,8 @@ class HardRiskEngine:
                                                 next_earnings=when, known=known)
             rule("HR18", "earnings blackout", not blocked, detail)
             if not known:
-                fail_closed.append(f"the next earnings date for {ticker} could not be determined")
+                closed("earnings_date_unknown",
+                       f"the next earnings date for {ticker} could not be determined")
         blocked, detail = macro_blackout(self.p, prop.trade_date, autonomous=prop.autonomous)
         rule("HR19", "macro release blackout", not blocked, detail)
 
@@ -319,7 +382,8 @@ class HardRiskEngine:
         web_ok, web_detail = check_web_sources(prop.evidence, web_evidence_window(self.p, prop.strategy))
         rule("HR05e", "web evidence provenance and freshness", web_ok, web_detail)
         rule("HR05d", "missing material information", not prop.missing_information,
-             "; ".join(prop.missing_information) or "no unresolved material information")
+             "; ".join(prop.missing_information) or "no unresolved material information",
+             facts={"count": len(prop.missing_information)})
         conf = prop.confidence
         floor_small = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "small",
                                               limit_class=prop.cls.limit_class,
@@ -330,39 +394,84 @@ class HardRiskEngine:
         floor = max(floor_small, gate_min_conf or 0)
         if conf is None:
             rule("HR05", "confidence", False, "no confidence supplied")
-            fail_closed.append("missing confidence")
+            closed("missing_confidence", "missing confidence")
         else:
-            rule("HR05", "confidence", conf >= floor, f"confidence {conf} vs floor {floor}")
+            rule("HR05", "confidence", conf >= floor, f"confidence {conf} vs floor {floor}",
+                 facts={"confidence": conf, "floor": floor})
         if prop.data_quality == "poor":
             rule("HR05b", "data quality", False, "policy reviewer rated the evidence poor; missing: " + "; ".join(prop.missing_information[:4]))
-            fail_closed.append("evidence quality poor")
+            closed("evidence_poor", "evidence quality poor")
         elif prop.data_quality == "partial":
             size_cap_small = True
             rule("HR05b", "data quality", True, "partial evidence: size capped small", blocking=False)
         else:
             rule("HR05b", "data quality", prop.data_quality == "good", f"data quality {prop.data_quality or 'unrated'}")
 
-        # HR06 deterministic sizing
+        # HR06 deterministic sizing. What the hint asks for is put to every limit on the size of
+        # an order at once (agentic_trading.sizing): each is computed below as the room it
+        # leaves, and where the bucket has opted in the order is cut to the smallest of them
+        # before the minimum order is asked about. Cutting can only shrink. Without the opt-in
+        # the order stays at what the hint asked for and each limit refuses it or does not, as
+        # it always has.
         effective_hint = prop.size_hint
         if size_cap_small or (conf is not None and conf < floor_normal):
             effective_hint = "small"
         sized = Proposal(**{**asdict(prop), "cls": prop.cls, "size_hint": effective_hint})
-        notional, target_weight, basis = self._size(sized, snap)
-        min_order = float((self.p.risk.get("sizing") or {}).get("min_order_usd", 25))
-        if notional < min_order:
-            rule("HR06", "sizing", True, f"nothing to add: {ticker} already at or above its {target_weight:.1f}% target ({basis})")
-            return self._stamp(HardRiskResult("NO_ACTION", "NO_TRADE", ticker, prop.bucket, 0.0, target_weight,
-                                              bucket.weight_of(ticker), rules, ladder_view, reg, advisories,
-                                              list(self.p.defaults_used), fail_closed), prop)
-        rule("HR06", "sizing", True, f"${notional:,.2f} toward a {target_weight:.1f}% target of the {prop.bucket} allocation ({basis}; size {effective_hint})")
+        requested, target_weight, basis = self._size(sized, snap)
+        minimum, minimum_source = sizing.minimum_order(self.p, prop.bucket)
+        caps = self._caps(prop, bucket, ticker)
+        plan = sizing.fit(requested, [entry.limit for entry in caps.values()],
+                          minimum_usd=minimum, minimum_source=minimum_source,
+                          shrink=sizing.fits_to_limits(self.p, prop.bucket))
+        notional = self._hold_to_caps(plan, caps)
+        sized_as = {**plan.as_dict(), "order": notional, "target_weight_pct": target_weight,
+                    "basis": basis, "size_hint": effective_hint}
+        if plan.code == sizing.AT_TARGET:
+            rule("HR06", "sizing", True,
+                 f"nothing to add: {ticker} already at or above its {target_weight:.1f}% target ({basis})",
+                 facts=sized_as)
+            return done("NO_ACTION", "NO_TRADE", 0.0, target_weight, bucket.weight_of(ticker),
+                        sizing=sized_as)
+        if plan.code == sizing.TARGET_BELOW_MINIMUM:
+            # Not "already at its target", which is what this used to say for both. The hint
+            # asks for something; it is just smaller than an order may be. No limit caused that:
+            # what conflicts is the size setting and the minimum order at this account size.
+            rule("HR06", "sizing", True,
+                 f"nothing to order: ${plan.requested_usd:,.2f} toward a {target_weight:.1f}% target "
+                 f"({basis}) is below the ${minimum:,.2f} minimum order",
+                 facts=sized_as)
+            return done("NO_ACTION", "NO_TRADE", 0.0, target_weight, bucket.weight_of(ticker),
+                        sizing=sized_as)
+        if not plan.feasible:
+            # Only where orders are cut to fit: the limits leave less room than the smallest
+            # order. The rules below are then put to what was asked for, not to nothing, so the
+            # record still shows which limit it was.
+            rule("HR06", "sizing", False,
+                 f"no order fits: ${plan.requested_usd:,.2f} was asked for, the limits leave room for "
+                 f"${plan.legal_max_usd or 0.0:,.2f} ({', '.join(plan.binding) or 'no room'}), and the "
+                 f"minimum order is ${minimum:,.2f}",
+                 facts=sized_as)
+        else:
+            rule("HR06", "sizing", True,
+                 f"${notional:,.2f} toward a {target_weight:.1f}% target of the {prop.bucket} allocation "
+                 f"({basis}; size {effective_hint})"
+                 + (f"; cut from ${plan.requested_usd:,.2f} to the room left by {', '.join(plan.binding)}"
+                    if plan.code == sizing.SHRUNK else ""),
+                 facts=sized_as)
+        judged = notional if plan.feasible else plan.requested_usd
+
+        def cap(rule_id: str) -> None:
+            entry = caps.get(rule_id)
+            if entry is not None:
+                passed, detail, facts = entry.judge(judged)
+                rule(rule_id, entry.name, passed, detail, facts=facts)
 
         current_mv = bucket.market_value_of(ticker)
         post_mv = current_mv + notional
         post_weight = post_mv / bucket.allocation_usd * 100.0 if bucket.allocation_usd else 0.0
 
         # HR07 bucket funding and isolation
-        rule("HR07", "bucket funding", bucket.cash_usd + 1e-6 >= notional,
-             f"{prop.bucket} cash ${bucket.cash_usd:,.2f} vs order ${notional:,.2f}; the other bucket is never a funding source")
+        cap("HR07")
         # Every other bucket, not one hard-coded counterpart. The old pairing checked sandbox
         # for a micro_live proposal and silently ignored core, so the rule only half applied to
         # the bucket that deploys real money.
@@ -371,54 +480,24 @@ class HardRiskEngine:
         rule("HR07b", "one symbol one bucket", not elsewhere,
              f"{ticker} is " + (f"held in {', '.join(elsewhere)}" if elsewhere
                                 else f"not held in {', '.join(others) or 'any other bucket'}"))
-        if prop.bucket != "core":
-            cap = bucket.allocation_usd
-            rule("HR07c", f"{prop.bucket} deployed cap", bucket.deployed_cost_usd + notional <= cap + 1e-6,
-                 f"deployed cost ${bucket.deployed_cost_usd:,.2f} + ${notional:,.2f} vs cap ${cap:,.0f}")
+        cap("HR07c")
 
-        # HR08 position and order caps
-        if prop.bucket == "core":
-            cap_pct = float(self._cfg("buckets", "core", "position_limits_pct_of_core", prop.cls.limit_class, default=5))
-            order_cap = float(self._cfg("buckets", "core", "order_rules", "max_single_order_pct_of_core", default=40))
-        else:
-            flat = float(self._cfg("buckets", prop.bucket, "position_limits",
-                                   "max_single_position_pct_of_allocation", default=30))
-            # A per-class cap, where the bucket declares one, is applied as well as the flat cap
-            # and never instead of it: a bucket holding both broad ETFs and single names should
-            # not size a single name like an index fund.
-            by_class = self._cfg("buckets", prop.bucket, "position_limits",
-                                 "max_pct_of_allocation_by_class", default=None) or {}
-            per_class = by_class.get(prop.cls.limit_class)
-            cap_pct = min(flat, float(per_class)) if per_class is not None else flat
-            order_cap = cap_pct
-        rule("HR08", "position cap", post_weight <= cap_pct + 1e-9,
-             f"post-trade {post_weight:.1f}% vs cap {cap_pct:.1f}% for {prop.cls.limit_class}")
-        rule("HR08b", "single order cap", notional <= bucket.allocation_usd * order_cap / 100.0 + 1e-6,
-             f"order ${notional:,.2f} vs {order_cap:.0f}% of allocation")
+        # HR08 position and order caps. A per-class cap, where the bucket declares one, is
+        # applied as well as the flat cap and never instead of it: a bucket holding both broad
+        # ETFs and single names should not size a single name like an index fund.
+        cap("HR08")
+        cap("HR08b")
 
         # HR21 risk tiers. A tier is a set of instrument classes sharing one share of the
         # account and one order cap, rather than a separate sub-account: one brokerage account
         # holds one pool of cash, and splitting it into notional envelopes would refuse a buy
         # while the account plainly had the money. classify_instrument decides which tier an
         # order falls in, so a model cannot argue a single name into the low tier.
-        tier_name, tier = self._tier_for(prop.bucket, prop.cls.limit_class)
-        if tier_name is None:
-            if prop.bucket == "micro_live":
-                fail_closed.append(
-                    f"{prop.cls.limit_class} belongs to no tier declared for {prop.bucket}")
-        else:
-            held = sum(bucket.classes_pct.get(c, 0.0) for c in tier.get("classes") or ())
-            tier_cap = tier.get("max_pct_of_account")
-            if tier_cap is not None:
-                post_tier = held + (notional / bucket.allocation_usd * 100.0
-                                    if bucket.allocation_usd else 0.0)
-                rule("HR21", f"{tier_name} tier share of the account",
-                     post_tier <= float(tier_cap) + 1e-9,
-                     f"{tier_name} tier post-trade {post_tier:.1f}% vs max {float(tier_cap):.0f}%")
-            tier_order = tier.get("max_order_usd")
-            if tier_order is not None:
-                rule("HR21b", f"{tier_name} tier order cap", notional <= float(tier_order) + 1e-6,
-                     f"order ${notional:,.2f} vs the {tier_name} tier's ${float(tier_order):,.0f} maximum")
+        tier_name, _tier = self._tier_for(prop.bucket, prop.cls.limit_class)
+        if tier_name is None and prop.bucket == "micro_live":
+            closed("no_tier", f"{prop.cls.limit_class} belongs to no tier declared for {prop.bucket}")
+        cap("HR21")
+        cap("HR21b")
 
         if prop.bucket == "core":
             # HR09 exposure-group overlap (fake diversification)
@@ -426,34 +505,20 @@ class HardRiskEngine:
             group = prop.cls.exposure_group
             held = [s for s in bucket.groups_held.get(group, []) if s != ticker] if group else []
             rule("HR09", "exposure group overlap", len(held) < max_per_group,
-                 f"group {group or 'none'}: already held {held or 'nothing'} (max {max_per_group} per group)")
+                 f"group {group or 'none'}: already held {held or 'nothing'} (max {max_per_group} per group)",
+                 facts={"held": ", ".join(held)} if held else None)
 
             # HR10 sleeve maximum and cash minimum (minimums are targets, maximums are hard)
-            sleeve = prop.cls.sleeve
-            if sleeve:
-                band = self._cfg("buckets", "core", "asset_class_bands_pct_of_core", sleeve, default={"max": 100}) or {}
-                post_sleeve = bucket.sleeves_pct.get(sleeve, 0.0) + notional / bucket.allocation_usd * 100.0
-                rule("HR10", "sleeve maximum", post_sleeve <= float(band.get("max", 100)) + 1e-9,
-                     f"{sleeve} post-trade {post_sleeve:.1f}% vs max {band.get('max', 100)}%")
-            min_cash = float(self._cfg("buckets", "core", "cash", "min_cash_pct_of_core", default=10))
-            post_cash_pct = (bucket.cash_usd - notional) / bucket.allocation_usd * 100.0
-            rule("HR10b", "cash minimum", post_cash_pct >= min_cash - 1e-9,
-                 f"post-trade cash {post_cash_pct:.1f}% vs minimum {min_cash:.0f}%")
+            cap("HR10")
+            cap("HR10b")
 
             # HR11 concentration
-            if prop.cls.limit_class == "individual_stock":
-                max_stocks = float(self._cfg("buckets", "core", "concentration_pct_of_core", "all_individual_stocks_combined", default=15))
-                post_stocks = bucket.stocks_pct + notional / bucket.allocation_usd * 100.0
-                rule("HR11", "stocks combined", post_stocks <= max_stocks + 1e-9, f"stocks {post_stocks:.1f}% vs max {max_stocks:.0f}%")
-            if prop.cls.limit_class in ("individual_stock", "sector_factor_thematic_etf"):
-                max_sector = float(self._cfg("buckets", "core", "concentration_pct_of_core", "direct_sector_exposure", default=10))
-                sector = prop.cls.sector or f"unclassified:{ticker}"
-                post_sector = bucket.sectors_pct.get(sector, 0.0) + notional / bucket.allocation_usd * 100.0
-                rule("HR11b", "direct sector exposure", post_sector <= max_sector + 1e-9,
-                     f"sector {sector} post-trade {post_sector:.1f}% vs max {max_sector:.0f}%")
+            cap("HR11")
+            cap("HR11b")
             max_pos = int(self._cfg("buckets", "core", "concentration_pct_of_core", "max_open_positions", default=8))
             new_count = bucket.n_positions + (0 if snap.has_position(ticker, "core") else 1)
-            rule("HR11c", "max open positions", new_count <= max_pos, f"{new_count} positions vs max {max_pos}")
+            rule("HR11c", "max open positions", new_count <= max_pos, f"{new_count} positions vs max {max_pos}",
+                 facts={"max": max_pos})
             # HR04b core stock eligibility screen
             if prop.cls.limit_class == "individual_stock":
                 ok_s, det = self._stock_screen(ticker)
@@ -470,41 +535,29 @@ class HardRiskEngine:
             # For real money, silence is a refusal rather than a bypass. A conceptual bucket may
             # legitimately have no diversification limits; the one holding real capital may not.
             if prop.bucket == "micro_live" and not conc:
-                fail_closed.append(f"{prop.bucket} has no concentration_pct_of_allocation limits")
+                closed("limits_missing", f"{prop.bucket} has no concentration_pct_of_allocation limits")
 
             if conc.get("max_etfs_per_exposure_group") is not None:
                 max_per_group = int(conc["max_etfs_per_exposure_group"])
                 group = prop.cls.exposure_group
                 held = [s for s in bucket.groups_held.get(group, []) if s != ticker] if group else []
                 rule("HR09", "exposure group overlap", len(held) < max_per_group,
-                     f"group {group or 'none'}: already held {held or 'nothing'} (max {max_per_group} per group)")
-            min_cash = self._cfg(*section, "cash", "min_cash_pct_of_allocation", default=None)
-            if min_cash is not None:
-                post_cash_pct = (bucket.cash_usd - notional) / bucket.allocation_usd * 100.0
-                rule("HR10b", "cash minimum", post_cash_pct >= float(min_cash) - 1e-9,
-                     f"post-trade cash {post_cash_pct:.1f}% vs minimum {float(min_cash):.0f}%")
-            if prop.cls.limit_class == "individual_stock" and conc.get("all_individual_stocks_combined") is not None:
-                max_stocks = float(conc["all_individual_stocks_combined"])
-                post_stocks = bucket.stocks_pct + notional / bucket.allocation_usd * 100.0
-                rule("HR11", "stocks combined", post_stocks <= max_stocks + 1e-9,
-                     f"stocks {post_stocks:.1f}% vs max {max_stocks:.0f}%")
-            if (prop.cls.limit_class in ("individual_stock", "sector_factor_thematic_etf")
-                    and conc.get("direct_sector_exposure") is not None):
-                max_sector = float(conc["direct_sector_exposure"])
-                sector = prop.cls.sector or f"unclassified:{ticker}"
-                post_sector = bucket.sectors_pct.get(sector, 0.0) + notional / bucket.allocation_usd * 100.0
-                rule("HR11b", "direct sector exposure", post_sector <= max_sector + 1e-9,
-                     f"sector {sector} post-trade {post_sector:.1f}% vs max {max_sector:.0f}%")
+                     f"group {group or 'none'}: already held {held or 'nothing'} (max {max_per_group} per group)",
+                     facts={"held": ", ".join(held)} if held else None)
+            cap("HR10b")
+            cap("HR11")
+            cap("HR11b")
             max_pos = int(self._cfg(*section, "position_limits", "max_open_positions", default=3))
             # Was hard-coded to "sandbox", so adding to an existing micro_live holding counted as
             # a new position and was refused once the bucket held its maximum.
             new_count = bucket.n_positions + (0 if snap.has_position(ticker, prop.bucket) else 1)
-            rule("HR11c", "max open positions", new_count <= max_pos, f"{new_count} positions vs max {max_pos}")
+            rule("HR11c", "max open positions", new_count <= max_pos, f"{new_count} positions vs max {max_pos}",
+                 facts={"max": max_pos})
             if prop.cls.limit_class == "individual_stock":
                 screened = bool(self._cfg(*section, "require_stock_eligibility_screen", default=False))
                 if prop.bucket == "micro_live" and not screened:
-                    fail_closed.append(
-                        f"{prop.bucket} would trade an individual stock with no eligibility screen")
+                    closed("no_screen",
+                           f"{prop.bucket} would trade an individual stock with no eligibility screen")
                 if screened:
                     ok_s, det = self._stock_screen(ticker)
                     rule("HR04b", "stock eligibility screen", ok_s, det)
@@ -515,22 +568,16 @@ class HardRiskEngine:
             per_day = int(self._cfg(*section, "max_new_positions_per_day", default=1))
             per_week = int(self._cfg(*section, "max_new_positions_per_week", default=3 if prop.bucket == "core" else 2))
             today, week = self._recent_open_counts(snap, prop.bucket, prop.trade_date)
-            rule("HR12", "new positions per day", today < per_day, f"{today} opened today vs max {per_day}")
-            rule("HR12b", "new positions per week", week < per_week, f"{week} opened this week vs max {per_week}")
+            rule("HR12", "new positions per day", today < per_day, f"{today} opened today vs max {per_day}",
+                 facts={"max": per_day})
+            rule("HR12b", "new positions per week", week < per_week, f"{week} opened this week vs max {per_week}",
+                 facts={"max": per_week})
 
         # HR23 the autonomous allowance: the share of the account code may have opened for
         # itself at any one time. Measured on provenance rather than on a separate sub-account,
         # so it is one pool of cash with a boundary drawn through it. A position a person later
         # adds to still counts, because the alternative would free capacity by touching it.
-        allowance = self._cfg("buckets", prop.bucket, "autonomy", "open", "max_pct_of_account",
-                              default=None)
-        if prop.autonomous and allowance is not None and bucket.allocation_usd:
-            held = sum(p.market_value for p in bucket.positions
-                       if str(p.opened_by or "").startswith("autonomy:"))
-            post = (held + notional) / bucket.allocation_usd * 100.0
-            rule("HR23", "autonomous allowance", post <= float(allowance) + 1e-9,
-                 f"positions opened without a person would be {post:.1f}% of the account "
-                 f"vs a limit of {float(allowance):.0f}%")
+        cap("HR23")
 
         # HR22 daily loss gate. It stops the day from compounding: after a bad enough day the
         # answer to "should we open something else" is no, whatever the analysis says. Realized
@@ -554,7 +601,8 @@ class HardRiskEngine:
                                default=None)
         if max_orders is not None:
             rule("HR20", "orders per week", orders_week < int(max_orders),
-                 f"{orders_week} order(s) in the trailing week vs max {int(max_orders)}")
+                 f"{orders_week} order(s) in the trailing week vs max {int(max_orders)}",
+                 facts={"max": int(max_orders)})
         if bool(self._cfg("buckets", prop.bucket, "activity_limits", "no_same_day_round_trips",
                           default=False)):
             # Deliberately one-directional. Buying back what was sold hours ago is the churn this
@@ -568,9 +616,241 @@ class HardRiskEngine:
         blocking_failures = [r for r in rules if not r.passed and r.blocking]
         verdict = "REJECT" if blocking_failures or fail_closed else "APPROVE"
         final_action = prop.action if verdict == "APPROVE" else "NO_TRADE"
-        return self._stamp(HardRiskResult(verdict, final_action, ticker, prop.bucket, notional if verdict == "APPROVE" else 0.0,
-                                          target_weight, post_weight if verdict == "APPROVE" else bucket.weight_of(ticker),
-                                          rules, ladder_view, reg, advisories, list(self.p.defaults_used), fail_closed), prop)
+        return done(verdict, final_action, notional if verdict == "APPROVE" else 0.0, target_weight,
+                    post_weight if verdict == "APPROVE" else bucket.weight_of(ticker),
+                    sizing=sized_as)
+
+    # ------------------------------------------------------------------ sizing
+    def order_room(self, prop: Proposal, snap: Snapshot) -> dict[str, Any]:
+        """What an opening order of this instrument could be, sized exactly as ``evaluate`` sizes it.
+
+        For a plan that has to say, before any research is run, what this account can and cannot
+        buy. Only the arithmetic of size: the hint, the room each limit leaves, the order both
+        ways of treating that room would give, and the minimum. It judges nothing that is not a
+        question of size -- no confidence, no evidence, no ladder, no regime -- so an answer here
+        is "an order of this size exists", never "this order would be approved".
+        """
+        bucket = snap.buckets[prop.bucket]
+        ticker = prop.ticker.upper()
+        requested, target_weight, basis = self._size(prop, snap)
+        minimum, minimum_source = sizing.minimum_order(self.p, prop.bucket)
+        caps = self._caps(prop, bucket, ticker)
+        limits = [entry.limit for entry in caps.values()]
+        cut = sizing.fit(requested, limits, minimum_usd=minimum, minimum_source=minimum_source,
+                         shrink=True)
+        kept = sizing.fit(requested, limits, minimum_usd=minimum, minimum_source=minimum_source,
+                          shrink=False)
+        # Left as asked for, an order stands only if no limit refuses it.
+        refused = [rule_id for rule_id, entry in caps.items()
+                   if kept.feasible and not entry.judge(kept.order_usd)[0]]
+        return {
+            "ticker": ticker, "limit_class": prop.cls.limit_class, "size_hint": prop.size_hint,
+            "target_weight_pct": target_weight, "basis": basis,
+            "fits_to_limits": sizing.fits_to_limits(self.p, prop.bucket),
+            "cut_to_fit": {**cut.as_dict(),
+                           "order": self._hold_to_caps(cut, caps) if cut.feasible else 0.0},
+            "as_asked": {**kept.as_dict(), "refused_by": refused,
+                         "feasible": kept.feasible and not refused},
+            "limits": [{"code": entry.limit.code, "rule_id": rule_id,
+                        "room": (None if math.isinf(entry.limit.room)
+                                 else sizing.floor_cents(entry.limit.room))}
+                       for rule_id, entry in caps.items()],
+        }
+
+    def _caps(self, prop: Proposal, bucket: BucketView, ticker: str) -> dict[str, _Cap]:
+        """Every limit on the size of this opening order, keyed by the rule that enforces it.
+
+        Each is built once, from the same figures, in both the forms it is used in: the room it
+        leaves, and the rule as it has always been written. A limit a bucket does not declare is
+        simply absent, exactly as its rule used to be absent from the record.
+        """
+        caps: dict[str, _Cap] = {}
+        name = prop.bucket
+        alloc = bucket.allocation_usd
+        cash = bucket.cash_usd
+        limit_class = prop.cls.limit_class
+
+        def share(usd: float) -> float:
+            return usd / alloc * 100.0 if alloc else 0.0
+
+        def room(pct: float) -> float:
+            """Dollars in a share of the allocation; unbounded when there is no allocation,
+            which is how the percentage rules have always read an empty account."""
+            return pct / 100.0 * alloc if alloc else math.inf
+
+        def add(rule_id: str, code: str, max_usd: float, rule_name: str,
+                judge: Callable[[float], tuple[bool, str, dict[str, Any]]]) -> None:
+            caps[rule_id] = _Cap(sizing.Limit(code, rule_id, max_usd), rule_name, judge)
+
+        add("HR07", "cash", cash, "bucket funding", lambda n: (
+            cash + 1e-6 >= n,
+            f"{name} cash ${cash:,.2f} vs order ${n:,.2f}; the other bucket is never a funding source",
+            {"cash": cash, "order": n}))
+
+        if name != "core":
+            deployed = bucket.deployed_cost_usd
+            add("HR07c", "deployed_cap", alloc - deployed, f"{name} deployed cap", lambda n: (
+                deployed + n <= alloc + 1e-6,
+                f"deployed cost ${deployed:,.2f} + ${n:,.2f} vs cap ${alloc:,.0f}",
+                {"deployed": deployed, "order": n, "cap": alloc}))
+
+        if name == "core":
+            cap_pct = float(self._cfg("buckets", "core", "position_limits_pct_of_core", limit_class, default=5))
+            order_cap = float(self._cfg("buckets", "core", "order_rules", "max_single_order_pct_of_core", default=40))
+        else:
+            flat = float(self._cfg("buckets", name, "position_limits",
+                                   "max_single_position_pct_of_allocation", default=30))
+            by_class = self._cfg("buckets", name, "position_limits",
+                                 "max_pct_of_allocation_by_class", default=None) or {}
+            per_class = by_class.get(limit_class)
+            cap_pct = min(flat, float(per_class)) if per_class is not None else flat
+            order_cap = cap_pct
+        current_mv = bucket.market_value_of(ticker)
+
+        def judge_position(n: float) -> tuple[bool, str, dict[str, Any]]:
+            post = share(current_mv + n)
+            return (post <= cap_pct + 1e-9,
+                    f"post-trade {post:.1f}% vs cap {cap_pct:.1f}% for {limit_class}",
+                    {"post_pct": post, "cap_pct": cap_pct})
+
+        add("HR08", "position_cap", room(cap_pct) - current_mv, "position cap", judge_position)
+        order_cap_usd = alloc * order_cap / 100.0
+        add("HR08b", "order_cap", order_cap_usd, "single order cap", lambda n: (
+            n <= order_cap_usd + 1e-6, f"order ${n:,.2f} vs {order_cap:.0f}% of allocation",
+            {"order": n, "cap": order_cap_usd}))
+
+        tier_name, tier = self._tier_for(name, limit_class)
+        if tier_name is not None:
+            tier_held = sum(bucket.classes_pct.get(c, 0.0) for c in tier.get("classes") or ())
+            if tier.get("max_pct_of_account") is not None:
+                tier_cap = float(tier["max_pct_of_account"])
+
+                def judge_tier(n: float) -> tuple[bool, str, dict[str, Any]]:
+                    post = tier_held + share(n)
+                    return (post <= tier_cap + 1e-9,
+                            f"{tier_name} tier post-trade {post:.1f}% vs max {tier_cap:.0f}%",
+                            {"tier": tier_name, "post_pct": post, "cap_pct": tier_cap})
+
+                add("HR21", "tier_share", room(tier_cap - tier_held),
+                    f"{tier_name} tier share of the account", judge_tier)
+            if tier.get("max_order_usd") is not None:
+                tier_order = float(tier["max_order_usd"])
+                add("HR21b", "tier_order", tier_order, f"{tier_name} tier order cap", lambda n: (
+                    n <= tier_order + 1e-6,
+                    f"order ${n:,.2f} vs the {tier_name} tier's ${tier_order:,.0f} maximum",
+                    {"tier": tier_name, "order": n, "cap": tier_order}))
+
+        if name == "core":
+            sleeve = prop.cls.sleeve
+            if sleeve:
+                band = self._cfg("buckets", "core", "asset_class_bands_pct_of_core", sleeve, default={"max": 100}) or {}
+                band_max = band.get("max", 100)
+                sleeve_pct = bucket.sleeves_pct.get(sleeve, 0.0)
+
+                def judge_sleeve(n: float) -> tuple[bool, str, dict[str, Any]]:
+                    post = sleeve_pct + share(n)
+                    return (post <= float(band_max) + 1e-9,
+                            f"{sleeve} post-trade {post:.1f}% vs max {band_max}%",
+                            {"post_pct": post, "cap_pct": float(band_max)})
+
+                add("HR10", "sleeve_max", room(float(band_max) - sleeve_pct), "sleeve maximum", judge_sleeve)
+            min_cash: Any = float(self._cfg("buckets", "core", "cash", "min_cash_pct_of_core", default=10))
+            max_stocks: Any = (float(self._cfg("buckets", "core", "concentration_pct_of_core",
+                                               "all_individual_stocks_combined", default=15))
+                               if limit_class == "individual_stock" else None)
+            max_sector: Any = (float(self._cfg("buckets", "core", "concentration_pct_of_core",
+                                               "direct_sector_exposure", default=10))
+                               if limit_class in ("individual_stock", "sector_factor_thematic_etf") else None)
+        else:
+            conc = self._cfg("buckets", name, "concentration_pct_of_allocation", default={}) or {}
+            min_cash = self._cfg("buckets", name, "cash", "min_cash_pct_of_allocation", default=None)
+            max_stocks = (conc.get("all_individual_stocks_combined")
+                          if limit_class == "individual_stock" else None)
+            max_sector = (conc.get("direct_sector_exposure")
+                          if limit_class in ("individual_stock", "sector_factor_thematic_etf") else None)
+
+        if min_cash is not None:
+            floor_pct = float(min_cash)
+
+            def judge_cash_floor(n: float) -> tuple[bool, str, dict[str, Any]]:
+                post = share(cash - n)
+                return (post >= floor_pct - 1e-9,
+                        f"post-trade cash {post:.1f}% vs minimum {floor_pct:.0f}%",
+                        {"post_pct": post, "min_cash_pct": floor_pct})
+
+            add("HR10b", "cash_floor", cash - (room(floor_pct) if alloc else 0.0), "cash minimum",
+                judge_cash_floor)
+        if max_stocks is not None:
+            stocks_cap = float(max_stocks)
+
+            def judge_stocks(n: float) -> tuple[bool, str, dict[str, Any]]:
+                post = bucket.stocks_pct + share(n)
+                return (post <= stocks_cap + 1e-9, f"stocks {post:.1f}% vs max {stocks_cap:.0f}%",
+                        {"post_pct": post, "cap_pct": stocks_cap})
+
+            add("HR11", "stocks_combined", room(stocks_cap - bucket.stocks_pct), "stocks combined",
+                judge_stocks)
+        if max_sector is not None:
+            sector_cap = float(max_sector)
+            sector = prop.cls.sector or f"unclassified:{ticker}"
+            sector_pct = bucket.sectors_pct.get(sector, 0.0)
+
+            def judge_sector(n: float) -> tuple[bool, str, dict[str, Any]]:
+                post = sector_pct + share(n)
+                return (post <= sector_cap + 1e-9,
+                        f"sector {sector} post-trade {post:.1f}% vs max {sector_cap:.0f}%",
+                        {"post_pct": post, "cap_pct": sector_cap})
+
+            add("HR11b", "sector_cap", room(sector_cap - sector_pct), "direct sector exposure",
+                judge_sector)
+
+        allowance = self._cfg("buckets", name, "autonomy", "open", "max_pct_of_account", default=None)
+        if prop.autonomous and allowance is not None and alloc:
+            allowed = float(allowance)
+            # An optional ceiling in dollars beside the share. A share follows the account, so a
+            # deposit widens it; a person who said "this much" meant an amount, and the smaller
+            # of the two is what holds. Absent, the share alone decides, as it always has.
+            declared = self._cfg("buckets", name, "autonomy", "open", "max_usd", default=None)
+            dollars = float(declared) if declared is not None else math.inf
+            opened_by_code = sum(p.market_value for p in bucket.positions
+                                 if str(p.opened_by or "").startswith("autonomy:"))
+
+            def judge_allowance(n: float) -> tuple[bool, str, dict[str, Any]]:
+                held = opened_by_code + n
+                post = held / alloc * 100.0
+                detail = (f"positions opened without a person would be {post:.1f}% of the "
+                          f"account vs a limit of {allowed:.0f}%")
+                if math.isfinite(dollars):
+                    detail += f", and ${held:,.2f} vs a ceiling of ${dollars:,.2f}"
+                return (post <= allowed + 1e-9 and held <= dollars + 1e-6, detail,
+                        {"post_pct": post, "cap_pct": allowed})
+
+            add("HR23", "autonomous_allowance", min(room(allowed), dollars) - opened_by_code,
+                "autonomous allowance", judge_allowance)
+        return caps
+
+    @staticmethod
+    def _hold_to_caps(plan: sizing.Sizing, caps: dict[str, _Cap]) -> float:
+        """The amount to order, proved against every rule it was cut to fit.
+
+        The room a limit leaves and the rule that enforces it are two readings of one figure, in
+        dollars and in shares of the account, so the last cent can fall either side of a
+        rounding. An order that was cut to fit is therefore put to each rule before it is
+        accepted, and gives up a cent at a time until all of them pass. If it cannot, or what is
+        left is below the minimum, that is an inconsistency this layer does not guess past.
+        """
+        if not plan.feasible:
+            return 0.0
+        if not plan.shrink:
+            return plan.order_usd
+        order = plan.order_usd
+        for _ in range(5):
+            if all(entry.judge(order)[0] for entry in caps.values()):
+                if order + 1e-9 < plan.minimum_usd:
+                    break
+                return order
+            order = sizing.floor_cents(order - sizing.CENT)
+        raise RuntimeError("an order cut to its limits could not be made to satisfy all of them")
 
     # ------------------------------------------------------------------ pieces
     def _strategy_allowed(self, prop: Proposal) -> tuple[bool, str]:
@@ -612,6 +892,12 @@ class HardRiskEngine:
             # .autonomy decides at execution time, against live state this layer cannot see.
             if (prop.action == AUTONOMOUS_ACTION and self._cfg(
                     "buckets", prop.bucket, "autonomy", "reduce", "enabled", default=False) is True):
+                return False, ""
+            # An exit from shares code itself bought under a confirmed plan, where the bucket
+            # has switched that on. The one case a SELL is eligible: the claim is the proposal's
+            # own, and autonomy.permits holds it to the fills before anything is approved.
+            if (prop.action in REDUCING_ACTIONS and prop.source == MANAGED_EXIT_SOURCE and self._cfg(
+                    "buckets", prop.bucket, "autonomy", MANAGED_EXIT, "enabled", default=False) is True):
                 return False, ""
             # Opening is the other block, switched separately because it creates risk rather
             # than cutting it, and additionally limited to the instrument classes named there.
