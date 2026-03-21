@@ -927,7 +927,14 @@ class ResearchJob(BaseModel):
     log: str | None = None
     exit_code: int | None = None
     error: str | None = None
+    #: Declared one release before anything writes them. Every model here forbids a field it
+    #: does not name, so a queue the next release has written to -- it stores which way a run
+    #: failed, and how often one was requeued after an expired sign-in -- could not be listed
+    #: by this one: a rollback would answer 500 for every job created since. Read first, write
+    #: second, and the release in between is one that can be rolled back to.
+    failure_code: str | None = None
     limit_recoveries: int = 0
+    login_recoveries: int = 0
     proposal_created: bool = False
     proposal_id: str | None = None
     task: dict[str, Any] | None = None
