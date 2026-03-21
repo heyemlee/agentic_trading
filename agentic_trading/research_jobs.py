@@ -172,10 +172,7 @@ class ResearchJobManager:
     def dispatch(self) -> list[str]:
         launched: list[str] = []
         for job in self.store.claim(self.max_concurrent):
-            command = [
-                sys.executable, "-m", "agentic_trading.research_worker",
-                "--config-dir", str(self.config_dir), "--run-key", job["run_key"],
-            ]
+            command = worker_command(self.config_dir, job["run_key"])
             try:
                 log_path = Path(job["log"])
                 log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,6 +289,26 @@ class ResearchJobManager:
         launched = self.dispatch()
         return {"recovered": recovered, "timed_out": timed_out,
                 "resumed_after_limit": resumed, "launched": launched}
+
+
+def worker_command(config_dir: str | Path, run_key: str) -> list[str]:
+    """The command that starts one research worker, importing the code this process is running.
+
+    ``-P`` is the whole point of this function. The worker is started with ``-m`` and with the
+    data directory as its working directory, and ``-m`` puts the working directory first on the
+    import path. In a release install the data directory is the developer's checkout, which holds
+    a package of the same name: so the API ran the released code and every worker it started
+    ran whatever happened to be in the checkout's working tree, committed or not. The traceback
+    of 2026-10-02 names the checkout's own ``research_worker.py`` under a service started from a
+    release. The worker writes proposals into the live state database, so an edit in progress in
+    the checkout was, for research, already deployed.
+
+    With ``-P`` the working directory is left off the path and the package is the one installed
+    beside the interpreter, which is the release. ``PYTHONPATH`` is still honoured, which is how
+    a development checkout runs its own code on purpose rather than by accident.
+    """
+    return [sys.executable, "-P", "-m", "agentic_trading.research_worker",
+            "--config-dir", str(config_dir), "--run-key", run_key]
 
 
 def _scrubbed_environment() -> dict[str, str]:
