@@ -102,6 +102,11 @@ agentic_trading/     the package
                      that cannot be the real one), backtests, and the conditions in front of
                      real money. Places no order: it writes proposals, and approvals.py is
                      still the only thing that approves one. Off until a person starts a plan
+  sources/           what research may read besides prices: Reddit (as upstream reads it, with
+                     each request watched) and SEC Form 4 filings from EDGAR. Every read ends in
+                     one named outcome and is written down with its links and times, so a feed
+                     that could not be read is never "nothing to report". Evidence for research
+                     only: nothing that decides an order imports it. Both off unless switched on
   broker/            venue adapters (simulated, Robinhood)
   llm/               Claude Code adapter and the MCP tool server
   risk/              hard risk engine, drawdown ladders, regime
