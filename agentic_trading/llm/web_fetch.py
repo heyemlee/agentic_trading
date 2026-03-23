@@ -246,6 +246,67 @@ def reset_call_budget() -> None:
     _calls_made = 0
 
 
+DEFAULT_ACCEPT = "text/html,text/plain,application/json"
+
+
+@dataclass(frozen=True)
+class Retrieved:
+    """One response as it was read: the bytes, and everything provenance is made from."""
+
+    url: str
+    raw: bytes
+    text: str
+    content_type: str
+    retrieved_at: str
+    truncated: bool
+    redirects: tuple[str, ...]
+
+
+def _retrieve_checked(checked: str, policy: WebPolicy, *, opener, resolver, now,
+                      accept: str = DEFAULT_ACCEPT) -> Retrieved:
+    """Read a URL that ``check_url`` has already passed, under every other control here."""
+    redirect = _AllowlistRedirect(policy, resolver)
+    client = opener or urllib.request.build_opener(redirect)
+    request = urllib.request.Request(checked, method="GET", headers={
+        "User-Agent": policy.user_agent, "Accept": accept,
+    })
+    with client.open(request, timeout=policy.timeout_seconds) as response:
+        content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            raise WebFetchError(
+                f"content type {content_type or '(none)'!r} is not one of "
+                f"{', '.join(sorted(ALLOWED_CONTENT_TYPES))}")
+        raw = response.read(policy.max_bytes + 1)
+        charset = response.headers.get_content_charset() or "utf-8"
+    truncated = len(raw) > policy.max_bytes
+    raw = raw[:policy.max_bytes]
+    return Retrieved(url=checked, raw=raw, text=raw.decode(charset, errors="replace"),
+                     content_type=content_type,
+                     retrieved_at=(now or datetime.now(UTC)).isoformat(), truncated=truncated,
+                     redirects=tuple(redirect.chain))
+
+
+def retrieve(url: str, policy: WebPolicy, *, opener=None, resolve=None, now=None,
+             accept: str = DEFAULT_ACCEPT) -> Retrieved:
+    """One allowlisted URL as bytes, for code that reads a source itself rather than for a model.
+
+    The same controls as :func:`fetch` and the same policy object: https only, the domain
+    allowlist re-checked on every redirect, no private address, the content-type allowlist and
+    the byte cap. What differs is what comes back and how failure arrives. A refusal by one of
+    those controls is a ``WebFetchError``; anything the network raised comes through as it was,
+    because a caller that reads a source for itself has to tell a 403 from a timeout
+    (agentic_trading.sources), which a sentence handed to a model does not.
+
+    It spends none of ``fetch``'s per-call budget. That budget bounds what a model may ask for;
+    a caller in this codebase bounds its own requests.
+    """
+    resolver = resolve or socket.getaddrinfo
+    checked, reason = check_url(url, policy, resolve=resolver)
+    if checked is None:
+        raise WebFetchError(reason)
+    return _retrieve_checked(checked, policy, opener=opener, resolver=resolver, now=now, accept=accept)
+
+
 def fetch(url: str, policy: WebPolicy, *, opener=None, resolve=None, now=None) -> str:
     """Retrieve one allowlisted URL as text. Never raises; a refusal is the return value."""
     global _calls_made
@@ -260,31 +321,16 @@ def fetch(url: str, policy: WebPolicy, *, opener=None, resolve=None, now=None) -
         if checked is None:
             raise WebFetchError(reason)
 
-        redirect = _AllowlistRedirect(policy, resolver)
-        client = opener or urllib.request.build_opener(redirect)
-        request = urllib.request.Request(checked, method="GET", headers={
-            "User-Agent": policy.user_agent, "Accept": "text/html,text/plain,application/json",
-        })
         _calls_made += 1
-        with client.open(request, timeout=policy.timeout_seconds) as response:
-            content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if content_type not in ALLOWED_CONTENT_TYPES:
-                raise WebFetchError(
-                    f"content type {content_type or '(none)'!r} is not one of "
-                    f"{', '.join(sorted(ALLOWED_CONTENT_TYPES))}")
-            raw = response.read(policy.max_bytes + 1)
-            charset = response.headers.get_content_charset() or "utf-8"
-        truncated = len(raw) > policy.max_bytes
-        raw = raw[:policy.max_bytes]
-        text = raw.decode(charset, errors="replace")
-        if content_type in ("text/html",):
+        got = _retrieve_checked(checked, policy, opener=opener, resolver=resolver, now=now)
+        text = got.text
+        if got.content_type in ("text/html",):
             parser = _TextExtractor()
             parser.feed(text)
             parser.close()
             text = parser.text()
-        moment = (now or datetime.now(UTC)).isoformat()
-        return envelope(checked, text, retrieved_at=moment, truncated=truncated, raw_bytes=raw,
-                        redirects=redirect.chain)
+        return envelope(checked, text, retrieved_at=got.retrieved_at, truncated=got.truncated,
+                        raw_bytes=got.raw, redirects=list(got.redirects))
     except Exception as exc:  # noqa: BLE001 - the model gets a reason, the server stays up
         detail = exc if isinstance(exc, WebFetchError) else f"{type(exc).__name__}: {exc}"
         return f"TOOL_ERROR: fetch_url refused {url!r}: {detail}"

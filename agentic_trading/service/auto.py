@@ -524,7 +524,8 @@ class AutoTradingMixin:
         from ..auto import store
 
         mode = document["envelope"]["mode"]
-        version_id = store.version_id(mode, document["strategy"], store.code_identity(profiles))
+        version_id = store.version_id(mode, document["strategy"],
+                                      store.code_identity(profiles, document["strategy"]))
         waiting = tuple(change["path"] for change in self._auto_settings_needed(profiles, document))
         return gating.evaluate(
             profiles, mode=mode, version_id=version_id,
@@ -609,7 +610,7 @@ class AutoTradingMixin:
                            "loss_pause_pct": float(envelope["loss_pause_pct"]),
                            "strategy": document["strategy"]},
                 "version_id": store.version_id(envelope["mode"], document["strategy"],
-                                               store.code_identity(profiles)),
+                                               store.code_identity(profiles, document["strategy"])),
                 "gates": [gate.as_dict() for gate in found],
                 "may_confirm": gating.may_confirm(found), "open": gating.is_open(found),
                 "advisories": self._auto_advisories(profiles, document)}
@@ -731,7 +732,8 @@ class AutoTradingMixin:
             "inputs": {"mode": mode, "capital_usd": float(document["envelope"]["capital_usd"]),
                        "loss_pause_pct": float(document["envelope"]["loss_pause_pct"]),
                        "strategy": document["strategy"]},
-            "version_id": store.version_id(mode, document["strategy"], store.code_identity(profiles)),
+            "version_id": store.version_id(mode, document["strategy"],
+                                           store.code_identity(profiles, document["strategy"])),
             "document": document,
             "changes": [{"id": row["id"], "file": row["file"], "status": row["status"],
                          "apply_after": row.get("apply_after"), "paths": row.get("paths")}
@@ -846,7 +848,8 @@ class AutoTradingMixin:
                 return end("lapsed", f"the plan could not be drawn again before it ran out: {exc}")
             store.note_request(db, last_checked_at=utcnow().isoformat(), last_reason=str(exc)[:300])
             return {"request": "waiting", "reason": str(exc)[:300]}
-        version_id = store.version_id(inputs["mode"], document["strategy"], store.code_identity(profiles))
+        version_id = store.version_id(inputs["mode"], document["strategy"],
+                                      store.code_identity(profiles, document["strategy"]))
         if version_id != request.get("version_id"):
             return end("lapsed", "the plan would no longer be the strategy version that was "
                                  f"confirmed ({request.get('version_id')} then, {version_id} now)")
@@ -1625,7 +1628,8 @@ class AutoTradingMixin:
                 loss_pause_pct=float(envelope["loss_pause_pct"]), strategy=running["strategy"],
                 as_given=True)
             needed = tuple(change["path"] for change in self._auto_settings_needed(profiles, document))
-            here = store.version_id(candidate["mode"], document["strategy"], store.code_identity(profiles))
+            here = store.version_id(candidate["mode"], document["strategy"],
+                                    store.code_identity(profiles, document["strategy"]))
             if here != candidate["version_id"]:
                 needed = (*needed, f"the strategy itself (it would run here as {here})")
         standing = replacement.standing_lines(candidate=candidate, incumbent=incumbent,

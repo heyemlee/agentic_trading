@@ -18,23 +18,38 @@ from . import UPSTREAM_TRADINGAGENTS_COMMIT, __version__
 RECORD_SCHEMA_VERSION = 1
 
 
-def _data_sources(profiles: Any, llm_calls: list[dict[str, Any]]) -> dict[str, Any]:
+def _data_sources(profiles: Any, llm_calls: list[dict[str, Any]],
+                  source_readings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """What the config says this system reads, beside what this run actually called.
 
     The two halves exist because they used to disagree invisibly: upstream's sentiment analyst
     binds no tools, so its StockTwits and Reddit reads never appear in ``llm_calls`` and never
     appeared anywhere else either. Declaring them makes the gap between declared and observed
     readable in every record instead of requiring someone to know the upstream source.
+
+    ``research_sources`` is the third thing, for the sources this project watches itself
+    (agentic_trading.sources): each read as it happened -- how it ended, what it covered, and
+    for every item its link, the time the source gives and the time it was first seen here.
+    A run that read none has an empty list, which is not the same as a list of failures.
     """
+    from . import sources
     from .evidence import web_sources_from_calls
 
     tool_calls = [c for call in (llm_calls or ()) for c in (call.get("tool_calls") or ())]
     fetches, searched = web_sources_from_calls(tool_calls)
     observed = sorted({str(c.get("tool")) for c in tool_calls if c.get("tool")})
     web = (profiles.risk.get("research_web_access") or {})
+    read = list(source_readings or [])
+    settings = sources.load(profiles)
     return {
         "declared": profiles.investor.get("declared_data_sources") or [],
         "observed_tools": observed,
+        "research_sources": {
+            "switched_on": sorted(name for name, on in ((sources.REDDIT, settings.reddit.enabled),
+                                                        (sources.FORM4, settings.form4.enabled)) if on),
+            "summary": sources.summary(read),
+            "readings": read,
+        },
         "web_access": {
             "fetch_enabled": ((web.get("fetch") or {}).get("enabled")) is True,
             "search_enabled": ((web.get("search") or {}).get("enabled")) is True,
@@ -67,6 +82,7 @@ def build_record(
     hard_risk: dict[str, Any] | None = None,
     final_recommendation: dict[str, Any] | None = None,
     portfolio: dict[str, Any] | None = None,
+    source_readings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     debate = final_state.get("investment_debate_state") or {}
     return {
@@ -118,7 +134,7 @@ def build_record(
         },
         "llm_usage": llm_usage,
         "llm_calls": llm_calls,
-        "data_sources": _data_sources(profiles, llm_calls),
+        "data_sources": _data_sources(profiles, llm_calls, source_readings),
         "elapsed_seconds": round(elapsed_seconds, 1),
         "unresolved_profile_fields": list(profiles.unresolved),
         "error": error,

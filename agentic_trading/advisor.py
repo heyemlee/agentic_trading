@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
-from . import diagnosis
+from . import diagnosis, sources
 from .broker.base import BrokerError, BrokerUnavailable
 from .broker.robinhood import RobinhoodBroker, _first, _quote_rows, _rows, _unwrap
 from .llm.claude_code import ClaudeCodeChatModel, ClaudeCodeError
@@ -374,7 +374,8 @@ def read_only_research(profiles, job, snapshot, notes):
     reset_usage_log()
     started = time.monotonic()
     graph = AgenticTradingGraph(profiles, instrument_type=kind, bucket="advisory",
-                                     portfolio_text=context, config=config)
+                                     portfolio_text=context, config=config,
+                                     sources_log=root / sources.LOG_NAME)
     final_state, rating = graph.propagate(ticker, job["trade_date"], asset_type="stock")
     report = graph.save_reports(final_state, ticker, root / "reports")
     policy = run_policy(profiles, final_state, ticker=ticker, instrument_type=kind,
@@ -401,6 +402,7 @@ def read_only_research(profiles, job, snapshot, notes):
         final_recommendation={"action": policy.final_action, "executable": False,
                               "scope": "read_only", "account_id": account_id},
         portfolio={"snapshot_text": context, "as_of": snapshot["fetched_at"]},
+        source_readings=sources.readings(graph.sources_log),
     )
     record["account_id"] = account_id
     record["advisory"] = True

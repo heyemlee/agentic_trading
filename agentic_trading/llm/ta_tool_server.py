@@ -51,7 +51,13 @@ def _build_fetch_url(profiles):
     return build_fetch_tool(profiles)
 
 
-LOCAL_TOOLS = {"fetch_url": _build_fetch_url}
+def _build_sec_form4(profiles):
+    from agentic_trading.sources.sec_form4 import build_tool
+
+    return build_tool(profiles)
+
+
+LOCAL_TOOLS = {"fetch_url": _build_fetch_url, "get_sec_form4": _build_sec_form4}
 
 
 def build_server(tool_names: list[str], config_dir: str | None):

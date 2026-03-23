@@ -6,14 +6,20 @@
 * analyst selection per instrument type (ETF runs skip the fundamentals
   analyst, whose tools return no statements for funds).
 
-No upstream file is modified. The only intrusion is a scoped patch of the
-``create_llm_client`` name inside ``tradingagents.graph.trading_graph`` while
-the base class constructor runs, because upstream has no provider registration
-hook yet (a small upstream PR would remove even that).
+No upstream file is modified. There are two intrusions, both scoped patches of
+one name each, put back when the call they wrap returns:
+
+* ``create_llm_client`` inside ``tradingagents.graph.trading_graph`` while the
+  base class constructor runs, because upstream has no provider registration
+  hook yet (a small upstream PR would remove even that);
+* ``fetch_reddit_posts`` inside upstream's sentiment analyst while a run is in
+  progress, so that its Reddit read goes through ``sources.reddit`` -- which
+  calls the same upstream function, and records how each request ended.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -24,6 +30,7 @@ from tradingagents.llm_clients.base_client import BaseLLMClient
 from .llm.claude_code import ClaudeCodeChatModel
 from .llm.untrusted import UNTRUSTED_CONTENT_NOTICE
 from .profile import Profiles, build_tradingagents_config
+from .sources import LOG_NAME as SOURCES_LOG_NAME
 
 
 class _ClaudeCodeClient(BaseLLMClient):
@@ -39,13 +46,19 @@ class _ClaudeCodeClient(BaseLLMClient):
 
 
 def make_llm_factory(profiles: Profiles, work_dir: str | None = None,
-                     progress_path: str | None = None):
+                     progress_path: str | None = None, sources_log: str | None = None):
     """Return a drop-in replacement for upstream ``create_llm_client``."""
+    from . import sources
     from .llm.web_fetch import load_policy
 
     # Read once per run: a bad web configuration must stop the run here, not surface as a
     # refusal string inside an analyst's report halfway through.
     web_policy = load_policy(profiles).as_dict()
+    # Which analyst is handed the Form 4 reader. Empty unless the source is switched on, and
+    # then exactly one analyst by name.
+    form4 = sources.load(profiles).form4
+    sources_policy = ({"form4_analyst": form4.analyst, "contact_env": form4.contact_env}
+                      if form4.enabled else {})
 
     def factory(provider: str, model: str, base_url: str | None = None, **kwargs: Any) -> BaseLLMClient:
         role = "deep" if model == profiles.tradingagents.deep_think_llm else "quick"
@@ -62,6 +75,8 @@ def make_llm_factory(profiles: Profiles, work_dir: str | None = None,
             config_dir=str(profiles.config_dir),
             role=role,
             web_policy=web_policy,
+            sources_policy=sources_policy,
+            sources_log=sources_log,
             callbacks=kwargs.get("callbacks"),
         )
         return _ClaudeCodeClient(model, base_url, llm=llm)
@@ -100,11 +115,15 @@ class AgenticTradingGraph(TradingAgentsGraph):
         llm_factory=None,
         portfolio_text: str = "",
         run_dir: Path | None = None,
+        sources_log: Path | None = None,
     ):
         self.profiles = profiles
         self.portfolio_text = portfolio_text
         self.instrument_type = instrument_type
         self.bucket = bucket
+        # Where this run's reads of outside sources are written down (agentic_trading.sources).
+        # Beside the run's own results; None for a graph nobody keeps a record of.
+        self.sources_log = sources_log or (run_dir / SOURCES_LOG_NAME if run_dir else None)
         selected = profiles.analysts_for(instrument_type)
         config = config or build_tradingagents_config(profiles)
         factory = llm_factory or make_llm_factory(profiles)
@@ -119,10 +138,34 @@ class AgenticTradingGraph(TradingAgentsGraph):
                 # Per run, beside that run's own reports: the console reads one file and
                 # never has to separate two concurrent runs sharing a directory.
                 progress_path=str(run_dir / "progress.jsonl") if run_dir else None,
+                sources_log=str(self.sources_log) if self.sources_log else None,
             )
 
         with mock.patch.object(upstream_module, "create_llm_client", factory):
             super().__init__(selected_analysts=selected, debug=debug, config=config, callbacks=callbacks)
+
+    def propagate(self, *args: Any, **kwargs: Any):
+        """Upstream's run, with the outside sources it reads watched for its length.
+
+        The date the run is an analysis of is put where a tool in another process can read it
+        (``sources.AS_OF_ENV``), so that a source which must not read past that date does not
+        depend on a model remembering to pass it. Put back when the run returns.
+        """
+        from .sources import AS_OF_ENV
+        from .sources import reddit as reddit_source
+
+        trade_date = kwargs.get("trade_date", args[1] if len(args) > 1 else None)
+        before = os.environ.get(AS_OF_ENV)
+        if trade_date:
+            os.environ[AS_OF_ENV] = str(trade_date)
+        try:
+            with reddit_source.installed(self.profiles, log_path=self.sources_log):
+                return super().propagate(*args, **kwargs)
+        finally:
+            if before is None:
+                os.environ.pop(AS_OF_ENV, None)
+            else:
+                os.environ[AS_OF_ENV] = before
 
     # Upstream injects this string into every agent prompt (analysts, researchers,
     # managers, trader, risk debators, portfolio manager) and calls it from both the

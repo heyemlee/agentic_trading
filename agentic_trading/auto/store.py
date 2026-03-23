@@ -106,18 +106,70 @@ def mandate_digest(profiles: Any) -> str:
     return digest.hexdigest()[:16]
 
 
-def code_identity(profiles: Any) -> dict[str, Any]:
-    """The models and the code a strategy runs on. Part of what a version *is*.
+@lru_cache(maxsize=8)
+def _module_digest(name: str) -> str:
+    package = Path(__file__).resolve().parent.parent
+    try:
+        tree = ast.parse((package / name).read_text(encoding="utf-8"))
+        return hashlib.sha256(ast.dump(tree, annotate_fields=False).encode()).hexdigest()[:16]
+    except (OSError, SyntaxError, ValueError) as exc:
+        return f"unreadable:{type(exc).__name__}"
+
+
+def research_kinds(profiles: Any, strategy: dict[str, Any] | None) -> tuple[str, ...]:
+    """The kinds of instrument a strategy's research is about, without asking anyone.
+
+    A symbol the profile lists in a fund exposure group is a fund. Anything else is taken to be
+    a stock, which is the kind with the widest research: so a universe that one day holds a
+    name that is not a listed fund is treated as reading every source a stock's research reads.
+    """
+    funds = {str(t).upper() for tickers in profiles.exposure_groups().values() for t in tickers}
+    universe = [str(s).upper() for s in (strategy or {}).get("universe") or []]
+    return tuple(sorted({"etf" if symbol in funds else "stock" for symbol in universe})) or ("etf",)
+
+
+def source_identity(profiles: Any, kinds: tuple[str, ...]) -> dict[str, str]:
+    """The outside sources that reach this research, each as the reader and settings in use.
+
+    Empty wherever no analyst that reads one runs -- which is every plan that buys only funds,
+    whatever the switches say. Where a source does reach the research, switching it, changing
+    what it is asked for, or changing how it is read is a change to what the model is shown,
+    and so a different strategy with a validation of its own to earn.
+    """
+    from .. import sources
+
+    settings = sources.load(profiles)
+    shown = {sources.REDDIT: ("sources/reddit.py", {"subreddits": settings.reddit.subreddits}),
+             sources.FORM4: ("sources/sec_form4.py", {
+                 "lookback_days": settings.form4.lookback_days,
+                 "max_filings": settings.form4.max_filings, "analyst": settings.form4.analyst})}
+    out = {}
+    for name in sources.in_effect(profiles, kinds):
+        module, asked = shown[name]
+        blob = json.dumps({"reader": _module_digest(module), "asked": asked}, sort_keys=True,
+                          default=list)
+        out[name] = hashlib.sha256(blob.encode()).hexdigest()[:16]
+    return out
+
+
+def code_identity(profiles: Any, strategy: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The models, the code and the information a strategy runs on. Part of what a version *is*.
 
     The package's version number is here for the record and decides nothing by itself: it has
-    been 0.1.0 through every change so far. What moves a version is ``logic``.
+    been 0.1.0 through every change so far. What moves a version is ``logic``, and -- where the
+    strategy's research reads one -- an outside source (``sources``). That key is absent when
+    none does, so a plan of funds has the identity it had before the sources existed.
     """
-    return {"package_version": __version__,
-            "upstream_commit": UPSTREAM_TRADINGAGENTS_COMMIT,
-            "deep_model": profiles.tradingagents.deep_think_llm,
-            "quick_model": profiles.tradingagents.quick_think_llm,
-            "logic": logic_digest(),
-            "mandate": mandate_digest(profiles)}
+    identity = {"package_version": __version__,
+                "upstream_commit": UPSTREAM_TRADINGAGENTS_COMMIT,
+                "deep_model": profiles.tradingagents.deep_think_llm,
+                "quick_model": profiles.tradingagents.quick_think_llm,
+                "logic": logic_digest(),
+                "mandate": mandate_digest(profiles)}
+    reads = source_identity(profiles, research_kinds(profiles, strategy))
+    if reads:
+        identity["sources"] = reads
+    return identity
 
 
 def version_id(mode: str, strategy: dict[str, Any], code: dict[str, Any]) -> str:
@@ -145,7 +197,7 @@ def record_version(db, profiles: Any, *, mode: str, strategy: dict[str, Any], pl
     unchanged does not restart its own validation. Asked for anything different it writes a new
     record whose validation is empty: not the parent's, which is kept on the parent.
     """
-    code = code_identity(profiles)
+    code = code_identity(profiles, strategy)
     wanted = version_id(mode, strategy, code)
     with db.transaction() as tx:
         record = db.read_meta(VERSIONS, {}) or {}
@@ -332,7 +384,8 @@ def known_versions(db) -> set[str]:
 
 def running_version_id(profiles: Any, plan: dict[str, Any]) -> str:
     """The id this plan's strategy has on the code, the models and the mandate as they are now."""
-    return version_id(plan["envelope"]["mode"], plan["strategy"], code_identity(profiles))
+    return version_id(plan["envelope"]["mode"], plan["strategy"],
+                      code_identity(profiles, plan["strategy"]))
 
 
 def moved_on(profiles: Any, plan: dict[str, Any] | None) -> bool:

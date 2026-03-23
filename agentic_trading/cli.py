@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 import uuid
@@ -22,6 +23,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from . import autonomy, diagnosis
+from . import sources as research_sources
 from .broker import make_broker
 from .env import load_env
 from .evidence import collect_evidence, foreign_bucket_mentions
@@ -66,6 +68,7 @@ from .risk import (
     load_ladder_states,
     save_ladder_states,
 )
+from .sources import readings as source_readings
 from .state_db import StateDB
 
 
@@ -262,6 +265,8 @@ def run_one(profiles: Profiles, ticker: str, trade_date: str, bucket: str, instr
         llm_usage=usage_summary(), llm_calls=list(USAGE_LOG), elapsed_seconds=time.time() - started,
         hard_risk=result.as_dict(), final_recommendation=final,
         portfolio={"snapshot_text": portfolio_text, "as_of": snap.as_of, "total_equity": snap.total_equity},
+        # A graph that keeps no log of its reads (a stand-in for one) simply has none to show.
+        source_readings=source_readings(getattr(graph, "sources_log", None)),
     )
     proposal = None
     authority_now = autonomy.note_version(profiles, store.db)
@@ -407,10 +412,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-dir", default="runs")
     parser.add_argument("--debug", action="store_true", help="stream upstream messages while running")
     parser.add_argument("--quiet", action="store_true", help="hide upstream INFO log lines")
+    parser.add_argument("--without-sources", default="", metavar="NAMES",
+                        help="leave these outside sources out of this run (reddit, sec_form4; comma "
+                             "separated). It can only leave out one the profile has on: a control "
+                             "run beside one that reads them, with nothing else changed")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    left_out = sorted({name.strip() for name in args.without_sources.split(",") if name.strip()})
+    unknown = [name for name in left_out if name not in (research_sources.REDDIT, research_sources.FORM4)]
+    if unknown:
+        _print(f"--without-sources names no such source: {', '.join(unknown)} "
+               f"(known: {research_sources.REDDIT}, {research_sources.FORM4})")
+        return 2
+    if left_out:
+        os.environ[research_sources.WITHOUT_ENV] = ",".join(left_out)
 
     profiles = _load(args.config_dir)
     if profiles is None:
