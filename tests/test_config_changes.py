@@ -6,6 +6,7 @@ read, never written, and git runs only inside a repository created for the test.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from datetime import timedelta
@@ -15,7 +16,7 @@ import pytest
 import yaml
 
 from agentic_trading import config_changes as cc
-from agentic_trading import launchd
+from agentic_trading import launchd, schedule, sources
 from agentic_trading.proposals import utcnow
 from agentic_trading.service import Service, ServiceConflict, ServiceError
 from tests.conftest import ROOT, copy_example_ledger
@@ -76,15 +77,17 @@ def test_a_section_edit_may_not_rename_or_add_keys():
 
 def test_set_values_changes_only_the_lines_it_touches(config_dir):
     text = (config_dir / RISK).read_text(encoding="utf-8")
-    new = cc.set_values(text, {"research_schedule.launchd.hour": 14,
+    # The hour is the owner's and moves (Settings changes it in two taps), so it is read, not assumed.
+    hour = cc.get_value(yaml.safe_load(text), "research_schedule.launchd.hour")
+    new = cc.set_values(text, {"research_schedule.launchd.hour": (hour + 1) % 24,
                                "micro_live_execution.max_capital_usd": 2500})
     diff = cc.unified_diff(text, new, RISK)
     removed = [line for line in diff.splitlines() if line.startswith("-") and not line.startswith("---")]
     assert len(removed) == 2
-    assert any("hour: 13" in line for line in removed)
+    assert any(f"hour: {hour}" in line for line in removed)
     assert any("max_capital_usd: 2000" in line for line in removed)
     assert "# mirrored into the launchd job" in new  # comments survive
-    assert cc.get_value(yaml.safe_load(new), "research_schedule.launchd.hour") == 14
+    assert cc.get_value(yaml.safe_load(new), "research_schedule.launchd.hour") == (hour + 1) % 24
 
 
 def test_set_values_fills_a_recommended_default_node_in_place(config_dir):
@@ -218,6 +221,133 @@ def test_the_same_keys_edited_by_hand_still_cool_and_may_not_invent_a_key():
     for share, expected in ((40, cc.COOLING), (60, cc.IMMEDIATE)):
         moved = cc.set_values(kept, {"buckets.micro_live.autonomy.reduce.min_remaining_pct_of_opened": share})
         assert cc.classify(RISK, kept, moved)["classification"] == expected
+
+
+# ----------------------------------------------------------------- the research switches
+# As with the autonomy switches, the deployment's own file is not what these read: whether this
+# machine studies candidates or reads the SEC today is the owner's setting, and it moves.
+RESEARCH = """\
+research_schedule:
+  enabled: true
+  period: weekly
+  max_tickers_per_run: 3
+  accounts:
+    micro_live:
+      holdings:   {period: weekly, max_tickers_per_run: 2}
+      candidates: {period: weekly, max_tickers_per_run: 3}
+research_web_access:
+  # What research may read besides prices. Off unless true here.
+  sources:
+    sec_form4: {enabled: true}
+  fetch:
+    enabled: true
+"""
+
+
+def _changed(old, new):
+    return [line for line in cc.unified_diff(old, new, RISK).splitlines()
+            if line[:1] in "+-" and line[:3] not in ("+++", "---")]
+
+
+def test_a_research_switch_is_read_the_way_the_code_that_acts_on_it_reads_it():
+    doc = yaml.safe_load(RESEARCH)
+    # A study's block that says nothing about enabled runs; a source nobody mentioned is off.
+    assert cc.research_switch_on(doc, "candidates") is True
+    assert cc.research_switch_on(doc, "sec_form4") is True
+    assert cc.research_switch_on(doc, "reddit") is False
+    assert [task.kind for task in schedule.tasks(doc["research_schedule"], bucket="micro_live")] == [
+        schedule.HOLDINGS, schedule.CANDIDATES]
+    # The names here are the names the sources package reads its settings under.
+    assert cc.RESEARCH_SWITCHES["reddit"] == sources.switch(sources.REDDIT)
+    assert cc.RESEARCH_SWITCHES["sec_form4"] == sources.switch(sources.FORM4)
+    assert cc.RESEARCH_SWITCHES["candidates"] == f"research_schedule.accounts.micro_live.{schedule.CANDIDATES}.enabled"
+
+
+def test_a_research_switch_writes_one_line_and_creates_the_key_it_needs():
+    off = cc.research_switch(RESEARCH, "candidates", False)
+    assert off.file == RISK and off.kind == "values"
+    assert off.set == {cc.RESEARCH_SWITCHES["candidates"]: False} and off.create == frozenset(off.set)
+    studied = cc.build(RESEARCH, off)
+    assert _changed(RESEARCH, studied) == [
+        "-      candidates: {period: weekly, max_tickers_per_run: 3}",
+        "+      candidates: {period: weekly, max_tickers_per_run: 3, enabled: false}",
+    ]
+    assert cc.research_switch_on(yaml.safe_load(studied), "candidates") is False
+    assert schedule.CANDIDATES not in [t.kind for t in schedule.tasks(yaml.safe_load(studied)["research_schedule"])]
+    back = cc.build(studied, cc.research_switch(studied, "candidates", True))
+    assert cc.research_switch_on(yaml.safe_load(back), "candidates") is True
+
+    # A source the file never mentioned: on has to write the block, beside the one that is there.
+    read = cc.build(RESEARCH, cc.research_switch(RESEARCH, "reddit", True))
+    assert _changed(RESEARCH, read) == ["+    reddit:", "+      enabled: true"]
+    assert "# What research may read besides prices. Off unless true here." in read
+    assert yaml.safe_load(read)["research_web_access"]["sources"] == {
+        "sec_form4": {"enabled": True}, "reddit": {"enabled": True}}
+    silent = cc.build(read, cc.research_switch(read, "reddit", False))
+    assert _changed(read, silent) == ["-      enabled: true", "+      enabled: false"]
+
+    # A file that has never had the sources block gets it, inside the section it belongs to.
+    unnamed = RESEARCH.replace("  # What research may read besides prices. Off unless true here.\n"
+                               "  sources:\n    sec_form4: {enabled: true}\n", "")
+    assert "sources" not in yaml.safe_load(unnamed)["research_web_access"]
+    first = cc.build(unnamed, cc.research_switch(unnamed, "sec_form4", True))
+    assert yaml.safe_load(first)["research_web_access"] == {
+        "fetch": {"enabled": True}, "sources": {"sec_form4": {"enabled": True}}}
+    assert list(yaml.safe_load(first)) == list(yaml.safe_load(unnamed))      # no new section
+
+    # None of it is guarded: what research looks at applies at once, in either direction.
+    for new in (studied, back, read, silent):
+        assert cc.classify(RISK, RESEARCH, new)["classification"] == cc.IMMEDIATE
+    assert cc.classify(RISK, unnamed, first)["classification"] == cc.IMMEDIATE
+
+
+def test_a_candidate_study_is_created_only_for_an_account_that_is_already_scheduled():
+    bare = RESEARCH.replace("      candidates: {period: weekly, max_tickers_per_run: 3}\n", "")
+    assert cc.research_switch_on(yaml.safe_load(bare), "candidates") is False
+    added = cc.build(bare, cc.research_switch(bare, "candidates", True))
+    assert _changed(bare, added) == ["+      candidates:", "+        enabled: true"]
+    kinds = [task.kind for task in schedule.tasks(yaml.safe_load(added)["research_schedule"])]
+    assert kinds == [schedule.HOLDINGS, schedule.CANDIDATES]
+    # Naming the first account would replace the single review the deployment runs.
+    single = "research_schedule:\n  enabled: true\n  period: weekly\n"
+    for unscheduled in (single, single + "  accounts: {}\n", single + "  accounts:\n    advisory:\n      holdings: {period: weekly}\n"):
+        with pytest.raises(cc.ConfigChangeError, match="not scheduled by account"):
+            cc.research_switch(unscheduled, "candidates", True)
+
+
+@pytest.mark.parametrize("name, on, match", [
+    ("stocktwits", True, "no research switch named"),
+    ("sec_form4", True, "already on"),
+    ("candidates", True, "already on"),
+    ("reddit", False, "already off"),
+    ("reddit", "yes", "turned on or off"),
+    ("reddit", 1, "turned on or off"),
+])
+def test_a_research_switch_refuses_what_changes_nothing_or_names_nothing(name, on, match):
+    with pytest.raises(cc.ConfigChangeError, match=match):
+        cc.research_switch(RESEARCH, name, on)
+
+
+def test_what_a_research_switch_may_create_is_a_closed_list_of_its_own():
+    assert cc.RESEARCH_CREATES == frozenset(cc.RESEARCH_SWITCHES.values())
+    # Beside the plan's list, never inside it: that one stays exactly what a plan names.
+    assert cc.RESEARCH_CREATES.isdisjoint(cc.CREATABLE)
+    reddit = cc.RESEARCH_SWITCHES["reddit"]
+    # The same key asked for as plain values, the shape a request arrives in, creates nothing.
+    with pytest.raises(cc.ConfigChangeError, match="no such setting"):
+        cc.build(RESEARCH, cc.ChangeSpec(file=RISK, set={reddit: True}))
+    # And nothing outside the two lists may be created by anyone.
+    stray = "research_web_access.sources.stocktwits.enabled"
+    with pytest.raises(cc.ConfigChangeError, match="may not be created from here"):
+        cc.build(RESEARCH, cc.ChangeSpec(file=RISK, set={stray: True}, create=frozenset({stray})))
+    with pytest.raises(cc.ConfigChangeError, match="only ever created in risk_profile.yaml"):
+        cc.ChangeSpec(file=INVESTOR, set={reddit: True}, create=frozenset({reddit})).check()
+    # A stored record puts its create back and is held to the same lists when it is rebuilt.
+    spec = cc.research_switch(RESEARCH, "reddit", True)
+    record = cc.new_record(spec, base=cc.base_of(RESEARCH, spec), identity="owner", reason="",
+                           verdict=cc.classify(RISK, RESEARCH, cc.build(RESEARCH, spec)))
+    assert record["status"] == cc.APPLIED and record["create"] == [reddit]
+    assert cc.build(RESEARCH, cc.spec_of(record)) == cc.build(RESEARCH, spec)
 
 
 # --------------------------------------------------------------------------- validation
@@ -443,7 +573,8 @@ def test_api_routes_step_up_and_shape(auth_client, monkeypatch, sandbox):
     monkeypatch.setattr("agentic_trading.api.app._service", sandbox)
     overview = auth_client.get("/config").json()
     assert {f["file"] for f in overview["files"]} == set(cc.FILES)
-    assert overview["values"]["research_schedule.launchd.hour"] == 13
+    assert overview["values"]["research_schedule.launchd.hour"] == sandbox.profiles().risk_cfg(
+        "research_schedule", "launchd", "hour")
     revision = next(f["revision"] for f in overview["files"] if f["file"] == RISK)
 
     body = {"file": RISK, "revision": revision, "set": {"micro_live_execution.max_capital_usd": 2500}}
@@ -533,6 +664,200 @@ def test_config_writes_need_a_session_and_csrf(auth_client, monkeypatch):
     assert calls == []
 
 
+# ---------------------------------------------------------------- the research switches
+CONTACT = "Test Owner owner@example.test"
+SCHEDULED = """\
+research_schedule:
+  enabled: true
+  period: weekly
+  launchd: {weekday: 5, hour: 13, minute: 30}
+  tickers: [VTI, VXUS, BND, VGIT]
+  max_tickers_per_run: 4
+  accounts:
+    micro_live:
+      holdings:   {period: weekly, max_tickers_per_run: 2}
+      candidates: {period: weekly, max_tickers_per_run: 3}"""
+
+
+@pytest.fixture
+def scheduled(sandbox):
+    """The sandbox with a research schedule of the suite's own; this deployment's is the owner's."""
+    path = sandbox.config_dir / RISK
+    path.write_text(cc.replace_section(path.read_text(encoding="utf-8"), "research_schedule", SCHEDULED),
+                    encoding="utf-8")
+    return sandbox
+
+
+def _research(service, name):
+    return service.config_overview()["research"]["switches"][name]
+
+
+def _put(service, name, on):
+    """One switch brought to a known state, whatever this deployment's own file says today."""
+    if _research(service, name)["on"] is not on:
+        service.submit_config_change(file=RISK, switch=name, on=on, identity="setup")
+
+
+def test_research_switches_are_reported_by_the_code_that_acts_on_them(scheduled, monkeypatch):
+    sandbox = scheduled
+    monkeypatch.setenv("CT_SEC_CONTACT", CONTACT)
+    overview = sandbox.config_overview()
+    research = overview["research"]
+    assert set(research["switches"]) == set(cc.RESEARCH_SWITCHES)
+    assert research["fires_every"] == "weekly"
+    for name, row in research["switches"].items():
+        assert row["path"] == cc.RESEARCH_SWITCHES[name] and row["available"] is True
+        assert row["on"] is cc.research_switch_on(yaml.safe_load(read(sandbox, RISK)), name)
+    settings = sources.load(sandbox.profiles())
+    assert research["switches"]["reddit"]["on"] is settings.reddit.enabled
+    assert research["switches"]["sec_form4"]["on"] is settings.form4.enabled
+    # What the study would look at: the universe, less what the account holds, cut to its cap.
+    held = {p["symbol"] for p in yaml.safe_load(
+        (sandbox.config_dir.parent / "state" / "micro_live_portfolio.yaml").read_text())["positions"]}
+    study = research["switches"]["candidates"]
+    assert study["on"] is True and (study["period"], study["max_tickers_per_run"]) == ("weekly", 3)
+    assert study["tickers"] == [t for t in ("VTI", "VXUS", "BND", "VGIT") if t not in held][:3]
+    # Who is asking the SEC is said as set or not set; the words themselves never leave .env.
+    assert research["switches"]["sec_form4"]["contact"] == {"set": True, "variable": "CT_SEC_CONTACT"}
+    assert "owner@example.test" not in json.dumps(overview)
+    monkeypatch.delenv("CT_SEC_CONTACT")
+    contact = _research(sandbox, "sec_form4")["contact"]
+    assert contact["set"] is False and contact["variable"] == "CT_SEC_CONTACT"
+    assert "CT_SEC_CONTACT is not set" in contact["why"]
+    # The watchlist form is gone from the page, and nothing else ever read that value.
+    assert "universe.core.individual_stocks.watchlist" not in overview["values"]
+
+    # A deployment that schedules no account has no candidate study to switch, and is told so.
+    path = sandbox.config_dir / RISK
+    path.write_text(cc.replace_section(read(sandbox, RISK), "research_schedule",
+                                       "research_schedule:\n  enabled: true\n  period: daily"), encoding="utf-8")
+    research = sandbox.config_overview()["research"]
+    assert research["fires_every"] == "daily"
+    assert research["switches"]["candidates"]["available"] is False
+    assert research["switches"]["candidates"]["on"] is False
+    with pytest.raises(ServiceError, match="not scheduled by account"):
+        sandbox.preview_config_change(file=RISK, switch="candidates", on=True)
+
+    # A schedule the scheduler itself could not read must not take this page down with it: the
+    # page is where that section is put right. The switch is withheld, and says why.
+    path.write_text(cc.replace_section(read(sandbox, RISK), "research_schedule", SCHEDULED.replace(
+        "candidates: {period: weekly, max_tickers_per_run: 3}",
+        "candidates: {period: weekly, max_tickers_per_run: lots}")), encoding="utf-8")
+    research = sandbox.config_overview()["research"]
+    study = research["switches"]["candidates"]
+    assert study["on"] is False and study["available"] is False
+    assert study["why"].startswith("research_schedule could not be read")
+    assert research["fires_every"] == "weekly" and set(research["switches"]) == set(cc.RESEARCH_SWITCHES)
+
+
+def test_a_research_switch_goes_through_preview_and_submit_like_any_other_change(scheduled):
+    sandbox = scheduled
+    revision = next(f["revision"] for f in sandbox.config_overview()["files"] if f["file"] == RISK)
+    preview = sandbox.preview_config_change(file=RISK, revision=revision, switch="candidates", on=False)
+    assert preview["changed"] is True and preview["classification"] == cc.IMMEDIATE
+    assert preview["reasons"] == [] and "enabled: false" in preview["diff"]
+    assert [c["path"] for c in preview["changes"]] == [cc.RESEARCH_SWITCHES["candidates"]]
+    assert _research(sandbox, "candidates")["on"] is True          # a preview writes nothing
+
+    result = sandbox.submit_config_change(file=RISK, revision=revision, switch="candidates", on=False,
+                                          identity="owner", reason="quiet week")
+    assert result["status"] == cc.APPLIED and result["classification"] == cc.IMMEDIATE
+    assert result["paths"] == [cc.RESEARCH_SWITCHES["candidates"]] and result["requested_by"] == "owner"
+    assert "launchd" in result["outcome"]           # under research_schedule, so launchd is asked
+    assert _research(sandbox, "candidates")["on"] is False
+    cfg = schedule.settings(sandbox.profiles())
+    assert schedule.CANDIDATES not in [task.kind for task in schedule.tasks(cfg, bucket="micro_live")]
+    assert sandbox.config_overview()["recent"][0]["id"] == result["id"]
+    assert sandbox.activity(kinds=("config_changed",))["events"][0]["subject"] == result["id"]
+    # The file moved, so the revision the page loaded is stale: a conflict, never an overwrite.
+    with pytest.raises(ServiceConflict):
+        sandbox.submit_config_change(file=RISK, revision=revision, switch="candidates", on=True)
+    with pytest.raises(ServiceError, match="already off"):
+        sandbox.preview_config_change(file=RISK, switch="candidates", on=False)
+    sandbox.submit_config_change(file=RISK, switch="candidates", on=True, identity="owner")
+    assert _research(sandbox, "candidates")["on"] is True
+
+
+def test_a_source_is_switched_on_only_once_it_could_be_read(sandbox, monkeypatch):
+    monkeypatch.setenv("CT_SEC_CONTACT", CONTACT)
+    _put(sandbox, "sec_form4", False)
+    _put(sandbox, "reddit", False)
+    text, recorded = read(sandbox, RISK), len(cc.records(sandbox.state_db()))
+    # Without a contact every read would end "not configured": on would be a word, not a fact.
+    monkeypatch.delenv("CT_SEC_CONTACT")
+    for ask in (sandbox.preview_config_change, sandbox.submit_config_change):
+        with pytest.raises(ServiceError, match="CT_SEC_CONTACT is not set"):
+            ask(file=RISK, switch="sec_form4", on=True)
+    monkeypatch.setenv("CT_SEC_CONTACT", "nobody")
+    with pytest.raises(ServiceError, match="a name and an e-mail address"):
+        sandbox.submit_config_change(file=RISK, switch="sec_form4", on=True)
+    assert read(sandbox, RISK) == text and len(cc.records(sandbox.state_db())) == recorded
+    monkeypatch.setenv("CT_SEC_CONTACT", CONTACT)
+    assert sandbox.submit_config_change(file=RISK, switch="sec_form4", on=True)["status"] == cc.APPLIED
+    assert sources.load(sandbox.profiles()).form4.enabled is True
+    # Off asks nothing of anyone.
+    monkeypatch.delenv("CT_SEC_CONTACT")
+    assert sandbox.submit_config_change(file=RISK, switch="sec_form4", on=False)["status"] == cc.APPLIED
+    assert sources.load(sandbox.profiles()).form4.enabled is False
+
+    # Reddit needs no contact, and its first on writes a block the file never had.
+    on = sandbox.submit_config_change(file=RISK, switch="reddit", on=True, identity="owner")
+    # A block that was not there is reported as the block; one that was, as its own line.
+    assert on["status"] == cc.APPLIED and len(on["paths"]) == 1
+    assert cc.RESEARCH_SWITCHES["reddit"].startswith(on["paths"][0])
+    assert "launchd" not in on["outcome"]
+    assert sources.load(sandbox.profiles()).reddit.enabled is True and _research(sandbox, "reddit")["on"] is True
+
+
+@pytest.mark.parametrize("ask, match", [
+    ({"switch": "reddit", "on": True, "set": {"research_schedule.launchd.hour": 14}}, "not both"),
+    ({"switch": "reddit", "on": True, "key": "research_web_access", "text": "research_web_access: {}"}, "not both"),
+    ({"switch": "reddit"}, "say which"),
+    ({"on": True, "set": {"research_schedule.launchd.hour": 14}}, "name the switch"),
+    ({"switch": "stocktwits", "on": True}, "no research switch named"),
+])
+def test_a_switch_is_asked_for_by_name_and_as_nothing_else(scheduled, ask, match):
+    sandbox = scheduled
+    _put(sandbox, "reddit", False)
+    text, recorded = read(sandbox, RISK), len(cc.records(sandbox.state_db()))
+    for call in (sandbox.preview_config_change, sandbox.submit_config_change):
+        with pytest.raises(ServiceError, match=match):
+            call(file=RISK, **ask)
+    with pytest.raises(ServiceError, match="is a setting in risk_profile.yaml"):
+        sandbox.preview_config_change(file=INVESTOR, switch="candidates", on=False)
+    assert read(sandbox, RISK) == text and len(cc.records(sandbox.state_db())) == recorded
+
+
+def test_the_api_takes_a_research_switch_by_name(auth_client, monkeypatch, sandbox):
+    monkeypatch.setattr("agentic_trading.api.app._service", sandbox)
+    _put(sandbox, "reddit", False)
+    overview = auth_client.get("/config").json()
+    assert overview["research"]["switches"]["reddit"] == {
+        "on": False, "path": cc.RESEARCH_SWITCHES["reddit"], "available": True}
+    revision = next(f["revision"] for f in overview["files"] if f["file"] == RISK)
+    body = {"file": RISK, "revision": revision, "switch": "reddit", "on": True}
+    preview = auth_client.post("/config/preview", json=body)
+    assert preview.status_code == 200 and preview.json()["classification"] == cc.IMMEDIATE
+    assert preview.json()["changed"] is True and "reddit" in preview.json()["diff"]
+    for refused in ({**body, "switch": "stocktwits"}, {**body, "on": "yes"}, {**body, "on": 1},
+                    {**body, "create": [cc.RESEARCH_SWITCHES["reddit"]]}):
+        assert auth_client.post("/config/preview", json=refused).status_code == 422, refused
+        assert auth_client.post("/config/changes", json=refused).status_code == 422, refused
+    mixed = auth_client.post("/config/changes", json={**body, "set": {"research_schedule.launchd.hour": 14}})
+    assert mixed.status_code == 400 and "not both" in mixed.json()["detail"]
+    # A key as plain values, without a name: the request route still creates nothing. (A source
+    # nobody has named, because the owner may well have switched Reddit once and declared its key.)
+    by_path = auth_client.post("/config/changes", json={
+        "file": RISK, "set": {"research_web_access.sources.stocktwits.enabled": True}})
+    assert by_path.status_code == 400 and "no such setting" in by_path.json()["detail"]
+    applied = auth_client.post("/config/changes", json=body)
+    assert applied.status_code == 200 and applied.json()["status"] == cc.APPLIED
+    assert applied.json()["requested_by"] == "test-owner"
+    assert auth_client.get("/config").json()["research"]["switches"]["reddit"]["on"] is True
+    again = auth_client.post("/config/preview", json={**body, "revision": ""})
+    assert again.status_code == 400 and "already on" in again.json()["detail"]
+
+
 # ------------------------------------------------------------------------------ launchd
 def test_reregister_research_is_a_no_op_outside_a_managed_install(tmp_path, monkeypatch):
     monkeypatch.delenv("CT_RELEASE_DIR", raising=False)
@@ -566,7 +891,8 @@ def test_reregister_research_rewrites_and_bootstraps_only_when_the_plist_changed
     assert unchanged == "launchd job unchanged" and calls == []
 
     text = (cfg / RISK).read_text(encoding="utf-8")
-    (cfg / RISK).write_text(cc.set_values(text, {"research_schedule.launchd.hour": 16}), encoding="utf-8")
+    moved = (cc.get_value(yaml.safe_load(text), "research_schedule.launchd.hour") + 1) % 24
+    (cfg / RISK).write_text(cc.set_values(text, {"research_schedule.launchd.hour": moved}), encoding="utf-8")
     summary = launchd.reregister_research(data_dir=tmp_path, launch_agents=agents,
                                           release_dir=release, home=tmp_path, run=fake_run)
     assert summary == "launchd job re-registered"
@@ -578,4 +904,4 @@ def test_reregister_research_rewrites_and_bootstraps_only_when_the_plist_changed
     import plistlib
 
     with (agents / f"{launchd.RESEARCH}.plist").open("rb") as stream:
-        assert plistlib.load(stream)["StartCalendarInterval"]["Hour"] == 16
+        assert plistlib.load(stream)["StartCalendarInterval"]["Hour"] == moved

@@ -563,7 +563,7 @@ def record_cashflow(body: CashflowRequest, request: Request) -> dict[str, Any]:
 
 # ----------------------------------------------------------------- configuration
 class ConfigChange(BaseModel):
-    """One section's new text, or values for dotted paths; never both."""
+    """One section's new text, values for dotted paths, or one research switch by name."""
 
     model_config = ConfigDict(extra="forbid")
     file: Literal["risk_profile.yaml", "investor_profile.yaml", "event_calendar.yaml"]
@@ -571,6 +571,11 @@ class ConfigChange(BaseModel):
     key: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     text: str | None = Field(default=None, max_length=200_000)
     set: dict[str, Any] | None = None
+    # A research switch, named rather than addressed: the key it sets, and may create, is the
+    # service's to name (config_changes.RESEARCH_SWITCHES). It goes through the same preview,
+    # classification and record as the other two shapes.
+    switch: Literal["candidates", "sec_form4", "reddit"] | None = None
+    on: StrictBool | None = None
 
 
 class ConfigSubmit(ConfigChange):

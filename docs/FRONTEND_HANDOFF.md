@@ -386,6 +386,20 @@ cooling, record a cash flow, stop or restore autonomous action, rotate the conso
 A loosening change carries the console password in the request and is parked for 24 hours
 server-side; the frontend never decides what loosens what.
 
+Since 2026-10-07 the same two calls take a third shape beside `{key, text}` and `{set}`: one
+research switch by name, `{file: "risk_profile.yaml", revision, switch, on}` with `switch` one
+of `candidates`, `sec_form4`, `reddit`. It may not be combined with the other two shapes (400),
+and an unknown name is a 422. The key the switch sets, and may create, is the service's to name.
+`GET /config` carries what the page draws them from, answered by the code that acts on each:
+`research.fires_every` (`weekly` or `daily`: how often the scheduler's job fires) and
+`research.switches.<name>` with `on`, `path`, `available`; `candidates` adds `period`,
+`max_tickers_per_run` and `tickers` (what the study would look at today), or `why` when it is
+unavailable because the schedule section could not be read; and `sec_form4` adds
+`contact: {set, variable, why?}`, which says whether who is asking the SEC is set and never
+what it is. A switch already in the state asked for is a 400 (`… is already on`); turning
+`sec_form4` on without a usable contact is a 400 that names the variable. `values` no longer
+carries `universe.core.individual_stocks.watchlist`: no form edits it and nothing reads it.
+
 A session is identified to the interface by an opaque id. The token hash never leaves the
 database, so listing devices can never yield a way to impersonate one. Using a session records
 the time; it never extends the 30-day deadline.

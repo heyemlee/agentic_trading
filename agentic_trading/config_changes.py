@@ -640,7 +640,7 @@ class ChangeSpec:
     set: dict[str, Any] = field(default_factory=dict)
     #: Paths among ``set`` that the file may not declare yet and that are created with their
     #: value. Never taken from a request: only code that names its own keys fills this in, and
-    #: ``check`` holds it to :data:`CREATABLE` whoever did.
+    #: ``check`` holds it to :data:`CREATABLE` and :data:`RESEARCH_CREATES` whoever did.
     create: frozenset[str] = frozenset()
 
     @property
@@ -654,7 +654,7 @@ class ChangeSpec:
             raise ConfigChangeError("describe the change as one section's text or as values, not both")
         if self.key is not None and self.text is None:
             raise ConfigChangeError("a section change needs its text")
-        stray = sorted(set(self.create) - CREATABLE)
+        stray = sorted(set(self.create) - CREATABLE - RESEARCH_CREATES)
         if stray:
             raise ConfigChangeError("these settings may not be created from here: " + ", ".join(stray))
         if self.create and self.file != "risk_profile.yaml":
@@ -665,7 +665,8 @@ class ChangeSpec:
 #: confirmed automatic-trading plan needs them (agentic_trading.auto.plan). A closed list held
 #: here, beside the rules that classify each of them: a path outside it is a misspelt key, and
 #: is refused as one whether it arrives from a request, a stored record or a caller in this
-#: package. (The two autonomy switches create their own number through ``switch_change``.)
+#: package. (The two autonomy switches create their own number through ``switch_change``, and a
+#: research switch its own key through ``research_switch``, from ``RESEARCH_CREATES``.)
 CREATABLE: frozenset[str] = frozenset({
     "sizing.fit_to_limits",
     "buckets.micro_live.autonomy.open.max_usd",
@@ -783,6 +784,67 @@ def switch_change(current: str, block: str, on: bool, value: int | None = None, 
                                     "changed: " + ", ".join(stray))
         verdict = {**verdict, "classification": CONFIRMED}
     return ChangeSpec(file="risk_profile.yaml", set=updates), new_text, verdict
+
+
+# ------------------------------------------------------------------ the research switches
+#: What scheduled research studies and reads beside prices, as the switches the Settings page
+#: offers: the candidate study of the Agentic account, and the two outside sources
+#: (agentic_trading.sources). A request names a switch, never a key. The keys are here, so the
+#: page can turn on a source this file has never mentioned -- which is how a source that is off
+#: is written -- without any request being able to create a setting of its own choosing.
+#:
+#: None of the three is guarded and none decides an order: they are what research looks at, so
+#: each applies at once, like the schedule they sit beside.
+RESEARCH_SWITCHES: dict[str, str] = {
+    "candidates": "research_schedule.accounts.micro_live.candidates.enabled",
+    "sec_form4": "research_web_access.sources.sec_form4.enabled",
+    "reddit": "research_web_access.sources.reddit.enabled",
+}
+
+#: What a research switch may bring into being. A closed list of its own, beside ``CREATABLE``:
+#: that one is what a confirmed automatic-trading plan creates, every entry of it guarded and
+#: classified; these belong to no plan and loosen nothing.
+RESEARCH_CREATES: frozenset[str] = frozenset(RESEARCH_SWITCHES.values())
+
+
+def research_switch_on(doc: dict[str, Any], name: str) -> bool:
+    """Whether the file has this switch on, by the rule the code that acts on it uses.
+
+    A candidate study runs when its block exists and does not say ``enabled: false``
+    (schedule.tasks). A source is read only when it says ``enabled: true`` (sources.load).
+    """
+    if name == "candidates":
+        block = get_value(doc, RESEARCH_SWITCHES[name].rsplit(".", 1)[0])
+        return isinstance(block, dict) and block.get("enabled") is not False
+    return get_value(doc, RESEARCH_SWITCHES[name]) is True
+
+
+def research_switch(current: str, name: str, on: bool) -> ChangeSpec:
+    """One research switch turned on or off, as the change that does it.
+
+    The change is an ordinary one: the caller builds, validates, classifies and records it like
+    any other. Two things are particular to it. The key may be created, because off is usually
+    written by saying nothing. And a candidate study is only switched for an account whose
+    research is already scheduled by account: naming the first account under
+    ``research_schedule.accounts`` replaces the single review a deployment otherwise runs
+    (schedule.tasks), which is a different decision from switching one study.
+    """
+    path = RESEARCH_SWITCHES.get(name)
+    if path is None:
+        raise ConfigChangeError(f"no research switch named {name!r}; the switches are "
+                                + ", ".join(sorted(RESEARCH_SWITCHES)))
+    if not isinstance(on, bool):
+        raise ConfigChangeError("a switch is turned on or off")
+    doc = _parse(current)
+    if name == "candidates":
+        account = get_value(doc, path.rsplit(".", 2)[0])
+        if not isinstance(account, dict) or not account:
+            raise ConfigChangeError(
+                "research is not scheduled by account here (research_schedule.accounts names no "
+                f"{SWITCH_BUCKET}); a candidate study is switched only for an account that is")
+    if research_switch_on(doc, name) is on:
+        raise ConfigChangeError(f"{name} is already {'on' if on else 'off'}")
+    return ChangeSpec(file="risk_profile.yaml", set={path: on}, create=frozenset({path}))
 
 
 # ------------------------------------------------------------------------------ records
