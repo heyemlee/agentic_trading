@@ -157,7 +157,9 @@ def test_next_run_is_read_from_the_same_configuration_the_job_is_written_from(cf
     upcoming = datetime.fromisoformat(
         schedule.next_run_at(cfg, FRIDAY_AFTER_CLOSE, local_zone=pacific))
     interval = research_interval(ROOT)
-    assert upcoming.isoweekday() == interval["Weekday"]
+    # This is the deployment's own schedule, so it is whatever the owner has set: a job that
+    # studies something every session fires daily and names no weekday to agree on.
+    assert upcoming.isoweekday() == interval.get("Weekday", upcoming.isoweekday())
     assert (upcoming.hour, upcoming.minute) == (interval["Hour"], interval["Minute"])
     assert upcoming > FRIDAY_AFTER_CLOSE.astimezone(pacific)
 
@@ -377,7 +379,10 @@ def test_the_job_fires_as_often_as_the_shortest_period_any_account_asks_for(tmp_
 
     cfg_dir = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg_dir)
-    weekly = schedule.settings(load_profiles(cfg_dir))
+    # Weekly throughout to begin with, in the copy: what the deployment's own accounts ask for
+    # today is the owner's to change, and a daily candidate study there is not this test's news.
+    weekly = schedule.settings(accounts_config(
+        cfg_dir, {"micro_live": {"holdings": {"period": "weekly"}}}, period="weekly"))
     assert "Weekday" in launchd.research_interval(tmp_path)
     assert "-W" in schedule.period_key(weekly)
 

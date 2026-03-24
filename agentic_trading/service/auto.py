@@ -1869,7 +1869,19 @@ class AutoTradingMixin:
         covered = [symbol for symbol in wanted if symbol in studied or symbol in watched]
         missing = [symbol for symbol in wanted if symbol not in covered]
         text = None
-        if wanted and missing:
+        if wanted and missing and studied:
+            # The study is already on: it takes one fund from each exposure group, so switching
+            # it on is not something left to do, and saying so again would send the owner back
+            # to a switch they have just made.
+            text = {"zh": (f"“候选 ETF”研究已经打开，它每周研究的是 {'、'.join(studied)}（每个类别一只），"
+                           f"不包括 {'、'.join(missing)}，所以模拟账户不会收到它们的买入信号。"
+                           "想让它们也被研究，把它们加进你的 Robinhood 自选（现有的自选研究会轮到它们）。"),
+                    "en": (f"The candidate-ETF study is on and covers {', '.join(studied)} (one fund "
+                           f"from each exposure group), not {', '.join(missing)}, so the simulated "
+                           "account will get no signal to buy them. To have them studied as well, "
+                           "add them to your Robinhood watchlist, which the existing watchlist "
+                           "study will reach.")}
+        elif wanted and missing:
             text = {"zh": (f"每周研究目前不会研究 {'、'.join(missing)}，所以模拟账户不会收到它们的买入信号。"
                            "两个办法：把它们加进你的 Robinhood 自选（现有的自选研究会轮到它们），"
                            "或在设置里打开“候选 ETF”研究（每周最多多用 3 次研究额度）。"),

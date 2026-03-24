@@ -36,7 +36,7 @@ from agentic_trading.portfolio import load_portfolio
 from agentic_trading.proposals import EXECUTED, PROPOSED, utcnow
 from agentic_trading.service import Service, ServiceConflict, ServiceError
 from tests.auto_market import scripted, today, write_research
-from tests.conftest import ROOT, copy_example_ledger
+from tests.conftest import ROOT, copy_example_ledger, research_as_written
 
 MICRO = "micro_live"
 PASSWORD = "Test-Only-Console-Pw1"
@@ -83,6 +83,8 @@ class Real:
         (root / "state").mkdir(parents=True)
         (root / "runs").mkdir()
         shutil.copytree(ROOT / "config", root / "config")
+        # Which research the owner has switched on today is not this account's to inherit.
+        research_as_written(root / "config" / "risk_profile.yaml")
         _real_money(root / "config" / "risk_profile.yaml", real_money)
         if openings_per_day:
             _busier(root / "config" / "risk_profile.yaml", openings_per_day)

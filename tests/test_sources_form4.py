@@ -584,7 +584,7 @@ def test_the_ticker_file_is_asked_for_weekly_and_an_old_copy_serves_when_it_cann
 
 
 # ------------------------------------------------------------------- where it is attached
-def test_the_tool_exists_by_name_and_answers_unavailable_on_this_deployment(profiles, monkeypatch, tmp_path):
+def test_the_tool_exists_by_name_and_answers_unavailable_while_the_source_is_off(profiles, monkeypatch, tmp_path):
     monkeypatch.setenv(sources.LOG_ENV, str(tmp_path / sources.LOG_NAME))
     monkeypatch.setattr(form4, "cache_dir", lambda _profiles: tmp_path / "cache")
     tool = ta_tool_server.LOCAL_TOOLS[FORM4_TOOL](profiles)
@@ -677,7 +677,7 @@ def test_the_date_a_run_is_about_is_set_for_its_length_and_put_back(
 
 
 def test_a_source_is_an_input_only_to_research_that_an_analyst_who_reads_it_runs_for(profiles):
-    assert sources.in_effect(profiles, ("etf", "stock")) == {}, "both are off on this deployment"
+    assert sources.in_effect(profiles, ("etf", "stock")) == {}, "neither is switched on to begin with"
     profiles.risk.setdefault("research_web_access", {})["sources"] = {
         "reddit": {"enabled": True}, "sec_form4": {"enabled": True}}
     assert sources.in_effect(profiles, ("etf",)) == {}, "funds are read by neither analyst"

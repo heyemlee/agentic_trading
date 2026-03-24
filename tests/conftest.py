@@ -50,6 +50,63 @@ def copy_example_ledger(name: str, destination: Path, as_of: str | None = None) 
     return destination
 
 
+CANDIDATES_AS_WRITTEN = "candidates: {period: weekly, max_tickers_per_run: 3, enabled: false}"
+
+
+def research_as_written_text(text: str) -> str:
+    """A risk profile's text with the research switches as this suite is written against.
+
+    Candidate-fund research off and weekly, and no outside source named under
+    ``research_web_access``. Everything else is returned as it was read.
+    """
+    text, found = re.subn(r"(?m)^(\s+)candidates: \{[^}\n]*\}", r"\1" + CANDIDATES_AS_WRITTEN, text)
+    assert found == 1, "research_schedule no longer writes the candidates task on one line"
+    lines = text.split("\n")
+    at = next((i for i, line in enumerate(lines) if re.match(r"^research_web_access:\s*(#.*)?$", line)), None)
+    assert at is not None, "the risk profile no longer has a research_web_access section"
+    kept, i = lines[:at + 1], at + 1
+    while i < len(lines) and (not lines[i] or lines[i].startswith((" ", "#"))):
+        if re.match(r"^  sources:", lines[i]):
+            while len(kept) > at + 1 and kept[-1].startswith("  #"):
+                kept.pop()                      # the comment written against the block goes with it
+            block = not re.match(r"^  sources:\s*\{", lines[i])
+            i += 1
+            while block and i < len(lines) and lines[i].startswith("    "):
+                i += 1
+            continue
+        kept.append(lines[i])
+        i += 1
+    return "\n".join(kept + lines[i:])
+
+
+def research_as_written(risk_profile: Path) -> Path:
+    """In a copied config, put the research switches back to what this suite is written against.
+
+    Which funds are studied and which outside sources research reads are the owner's to switch
+    from the settings page, and every switch is a commit to config/ in this checkout. On
+    2026-10-07 the owner turned candidate research and SEC Form 4 on, and sixteen tests that
+    read "both are off on this deployment" as a fact went red an hour after a release that had
+    passed them. It is the reason `disarm` exists in tests/test_api.py, met a second time: what
+    the owner has switched on today is an operational fact, and no result may depend on it
+    either way.
+
+    So a test that needs a switch on says so in its own copy, starting from here. The rest of
+    the copy is still the deployment's own, which is what keeps these tests on the real rules.
+    """
+    risk_profile.write_text(research_as_written_text(risk_profile.read_text(encoding="utf-8")),
+                            encoding="utf-8")
+    return risk_profile
+
+
+def with_research_as_written(profiles):
+    """The same starting point for profiles that are already loaded. Returns them."""
+    (profiles.risk.get("research_web_access") or {}).pop("sources", None)
+    account = ((profiles.risk.get("research_schedule") or {}).get("accounts") or {}).get("micro_live")
+    if isinstance(account, dict) and "candidates" in account:
+        account["candidates"] = {"period": "weekly", "max_tickers_per_run": 3, "enabled": False}
+    return profiles
+
+
 @pytest.fixture
 def console_auth(monkeypatch, tmp_path):
     from importlib import import_module
@@ -90,9 +147,14 @@ def fake_claude(monkeypatch, tmp_path):
 
 @pytest.fixture
 def profiles():
+    """The deployment's own profiles, with the research switches as this suite is written against.
+
+    The rules and limits are the real ones. Which research the owner has switched on today is
+    not: see ``research_as_written``.
+    """
     from agentic_trading.profile import load_profiles
 
-    return load_profiles(ROOT / "config")
+    return with_research_as_written(load_profiles(ROOT / "config"))
 
 
 @pytest.fixture
@@ -113,6 +175,7 @@ def profiles_with_state(tmp_path):
 
     cfg = tmp_path / "config"
     shutil.copytree(ROOT / "config", cfg)
+    research_as_written(cfg / "risk_profile.yaml")
     state = tmp_path / "state"
     state.mkdir()
     copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")

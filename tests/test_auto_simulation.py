@@ -489,11 +489,12 @@ def test_a_plan_whose_funds_nobody_researches_says_so(desk):
     _preview, started = start(service)
     coverage = started["simulation"]["research"]
     universe = started["simulation"]["plan"]["strategy"]["universe"]
-    # The deployment researches what the owner holds and what the owner added; the candidate
-    # study that would reach these funds is switched off there.
+    # Research studies what the owner holds and what the owner added; in the copy this starts
+    # from, the candidate study that would reach these funds is switched off.
     assert coverage["universe"] == universe and coverage["candidates_enabled"] is False
     assert coverage["missing"] == universe and coverage["covered"] == []
-    assert "Robinhood 自选" in coverage["text"]["zh"] and "候选 ETF" in coverage["text"]["zh"]
+    assert "Robinhood 自选" in coverage["text"]["zh"] and "打开“候选 ETF”研究" in coverage["text"]["zh"]
+    assert "switch on the candidate-ETF study" in coverage["text"]["en"]
     # Switched on in the real configuration, the study reaches the first of them.
     risk = service.profiles().config_dir / "risk_profile.yaml"
     risk.write_text(risk.read_text().replace(
@@ -502,6 +503,17 @@ def test_a_plan_whose_funds_nobody_researches_says_so(desk):
     reached = service.auto_simulation()["research"]
     assert reached["candidates_enabled"] is True and reached["covered"]
     assert set(reached["covered"]) | set(reached["missing"]) == set(universe)
+    # The study takes one fund from each group, so some of the plan's funds are still not
+    # studied. What is said then names what the study does cover and no longer tells the owner
+    # to switch on something that is on: the watchlist is the one way left.
+    assert reached["missing"], "the plan may buy more funds than the study has groups"
+    for lang, already, again in (("zh", "已经打开", "打开“候选 ETF”研究（"),
+                                 ("en", "is on and covers", "switch on the candidate-ETF study")):
+        said = reached["text"][lang]
+        assert already in said and again not in said, said
+        assert all(symbol in said for symbol in reached["missing"]), said
+        assert any(symbol in said for symbol in reached["covered"]), said
+    assert "Robinhood 自选" in reached["text"]["zh"] and "watchlist" in reached["text"]["en"]
 
 
 # ---------------------------------------------------------------- the other doors

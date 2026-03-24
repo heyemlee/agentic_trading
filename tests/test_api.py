@@ -49,7 +49,7 @@ from agentic_trading.service.status import (
     proposal_status,
 )
 from agentic_trading.state_db import StateDB
-from tests.conftest import ROOT, copy_example_ledger
+from tests.conftest import ROOT, copy_example_ledger, research_as_written
 
 
 @pytest.fixture
@@ -67,6 +67,8 @@ def sandbox_service(tmp_path, offline_market_reads):
     copy_example_ledger("micro_live_portfolio.example.yaml", state / "micro_live_portfolio.yaml")
     (tmp_path / "runs").mkdir()
     disarm(cfg / "risk_profile.yaml")
+    # And for the same reason, which research the owner has switched on today.
+    research_as_written(cfg / "risk_profile.yaml")
     return Service(cfg)
 
 

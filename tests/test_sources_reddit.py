@@ -20,6 +20,7 @@ from agentic_trading import config_changes as cc
 from agentic_trading import sources
 from agentic_trading.records import _data_sources
 from agentic_trading.sources import reddit, seen
+from tests.conftest import research_as_written_text
 
 ROOT = Path(__file__).resolve().parents[1]
 START, END = "2026-09-29", "2026-10-06"
@@ -332,8 +333,8 @@ def test_the_graph_watches_the_read_for_the_length_of_a_run_and_records_it(
     graph = AgenticTradingGraph(profiles, instrument_type="stock", bucket="core", config=cfg,
                                 run_dir=tmp_path / "run")
     graph.propagate("AAPL", "2026-09-02", asset_type="stock")
-    # The deployment's own configuration: the source is off, so nothing was asked of Reddit and
-    # the analyst was told the source is unavailable.
+    # No source is switched on: nothing was asked of Reddit and the analyst was told the source
+    # is unavailable.
     assert seen_inside["text"].startswith("<reddit unavailable: this source is switched off")
     (reading,) = sources.readings(graph.sources_log)
     assert reading["outcome"] == sources.DISABLED
@@ -367,9 +368,10 @@ def test_a_source_switch_is_a_setting_like_web_access_and_the_file_still_loads(c
     ``research_web_access`` is the precedent: what research may read is the owner's to change
     at once. What a source can never do is the subject of the test above this one.
     """
-    text = (config_dir / "risk_profile.yaml").read_text(encoding="utf-8")
+    # From a file that names no source, whatever the deployment's own names today.
+    text = research_as_written_text((config_dir / "risk_profile.yaml").read_text(encoding="utf-8"))
     assert "\nresearch_web_access:\n" in text and "sources:" not in text.split(
-        "\nresearch_web_access:\n")[1].split("\n\n")[0], "the deployment's own file names none"
+        "\nresearch_web_access:\n")[1].split("\n\n")[0], "the file this starts from names none"
     # Inside the existing section: the console refuses a change that adds a section of its own.
     on = text.replace("\nresearch_web_access:\n", "\nresearch_web_access:\n  sources:\n"
                       "    reddit:\n      enabled: true\n    sec_form4:\n      enabled: true\n", 1)
