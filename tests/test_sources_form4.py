@@ -242,6 +242,24 @@ def test_a_planned_sale_is_marked_by_its_footnote_or_by_the_filings_box_or_not_a
     assert form4.meaning(sale, plan_affirmed=False)["planned"] is None
 
 
+@pytest.mark.parametrize("footnote, planned", [
+    ("made pursuant to a Rule 10b5-1 trading plan adopted on March 2, 2026", True),
+    ("pursuant to a Rule 10b5‑1 plan", True),              # a non-breaking hyphen, as pasted
+    ("under a 10b5–1(c) instruction", True),                # an en dash
+    ("pursuant to Rule 10b-5-1", True),
+    ("sold under the reporting person's 10b5 trading plan", True),
+    ("pursuant to a 10B5-1 PLAN", True),
+    ("The price is a weighted average.", False),
+    ("claims under Rule 10b-5 of the Exchange Act", False),      # the antifraud rule, not a plan
+    ("see exhibit 10b5-12", False),
+])
+def test_a_plan_named_in_a_footnote_is_found_however_the_dash_was_typed(footnote, planned):
+    document = form4.parse(filing(line("S", moved="D", notes=("F1",)), footnotes={"F1": footnote}))
+    assert document["lines"][0]["plan_in_footnote"] is planned
+    kind = form4.meaning(document["lines"][0], plan_affirmed=None)
+    assert kind["planned"] == ("footnote" if planned else None)
+
+
 def test_a_grant_is_never_counted_as_a_purchase_and_a_planned_sale_is_counted_as_planned(tmp_path):
     edgar = Edgar({
         SUBMISSIONS: index((acc(1), "4", "2026-09-17", "2026-09-17T21:00:00.000Z"),

@@ -91,7 +91,13 @@ PAUSE_SECONDS = 0.2
 TICKERS_FRESH_DAYS = 7
 SEEN_DAYS = 800
 FORMS = ("4", "4/A")
-_PLAN = re.compile(r"10b5\s*-?\s*1", re.IGNORECASE)
+#: A footnote naming a Rule 10b5-1 plan, however the dash was typed. Filings are pasted from
+#: word processors, so the hyphen is as often a non-breaking hyphen or an en dash as a hyphen,
+#: and the rule is written "10b5-1", "10b-5-1" and "10b5 plan" alike. "Rule 10b-5" by itself is
+#: the antifraud rule and is not a plan; nor is a longer number that merely starts the same way.
+_DASH = "[-‐-―−]"
+_PLAN = re.compile(
+    rf"10b\s*{_DASH}?\s*5(?:\s*{_DASH}?\s*1(?!\d)|\s*{_DASH}?\s*(?:trading\s+)?plan)", re.IGNORECASE)
 _RENDERED = re.compile(r"^xsl[A-Za-z0-9]+/")
 _ACCESSION = re.compile(r"\d{10}-\d{2}-\d{6}")
 _XML_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,120}\.xml", re.IGNORECASE)
