@@ -159,6 +159,13 @@ declared_data_sources:
     keyless: true
     tool_visible: true                       # mcp__ta__fetch_url; the allowlist and the
                                              # controls live in risk_profile research_web_access
+  - id: sec_edgar_form4
+    used_for: [insider_filings]
+    keyless: true                            # no key and no account; CT_SEC_CONTACT in .env
+                                             # says who is asking, as the SEC requires
+    tool_visible: true                       # get_sec_form4, handed to the fundamentals
+                                             # analyst for stocks; switched on in risk_profile
+                                             # research_web_access.sources.sec_form4
 
 # LLM execution layer. The system runs on the Claude Max subscription through the official
 # Claude Code CLI (`claude -p`); no Anthropic API key is ever used or accepted.

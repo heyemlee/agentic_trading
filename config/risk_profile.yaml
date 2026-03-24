@@ -615,7 +615,7 @@ research_schedule:
   accounts:
     micro_live:
       holdings:   {period: weekly, max_tickers_per_run: 2}
-      candidates: {period: weekly, max_tickers_per_run: 3, enabled: false}
+      candidates: {period: weekly, max_tickers_per_run: 3, enabled: true}
       watchlist:  {period: weekly, max_tickers_per_run: 3}
     advisory:
       holdings:   {period: weekly, max_tickers_per_run: 2, language: zh}
@@ -636,6 +636,10 @@ research_schedule:
 # whether it is enabled at all, and the turn and wall-clock budgets. Content reached this way
 # can inform a report but is never evidence, because there is no provenance record to keep.
 research_web_access:
+  # What research may read besides prices (agentic_trading/sources). Off unless true here.
+  # Form 4 reaches stock research only; who is asking the SEC is CT_SEC_CONTACT in .env.
+  sources:
+    sec_form4: {enabled: true}
   fetch:
     enabled: true
     max_bytes: 400000                        # ~400 KB per page, then truncated and flagged
