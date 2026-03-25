@@ -12,224 +12,337 @@
 <meta name="apple-mobile-web-app-title" content="Agentic Trading" />
 <meta name="theme-color" content="#ffffff" />
 <link rel="stylesheet" href="assets/console.css" />
+<link rel="stylesheet" href="assets/portfolio.css" />
 </head>
-<body class="theme-mono">
+<body class="theme-mono pf-glass">
 
-<main id="content" hidden data-i18n-title="cf.title">
+<main id="content" class="me-page cf-page" hidden data-i18n-title="cf.title">
 
-  <section class="section pagehead" data-od-id="pagehead">
-    <div class="container">
-      <h1 data-i18n="cf.title">Settings</h1>
-      <p class="body-muted" data-i18n="cf.intro">Everything in config/ that is not code. Tightening applies at once; loosening a limit asks for the password and waits a day, during which it can be withdrawn.</p>
-    </div>
-  </section>
-
-  <!-- ── changes still cooling ─────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" id="pending-section" data-od-id="pending" hidden>
-    <div class="container">
-      <div class="card card-tinted">
-        <div class="section-head">
-          <p class="eyebrow" data-i18n="cf.pending">Waiting to apply</p>
-          <span class="chip chip-warn" id="pending-count">—</span>
-        </div>
-        <div class="list list-inset" style="margin-top:12px;" id="pending-list"></div>
-        <p class="body-sm body-muted" style="margin-top:12px;" data-i18n="cf.pendingHint">A change applies against the file as it is then; if the part it touches was edited meanwhile, it fails and says so.</p>
+  <!-- ══ what a person decides here: a few rows and switches, each one confirmation away ══ -->
+  <div id="cf-main" data-od-id="settings-main">
+    <section class="section pagehead pf-head" data-od-id="pagehead">
+      <div class="container">
+        <h1 data-i18n="cf.title">Settings</h1>
+        <p data-i18n="cf.intro">You see every change before it applies. Loosening a limit also asks for the password and waits 24 hours.</p>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ── the forms ─────────────────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="forms">
-    <div class="container">
+    <section class="section pf-body me-body">
+      <div class="container pf-stack">
 
-      <details class="settings-group" id="form-schedule" data-od-id="form-schedule">
-        <summary data-i18n="cf.schedule">Research schedule</summary>
-        <div class="card">
-          <div class="grid-2">
-            <div class="field"><label for="sc-period" data-i18n="cf.period">Period</label>
-              <select class="select" id="sc-period"><option value="weekly">weekly</option><option value="daily">daily</option></select></div>
-            <div class="field"><label for="sc-weekday" data-i18n="cf.weekday">Weekday</label>
-              <select class="select" id="sc-weekday">
-                <option value="1">1 · Mon</option><option value="2">2 · Tue</option><option value="3">3 · Wed</option>
-                <option value="4">4 · Thu</option><option value="5">5 · Fri</option><option value="6">6 · Sat</option><option value="7">7 · Sun</option>
-              </select></div>
-            <div class="field"><label for="sc-hour" data-i18n="cf.hour">Hour (Mac local time)</label>
-              <input class="input" id="sc-hour" type="number" inputmode="numeric" min="0" max="23" /></div>
-            <div class="field"><label for="sc-minute" data-i18n="cf.minute">Minute</label>
-              <input class="input" id="sc-minute" type="number" inputmode="numeric" min="0" max="59" /></div>
-            <div class="field"><label for="sc-max-tickers" data-i18n="cf.maxTickers">Tickers per run</label>
-              <input class="input" id="sc-max-tickers" type="number" inputmode="numeric" min="1" max="20" /></div>
-            <div class="field"><label for="sc-max-daily" data-i18n="cf.maxDaily">Analyses per day</label>
-              <input class="input" id="sc-max-daily" type="number" inputmode="numeric" min="1" max="50" /></div>
-            <div class="field"><label for="sc-holiday" data-i18n="cf.holiday">On a holiday</label>
-              <select class="select" id="sc-holiday"><option value="previous_session">previous_session</option><option value="skip">skip</option></select></div>
-            <div class="field"><label for="sc-paused" data-i18n="cf.whilePaused">While paused</label>
-              <select class="select" id="sc-paused"><option value="true" data-i18n="cf.keepResearching">keep researching</option><option value="false" data-i18n="cf.stopToo">stop research too</option></select></div>
+        <!-- changes still cooling: only there when something is -->
+        <article class="pf-card" id="pending-section" data-od-id="pending" hidden>
+          <div class="pf-card-head">
+            <p class="pf-eyebrow" data-i18n="cf.pending">Waiting to apply</p>
+            <span class="chip chip-warn" id="pending-count">—</span>
           </div>
-          <div class="field" style="margin-top:12px;"><label for="sc-tickers" data-i18n="cf.tickers">Tickers to analyse (blank: one per exposure group)</label>
-            <input class="input" id="sc-tickers" type="text" autocapitalize="characters" autocomplete="off" placeholder="VTI, BND" /></div>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-green" type="button" id="sc-save" data-od-id="cta-save-schedule" data-i18n="cf.review">Review change</button>
-          </div>
-          <p class="body-sm body-muted" style="margin-top:12px;" id="sc-launchd"></p>
-        </div>
-      </details>
+          <div class="pf-rows pf-holdings" id="pending-list"></div>
+        </article>
 
-      <details class="settings-group" id="form-watchlist" data-od-id="form-watchlist">
-        <summary data-i18n="cf.watchlist">Stock watchlist</summary>
-        <div class="card">
-          <p class="body-sm body-muted" data-i18n="cf.watchlistHint">Candidates come from you; the system screens and analyses what is listed here and never invents a name.</p>
-          <div class="row row-wrap" style="margin-top:12px;" id="wl-chips"></div>
-          <div class="settings-inline" style="margin-top:12px;">
-            <input class="input" id="wl-add" type="text" autocapitalize="characters" autocomplete="off" placeholder="NVDA" />
-            <button class="btn btn-secondary" type="button" id="wl-add-btn" data-i18n="common.add">Add</button>
+        <!-- research: when it runs, what it studies, what it reads -->
+        <article class="pf-card" data-od-id="research">
+          <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="cf.research">Research</p></div>
+          <div class="pf-rows pf-holdings">
+            <button class="pf-row" type="button" id="schedule-row" data-od-id="row-schedule">
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.2V12l3.4 2"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.scheduleTime">Research time</span>
+                <span class="pf-row-sub" data-i18n="cf.scheduleHint">This Mac's local time</span></span>
+              <span class="pf-row-side"><span class="pf-row-value" id="schedule-value">—</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" role="switch" aria-checked="false" id="switch-candidates" data-od-id="switch-candidates" hidden>
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V11M9.3 19.5V6M14.7 19.5v-5.5M20 19.5V8.5"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.sw.candidates.name">Candidate ETF research</span>
+                <span class="pf-row-sub" id="switch-candidates-sub"></span></span>
+              <span class="cf-toggle" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" role="switch" aria-checked="false" id="switch-sec_form4" data-od-id="switch-sec_form4" hidden>
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 3.5h6.5l4 4V20a.5.5 0 01-.5.5h-10a.5.5 0 01-.5-.5V4a.5.5 0 01.5-.5z"/><path d="M14 3.5V8h4M9.5 12.5h5M9.5 16h5"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.sw.sec_form4.name">SEC insider filings</span>
+                <span class="pf-row-sub" id="switch-sec_form4-sub"></span></span>
+              <span class="cf-toggle" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" role="switch" aria-checked="false" id="switch-reddit" data-od-id="switch-reddit" hidden>
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.5A2.5 2.5 0 017.5 4h9A2.5 2.5 0 0119 6.5v6a2.5 2.5 0 01-2.5 2.5H11l-4 3.5V15A2.5 2.5 0 015 12.5z"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.sw.reddit.name">Reddit discussion</span>
+                <span class="pf-row-sub" id="switch-reddit-sub"></span></span>
+              <span class="cf-toggle" aria-hidden="true"></span>
+            </button>
           </div>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-green" type="button" id="wl-save" data-od-id="cta-save-watchlist" data-i18n="cf.review">Review change</button>
-          </div>
-          <p class="body-sm" style="margin-top:12px;" id="wl-status" role="status" aria-live="polite"></p>
-        </div>
-      </details>
+          <p class="pf-fine pf-card-foot cf-status" id="research-status" role="status" aria-live="polite"></p>
+        </article>
 
-      <details class="settings-group" id="form-calendar" data-od-id="form-calendar">
-        <summary data-i18n="cf.calendar">Macro event calendar</summary>
-        <div class="card">
-          <p class="body-sm body-muted" data-i18n="cf.calendarHint">FOMC, CPI and payrolls dates, kept by hand from the primary sources. Autonomous opens stop past the maintained-through date.</p>
-          <div class="field" style="margin-top:12px;"><label for="cal-through" data-i18n="cf.maintainedThrough">Maintained through</label>
-            <input class="input" id="cal-through" type="date" /></div>
-          <div class="list list-inset" style="margin-top:12px;" id="cal-events"></div>
-          <div class="grid-3" style="margin-top:12px;">
-            <input class="input" id="cal-date" type="date" />
-            <select class="select" id="cal-kind"><option value="fomc_decision">fomc_decision</option><option value="cpi">cpi</option><option value="payrolls">payrolls</option><option value="pce">pce</option><option value="gdp">gdp</option></select>
-            <input class="input" id="cal-note" type="text" autocomplete="off" data-i18n-ph="cf.notePh" placeholder="" />
+        <!-- upkeep: things kept by hand, and where automatic trading is switched -->
+        <article class="pf-card" data-od-id="upkeep">
+          <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="cf.upkeep">Upkeep</p></div>
+          <div class="pf-rows pf-holdings">
+            <button class="pf-row" type="button" id="calendar-row" data-od-id="row-calendar">
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.calendar">Macro calendar</span>
+                <span class="pf-row-sub" data-i18n="cf.calendarSub">FOMC, CPI, payrolls</span></span>
+              <span class="pf-row-side"><span class="pf-row-value" id="calendar-value">—</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" id="password-row" data-od-id="row-password">
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 018 0v3.5"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.password">Console password</span>
+                <span class="pf-row-sub" data-i18n="cf.passwordSub">Changing it signs every device out</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
+            <a class="pf-row" href="index.html?scope=agentic" id="auto-row" data-od-id="row-auto">
+              <span class="pf-orb me-orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 13.5h6l-1 7.5 8-10.5h-6z"/></svg></span>
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.auto">Automatic trading</span>
+                <span class="pf-row-sub" data-i18n="cf.autoSub">On Home, in the Agentic account</span></span>
+              <span class="pf-row-side"><span class="pf-row-value" id="auto-state">—</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </a>
           </div>
-          <div class="btn-row" style="margin-top:12px;">
-            <button class="btn btn-secondary" type="button" id="cal-add" data-i18n="cf.addEvent">Add event</button>
-          </div>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-green" type="button" id="cal-save" data-od-id="cta-save-calendar" data-i18n="cf.review">Review change</button>
-          </div>
-          <p class="body-sm" style="margin-top:12px;" id="cal-status" role="status" aria-live="polite"></p>
-        </div>
-      </details>
+        </article>
 
-      <details class="settings-group" id="form-cashflow" data-od-id="form-cashflow">
-        <summary data-i18n="cf.cashflow">Record a deposit or withdrawal</summary>
-        <div class="card">
-          <p class="body-sm body-muted" data-i18n="cf.cashflowHint">Money moved in or out of a bucket must be recorded, or the drawdown ladder reads a deposit as performance.</p>
-          <div class="grid-2" style="margin-top:12px;">
-            <div class="field"><label for="cash-bucket" data-i18n="cf.bucket">Bucket</label>
-              <select class="select" id="cash-bucket"><option value="micro_live">micro_live</option><option value="core">core</option><option value="sandbox">sandbox</option></select></div>
-            <div class="field"><label for="cash-kind" data-i18n="cf.kind">Kind</label>
-              <select class="select" id="cash-kind"><option value="deposit" data-i18n="cf.deposit">deposit</option><option value="withdrawal" data-i18n="cf.withdrawal">withdrawal</option><option value="income" data-i18n="cf.income">income (interest, dividend)</option><option value="fee" data-i18n="cf.fee">fee</option></select></div>
-            <div class="field"><label for="cash-amount" data-i18n="cf.amount">Amount (USD)</label>
-              <input class="input" id="cash-amount" type="number" inputmode="decimal" min="0.01" step="0.01" /></div>
-            <div class="field"><label for="cash-date" data-i18n="cf.date">Date</label>
-              <input class="input" id="cash-date" type="date" /></div>
-          </div>
-          <div class="field" style="margin-top:12px;"><label for="cash-reason" data-i18n="ap.reason">Reason (optional)</label>
-            <input class="input" id="cash-reason" type="text" maxlength="500" autocomplete="off" /></div>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-green" type="button" id="cash-save" data-od-id="cta-cashflow" data-i18n="cf.record">Record</button>
-          </div>
-          <p class="body-sm" style="margin-top:12px;" id="cash-status" role="status" aria-live="polite"></p>
-        </div>
-      </details>
+        <a class="pf-cta" href="settings.html?view=advanced" id="advanced-link" data-od-id="row-advanced">
+          <span class="pf-cta-copy"><strong data-i18n="cf.advanced">Advanced</strong>
+            <span data-i18n="cf.advancedSub">Every config file, the change record, recording cash by hand</span></span>
+          <span class="pf-chevron" aria-hidden="true"></span>
+        </a>
 
-      <details class="settings-group" id="form-autonomy" data-od-id="form-autonomy">
-        <summary data-i18n="cf.autonomy">Autonomous action</summary>
-        <div class="card">
-          <div class="section-head">
-            <p class="eyebrow" data-i18n="cf.autonomyState">State</p>
-            <span class="chip" id="au-state">—</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ══ advanced: everything else the files hold, one tap further away ══ -->
+  <div id="cf-advanced" data-od-id="settings-advanced" hidden>
+    <section class="section pagehead pf-head">
+      <div class="container">
+        <h1 data-i18n="cf.advanced">Advanced</h1>
+        <p data-i18n="cf.advancedIntro">Every setting in the config files, which day to day you will not need. A change here is previewed and confirmed like any other.</p>
+      </div>
+    </section>
+
+    <section class="section pf-body me-body">
+      <div class="container pf-stack">
+
+        <article class="pf-card" data-od-id="files">
+          <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="cf.allSections">Config files</p></div>
+          <div class="pf-holdings" id="file-list"></div>
+          <p class="pf-fine pf-card-foot" data-i18n="cf.allSectionsHint">Each file is edited one section at a time, comments included. A section marked guarded holds limits: loosening one waits a day.</p>
+        </article>
+
+        <article class="pf-card" data-od-id="advanced-other">
+          <div class="pf-card-head"><p class="pf-eyebrow" data-i18n="cf.other">Records and the rest</p></div>
+          <div class="pf-rows pf-holdings">
+            <button class="pf-row" type="button" id="recent-row" data-od-id="row-recent">
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.recent">Recent changes</span>
+                <span class="pf-row-sub" data-i18n="cf.recentSub">Who changed what, and when it applied</span></span>
+              <span class="pf-row-side"><span class="pf-row-value" id="recent-count"></span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" id="cashflow-row" data-od-id="row-cashflow">
+              <span class="pf-row-main"><span class="pf-row-title" data-i18n="cf.cashflow">Record a deposit or withdrawal</span>
+                <span class="pf-row-sub" data-i18n="cf.cashflowSub">Home already offers this in one tap when the books disagree</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
+            <button class="pf-row" type="button" id="autonomy-row" data-od-id="row-autonomy">
+              <span class="pf-row-main"><span class="pf-row-title" id="autonomy-title">—</span>
+                <span class="pf-row-sub" id="au-detail"></span></span>
+              <span class="pf-row-side"><span class="chip" id="au-state">—</span></span>
+              <span class="pf-chevron" aria-hidden="true"></span>
+            </button>
           </div>
-          <p class="body-sm body-muted" style="margin-top:8px;" id="au-detail"></p>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-danger" type="button" id="au-stop" data-od-id="cta-autonomy-stop" data-i18n="cf.stopAutonomy">Stop autonomous action</button>
-            <button class="btn btn-secondary" type="button" id="au-resume" data-od-id="cta-autonomy-resume" data-i18n="cf.resumeAutonomy" hidden>Restore autonomous action</button>
-          </div>
-        </div>
-      </details>
+          <p class="pf-fine pf-card-foot cf-status" id="advanced-status" role="status" aria-live="polite"></p>
+        </article>
 
-      <details class="settings-group" id="form-password" data-od-id="form-password">
-        <summary data-i18n="cf.password">Console password</summary>
-        <div class="card">
-          <p class="body-sm body-muted" data-i18n="cf.passwordHint">Rotating it signs every device out, this one included. 16 characters or more, or 8–15 with upper, lower, digit and symbol.</p>
-          <form id="pw-form" autocomplete="off" onsubmit="return false;">
-            <div class="field" style="margin-top:12px;"><label for="pw-current" data-i18n="cf.currentPassword">Current password</label>
-              <input class="input" id="pw-current" type="password" autocomplete="current-password" /></div>
-            <div class="field" style="margin-top:12px;"><label for="pw-new" data-i18n="cf.newPassword">New password</label>
-              <input class="input" id="pw-new" type="password" autocomplete="new-password" /></div>
-            <div class="field" style="margin-top:12px;"><label for="pw-again" data-i18n="cf.newPasswordAgain">New password, again</label>
-              <input class="input" id="pw-again" type="password" autocomplete="new-password" /></div>
-          </form>
-          <div class="btn-row" style="margin-top:20px;">
-            <button class="btn btn-dark" type="button" id="pw-save" data-od-id="cta-password" data-i18n="cf.rotate">Change password</button>
-          </div>
-          <p class="body-sm" style="margin-top:12px;" id="pw-status" role="status" aria-live="polite"></p>
-        </div>
-      </details>
-
-    </div>
-  </section>
-
-  <!-- ── every section of every file ───────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="files">
-    <div class="container">
-      <div class="section-head"><h2 data-i18n="cf.allSections">All settings, by file</h2></div>
-      <p class="body-sm body-muted" data-i18n="cf.allSectionsHint">Each file is edited one top-level section at a time, comments included. A section marked guarded holds limits: loosening one waits a day.</p>
-      <div id="file-list" style="margin-top:12px;"></div>
-    </div>
-  </section>
-
-  <!-- ── recent changes ────────────────────────────────────────────── -->
-  <section class="section" style="padding-top:0;" data-od-id="recent">
-    <div class="container">
-      <div class="section-head"><h2 data-i18n="cf.recent">Recent changes</h2></div>
-      <div class="list list-inset" id="recent-list"></div>
-      <p class="empty" id="recent-empty" data-i18n="cf.noRecent" hidden>No changes made from the console yet.</p>
-    </div>
-  </section>
+      </div>
+    </section>
+  </div>
 
 </main>
 
-<!-- The section editor: one top-level key's text, comments and all. -->
-<dialog class="modal" data-sheet id="editor-dialog" data-od-id="editor-dialog">
-  <form method="dialog" class="dialog-body dialog-tall">
-    <h2 id="editor-title">—</h2>
-    <p class="body-sm body-muted" style="margin-top:8px;" id="editor-copy"></p>
-    <div class="field" style="margin-top:16px;">
-      <label for="editor-text" data-i18n="cf.sectionText">Section text (YAML)</label>
-      <textarea class="textarea textarea-code" id="editor-text" rows="18" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
-    </div>
-    <p class="body-sm" style="margin-top:8px;" id="editor-status" role="status" aria-live="polite"></p>
-  </form>
-  <div class="dialog-foot">
-    <button class="btn btn-green" id="editor-preview" data-i18n="cf.review">Review change</button>
-    <button class="btn btn-secondary" id="editor-cancel" data-i18n="common.cancel">Cancel</button>
-  </div>
-</dialog>
-
-<!-- One confirmation for everything: what will change, whether it waits, the password. -->
-<dialog class="modal" data-sheet id="confirm-dialog" data-od-id="confirm-dialog">
-  <form method="dialog" class="dialog-body dialog-tall" id="confirm-form">
+<!-- One confirmation for everything: what will change in a sentence, whether it waits, the
+     file's own diff folded beneath, and the password when the change loosens a limit. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="confirm-dialog" data-od-id="confirm-dialog" aria-labelledby="confirm-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
     <h2 id="confirm-title">—</h2>
-    <p class="body-sm" style="margin-top:8px;" id="confirm-verdict"></p>
-    <pre class="diffview" id="confirm-diff" hidden></pre>
-    <div id="confirm-summary" class="body-sm" style="margin-top:12px;"></div>
-    <div class="field" style="margin-top:16px;" id="confirm-reason-field">
+    <button class="circle-control" type="button" id="confirm-close" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <form method="dialog" id="confirm-form">
+    <p class="cf-sheet-lead" id="confirm-summary"></p>
+    <p class="pf-fine cf-sheet-note" id="confirm-verdict"></p>
+    <details class="pf-more cf-diff" id="confirm-diff-box" hidden>
+      <summary data-i18n="cf.showDiff">See the file change</summary>
+      <pre class="diffview" id="confirm-diff"></pre>
+    </details>
+    <div class="field cf-sheet-field" id="confirm-reason-field">
       <label for="confirm-reason" data-i18n="ap.reason">Reason (optional)</label>
       <input class="input" id="confirm-reason" type="text" maxlength="500" autocomplete="off" />
     </div>
-    <div class="field" style="margin-top:12px;" id="confirm-password-field" hidden>
+    <div class="field cf-sheet-field" id="confirm-password-field" hidden>
       <label for="confirm-password" data-i18n="cf.confirmPassword">Console password</label>
       <input class="input" id="confirm-password" type="password" autocomplete="current-password" />
     </div>
-    <p class="body-sm" style="margin-top:8px;" id="confirm-status" role="status" aria-live="polite"></p>
+    <p class="pf-fine cf-sheet-status" id="confirm-status" role="status" aria-live="polite"></p>
   </form>
-  <div class="dialog-foot">
-    <button class="btn btn-dark" id="confirm-submit">—</button>
-    <button class="btn btn-secondary" id="confirm-cancel" data-i18n="common.cancel">Cancel</button>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="confirm-submit">—</button>
+    <button class="btn btn-secondary" type="button" id="confirm-cancel" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- When research runs: the day and the time on the face of it, three rarer choices beneath. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="schedule-sheet" data-od-id="schedule-sheet" aria-labelledby="schedule-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="schedule-title" data-i18n="cf.scheduleTime">Research time</h2>
+    <button class="circle-control" type="button" data-close-sheet="schedule-sheet" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <div id="sc-days-field">
+    <p class="cf-label" id="sc-days-label" data-i18n="cf.weekday">Day of the week</p>
+    <div class="cf-days" role="radiogroup" aria-labelledby="sc-days-label" id="sc-days"></div>
+  </div>
+  <p class="pf-fine cf-daily-note" id="sc-daily-note" data-i18n="cf.dailyNote" hidden>Some research here runs every day, so the job fires daily at this time.</p>
+  <div class="field cf-time">
+    <label class="cf-label" for="sc-time" data-i18n="cf.time">Time</label>
+    <input class="input cf-time-input" id="sc-time" type="time" step="60" />
+    <p class="pf-fine" data-i18n="cf.timeHint">By this Mac's clock, not the phone's.</p>
+  </div>
+  <details class="pf-more cf-more" id="sc-more">
+    <summary data-i18n="cf.moreOptions">More options</summary>
+    <div class="cf-option">
+      <span class="cf-option-name"><span data-i18n="cf.maxDaily">Analyses per day, at most</span>
+        <span class="pf-fine" data-i18n="cf.maxDailyHint">Research you start by hand counts too</span></span>
+      <span class="cf-stepper">
+        <button type="button" class="cf-step" id="sc-budget-less" data-i18n-aria="cf.fewer" aria-label="Fewer">−</button>
+        <output id="sc-budget">—</output>
+        <button type="button" class="cf-step" id="sc-budget-more" data-i18n-aria="cf.more" aria-label="More">+</button>
+      </span>
+    </div>
+    <div class="cf-option cf-option-stack">
+      <span class="cf-option-name" id="sc-holiday-label" data-i18n="cf.holiday">On a day the market is shut</span>
+      <span class="cf-seg" role="radiogroup" aria-labelledby="sc-holiday-label" id="sc-holiday"></span>
+    </div>
+    <div class="cf-option cf-option-stack">
+      <span class="cf-option-name" id="sc-paused-label" data-i18n="cf.whilePaused">While orders are paused</span>
+      <span class="cf-seg" role="radiogroup" aria-labelledby="sc-paused-label" id="sc-paused"></span>
+    </div>
+  </details>
+  <p class="pf-fine cf-sheet-status" id="sc-status" role="status" aria-live="polite"></p>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="sc-save" data-od-id="cta-save-schedule" data-i18n="cf.review">Review change</button>
+    <button class="btn btn-secondary" type="button" data-close-sheet="schedule-sheet" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- The macro calendar: dates kept by hand from the primary sources. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="calendar-sheet" data-od-id="calendar-sheet" aria-labelledby="calendar-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="calendar-title" data-i18n="cf.calendar">Macro calendar</h2>
+    <button class="circle-control" type="button" data-close-sheet="calendar-sheet" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <p class="pf-fine" data-i18n="cf.calendarHint">FOMC, CPI and payrolls dates, kept by hand from the primary sources. Autonomous opens stop past the maintained-through date.</p>
+  <div class="field cf-sheet-field">
+    <label class="cf-label" for="cal-through" data-i18n="cf.maintainedThrough">Maintained through</label>
+    <input class="input cf-time-input" id="cal-through" type="date" />
+  </div>
+  <p class="cf-label cf-sheet-field" data-i18n="cf.events">Events</p>
+  <div class="pf-rows cf-events" id="cal-events"></div>
+  <details class="pf-more cf-more" id="cal-more">
+    <summary data-i18n="cf.addEvent">Add an event</summary>
+    <div class="cf-add">
+      <input class="input cf-time-input" id="cal-date" type="date" data-i18n-aria="cf.date" aria-label="Date" />
+      <select class="select" id="cal-kind" data-i18n-aria="cf.kind" aria-label="Kind">
+        <option value="fomc_decision" data-i18n="cf.kind.fomc_decision">FOMC decision</option>
+        <option value="cpi" data-i18n="cf.kind.cpi">CPI</option>
+        <option value="payrolls" data-i18n="cf.kind.payrolls">Payrolls</option>
+        <option value="pce" data-i18n="cf.kind.pce">PCE</option>
+        <option value="gdp" data-i18n="cf.kind.gdp">GDP</option>
+      </select>
+      <input class="input" id="cal-note" type="text" autocomplete="off" data-i18n-ph="cf.notePh" placeholder="" />
+      <button class="btn btn-secondary" type="button" id="cal-add" data-i18n="common.add">Add</button>
+    </div>
+  </details>
+  <p class="pf-fine cf-sheet-status" id="cal-status" role="status" aria-live="polite"></p>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="cal-save" data-od-id="cta-save-calendar" data-i18n="cf.review">Review change</button>
+    <button class="btn btn-secondary" type="button" data-close-sheet="calendar-sheet" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- The console password. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="password-sheet" data-od-id="password-sheet" aria-labelledby="password-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="password-title" data-i18n="cf.password">Console password</h2>
+    <button class="circle-control" type="button" data-close-sheet="password-sheet" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <p class="pf-fine" data-i18n="cf.passwordHint">Rotating it signs every device out, this one included. 16 characters or more, or 8–15 with upper, lower, digit and symbol.</p>
+  <form id="pw-form" autocomplete="off" onsubmit="return false;">
+    <div class="field cf-sheet-field"><label for="pw-current" data-i18n="cf.currentPassword">Current password</label>
+      <input class="input" id="pw-current" type="password" autocomplete="current-password" /></div>
+    <div class="field cf-sheet-field"><label for="pw-new" data-i18n="cf.newPassword">New password</label>
+      <input class="input" id="pw-new" type="password" autocomplete="new-password" /></div>
+    <div class="field cf-sheet-field"><label for="pw-again" data-i18n="cf.newPasswordAgain">New password, again</label>
+      <input class="input" id="pw-again" type="password" autocomplete="new-password" /></div>
+  </form>
+  <p class="pf-fine cf-sheet-status" id="pw-status" role="status" aria-live="polite"></p>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="pw-save" data-od-id="cta-password" data-i18n="cf.rotate">Change password</button>
+    <button class="btn btn-secondary" type="button" data-close-sheet="password-sheet" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- Advanced: a cash flow recorded by hand. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="cashflow-sheet" data-od-id="cashflow-sheet" aria-labelledby="cashflow-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="cashflow-title" data-i18n="cf.cashflow">Record a deposit or withdrawal</h2>
+    <button class="circle-control" type="button" data-close-sheet="cashflow-sheet" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <p class="pf-fine" data-i18n="cf.cashflowHint">Money moved in or out of a bucket must be recorded, or the drawdown ladder reads a deposit as performance.</p>
+  <div class="field cf-sheet-field"><label for="cash-bucket" data-i18n="cf.bucket">Bucket</label>
+    <select class="select" id="cash-bucket"><option value="micro_live">micro_live</option><option value="core">core</option><option value="sandbox">sandbox</option></select></div>
+  <div class="field cf-sheet-field"><label for="cash-kind" data-i18n="cf.kind">Kind</label>
+    <select class="select" id="cash-kind"><option value="deposit" data-i18n="cf.deposit">deposit</option><option value="withdrawal" data-i18n="cf.withdrawal">withdrawal</option><option value="income" data-i18n="cf.income">income (interest, dividend)</option><option value="fee" data-i18n="cf.fee">fee</option></select></div>
+  <div class="field cf-sheet-field"><label for="cash-amount" data-i18n="cf.amount">Amount (USD)</label>
+    <input class="input" id="cash-amount" type="number" inputmode="decimal" min="0.01" step="0.01" /></div>
+  <div class="field cf-sheet-field"><label for="cash-date" data-i18n="cf.date">Date</label>
+    <input class="input cf-time-input" id="cash-date" type="date" /></div>
+  <div class="field cf-sheet-field"><label for="cash-reason" data-i18n="ap.reason">Reason (optional)</label>
+    <input class="input" id="cash-reason" type="text" maxlength="500" autocomplete="off" /></div>
+  <p class="pf-fine cf-sheet-status" id="cash-status" role="status" aria-live="polite"></p>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="cash-save" data-od-id="cta-cashflow" data-i18n="cf.record">Record</button>
+    <button class="btn btn-secondary" type="button" data-close-sheet="cashflow-sheet" data-i18n="common.cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- Advanced: what was changed from the console, newest first. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="recent-sheet" data-od-id="recent-sheet" aria-labelledby="recent-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 id="recent-title" data-i18n="cf.recent">Recent changes</h2>
+    <button class="circle-control" type="button" data-close-sheet="recent-sheet" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <div class="pf-rows cf-events" id="recent-list"></div>
+  <p class="pf-fine" id="recent-empty" data-i18n="cf.noRecent" hidden>No changes made from the console yet.</p>
+</dialog>
+
+<!-- Advanced: the section editor, one top-level key's text, comments and all. -->
+<dialog class="glass-sheet cf-sheet" data-sheet id="editor-dialog" data-od-id="editor-dialog" aria-labelledby="editor-title">
+  <div class="sheet-grip"></div>
+  <div class="glass-sheet-head">
+    <h2 class="cf-editor-title" id="editor-title">—</h2>
+    <button class="circle-control" type="button" data-close-sheet="editor-dialog" data-i18n-aria="common.close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </div>
+  <p class="pf-fine" id="editor-copy"></p>
+  <div class="field cf-sheet-field">
+    <label for="editor-text" data-i18n="cf.sectionText">Section text (YAML)</label>
+    <textarea class="textarea textarea-code" id="editor-text" rows="10" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+  </div>
+  <p class="pf-fine cf-sheet-status" id="editor-status" role="status" aria-live="polite"></p>
+  <div class="btn-row cf-sheet-actions">
+    <button class="btn btn-dark" type="button" id="editor-preview" data-i18n="cf.review">Review change</button>
+    <button class="btn btn-secondary" type="button" id="editor-cancel" data-close-sheet="editor-dialog" data-i18n="common.cancel">Cancel</button>
   </div>
 </dialog>
 

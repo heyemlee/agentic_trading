@@ -16,7 +16,7 @@ evaluation.html  Evaluation forward record against the declared benchmark
 more.html        Me        preferences, account/device and supporting-tool links
 notifications.html Devices signed-in devices, push status and a test
 profile.html     Context   my personal context, read by the assistant
-settings.html    Settings  schedule, watchlist, calendar, cash flows, every config section
+settings.html    Settings  research time and switches, macro calendar, password; Advanced holds every config section
 login.html       Sign in   owner passphrase; the one page served without a session
 
 assets/console.css   tokens, components, motion
@@ -347,8 +347,27 @@ with its limits, its one number (the share of each holding kept; the confidence 
 never below `limits.confidence_floors.autonomous_any`) and the console password, and posts
 `POST /autonomy/switch`; the change applies at once. Off, pause and resume take a second tap, as
 the ledger's booking buttons do. Autonomy the system withdrew shows as stopped, with a Restore
-that asks for the password (`POST /autonomy/resume`). Settings and System keep their own
-controls; both screens post the same calls and read the same state.
+that asks for the password (`POST /autonomy/resume`). Settings points here with a row that says
+which way the switches stand, and keeps the standing stop (`POST /autonomy/stop`) under Advanced;
+System keeps the kill switch. All of them read the same state.
+
+Settings (`<body class="theme-mono pf-glass">`, Me's glass in ink) is written for a thumb. The
+page a person lands on holds what they decide and nothing else: what is still cooling, with its
+Withdraw; when research runs; three research switches (the candidate-ETF study, SEC Form 4,
+Reddit); the macro calendar; the console password; and a row to Home's Agentic account. Every
+row is one target at least 64px tall, and the page has no free-standing buttons. A switch is
+drawn from `config.research.switches` and only where the API reports it, and it moves only when
+that reading changes: a tap asks `POST /config/preview` for `{switch, on}` and opens the one
+confirmation sheet, which says in a sentence what will change, folds the file's own diff
+beneath it, and asks for the password and a reason only when the change loosens a limit and
+will wait. The SEC switch says which variable to set, without a request, while the contact is
+missing. Forms (the research time, the calendar, the password) open in sheets and edit a draft
+taken, with the file's revision, when the sheet opened, so a poll never moves a choice under a
+thumb and a file that changed meanwhile is a conflict the server names. Advanced is the same
+page under `?view=advanced`: every config file by section with the YAML editor, the change
+record, a cash flow recorded by hand, the autonomy stop. The header's arrow comes back from it
+through history, and goes to Settings first when the page was opened cold on Advanced. The
+page reads `config` (60s) and nothing else, as before.
 
 
 Assistant uses `assistant` (5s, stale after 5 minutes) for

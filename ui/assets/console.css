@@ -1385,3 +1385,112 @@ html:has(> body.theme-mono) { background: #fff; }
 .pc-fact strong { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .pc-fact p { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 @media (prefers-reduced-motion: reduce) { .pc-topic, .pc-editor { transition: none; } }
+
+/* ─── Settings: a few rows and switches, drawn in Me's glass ─────────────
+   <main class="me-page cf-page"> takes the card, the rows and the bead from Me. What follows
+   is what a page of settings adds: a switch, the sheets that hold a form, and the plainer
+   lists under Advanced. Ink on glass like the rest of Me; amber and red keep their meaning. */
+.cf-page .pf-row-side { flex-direction: row; align-items: center; }
+.cf-page .pf-row-value { font-size: 15px; font-weight: 500; color: var(--pf-ink-2); }
+.cf-page .pf-row-value.is-warn, .cf-page .pf-row-sub.is-warn { color: var(--warn-ink); }
+.cf-page .pf-quiet, .cf-sheet .pf-quiet { min-height: 44px; }
+.cf-page .chip { font-variant-numeric: tabular-nums; }
+.cf-danger { color: var(--danger-ink); }
+
+/* The switch. It shows what the server last said and moves only when that changes: a tap
+   opens the confirmation, it does not flip anything. */
+.cf-toggle {
+  position: relative; flex: none; width: 51px; height: 31px; margin-right: 2px; border-radius: 999px;
+  background: #dcdce0; box-shadow: inset 0 0 0 .5px rgba(13, 13, 13, .06);
+  transition: background 220ms ease, opacity 160ms ease;
+}
+.cf-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 5px rgba(13, 13, 13, .2), 0 0 0 .5px rgba(13, 13, 13, .05);
+  transition: transform 300ms var(--pf-settle, cubic-bezier(.22, 1, .36, 1));
+}
+[role="switch"][aria-checked="true"] > .cf-toggle { background: var(--green); }
+[role="switch"][aria-checked="true"] > .cf-toggle::after { transform: translateX(20px); }
+[role="switch"][aria-disabled="true"] > .cf-toggle, [role="switch"]:disabled > .cf-toggle { opacity: .45; }
+.cf-page button.pf-row:disabled { cursor: default; }
+
+/* sheets: one sentence, then whatever the change needs */
+.cf-sheet-lead { font-size: 16px; line-height: 1.62; overflow-wrap: anywhere; }
+.cf-sheet-note { margin-top: 8px; }
+.cf-sheet-note.is-cooling { color: var(--danger-ink); }
+.cf-sheet-field { margin-top: 14px; }
+.cf-sheet-status { margin-top: 12px; overflow-wrap: anywhere; }
+.cf-sheet-actions { margin-top: 20px; }
+.cf-diff { margin-top: 18px; border-bottom: 1px solid var(--pf-line); }
+.cf-diff .diffview { margin: 0 0 14px; }
+.cf-label { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--pf-ink-2); }
+.cf-label.cf-sheet-field { margin-top: 18px; }
+.glass-sheet-head .cf-editor-title { font-family: var(--font-mono); font-size: 15px; line-height: 1.4; letter-spacing: 0; overflow-wrap: anywhere; }
+
+.cf-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cf-day {
+  min-height: 44px; padding: 0; border: 0; border-radius: 999px; background: #f3f3f3; color: var(--pf-ink);
+  font-size: 15px; font-weight: 600;
+  transition: background 160ms ease, color 160ms ease, transform 260ms var(--pf-spring, ease);
+}
+.cf-day[aria-checked="true"] { background: var(--green); color: var(--green-contrast); }
+.cf-day.is-pressed, .cf-step.is-pressed { transform: scale(.94); }
+.cf-daily-note { margin-top: 4px; }
+.cf-time { margin-top: 20px; gap: 0; }
+.cf-time .pf-fine { margin-top: 8px; }
+.cf-time .cf-time-input { font-size: 20px; font-weight: 600; }
+/* iOS draws a date or a time as a centred pill of its own width; here it is a field like the rest. */
+.cf-time-input { -webkit-appearance: none; appearance: none; width: 100%; text-align: left; font-variant-numeric: tabular-nums; }
+.cf-time-input::-webkit-date-and-time-value { text-align: left; }
+
+.cf-more { margin-top: 18px; border-bottom: 1px solid var(--pf-line); }
+.cf-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--pf-line); }
+.cf-option-stack { flex-direction: column; align-items: stretch; gap: 10px; }
+.cf-option-name { font-size: 15px; font-weight: 600; }
+.cf-option-name .pf-fine { display: block; font-weight: 400; }
+.cf-stepper { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.cf-step {
+  width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: #f3f3f3; color: var(--pf-ink);
+  font-size: 22px; line-height: 1; transition: transform 260ms var(--pf-spring, ease);
+}
+.cf-stepper output { min-width: 2ch; text-align: center; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cf-seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px; border-radius: 999px; background: #f0f0f0; }
+.cf-seg button {
+  min-height: 40px; padding: 6px 10px; border: 0; border-radius: 999px; background: none; color: var(--pf-ink-2);
+  font-size: 14px; font-weight: 500;
+}
+.cf-seg button[aria-checked="true"] { background: #fff; color: var(--pf-ink); box-shadow: 0 1px 3px #0000001f, 0 0 0 .5px #0000000f; }
+
+/* a list inside a sheet: events, the change record */
+.cf-events .pf-row { min-height: 56px; padding-inline: 0; border-radius: 0; }
+.cf-events .pf-row + .pf-row:not(:has(> .pf-orb))::before { left: 0; right: 0; }
+.cf-events .pf-row .chip { flex: none; }
+.cf-add { display: grid; gap: 8px; padding: 4px 0 14px; }
+
+/* Advanced: a file opens in place to its sections; a section opens the editor */
+.cf-file + .cf-file { border-top: 1px solid var(--pf-line); }
+.cf-file > summary { list-style: none; cursor: pointer; }
+.cf-file > summary::-webkit-details-marker { display: none; }
+.cf-file > summary .pf-chevron { transition: transform 240ms var(--pf-settle, ease); }
+.cf-file[open] > summary .pf-chevron { transform: rotate(135deg); }
+.cf-file > summary.is-pressed { background: rgba(13, 13, 13, .07); }
+.cf-file > summary:focus-visible { outline: 2px solid var(--pf-ink); outline-offset: -2px; }
+.cf-sections { margin: 0 10px 10px; padding: 4px 0; border-radius: 16px; background: var(--pf-fill); }
+.cf-section {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 8px 14px;
+  border: 0; border-radius: 12px; background: none; color: var(--pf-ink); text-align: left;
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: 0;
+}
+.cf-section.is-pressed { background: rgba(13, 13, 13, .07); }
+.cf-section-key { min-width: 0; overflow-wrap: anywhere; }
+.cf-section .chip { flex: none; font-family: var(--font-body); }
+.cf-section-meta { flex: none; margin-left: auto; font-family: var(--font-body); font-size: 12px; color: var(--pf-ink-3); }
+
+/* A finger on a field smaller than 16px makes iOS zoom the whole page in and leave it there. */
+@media (pointer: coarse) { .cf-sheet .textarea-code { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .cf-toggle, .cf-toggle::after, .cf-day, .cf-step, .cf-file > summary .pf-chevron { transition: none; } }
+@media (forced-colors: active) {
+  .cf-toggle { border: 1px solid CanvasText; }
+  [role="switch"][aria-checked="true"] > .cf-toggle { background: Highlight; }
+  .cf-day[aria-checked="true"], .cf-seg button[aria-checked="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}

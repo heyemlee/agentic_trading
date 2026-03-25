@@ -519,15 +519,24 @@ every TODO is resolved (or `accept_all_recommended_defaults: true`).
 
 ### Configuration changes from the console
 
-Since 2026-09-17 the console's Settings page (More → Settings) edits `risk_profile.yaml`,
+Since 2026-09-17 the console's Settings page (Me → Settings) edits `risk_profile.yaml`,
 `investor_profile.yaml` and `event_calendar.yaml`. The mandate documents and `.env` are not
-offered. Two ways in, one pipeline (`agentic_trading/config_changes.py`):
+offered. Three ways in, one pipeline (`agentic_trading/config_changes.py`):
 
-- **Forms** for the things that change often — research schedule, stock watchlist, macro
-  event calendar — set named values; the file is rewritten by a round-trip YAML writer with
-  every comment kept, and only the edited lines differ.
-- **Section editor** for everything else: one top-level key's text, comment block included,
-  replaced verbatim. The key may not be renamed and sections may not be added or removed.
+- **Research switches**, on the page's face: the Agentic account's candidate study, SEC Form 4
+  and Reddit. The request names the switch (`switch`, `on`) and never a key; the keys are
+  `config_changes.RESEARCH_SWITCHES`, and a switch may create its own key where the file never
+  declared it (`RESEARCH_CREATES`, a closed list beside the plan's `CREATABLE`), because a
+  source that is off is usually written by saying nothing. None of the three is guarded, so
+  each applies at once. Two refusals come before anything is written: SEC Form 4 is not
+  switched on until `CT_SEC_CONTACT` is set and well formed, and a candidate study is switched
+  only for an account already named under `research_schedule.accounts`.
+- **Forms** for what changes now and then — when research runs, the macro event calendar —
+  set named values; the file is rewritten by a round-trip YAML writer with every comment kept,
+  and only the edited lines differ. A value can never create a setting.
+- **Section editor**, under Advanced, for everything else: one top-level key's text, comment
+  block included, replaced verbatim. The key may not be renamed and sections may not be added
+  or removed.
 
 Whichever way, the rebuilt file is loaded by the same `load_profiles` the service runs on
 before anything is written; a file the service could not load is refused with the loader's
@@ -550,9 +559,15 @@ Every applied change is committed locally to this checkout (`git log -- config/`
 the paths touched. A schedule change re-registers the research launchd job by itself, without
 restarting the API (`launchd.reregister_research`), and reports what it did beside the change.
 
-The same page records deposits and withdrawals (`POST /portfolio/cashflow`, the same call as
-`ct-state cashflow`), stops or restores autonomous action (`ct-autonomy stop`/`resume`; restoring
-needs the password), and rotates the console password (which signs every device out).
+The same page rotates the console password (which signs every device out) and, under Advanced,
+records deposits and withdrawals (`POST /portfolio/cashflow`, the same call as
+`ct-state cashflow`) and stops or restores autonomous action (`ct-autonomy stop`/`resume`;
+restoring needs the password).
+
+Because the page commits every change to `config/` on `main`, a switch flipped from the phone
+moves a tracked file under the test suite. A test that needs a research switch, or the research
+time, one way puts its own copy of the config that way first; it does not read this
+deployment's.
 
 ## Tests
 

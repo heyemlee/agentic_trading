@@ -886,7 +886,6 @@ window.CT = (function () {
       "research_schedule.launchd.minute": 30, "research_schedule.on_non_session_day": "previous_session",
       "research_schedule.tickers": [], "research_schedule.max_tickers_per_run": 3,
       "research_schedule.max_analyses_per_day": 6, "research_schedule.run_while_paused": true,
-      "universe.core.individual_stocks.watchlist": ["AAPL"],
       "maintained_through": "2026-12-10",
       "events": [{ date: "2026-10-28", kind: "fomc_decision", note: "October 27-28 meeting; statement day" },
                  { date: "2026-11-10", kind: "cpi", note: "October 2026 CPI" }],
@@ -904,6 +903,18 @@ window.CT = (function () {
                apply_after: null, status: "applied", applied_at: "2026-09-15T09:00:00+00:00",
                outcome: { git: "committed 1a2b3c4" }, error: null }],
     autonomy: { armed: false, withdrawn: false, reason: null, at: null },
+    /* What research studies and reads, as Settings draws its three switches. The SEC contact
+       is only ever "set" or not: the words themselves stay in .env. */
+    research: {
+      fires_every: "weekly",
+      switches: {
+        candidates: { on: true, path: "research_schedule.accounts.micro_live.candidates.enabled", available: true,
+                      period: "weekly", max_tickers_per_run: 3, tickers: ["VTI", "VXUS", "BND"] },
+        sec_form4: { on: true, path: "research_web_access.sources.sec_form4.enabled", available: true,
+                     contact: { set: true, variable: "CT_SEC_CONTACT" } },
+        reddit: { on: false, path: "research_web_access.sources.reddit.enabled", available: true },
+      },
+    },
     launchd_managed: true,
   };
 

@@ -3583,15 +3583,21 @@ test('an approval the API refused before sending is a plain failure, not an unce
   assert.equal(timedOut.element('btn-approve').disabled, true);
 });
 
-/* ── settings: config edits go through one preview-then-confirm sheet ───── */
+/* ── settings: a few rows and switches; every write goes through one preview-then-confirm sheet ───── */
+const SWITCH_NAMES = ['candidates', 'sec_form4', 'reddit'];
 function settingsPage(overrides, preview) {
   const c = context(true); c.run('console.js');
   Object.assign(c.CT, overrides || {});
   c.Console.mount = c.Console.wireTabs = () => {};
-  c.Console.live = (keys, render) => { c.render = render; render(); };
+  c.Console.live = (keys, render) => { c.liveKeys = keys; c.render = render; render(); };
   c.Console.openSheet = id => { c.element(id).open = true; };
   c.Console.closeSheet = id => { c.element(id).open = false; };
   c.posted = [];
+  // The stand-in element forgets attributes; a switch's state is written as one, so keep these.
+  for (const name of SWITCH_NAMES) {
+    const row = c.element('switch-' + name);
+    row.attrs = {}; row.setAttribute = (key, value) => { row.attrs[key] = value; };
+  }
   c.CT_API = { canAct: () => true, isLive: () => true, writesEnabled: true, authenticated: true,
     readOnce: async () => {}, fetchJSON: async () => ({ text: 'x: 1', revision: 'r', guarded: false }),
     post: async (url, body) => {
@@ -3602,25 +3608,169 @@ function settingsPage(overrides, preview) {
   c.run('pages/settings.js');
   return c;
 }
+const demoConfig = () => JSON.parse(JSON.stringify(context(true).CT.config));
+const tapOn = (c, id, dataset) => c.element(id).events.click({ target: { closest: () => ({ dataset }) } });
+const route = (c, search) => { c.location.search = search; c.document.dispatchEvent({ type: 'ct:route' }); };
 
-test('settings lists what is cooling, with a withdraw control, and every section by file', () => {
+test('settings opens on what a person decides: what is cooling, when research runs, three switches', () => {
   const c = settingsPage();
+  assert.deepEqual([...c.liveKeys], ['config'], 'the page polls nothing it did not poll before');
+  assert.equal(c.element('cf-main').hidden, false);
+  assert.equal(c.element('cf-advanced').hidden, true);
+  // what is cooling, in words, with the way to withdraw it
   assert.equal(c.element('pending-section').hidden, false);
   const pending = c.element('pending-list').innerHTML;
   assert.ok(pending.includes('data-cancel="demo1"') && pending.includes('cf.withdraw'));
-  assert.ok(pending.includes('micro_live_execution.max_capital_usd'));
-  const files = c.element('file-list').innerHTML;
-  assert.ok(files.includes('data-edit-key="micro_live_execution"') && files.includes('cf.guarded'));
-  assert.ok(files.includes('event_calendar.yaml'));
-  assert.equal(c.element('sc-hour').value, '13');
-  assert.ok(c.element('wl-chips').innerHTML.includes('data-wl-remove="AAPL"'));
-  assert.ok(c.element('recent-list').innerHTML.includes('committed abc') || c.element('recent-list').innerHTML.includes('applied'));
+  assert.ok(pending.includes('micro_live_execution.max_capital_usd $2,000 → $2,500'), pending);
+  // when research runs
+  assert.equal(c.element('schedule-value').textContent, 'cf.everyWeek cf.day.5 13:30');
+  // the switches, as the server reports them
+  assert.deepEqual(SWITCH_NAMES.map(name => c.element('switch-' + name).attrs['aria-checked']), ['true', 'true', 'false']);
+  assert.ok(SWITCH_NAMES.every(name => c.element('switch-' + name).hidden === false));
+  assert.match(c.element('switch-candidates-sub').textContent, /^VTI.*VXUS.*BND · cf\.onceWeekly$/);
+  assert.equal(c.element('switch-sec_form4-sub').textContent, 'cf.form4Sub');
+  assert.equal(c.element('switch-reddit-sub').textContent, 'cf.redditSub');
+  // upkeep
+  assert.equal(c.element('calendar-value').textContent, 'cf.through Dec 10');
+  assert.equal(c.element('auto-state').textContent, 'cf.autonomyOff');
+
+  // An API that does not report the switches yet is shown none: a guess drawn as a switch is worse.
+  const older = demoConfig(); delete older.research;
+  const bare = settingsPage({ config: older });
+  assert.ok(SWITCH_NAMES.every(name => bare.element('switch-' + name).hidden === true));
+  assert.equal(bare.element('schedule-value').textContent, 'cf.everyWeek cf.day.5 13:30');
+
+  // Scheduled research switched off as a whole is said where its time would be.
+  const idle = demoConfig(); idle.values['research_schedule.enabled'] = false;
+  assert.equal(settingsPage({ config: idle }).element('schedule-value').textContent, 'cf.scheduleOff');
+});
+
+test('a switch names itself to the server, shows one confirmation, and moves only when the server has', async () => {
+  const c = settingsPage();
+  c.element('switch-reddit').events.click();
+  await flush();
+  // The request names the switch. It carries no key and no value of its own to set or create.
+  assert.equal(JSON.stringify(c.posted), JSON.stringify([{ url: '/config/preview',
+    body: { file: 'risk_profile.yaml', revision: 'demo-risk', switch: 'reddit', on: true } }]));
+  assert.equal(c.element('confirm-dialog').open, true);
+  assert.equal(c.element('confirm-title').textContent, 'cf.sw.reddit.onTitle');
+  assert.match(c.element('confirm-summary').innerHTML, /^cf\.sw\.reddit\.on /);
+  assert.equal(c.element('confirm-verdict').textContent, 'cf.immediateVerdict');
+  assert.equal(c.element('confirm-submit').textContent, 'cf.turnOn');
+  assert.equal(c.element('confirm-password-field').hidden, true);
+  assert.equal(c.element('confirm-reason-field').hidden, true, 'one step: a sentence and a button');
+  // the file's own diff is there, folded under the sentence
+  assert.equal(c.element('confirm-diff-box').hidden, false);
+  assert.equal(c.element('confirm-diff-box').open, false);
+  assert.ok(c.element('confirm-diff').innerHTML.includes('diff-add'));
+  assert.equal(c.element('switch-reddit').attrs['aria-checked'], 'false', 'opening the sheet flips nothing');
+
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(c.posted[1].url, '/config/changes');
+  assert.equal(JSON.stringify(c.posted[1].body), JSON.stringify({ file: 'risk_profile.yaml', revision: 'demo-risk',
+    switch: 'reddit', on: true, reason: 'switched on from Settings' }));
+  assert.equal(c.element('confirm-dialog').open, false);
+  assert.match(c.element('research-status').textContent, /^cf\.switchedOn cf\.sw\.reddit\.name$/);
+  assert.equal(c.element('switch-reddit').attrs['aria-checked'], 'false', 'not until the server reports it');
+  c.CT.config.research.switches.reddit.on = true; c.render();
+  assert.equal(c.element('switch-reddit').attrs['aria-checked'], 'true');
+
+  // One that is on asks to be turned off.
+  c.element('switch-candidates').events.click();
+  await flush();
+  assert.equal(JSON.stringify(c.posted[2].body), JSON.stringify({ file: 'risk_profile.yaml', revision: 'demo-risk',
+    switch: 'candidates', on: false }));
+  assert.equal(c.element('confirm-title').textContent, 'cf.sw.candidates.offTitle');
+  assert.equal(c.element('confirm-submit').textContent, 'cf.turnOff');
+});
+
+test('a switch that could not work says why here, before any request', async () => {
+  const config = demoConfig();
+  config.research.switches.sec_form4 = { on: false, available: true, contact: { set: false, variable: 'CT_SEC_CONTACT' } };
+  config.research.switches.candidates = { on: false, available: false, tickers: [] };
+  const c = settingsPage({ config });
+  assert.equal(c.element('switch-sec_form4-sub').textContent, 'cf.form4NoContact');
+  assert.match(c.element('switch-sec_form4-sub').className, /is-warn/);
+  c.element('switch-sec_form4').events.click();
+  await flush();
+  assert.equal(c.posted.length, 0, 'the SEC is asked nothing until the deployment says who is asking');
+  assert.equal(c.element('research-status').textContent, 'cf.form4NeedsContact CT_SEC_CONTACT');
+  assert.equal(c.element('confirm-dialog').open, undefined);
+
+  assert.equal(c.element('switch-candidates-sub').textContent, 'cf.candidatesUnavailable');
+  assert.equal(c.element('switch-candidates').attrs['aria-disabled'], 'true');
+  c.element('switch-candidates').events.click();
+  await flush();
+  assert.equal(c.posted.length, 0);
+  assert.equal(c.element('research-status').textContent, 'cf.candidatesUnavailable');
+  // Where the engine gave its own reason, that is what is shown, as it wrote it.
+  config.research.switches.candidates.why = 'research_schedule could not be read: x'; c.render();
+  assert.equal(c.element('switch-candidates-sub').textContent, 'research_schedule could not be read: x');
+
+  // Turning a source off never needs the contact, and one left on without it says what that means.
+  config.research.switches.sec_form4.on = true; c.render();
+  assert.equal(c.element('switch-sec_form4-sub').textContent, 'cf.form4OnNoContact');
+  c.element('switch-sec_form4').events.click();
+  await flush();
+  assert.equal(c.posted.length, 1);
+  assert.equal(c.posted[0].body.on, false);
+});
+
+test('the research time is a day and a time, and only what moved is sent', async () => {
+  const c = settingsPage();
+  c.element('schedule-row').events.click();
+  assert.equal(c.element('schedule-sheet').open, true);
+  assert.equal(c.element('sc-time').value, '13:30');
+  assert.ok(c.element('sc-days').innerHTML.includes('data-day="5" aria-checked="true"'));
+  assert.equal(c.element('sc-days-field').hidden, false);
+  assert.equal(c.element('sc-budget').textContent, '6');
+
+  c.element('sc-save').events.click();
+  assert.equal(c.element('sc-status').textContent, 'cf.noChange');
+  c.element('sc-time').value = '';
+  c.element('sc-save').events.click();
+  assert.equal(c.element('sc-status').textContent, 'cf.timeNeeded');
+  assert.equal(c.posted.length, 0, 'nothing to preview yet');
+
+  tapOn(c, 'sc-days', { day: '4' });
+  assert.ok(c.element('sc-days').innerHTML.includes('data-day="4" aria-checked="true"'));
+  c.element('sc-time').value = '14:30';
+  c.element('sc-budget-more').events.click();
+  tapOn(c, 'sc-holiday', { value: 'skip' });
+  c.element('sc-save').events.click();
+  await flush();
+  assert.equal(JSON.stringify(c.posted[0]), JSON.stringify({ url: '/config/preview', body: { file: 'risk_profile.yaml',
+    revision: 'demo-risk', set: { 'research_schedule.launchd.hour': 14, 'research_schedule.max_analyses_per_day': 7,
+      'research_schedule.on_non_session_day': 'skip', 'research_schedule.launchd.weekday': 4 } } }));
+  const summary = c.element('confirm-summary').innerHTML;
+  assert.ok(summary.includes('cf.everyWeek cf.day.5 13:30 → cf.everyWeek cf.day.4 14:30'), summary);
+  assert.ok(summary.includes('6 → 7') && summary.includes('cf.holidayPrevious → cf.holidaySkip'), summary);
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(c.posted[1].url, '/config/changes');
+  assert.equal(c.element('schedule-sheet').open, false);
+  assert.match(c.element('research-status').textContent, /^cf\.scheduleApplied/);
+
+  // Once any study runs daily the job fires daily, so there is no weekday to choose or to send.
+  const config = demoConfig(); config.research.fires_every = 'daily';
+  const daily = settingsPage({ config });
+  assert.equal(daily.element('schedule-value').textContent, 'cf.everyDay 13:30');
+  daily.element('schedule-row').events.click();
+  assert.equal(daily.element('sc-days-field').hidden, true);
+  assert.equal(daily.element('sc-daily-note').hidden, false);
+  daily.element('sc-time').value = '09:05';
+  daily.element('sc-save').events.click();
+  await flush();
+  assert.equal(JSON.stringify(daily.posted[0].body.set), JSON.stringify({ 'research_schedule.launchd.hour': 9,
+    'research_schedule.launchd.minute': 5 }));
 });
 
 test('a loosening change previews, then needs the password before it is sent', async () => {
   const c = settingsPage({}, { changed: true, classification: 'cooling', diff: '-  max_capital_usd: 2000\n+  max_capital_usd: 2500',
     reasons: ['micro_live_execution.max_capital_usd'] });
-  c.element('sc-hour').value = '14';
+  c.element('schedule-row').events.click();
+  c.element('sc-time').value = '14:30';
   c.element('sc-save').events.click();
   await flush();
   assert.equal(c.posted[0].url, '/config/preview');
@@ -3628,6 +3778,10 @@ test('a loosening change previews, then needs the password before it is sent', a
   assert.equal(c.posted[0].body.revision, 'demo-risk');
   assert.equal(c.element('confirm-dialog').open, true);
   assert.equal(c.element('confirm-password-field').hidden, false);
+  assert.equal(c.element('confirm-reason-field').hidden, false, 'a change that waits is asked why');
+  assert.match(c.element('confirm-verdict').textContent, /^cf\.coolingVerdict 24 micro_live_execution\.max_capital_usd$/);
+  assert.match(c.element('confirm-verdict').className, /is-cooling/);
+  assert.equal(c.element('confirm-submit').textContent, 'cf.confirmCooling');
   assert.ok(c.element('confirm-diff').innerHTML.includes('diff-add'));
   c.element('confirm-submit').events.click();
   await flush();
@@ -3640,20 +3794,34 @@ test('a loosening change previews, then needs the password before it is sent', a
   assert.equal(c.posted[1].body.password, 'pw');
   assert.equal(JSON.stringify(c.posted[1].body.set), JSON.stringify({ 'research_schedule.launchd.hour': 14 }));
   assert.equal(c.element('confirm-dialog').open, false);
+  // The password does not outlive the sheet, however the sheet was closed.
+  c.element('confirm-password').value = 'pw';
+  c.element('confirm-dialog').events.close();
+  assert.equal(c.element('confirm-password').value, '');
 });
 
 test('a tightening change previews without a password field and sends on confirm', async () => {
   const c = settingsPage();
-  c.element('wl-chips').events.click({ target: { closest: () => ({ dataset: { wlRemove: 'AAPL' } }) } });
-  c.element('wl-save').events.click();
+  c.element('calendar-row').events.click();
+  assert.equal(c.element('calendar-sheet').open, true);
+  assert.equal(c.element('cal-through').value, '2026-12-10');
+  // The stand-in dictionary knows no key, so a kind reads as the engine wrote it: the fallback.
+  assert.ok(c.element('cal-events').innerHTML.includes('2026-10-28 · fomc_decision'));
+  c.element('cal-save').events.click();
+  assert.equal(c.element('cal-status').textContent, 'cf.noChange');
+  assert.equal(c.posted.length, 0);
+  tapOn(c, 'cal-events', { calRemove: '0' });
+  c.element('cal-save').events.click();
   await flush();
-  assert.equal(JSON.stringify(c.posted[0].body), JSON.stringify({ file: 'investor_profile.yaml', revision: 'demo-investor',
-    set: { 'universe.core.individual_stocks.watchlist': [] } }));
+  assert.equal(JSON.stringify(c.posted[0].body), JSON.stringify({ file: 'event_calendar.yaml', revision: 'demo-calendar',
+    set: { maintained_through: '2026-12-10', events: [{ date: '2026-11-10', kind: 'cpi', note: 'October 2026 CPI' }] } }));
+  assert.equal(c.element('confirm-summary').innerHTML, 'cf.eventsChanged 2 1');
   assert.equal(c.element('confirm-password-field').hidden, true);
   c.element('confirm-submit').events.click();
   await flush();
   assert.equal(c.posted[1].url, '/config/changes');
   assert.equal(c.posted[1].body.password, undefined);
+  assert.equal(c.element('calendar-sheet').open, false);
 });
 
 test('withdrawing a cooling change posts its cancel and nothing else', async () => {
@@ -3662,6 +3830,76 @@ test('withdrawing a cooling change posts its cancel and nothing else', async () 
   c.element('pending-list').events.click({ target: { closest: () => button } });
   await flush();
   assert.equal(JSON.stringify(c.posted), JSON.stringify([{ url: '/config/changes/demo1/cancel', body: {} }]));
+});
+
+test('advanced is the same page one tap further: every section by file, the record, the stop', async () => {
+  const c = settingsPage();
+  route(c, '?demo=1&view=advanced');
+  assert.equal(c.element('cf-main').hidden, true);
+  assert.equal(c.element('cf-advanced').hidden, false);
+  const files = c.element('file-list').innerHTML;
+  assert.ok(files.includes('data-edit-key="micro_live_execution"') && files.includes('cf.guarded'));
+  assert.ok(files.includes('event_calendar.yaml') && files.includes('cf.sections 5'));
+  assert.ok(c.element('recent-list').innerHTML.includes('committed 1a2b3c4'));
+  assert.ok(c.element('recent-list').innerHTML.includes('>applied</span>'));
+  assert.equal(c.element('recent-count').textContent, '1');
+
+  // a section retyped by hand: the diff is all there is to show, so it is open, and a reason is asked
+  tapOn(c, 'file-list', { editFile: 'risk_profile.yaml', editKey: 'research_schedule' });
+  await flush();
+  assert.equal(c.element('editor-dialog').open, true);
+  assert.equal(c.element('editor-text').value, 'x: 1');
+  c.element('editor-preview').events.click({ preventDefault() {} });
+  await flush();
+  assert.equal(JSON.stringify(c.posted[0].body), JSON.stringify({ file: 'risk_profile.yaml', revision: 'r',
+    key: 'research_schedule', text: 'x: 1' }));
+  assert.equal(c.element('confirm-diff-box').open, true);
+  assert.equal(c.element('confirm-reason-field').hidden, false);
+  c.element('confirm-cancel').events.click();
+
+  // the stop is one gesture with a reason; restoring asks for the password
+  c.element('autonomy-row').events.click();
+  assert.equal(c.element('confirm-title').textContent, 'cf.stopAutonomy');
+  assert.equal(c.element('confirm-password-field').hidden, true);
+  c.element('confirm-submit').events.click();
+  await flush();
+  assert.equal(JSON.stringify(c.posted[1]), JSON.stringify({ url: '/autonomy/stop', body: { reason: 'stopped from the console' } }));
+  c.CT.config.autonomy = { armed: false, withdrawn: true, reason: 'looked wrong', at: null }; c.render();
+  assert.equal(c.element('autonomy-title').textContent, 'cf.resumeAutonomy');
+  assert.equal(c.element('auto-state').textContent, 'cf.autonomyWithdrawn');
+  c.element('autonomy-row').events.click();
+  assert.equal(c.element('confirm-password-field').hidden, false);
+
+  route(c, '?demo=1');
+  assert.equal(c.element('cf-main').hidden, false);
+  assert.equal(c.element('cf-advanced').hidden, true);
+});
+
+test('copy the settings page looks up by name exists in both languages', () => {
+  const { en, zh } = dictionary();
+  const wanted = [
+    ...SWITCH_NAMES.flatMap(name => ['name', 'onTitle', 'offTitle', 'on', 'off'].map(part => `cf.sw.${name}.${part}`)),
+    ...[1, 2, 3, 4, 5, 6, 7].map(day => 'cf.day.' + day),
+    ...['applied', 'cancelled', 'failed', 'pending'].map(status => 'cf.status.' + status),
+    ...['risk', 'investor', 'calendar'].map(file => 'cf.file.' + file),
+    ...['deposit', 'withdrawal', 'income', 'fee'].map(kind => 'cf.' + kind),
+  ];
+  // every kind the calendar form offers, and every switch the demo and the page agree on
+  const html = uiFile('settings.html');
+  const kinds = [...html.matchAll(/<option value="(\w+)" data-i18n="cf\.kind\.\1"/g)].map(m => 'cf.kind.' + m[1]);
+  assert.equal(kinds.length, 5);
+  assert.deepEqual(Object.keys(context(true).CT.config.research.switches), SWITCH_NAMES);
+  for (const name of SWITCH_NAMES) assert.ok(html.includes(`id="switch-${name}"`), name);
+  assert.deepEqual([...wanted, ...kinds].filter(key => !en.has(key)), [], 'missing from en');
+  assert.deepEqual([...wanted, ...kinds].filter(key => !zh.has(key)), [], 'missing from zh');
+  // the switches the page offers are the ones the service knows by name, and the API accepts
+  const names = src => [...src.matchAll(/"(\w+)"/g)].map(m => m[1]);
+  const table = fs.readFileSync(path.join(root, 'agentic_trading/config_changes.py'), 'utf8')
+    .match(/RESEARCH_SWITCHES: dict\[str, str\] = \{([\s\S]*?)\n\}/)[1];
+  assert.deepEqual([...table.matchAll(/^\s+"(\w+)": /gm)].map(m => m[1]), SWITCH_NAMES);
+  const api = fs.readFileSync(path.join(root, 'agentic_trading/api/app.py'), 'utf8')
+    .match(/switch: Literal\[([^\]]+)\] \| None = None/)[1];
+  assert.deepEqual(names(api), SWITCH_NAMES);
 });
 
 test('assistant account switches retain independent drafts and reject a late conversation', async () => {
