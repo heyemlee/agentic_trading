@@ -119,6 +119,36 @@ def test_each_thing_that_can_be_wrong_with_a_pass_has_a_name(tick, error, unconf
     assert set(found) <= set(runner.PROBLEMS)
 
 
+def test_one_failed_read_of_the_index_does_not_cost_the_session(running, monkeypatch):
+    """Every session from 2026-10-07 to 10-13 was kept out of the count as ``regime_unknown``.
+
+    A pass reads the regime for the session in progress, which upstream fetches from Yahoo again
+    every fifteen minutes, and on each of those days one to four of the fetches failed for a
+    moment (tests/test_market_regime.py). One pass's problem is the session's, so one read was
+    the day.
+    """
+    from tradingagents.dataflows import stockstats_utils
+
+    from agentic_trading import cli
+    from agentic_trading.risk import regime
+    from tests.test_market_regime import vendor
+
+    _service, sim, _prices, runs = running
+    flaky = vendor({"SPY": 1})
+    monkeypatch.setattr(stockstats_utils, "load_ohlcv", flaky)
+    monkeypatch.setattr(cli, "assess_regime", regime.assess_regime)
+    monkeypatch.setattr(regime, "RETRY_PAUSES_SECONDS", (0.0, 0.0))
+    first = runner.run(sim, research_from=runs)
+    assert first["health"]["regime_available"] is True
+    assert first["recorded"]["problems"] == [] and flaky.calls[:2] == ["SPY", "SPY"]
+
+    # A vendor that does not answer at all is what it always was: unknown, and the session says so.
+    monkeypatch.setattr(stockstats_utils, "load_ohlcv", vendor({"SPY": 99}))
+    second = runner.run(sim, research_from=runs)
+    assert second["health"]["regime_available"] is False
+    assert second["recorded"]["problems"] == [runner.REGIME_UNKNOWN]
+
+
 def test_every_problem_has_words_for_a_person():
     from agentic_trading.auto import cli
 
