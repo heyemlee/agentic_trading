@@ -1853,34 +1853,42 @@ class AutoTradingMixin:
 
         profiles = self.profiles()
         cfg = schedule.settings(profiles)
-        account = (cfg.get("accounts") or {}).get(MICRO_BUCKET) or {}
-        candidates = account.get("candidates") or {}
-        studied: list[str] = []
-        if cfg.get("enabled") and candidates and candidates.get("enabled") is not False:
-            studied = [str(s).upper() for s in schedule.default_tickers(profiles, {
-                **cfg, "max_tickers_per_run": candidates.get("max_tickers_per_run",
-                                                             cfg.get("max_tickers_per_run", 3))})]
+        # What the schedule would study is the scheduler's own answer, cut as the scheduler cuts
+        # it: the universe less what the account holds, by the schedule's cap and then the
+        # task's. Reading the caps a second time here once let this name funds the study never
+        # reaches, whenever the task's cap was the larger of the two.
+        scheduled = ({task.kind: task for task in schedule.tasks(cfg, bucket=MICRO_BUCKET)}
+                     if cfg.get("enabled") else {})
+        study = scheduled.get(schedule.CANDIDATES)
+        studied = ([str(s).upper() for s in schedule.subjects_for(profiles, study)][:study.max_tickers]
+                   if study is not None else [])
         watched: list[str] = []
-        watchlist = account.get("watchlist") or {}
-        if cfg.get("enabled") and watchlist and watchlist.get("enabled") is not False:
+        if schedule.WATCHLIST in scheduled:
             snapshot = self.state_db(profiles).read_meta(SNAPSHOT, {}) or {}
             watched = schedule.watchlist_names(snapshot)
+        # A fund the account holds is set aside by the study because the holdings review examines
+        # it. That is research on it all the same, so it is not reported as unstudied.
+        reviewed = ([str(s).upper() for s in schedule.subjects_for(profiles, scheduled[schedule.HOLDINGS])]
+                    if schedule.HOLDINGS in scheduled else [])
         wanted = [str(symbol).upper() for symbol in universe]
-        covered = [symbol for symbol in wanted if symbol in studied or symbol in watched]
+        covered = [symbol for symbol in wanted
+                   if symbol in studied or symbol in watched or symbol in reviewed]
         missing = [symbol for symbol in wanted if symbol not in covered]
         text = None
-        if wanted and missing and studied:
+        if wanted and missing and study is not None:
             # The study is already on: it takes one fund from each exposure group, so switching
             # it on is not something left to do, and saying so again would send the owner back
             # to a switch they have just made.
-            text = {"zh": (f"“候选 ETF”研究已经打开，它每周研究的是 {'、'.join(studied)}（每个类别一只），"
+            covers = {"zh": f"，它每周研究的是 {'、'.join(studied)}（每个类别一只）" if studied else "",
+                      "en": f" and covers {', '.join(studied)} (one fund from each exposure group)"
+                            if studied else ""}
+            text = {"zh": (f"“候选 ETF”研究已经打开{covers['zh']}，"
                            f"不包括 {'、'.join(missing)}，所以模拟账户不会收到它们的买入信号。"
                            "想让它们也被研究，把它们加进你的 Robinhood 自选（现有的自选研究会轮到它们）。"),
-                    "en": (f"The candidate-ETF study is on and covers {', '.join(studied)} (one fund "
-                           f"from each exposure group), not {', '.join(missing)}, so the simulated "
-                           "account will get no signal to buy them. To have them studied as well, "
-                           "add them to your Robinhood watchlist, which the existing watchlist "
-                           "study will reach.")}
+                    "en": (f"The candidate-ETF study is on{covers['en']}, not {', '.join(missing)}, "
+                           "so the simulated account will get no signal to buy them. To have them "
+                           "studied as well, add them to your Robinhood watchlist, which the "
+                           "existing watchlist study will reach.")}
         elif wanted and missing:
             text = {"zh": (f"每周研究目前不会研究 {'、'.join(missing)}，所以模拟账户不会收到它们的买入信号。"
                            "两个办法：把它们加进你的 Robinhood 自选（现有的自选研究会轮到它们），"
@@ -1891,7 +1899,8 @@ class AutoTradingMixin:
                            "or switch on the candidate-ETF study in Settings (up to three more "
                            "analyses a week).")}
         return {"universe": wanted, "covered": covered, "missing": missing,
-                "candidates_enabled": bool(studied), "on_watchlist": [s for s in wanted if s in watched],
+                "candidates_enabled": study is not None,
+                "on_watchlist": [s for s in wanted if s in watched],
                 "text": text}
 
 

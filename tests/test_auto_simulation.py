@@ -516,6 +516,52 @@ def test_a_plan_whose_funds_nobody_researches_says_so(desk):
     assert "Robinhood 自选" in reached["text"]["zh"] and "watchlist" in reached["text"]["en"]
 
 
+def test_what_is_called_studied_is_what_the_schedule_would_study(desk):
+    """Cut by both caps and less what is held, because that is how the scheduler cuts it.
+
+    The notice once read the candidate task's cap in place of the schedule's, so with the task's
+    the larger it named funds no run would ever reach. It now asks the scheduler.
+    """
+    from agentic_trading import schedule
+
+    service, _prices, _runs = desk
+    _preview, started = start(service)
+    universe = started["simulation"]["plan"]["strategy"]["universe"]
+    root = service.profiles().project_dir
+    risk = root / "config" / "risk_profile.yaml"
+    risk.write_text(risk.read_text().replace(
+        "candidates: {period: weekly, max_tickers_per_run: 3, enabled: false}",
+        "candidates: {period: weekly, max_tickers_per_run: 5, enabled: true}"))
+
+    def would_study():
+        profiles = service.profiles()
+        cfg = schedule.settings(profiles)
+        task = next(t for t in schedule.tasks(cfg, bucket="micro_live") if t.kind == schedule.CANDIDATES)
+        assert task.max_tickers == 5 > int(cfg["max_tickers_per_run"]), "the task's cap is the larger"
+        return schedule.subjects_for(profiles, task)[:task.max_tickers], int(cfg["max_tickers_per_run"])
+
+    studied, schedule_cap = would_study()
+    assert len(studied) == schedule_cap, "the schedule's cap still binds"
+    reached = service.auto_simulation()["research"]
+    assert reached["covered"] == [s for s in universe if s in studied]
+    assert reached["missing"] == [s for s in universe if s not in studied] and reached["missing"]
+    assert all(symbol not in reached["text"]["zh"].split("不包括")[0] for symbol in reached["missing"])
+
+    # A fund the account holds is set aside by the study and examined by the holdings review:
+    # the next fund takes its place in the study, and the held one is not called unstudied.
+    held = studied[0]
+    ledger = root / "state" / "micro_live_portfolio.yaml"
+    ledger.write_text(ledger.read_text().replace(
+        "positions: []", f"positions:\n  - symbol: {held}\n    bucket: micro_live\n"
+                         "    quantity: 0.1\n    cost_basis_per_share: 100.0"))
+    after, _cap = would_study()
+    assert held not in after and len(after) == schedule_cap
+    reached = service.auto_simulation()["research"]
+    assert held in reached["covered"] and held not in reached["missing"]
+    assert reached["covered"] == [s for s in universe if s in after or s == held]
+    assert reached["candidates_enabled"] is True
+
+
 # ---------------------------------------------------------------- the other doors
 def test_the_simulated_account_over_http(auth_client, desk, monkeypatch):
     service, _prices, runs = desk
