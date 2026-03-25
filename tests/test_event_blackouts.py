@@ -105,6 +105,7 @@ def test_the_calendar_asks_to_be_renewed_before_it_expires(profiles, tmp_path):
     assert not cal.needs_renewal(date(2026, 1, 1))
 
 
+@pytest.mark.shipped_calendar
 def test_the_shipped_calendar_is_real_and_says_how_far_it_is_good_for(profiles):
     """Filled 2026-09-15 from federalreserve.gov and bls.gov, having been deliberately empty.
 
@@ -129,6 +130,7 @@ def test_the_shipped_calendar_is_real_and_says_how_far_it_is_good_for(profiles):
     assert {e["kind"] for e in cal.events} <= {"fomc_decision", "cpi", "payrolls"}
 
 
+@pytest.mark.shipped_calendar
 def test_the_shipped_calendar_gates_autonomy_without_touching_a_human_approval(profiles):
     """The asymmetry is the whole point: a person has the calendar in view, unattended code
     does not. And past its horizon it goes back to refusing rather than quietly allowing."""

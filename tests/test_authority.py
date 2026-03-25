@@ -85,7 +85,10 @@ def test_todays_rules_put_every_action_in_front_of_a_person(world):
     micro = profiles.risk["micro_live_execution"]
     assert a["limits"]["capital"]["max_capital_usd"] == micro["max_capital_usd"]
     assert a["limits"]["tiers"]["low"]["max_order_usd"] == 200
-    assert a["limits"]["event_blackouts"]["macro"]["maintained_through"] == "2026-12-10"
+    # The horizon the file itself declares, whatever date the owner has renewed it to.
+    shipped = yaml.safe_load((profiles.project_dir / "config" / "event_calendar.yaml").read_text())
+    horizon = a["limits"]["event_blackouts"]["macro"]["maintained_through"]
+    assert horizon == str(shipped["maintained_through"])
     assert a["preflight"] == {"ready": None, "blocking": [], "checked_at": None, "stale": True}
 
 

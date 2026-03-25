@@ -7,6 +7,7 @@ read, never written, and git runs only inside a repository created for the test.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from datetime import timedelta
@@ -359,7 +360,9 @@ def test_validation_uses_the_real_loader(sandbox):
     with pytest.raises(cc.ConfigChangeError, match="may not be added or removed"):
         cc.validate(sandbox.config_dir, RISK, text + "\nextra_key: 1\n")
     cal = read(sandbox, CALENDAR)
-    broken = cal.replace("maintained_through: 2026-12-10", "maintained_through: soon")
+    # Whatever date the owner has renewed it to.
+    broken, found = re.subn(r"(?m)^maintained_through: .*$", "maintained_through: soon", cal)
+    assert found == 1
     with pytest.raises(cc.ConfigChangeError, match="maintained_through"):
         cc.validate(sandbox.config_dir, CALENDAR, broken)
     assert read(sandbox, RISK) == text  # validation never writes

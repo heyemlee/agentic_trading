@@ -1,12 +1,21 @@
 import re
 import shutil
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+#: How far the macro calendar this suite is written against is good for: no test meets it.
+CALENDAR_AS_WRITTEN_THROUGH = date(2099, 12, 31)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "shipped_calendar: read config/event_calendar.yaml as the deployment keeps it, "
+                   "not as this suite is written against (see calendar_as_written)")
 
 
 def recent_session() -> str:
@@ -297,6 +306,44 @@ def no_network_guard(monkeypatch):
     assert not attempts, (
         f"an offline test tried to {attempts[0]} {len(attempts)} time(s); the suite must not "
         "touch the network. Stub the market data (see execution_scenarios.simulated_market).")
+
+
+@pytest.fixture(autouse=True)
+def calendar_as_written(request, monkeypatch):
+    """The deployment's macro calendar, read in a test, schedules nothing and never runs out.
+
+    ``config/event_calendar.yaml`` is the owner's, kept by hand: a release day and the day before
+    it close autonomous opens, and past ``maintained_through`` they stay closed until someone
+    renews it. Every test that copies config/ and opens a position dated today was reading it,
+    so on 2026-10-14, a CPI day, 94 of them failed on ``macro_blackout`` and the gate a release
+    is held to refused for the date -- as it would on every release day and its eve, and for
+    good once the horizon passed. It is ``research_as_written`` met again: what the owner keeps
+    in config/ is an operational fact, and no result may depend on it.
+
+    So where the file read is the deployment's own, byte for byte -- config/ itself or a copy of
+    it -- the loader answers with no releases, good through 2099. A test about the blackout
+    writes its own calendar (tests/test_event_blackouts.py), which is read as written; a test
+    about the shipped file says so with ``@pytest.mark.shipped_calendar``.
+    """
+    if request.node.get_closest_marker("shipped_calendar"):
+        return
+    from agentic_trading import event_calendar
+
+    shipped = (ROOT / "config" / "event_calendar.yaml").read_bytes()
+    real = event_calendar.load_macro_calendar
+
+    def load(profiles):
+        calendar = real(profiles)
+        try:
+            deployed = calendar.exists and calendar.path.read_bytes() == shipped
+        except OSError:
+            deployed = False
+        if not deployed:
+            return calendar
+        return event_calendar.MacroCalendar(path=calendar.path, exists=True,
+                                            maintained_through=CALENDAR_AS_WRITTEN_THROUGH)
+
+    monkeypatch.setattr(event_calendar, "load_macro_calendar", load)
 
 
 @pytest.fixture(autouse=True)
