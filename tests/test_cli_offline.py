@@ -54,6 +54,8 @@ def test_ct_research_end_to_end_offline(fake_claude, tmp_path, monkeypatch, real
     assert rec["hard_risk"]["ladder"]["effective_level_for_bucket"] == "NORMAL"
     assert rec["hard_risk"]["regime"]["level"] == "NORMAL"
     assert "PORTFOLIO SNAPSHOT" in rec["portfolio"]["snapshot_text"]
+    # The same text the agents and the policy reviewer were given says how an order is placed.
+    assert "ORDER MECHANICS" in rec["portfolio"]["snapshot_text"]
     # the fake reviewer returns confidence 0 -> policy NO_TRADE -> Hard Risk NO_ACTION, never an approval
     assert rec["policy"]["final_action"] == "NO_TRADE" and rec["hard_risk"]["verdict"] == "NO_ACTION"
     assert rec["final_recommendation"]["action"] == "NO_TRADE"

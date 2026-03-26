@@ -43,6 +43,7 @@ from .portfolio import (
     Snapshot,
     build_snapshot,
     load_portfolio,
+    render_order_mechanics,
     render_snapshot,
     upstream_identity_lookup,
 )
@@ -119,6 +120,9 @@ def portfolio_context(profiles: Profiles, trade_date: str, bucket: str = "core",
     governing = ladders.governing(bucket)
     text = render_snapshot(snap, {"total": {"level": governing.level, "drawdown_pct": governing.drawdown_pct}},
                            regime.as_dict())
+    # Every agent and the policy reviewer read this text, so how an order is placed is said once
+    # here, beside the money it is placed from.
+    text += "\n" + render_order_mechanics(profiles, bucket)
     return snap, ladders, regime, text
 
 

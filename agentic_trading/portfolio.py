@@ -785,3 +785,50 @@ def render_snapshot(snap: Snapshot, ladder: dict[str, Any] | None = None, regime
     if snap.warnings:
         lines.append("- WARNINGS: " + "; ".join(snap.warnings))
     return "\n".join(lines)
+
+
+def _position_caps(profiles: Profiles, bucket: str) -> str:
+    """This bucket's position limits as the hard risk engine reads them, in words."""
+    if bucket == "core":
+        path, flat = ("buckets", "core", "position_limits_pct_of_core"), None
+    else:
+        path = ("buckets", bucket, "position_limits", "max_pct_of_allocation_by_class")
+        flat = profiles.risk_cfg("buckets", bucket, "position_limits",
+                                 "max_single_position_pct_of_allocation", default=None)
+    by_class = {name: profiles.risk_cfg(*path, name) for name in profiles.risk_cfg(*path, default={}) or {}}
+    by_class = {name: pct for name, pct in by_class.items() if isinstance(pct, int | float)}
+    parts = [f"at most {float(flat):g}% of the bucket in one position"] if flat is not None else []
+    if by_class:
+        parts.append("by kind at most " + ", ".join(f"{name} {float(pct):g}%"
+                                                    for name, pct in by_class.items()))
+    return "; ".join(parts)
+
+
+def render_order_mechanics(profiles: Profiles, bucket: str) -> str:
+    """What happens to a conclusion after the agents, stated so it is not mistaken for a limit.
+
+    Research for a $100 account kept recording "one share costs more than the whole bucket" as a
+    reason not to act (five runs to 2026-10-09), when a purchase is sent as a dollar amount and
+    the venue buys a fraction of a share. Nothing here is a rule the model applies: every figure
+    is read from where the engine and the venue record read it, and is enforced there.
+    """
+    from .broker.requirements import ROBINHOOD, for_venue, venue_of
+    from .sizing import minimum_order
+
+    lines = [("ORDER MECHANICS (applied by deterministic code after you; facts about how an order "
+              "is placed, not a view on the idea):")]
+    venue = for_venue(venue_of(profiles, bucket))
+    if venue is not None and venue.fractional:
+        name = "Robinhood" if venue.venue == ROBINHOOD else "the paper venue"
+        lines.append(f"- A purchase for the {bucket.upper()} bucket is sent to {name} as a dollar "
+                     "amount, which buys a fraction of a share where needed. The price of one share "
+                     "does not limit the position, so 'one share costs more than the bucket' is not "
+                     "a reason for or against an idea.")
+    caps = _position_caps(profiles, bucket)
+    lines.append("- How many dollars are bought is not yours to choose: code sets it from the size "
+                 "hint and this bucket's limits" + (f" ({caps})" if caps else "")
+                 + ". No confidence or argument changes a limit.")
+    smallest, _ = minimum_order(profiles, bucket)
+    lines.append(f"- The smallest order code places is ${smallest:,.2f}; a size that comes out "
+                 "below it is not placed.")
+    return "\n".join(lines)
