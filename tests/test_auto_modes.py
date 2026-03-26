@@ -12,6 +12,7 @@ No pass of any mode asks a model anything. History is the tests' own (tests/auto
 """
 
 import ast
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -233,23 +234,29 @@ def test_the_backtest_holds_research_to_the_same_trend_rule():
     def at(day, hour=12):
         return datetime.fromisoformat(day).replace(hour=hour, tzinfo=NY)
 
-    def run(bars, signals):
+    def run(bars, signals, lifetime=math.inf):
         return bt.run(bars={"VTI": bars}, start=days[0], end=days[-1], capital_usd=1000.0, rules=rules,
-                      signals=signals, costs=costs.FREE)
+                      signals=signals, research_lifetime_minutes=lifetime, costs=costs.FREE)
 
     bought = run(rising, [bt.Signal(at(days[3]), "VTI", "BUY", confidence=90)])
     assert [(f["date"], f["side"], f["reason"]) for f in bought.fills] == [
         (days[4], "buy", "research"), (days[8], "sell", "trend_break")]
     assert bought.fills[1]["decided"] == days[7], "decided on the close that broke it, filled the next open"
-    # Below its average when research says buy: it waits for the research's two days, then lapses.
+    # Below its average when research says buy: it waits two sessions, then lapses.
     falling = _series([106, 105, 104, 103, 102, 101, 100, 99, 98, 97])
     lapsed = run(falling, [bt.Signal(at(days[3]), "VTI", "BUY", confidence=90)])
     assert lapsed.fills == [] and [(row["date"], row["why"]) for row in lapsed.skipped] == [
         (days[6], "never above its own average while the research was current")]
-    # It turns up inside those two days: bought then, on the open after the close that confirmed it.
+    # It turns up inside those two sessions: bought then, on the open after the close that confirmed it.
     turning = _series([106, 105, 104, 103, 102, 108, 109, 110, 111, 112])
     late = run(turning, [bt.Signal(at(days[3]), "VTI", "BUY", confidence=90)])
     assert late.fills[0]["date"] == days[6] and late.fills[0]["side"] == "buy"
+    # Under the live path's two-day lifetime the wait is shorter than that across a weekend:
+    # Thursday's noon research is gone by Monday's open, whichever way the fund then turns.
+    for bars in (falling, turning):
+        gone = run(bars, [bt.Signal(at(days[3]), "VTI", "BUY", confidence=90)], lifetime=2880)
+        assert gone.fills == [] and [(row["date"], row["why"]) for row in gone.skipped] == [
+            (days[5], "past the research's lifetime while it waited for the trend")]
     # Research not sure enough is refused for that, at once, and waits for nothing.
     unsure = run(falling, [bt.Signal(at(days[3]), "VTI", "BUY", confidence=60)])
     assert [(row["date"], row["why"]) for row in unsure.skipped] == [

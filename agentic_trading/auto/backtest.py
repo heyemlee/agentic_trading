@@ -19,6 +19,15 @@ the reason. A holding with no bar is valued at its last close and the day says s
 do (``auto.costs``): the worse side of the price, by the spread and slippage assumed and the
 fees documented.
 
+**It does not act on research the live path would have let lapse.** A recorded conclusion has
+the lifetime the live path gives it (``research_lifetime_minutes``), and a replay must say what
+that is. What counts is how old it was at the first moment the live path could have acted: the
+moment it concluded, when the market was open then, and otherwise the next open -- so research
+finished on a Friday evening is two and a half days old by Monday's open and lapses under a
+two-day lifetime, as it does live. A conclusion reached while the market was open is acted on
+live that same session; with daily bars there is no price after it until the close, so here it
+still fills at the next open, which is the one place the replay is later than the live path.
+
 What it models is a strategy's own rules -- which funds, how many, how large, when to leave --
 inside a capital figure and a cap on what may be deployed. It does not replay the Hard Risk
 engine's every rule, and a result says so. It is deterministic: the same inputs give the same
@@ -41,6 +50,9 @@ from . import costs as cost_model
 
 NEW_YORK = ZoneInfo("America/New_York")
 OPENS_AT = time(9, 30)
+#: The regular close. A half day closes earlier; the bars do not say which days those are, so a
+#: conclusion in the afternoon of one is taken as reached while the market was still open.
+CLOSES_AT = time(16, 0)
 BUY, SELL, REDUCE = "BUY", "SELL", "REDUCE"
 #: How many sessions an order waits for a bar before it is given up on.
 MAX_WAIT_SESSIONS = 3
@@ -185,12 +197,18 @@ def opens_at(session: str) -> datetime:
     return datetime.combine(date.fromisoformat(session), OPENS_AT, tzinfo=NEW_YORK)
 
 
+def closes_at(session: str) -> datetime:
+    """The moment a session's regular trading ends."""
+    return datetime.combine(date.fromisoformat(session), CLOSES_AT, tzinfo=NEW_YORK)
+
+
 def _floor(quantity: float) -> float:
     return math.floor(quantity / INCREMENT + 1e-9) * INCREMENT
 
 
 def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float, rules: Rules,
         costs: cost_model.Costs = cost_model.STANDARD, signals: Iterable[Signal] = (),
+        research_lifetime_minutes: float | None = None,
         decide: Decide | None = None, flows: Iterable[Flow] = (),
         opening_cash_usd: float | None = None, deploy_cap_usd: float | None = None,
         min_order_usd: float = 1.0,
@@ -202,16 +220,25 @@ def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float,
     plan's capital, which positions are sized as a share of; ``opening_cash_usd`` is what the
     account starts with (the capital, unless told otherwise) and ``deploy_cap_usd`` what may be
     invested at cost at any one time (the capital, unless told otherwise).
+
+    ``research_lifetime_minutes`` is required whenever ``signals`` are given: a replay that
+    left it out would act on research the live path had let lapse, which is the flattering
+    kind of mistake. ``math.inf`` says "never lapses" in so many words.
     """
     table = {symbol.upper(): sorted(rows, key=lambda bar: bar.date) for symbol, rows in bars.items()}
     by_day = {symbol: {bar.date: bar for bar in rows} for symbol, rows in table.items()}
     sessions = sorted({bar.date for rows in table.values() for bar in rows if start <= bar.date <= end})
+    trading_days = {bar.date for rows in table.values() for bar in rows}
     cap = float(capital_usd if deploy_cap_usd is None else deploy_cap_usd)
     cash = float(capital_usd if opening_cash_usd is None else opening_cash_usd)
     funded = cash
     held: dict[str, _Lot] = {}
     queue: list[dict[str, Any]] = []
     waiting = sorted(signals, key=lambda s: s.at)
+    if waiting and research_lifetime_minutes is None:
+        raise ValueError("a replay of research needs the research's lifetime "
+                         "(research_lifetime_minutes); math.inf if it never lapses")
+    lifetime = math.inf if research_lifetime_minutes is None else float(research_lifetime_minutes)
     money = sorted(flows, key=lambda f: f.date)
     out = Result(start=start, end=end, sessions=sessions, equity=[], fills=[], trades=[], skipped=[],
                  pending=[], missing={}, params={
@@ -223,6 +250,7 @@ def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float,
                                "take_profit_pct": rules.take_profit_pct,
                                "max_holding_days": rules.max_holding_days,
                                "trend_window": rules.trend_window},
+                     "research_lifetime_minutes": None if math.isinf(lifetime) else lifetime,
                      "fill": "the next session's open after the decision",
                      "decided_on": "closes on or before the day of the decision"})
 
@@ -319,7 +347,12 @@ def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float,
             return None
         return closes[-1] > sum(closes[-rules.trend_window:]) / rules.trend_window
 
-    held_over: list[tuple[Signal, int]] = []
+    def market_open_at(moment: datetime) -> bool:
+        """Whether a session was trading at ``moment``: the live path could have acted then."""
+        day = moment.astimezone(NEW_YORK).date().isoformat()
+        return day in trading_days and opens_at(day) <= moment < closes_at(day)
+
+    held_over: list[tuple[Signal, int, datetime | None]] = []
     for index, day in enumerate(sessions):
         # 1. Money in or out, before the open. A date that was not a session lands on the next.
         while money and money[0].date <= day:
@@ -332,15 +365,27 @@ def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float,
         #    with a trend rule, only once the fund is above its average, and only while the
         #    research is still current.
         opening = opens_at(day)
-        arrived: list[tuple[Signal, int]] = held_over
+        arrived: list[tuple[Signal, int, datetime | None]] = held_over
         held_over = []
         while waiting and waiting[0].at < opening:
-            arrived.append((waiting.pop(0), index + TREND_WAIT_SESSIONS))
-        for signal, gives_up_at in arrived:
+            signal = waiting.pop(0)
+            # The first moment the live path could have acted on it: the moment it concluded,
+            # when the market was open then, and otherwise this open.
+            first = signal.at if market_open_at(signal.at) else opening
+            arrived.append((signal, index + TREND_WAIT_SESSIONS, first))
+        for signal, gives_up_at, first in arrived:
             symbol = signal.symbol.upper()
             decided = signal.at.isoformat()
             if signal.at.astimezone(NEW_YORK).date().isoformat() < start:
                 continue                         # from before the window: not this run's to act on
+            # A conclusion carried over to wait for the trend is looked at again at this open.
+            age = ((first or opening) - signal.at).total_seconds() / 60.0
+            if age > lifetime + 1e-9:
+                skip(day, symbol, signal.action,
+                     "past the research's lifetime " + ("before the market opened" if first
+                                                        else "while it waited for the trend"),
+                     decided=decided, age_minutes=round(age), lifetime_minutes=lifetime)
+                continue
             if signal.action == BUY:
                 # Only a purchase the strategy would otherwise make waits on the trend: one it
                 # would refuse anyway is refused now, for the reason that actually applies.
@@ -351,7 +396,7 @@ def run(*, bars: dict[str, list[Bar]], start: str, end: str, capital_usd: float,
                         skip(day, symbol, BUY, "never above its own average while the research "
                                                "was current", decided=decided)
                     else:
-                        held_over.append((signal, gives_up_at))
+                        held_over.append((signal, gives_up_at, None))
                     continue
                 want_to_buy(symbol, f"research:{signal.source or ''}".rstrip(":"), decided, day,
                             confidence=signal.confidence, needs_confidence=True)
@@ -473,11 +518,15 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                  opening_cash_usd: float, flows: Iterable[Flow] = (),
                  costs: cost_model.Costs = cost_model.STANDARD,
                  limit_class_of: Callable[[str], str | None] = lambda _symbol: None) -> Result:
-    """A fixed-weight portfolio bought at the first open and held: the reference benchmark.
+    """A fixed-weight portfolio bought and held: the reference benchmark.
 
-    Every dollar is invested at the weights, at the first open and again whenever money comes
-    in; money taken out is sold pro rata. No rule, no cap, no rebalancing: this is what doing
-    nothing clever with the same money would have been, and it pays the same costs.
+    Every dollar is invested at the weights, and money taken out is sold pro rata. No rule, no
+    cap, no rebalancing: this is what doing nothing clever with the same money would have been,
+    and it pays the same costs. It keeps the fill rule every other row keeps -- decided on a
+    close, filled at the next open -- so the money it starts with is invested at the second
+    session's open, as the passive row's is, and money that arrives is invested at the open
+    after the session it arrived on. Until 2026-10-15 it bought at the first open, a session
+    ahead of the rows it was set beside.
     """
     table = {symbol.upper(): {bar.date: bar for bar in rows} for symbol, rows in bars.items()}
     total = sum(float(v) for v in weights.values())
@@ -487,11 +536,13 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                  pending=[], missing={}, params={
                      "weights_pct": {s: round(w * 100, 4) for s, w in shares.items()},
                      "opening_cash_usd": float(opening_cash_usd), "costs": costs.name,
-                     "fill": "the open of the first session, and of each session money arrives on"})
+                     "fill": "the next session's open after the close the money was there on"})
     cash, funded = float(opening_cash_usd), float(opening_cash_usd)
     held = dict.fromkeys(shares, 0.0)
     last = dict.fromkeys(shares, 0.0)
     money = sorted(flows, key=lambda f: f.date)
+    # What the last close decided: invest this much (positive) or raise this much (negative).
+    decided, decided_on = 0.0, None
     for day in sessions:
         while money and money[0].date <= day:
             flow = money.pop(0)
@@ -499,10 +550,12 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                 cash += flow.amount_usd
                 funded += flow.amount_usd
         todays = {symbol: table.get(symbol, {}).get(day) for symbol in shares}
-        if all(todays.values()):
+        if decided and all(todays.values()):
             when = date.fromisoformat(day)
-            if cash > 0.005:
-                budget = cash
+            # Only what was there at the close the decision was made on: money that arrived
+            # before this open is decided on this session's close, like any other.
+            if decided > 0 and cash > 0.005:
+                budget = min(decided, cash)
                 for symbol, share in shares.items():
                     bar = todays[symbol]
                     dollars = budget * share
@@ -517,9 +570,9 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                                       "quantity": round(quantity, 8), "price": priced.price,
                                       "open": bar.open, "fees_usd": priced.fees_usd,
                                       "cost_usd": round(abs(priced.price - bar.open) * quantity, 6),
-                                      "reason": "benchmark", "decided": None})
-            elif cash < -0.005:
-                owed = -cash
+                                      "reason": "benchmark", "decided": decided_on})
+            elif decided < 0 and cash < -0.005:
+                owed = min(-decided, -cash)
                 value = sum(held[s] * todays[s].open for s in shares)
                 for symbol in shares:
                     bar = todays[symbol]
@@ -534,7 +587,7 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                                       "quantity": round(quantity, 8), "price": priced.price,
                                       "open": bar.open, "fees_usd": priced.fees_usd,
                                       "cost_usd": round(abs(priced.price - bar.open) * quantity, 6),
-                                      "reason": "benchmark", "decided": None})
+                                      "reason": "benchmark", "decided": decided_on})
         stale, invested = [], 0.0
         for symbol in shares:
             bar = todays[symbol]
@@ -548,4 +601,6 @@ def held_weights(*, bars: dict[str, list[Bar]], start: str, end: str, weights: d
                            "cash_usd": round(cash, 4), "invested_usd": round(invested, 4),
                            "funded_usd": round(funded, 4),
                            "positions": sum(1 for q in held.values() if q > 0), "stale": stale})
+        # Decided on this close, carried out at the next open that has every fund's bar.
+        decided, decided_on = (cash, day) if abs(cash) > 0.005 else (0.0, None)
     return out

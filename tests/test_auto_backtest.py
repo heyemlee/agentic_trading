@@ -11,6 +11,7 @@ docs/todo.md, P2.3. Each of the ways a backtest flatters a strategy is a test he
 All of it on bars the tests write themselves. Nothing here reads a market.
 """
 
+import math
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -54,8 +55,10 @@ D = days(12)
 
 
 def run(bars, **over):
+    # Research that never lapses, said in so many words: these tests are about when and how a
+    # conclusion fills. The lifetime has tests of its own below.
     args = {"bars": bars, "start": D[0], "end": D[-1], "capital_usd": 1000.0, "rules": RULES,
-            "costs": costs.FREE}
+            "costs": costs.FREE, "research_lifetime_minutes": math.inf}
     return bt.run(**{**args, **over})
 
 
@@ -88,7 +91,8 @@ def test_nothing_on_or_before_a_day_depends_on_any_bar_after_it():
                      take_profit_pct=9.0, max_holding_days=12, min_confidence=70)
     signals = [bt.Signal(at(stamps[i], 11), "VXUS", "BUY", confidence=85) for i in (2, 14)]
     args = {"start": stamps[5], "end": stamps[-1], "capital_usd": 1000.0, "rules": rules,
-            "signals": signals, "decide": bt.trend_filter(rules, window=5), "costs": costs.STANDARD}
+            "signals": signals, "research_lifetime_minutes": 2880,
+            "decide": bt.trend_filter(rules, window=5), "costs": costs.STANDARD}
     whole = bt.run(bars=full, **args)
     assert whole.fills and whole.trades, "the run has to do something for this to mean anything"
     for cut in (stamps[9], stamps[15], stamps[22]):
@@ -128,6 +132,95 @@ def test_bars_from_before_the_window_are_history_and_nothing_else():
     # Without that history the rule has no average for four sessions, and trades on none.
     late = run({"VTI": series(list(range(100, 112)))}, decide=bt.trend_filter(RULES, window=5))
     assert late.fills[0]["decided"] == D[4]
+
+
+# ---------------------------------------------------------------- research the live path let lapse
+TWO_DAYS = 2880          # the live path's lifetime for a steady plan's research, in minutes
+
+
+def test_research_from_a_friday_evening_has_lapsed_by_monday_and_is_not_bought():
+    """Found in review on 2026-10-14: a replay bought research the live path had let expire."""
+    bars = {"VTI": series([(100 + i, 100.5 + i) for i in range(12)])}
+    friday_evening = bt.Signal(at(D[4], 16, 39), "VTI", "BUY", confidence=90, source="run-1")
+    result = run(bars, signals=[friday_evening], research_lifetime_minutes=TWO_DAYS)
+    assert result.fills == []
+    [skipped] = result.skipped
+    assert skipped["date"] == D[5] and skipped["why"] == "past the research's lifetime before the market opened"
+    assert skipped["age_minutes"] == 3891 and skipped["lifetime_minutes"] == TWO_DAYS
+    assert result.params["research_lifetime_minutes"] == TWO_DAYS
+    # The same research on a Thursday evening is a day younger at Friday's open, and is bought.
+    thursday_evening = bt.Signal(at(D[3], 16, 39), "VTI", "BUY", confidence=90, source="run-1")
+    assert run(bars, signals=[thursday_evening], research_lifetime_minutes=TWO_DAYS).fills[0]["date"] == D[4]
+
+
+@pytest.mark.parametrize("when, filled_on", [
+    (at(D[4], 7, 0), D[4]),        # before Friday's open: current at that open, bought then
+    (at(D[4], 10, 0), D[5]),       # during Friday's session: the live path acted on it that day
+    (at(D[4], 15, 59), D[5]),      # a minute before the close is still during the session
+])
+def test_research_is_judged_by_its_age_when_the_live_path_could_first_act(when, filled_on):
+    """Research concluded while the market was open is acted on live at once. With no price
+    after it until the close, the replay fills it at the next open -- even Monday's, which is
+    more than two days later -- because it was current when the live path saw it."""
+    bars = {"VTI": series([(100 + i, 100.5 + i) for i in range(12)])}
+    result = run(bars, signals=[bt.Signal(when, "VTI", "BUY", confidence=90)],
+                 research_lifetime_minutes=TWO_DAYS)
+    assert [f["date"] for f in result.fills] == [filled_on] and result.skipped == []
+
+
+def test_research_that_says_sell_lapses_like_research_that_says_buy():
+    bars = {"VTI": series([(100 + i, 100.5 + i) for i in range(12)])}
+    signals = [bt.Signal(at(D[0], 8), "VTI", "BUY", confidence=90),
+               bt.Signal(at(D[4], 17, 0), "VTI", "SELL", confidence=90)]
+    result = run(bars, signals=signals, research_lifetime_minutes=TWO_DAYS)
+    assert [f["side"] for f in result.fills] == ["buy"]
+    assert [(row["action"], row["why"]) for row in result.skipped] == [
+        ("SELL", "past the research's lifetime before the market opened")]
+
+
+def test_a_replay_of_research_must_say_how_long_research_lives():
+    bars = {"VTI": series([100] * 12)}
+    with pytest.raises(ValueError, match="lifetime"):
+        bt.run(bars=bars, start=D[0], end=D[-1], capital_usd=1000.0, rules=RULES,
+               signals=[bt.Signal(at(D[0], 8), "VTI", "BUY", confidence=90)])
+    # Comparators that replay no research need none.
+    plain = bt.passive_rules(RULES)
+    assert bt.run(bars=bars, start=D[0], end=D[-1], capital_usd=1000.0, rules=plain,
+                  decide=bt.buy_and_hold(plain)).params["research_lifetime_minutes"] is None
+
+
+def test_the_replay_lifetime_is_the_one_the_simulated_account_expires_research_by(profiles):
+    """Two readings of one setting: the service's, for replays, and the live pass's own."""
+    from agentic_trading.auto import modes, trader
+    from agentic_trading.service import Service
+
+    now = datetime.now(NY)
+    for mode, spec in modes.TABLE.items():
+        lifetime = Service._auto_research_lifetime(profiles, mode)
+        tag = spec.strategy_tag
+        young = {"created_at": (now - timedelta(minutes=lifetime - 1)).isoformat()}
+        old = {"created_at": (now - timedelta(minutes=lifetime + 1)).isoformat()}
+        assert not trader._expired(profiles, young, tag), mode
+        assert trader._expired(profiles, old, tag), mode
+
+
+def test_history_is_read_far_enough_back_for_the_longest_average_in_use():
+    """Found in review on 2026-10-14: a 60-session trend rule was given the simple rule's 20."""
+    from agentic_trading.auto import comparison
+    from agentic_trading.service import Service
+
+    start = "2026-09-01"
+    for mode, window in (("swing", 60), ("swing", 0), ("steady", 120)):
+        rules = bt.Rules(universe=("VTI",), max_positions=1, position_pct=50.0, trend_window=window)
+        warm = Service._auto_warm_from(start, mode, rules)
+        weekdays = sum(1 for n in range((date.fromisoformat(start) - date.fromisoformat(warm)).days)
+                       if (date.fromisoformat(warm) + timedelta(days=n)).weekday() < 5)
+        needed = max(window, comparison.AVERAGE_OVER[mode])
+        assert weekdays >= needed + 10, (mode, window, warm)
+    # Both strategies of a comparison are covered, the longer one deciding.
+    short = bt.Rules(universe=("VTI",), max_positions=1, position_pct=50.0, trend_window=10)
+    long = bt.Rules(universe=("VTI",), max_positions=1, position_pct=50.0, trend_window=90)
+    assert Service._auto_warm_from(start, "swing", short, long) == Service._auto_warm_from(start, "swing", long)
 
 
 # ---------------------------------------------------------------- no market, no fill
@@ -311,8 +404,15 @@ def test_the_reference_benchmark_is_bought_at_its_weights_and_held():
     bars = {"VTI": series([100] * 6 + [110] * 6), "BND": series([50] * 12)}
     result = bt.held_weights(bars=bars, start=D[0], end=D[-1], weights={"VTI": 60, "BND": 40},
                              opening_cash_usd=1000.0, costs=costs.FREE, flows=[bt.Flow(D[8], 500.0)])
-    assert [(f["date"], f["symbol"], round(f["quantity"] * f["price"], 2)) for f in result.fills] == [
-        (D[0], "VTI", 600.0), (D[0], "BND", 400.0), (D[8], "VTI", 300.0), (D[8], "BND", 200.0)]
+    # Decided on a close and bought at the next open, like every other row: the opening cash on
+    # the first close, the deposit on the close of the session it arrived on.
+    assert [(f["decided"], f["date"], f["symbol"], round(f["quantity"] * f["price"], 2))
+            for f in result.fills] == [
+        (D[0], D[1], "VTI", 600.0), (D[0], D[1], "BND", 400.0),
+        (D[8], D[9], "VTI", 300.0), (D[8], D[9], "BND", 200.0)]
+    passive_rules = bt.Rules(universe=("VTI", "BND"), max_positions=2, position_pct=50.0)
+    passive = run(bars, rules=passive_rules, decide=bt.buy_and_hold(passive_rules))
+    assert {f["date"] for f in passive.fills} == {result.fills[0]["date"]}, "the same first session"
     summary = metrics.summarize(result.equity, fills=result.fills, opening_usd=1000.0)
     assert summary["net_return_pct"] == pytest.approx(6.0), "10% on the 60%, and the deposit is not a gain"
     assert result.params["weights_pct"] == {"VTI": 60.0, "BND": 40.0}

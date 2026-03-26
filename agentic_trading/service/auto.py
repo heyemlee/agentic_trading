@@ -1362,6 +1362,38 @@ class AutoTradingMixin:
                 "minimum": float(sizing.minimum_order(profiles, MICRO_BUCKET)[0]),
                 "limit_class_of": limit_class_of}
 
+    @staticmethod
+    def _auto_research_lifetime(profiles: Profiles, mode: str) -> float:
+        """Minutes research stays actionable for a plan in ``mode``, as the live pass reads it.
+
+        The same lookup ``auto.trader._expired`` makes -- the freshness class of the strategy tag
+        the mode's proposals carry -- so a replay never keeps research alive longer than the
+        simulated account would have (tests/test_auto_backtest.py holds the two together).
+        """
+        from ..auto import modes
+        from ..proposals import freshness_class_of
+
+        classes = (profiles.risk.get("proposal_freshness") or {}).get("classes") or {}
+        tag = modes.TABLE[mode].strategy_tag
+        return float((classes.get(freshness_class_of(profiles, tag)) or {}).get("ttl_minutes", 2880))
+
+    @staticmethod
+    def _auto_warm_from(start: str, mode: str, *rules: Any) -> str:
+        """The first day of history to read so every average used in a window is whole on its start.
+
+        The longer of the simple rule's average for the mode and any strategy's own trend
+        window, in sessions, read back in calendar days with room for weekends and holidays.
+        Sized by the simple rule alone it left a 60-session trend rule with too little history,
+        and a replay refused its first purchases as "never above its own average".
+        """
+        from datetime import date, timedelta
+
+        from ..auto import comparison
+
+        sessions = max([comparison.AVERAGE_OVER.get(mode, 100),
+                        *(int(getattr(rule, "trend_window", 0) or 0) for rule in rules)])
+        return (date.fromisoformat(start) - timedelta(days=int(sessions * 1.6) + 10)).isoformat()
+
     def _auto_recorded_signals(self, start: str, end: str) -> tuple[list[Any], list[dict[str, Any]]]:
         """(the actionable research conclusions recorded live inside a window, every conclusion).
 
@@ -1418,8 +1450,7 @@ class AutoTradingMixin:
         if start >= end:
             raise ServiceError("a backtest needs a window that ends after it begins, on a session "
                                "that has finished")
-        warm = (date.fromisoformat(start)
-                - timedelta(days=int(comparison.AVERAGE_OVER.get(mode, 100) * 1.6) + 10)).isoformat()
+        warm = self._auto_warm_from(start, mode, rules)
         symbols = list(dict.fromkeys([*rules.universe, *setup["weights"]]))
         try:
             history = bar_source.read(symbols, start=warm, end=end)
@@ -1437,8 +1468,9 @@ class AutoTradingMixin:
         said = {"zh": "策略：按当时实时记录的研究结论，用方案的规则重放。",
                 "en": "Strategy: the research conclusions recorded live at the time, replayed "
                       "under the plan's rules."}
+        lifetime = self._auto_research_lifetime(profiles, mode)
         if signals:
-            replay = bt.run(rules=rules, signals=signals, **shared)
+            replay = bt.run(rules=rules, signals=signals, research_lifetime_minutes=lifetime, **shared)
             ledgers["strategy"] = replay.as_dict()
             rows["strategy"] = comparison.strategy_row(
                 replay.equity, fills=replay.fills, trades=replay.trades, skipped=replay.skipped,
@@ -1452,7 +1484,7 @@ class AutoTradingMixin:
                       "inside it). Research is not regenerated for past dates, so the strategy "
                       "has no backtest result here."}}
         conditions = {**compared["conditions"], "replayed_conclusions": len(signals),
-                      "recorded_conclusions": len(conclusions)}
+                      "recorded_conclusions": len(conclusions), "research_lifetime_minutes": lifetime}
         card = experiments.build(
             setup["db"], kind=experiments.BACKTEST, version=setup["version"], start=start, end=end,
             data={"source": bar_source.SOURCE, "caliber": bar_source.CALIBER, "symbols": symbols,
@@ -1485,7 +1517,6 @@ class AutoTradingMixin:
         candidate was fixed, up to the last one that has finished. One card, the candidate's:
         the strategy in force is a row on it, not a second trial of its own.
         """
-        from datetime import date, timedelta
 
         from .. import evaluation, sizing
         from ..auto import backtest as bt
@@ -1509,8 +1540,7 @@ class AutoTradingMixin:
         weights = {str(k).upper(): float(v) for k, v in
                    (evaluation.settings(live).get("benchmark") or {}).items()}
         symbols = list(dict.fromkeys([*rules.universe, *old_rules.universe, *weights]))
-        warm = (date.fromisoformat(start)
-                - timedelta(days=int(comparison.AVERAGE_OVER.get(mode, 100) * 1.6) + 10)).isoformat()
+        warm = self._auto_warm_from(start, mode, rules, old_rules)
         try:
             history = bar_source.read(symbols, start=warm, end=end)
         except bar_source.BarsUnavailable as exc:
@@ -1541,9 +1571,11 @@ class AutoTradingMixin:
                 "zh": f"现用策略 {incumbent['version_id']}：同样的研究结论、资金、价格和成本下重放。",
                 "en": f"In force, {incumbent['version_id']}: replayed on the same research, money, "
                       "prices and costs."})}
+        lifetime = self._auto_research_lifetime(sim_profiles, mode)
         for name, (how, said) in told.items():
             if signals:
-                replay = bt.run(rules=how, signals=signals, **shared)
+                replay = bt.run(rules=how, signals=signals, research_lifetime_minutes=lifetime,
+                                **shared)
                 ledgers[name] = replay.as_dict()
                 rows[name] = comparison.strategy_row(
                     replay.equity, fills=replay.fills, trades=replay.trades, skipped=replay.skipped,
@@ -1561,6 +1593,7 @@ class AutoTradingMixin:
                   "last_bar": max(bars[-1].date for bars in history.values())},
             conditions={**compared["conditions"], "replayed_conclusions": len(signals),
                         "recorded_conclusions": len(conclusions),
+                        "research_lifetime_minutes": lifetime,
                         "incumbent": incumbent["version_id"],
                         "incumbent_strategy": incumbent.get("strategy")},
             rows=rows,
@@ -1741,7 +1774,6 @@ class AutoTradingMixin:
         need; if that cannot be read the comparators are absent, with the reason, and the
         account's own figures still stand.
         """
-        from datetime import date, timedelta
 
         from .. import evaluation
         from ..auto import backtest as bt
@@ -1818,8 +1850,7 @@ class AutoTradingMixin:
                 flows = [bt.Flow(later["date"], round(float(later["funded_usd"]) - float(earlier["funded_usd"]), 2))
                          for earlier, later in pairwise(equity)
                          if abs(float(later["funded_usd"]) - float(earlier["funded_usd"])) > 0.005]
-                warm = (date.fromisoformat(start) - timedelta(
-                    days=int(comparison.AVERAGE_OVER.get(setup["mode"], 100) * 1.6) + 10)).isoformat()
+                warm = self._auto_warm_from(start, setup["mode"], setup["rules"])
                 history = bar_source.read([*setup["rules"].universe, *setup["weights"]], start=warm, end=end)
                 compared = comparison.run(
                     bars=history, start=start, end=end, mode=setup["mode"], rules=setup["rules"],
