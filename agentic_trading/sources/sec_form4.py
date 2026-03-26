@@ -45,6 +45,7 @@ import html
 import json
 import os
 import re
+import tempfile
 import time as _time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -620,6 +621,27 @@ def unavailable(symbol: str, outcome: str, detail: str) -> str:
 
 
 # ---------------------------------------------------------------------------------- reading
+def _keep(path: Path, text: str) -> None:
+    """Keep a copy whole or not at all: a reader never meets half a file.
+
+    Written beside the destination and moved into place in one step, so a crash or a full disk
+    part-way through leaves the earlier copy, or none -- never a torn one. A copy is only a
+    saving, so a copy that could not be kept is simply not kept.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".part")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(text)
+            os.replace(temporary, path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+    except OSError:
+        pass
+
+
 def _tickers(client: Client, root: Path, *, now: datetime) -> Any:
     """The SEC's ticker file: this week's copy if there is one, else fetched and kept."""
     kept = root / FORM4 / "company_tickers.json"
@@ -637,11 +659,7 @@ def _tickers(client: Client, root: Path, *, now: datetime) -> Any:
             return json.loads(kept.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise first from None
-    try:
-        kept.parent.mkdir(parents=True, exist_ok=True)
-        kept.write_text(got.text, encoding="utf-8")
-    except OSError:
-        pass
+    _keep(kept, got.text)
     return table
 
 
@@ -659,24 +677,38 @@ def _listed_document(client: Client, cik: int, accession: str) -> str | None:
 
 def _document(client: Client, root: Path, cik: int,
               row: dict[str, Any]) -> tuple[str, bool, str | None]:
-    """(the filing's XML, whether it was already kept, where it is). A filing never changes."""
+    """(the filing's XML, whether it was already kept, where it is). A filing never changes.
+
+    Only a filing that reads as one is kept, so a kept copy that does not read was torn on its
+    way to the disk -- a crash, a full disk, before copies were moved into place whole -- and
+    is fetched again rather than kept failing for good (found in review on 2026-10-14).
+    """
     accession = row["accession"]
     kept = root / FORM4 / "filings" / f"{accession}.xml"
     url = document_url(cik, row)
     try:
-        return kept.read_text(encoding="utf-8"), True, url
+        text = kept.read_text(encoding="utf-8")
     except OSError:
-        pass
+        text = None
+    if text is not None:
+        try:
+            parse(text)
+            return text, True, url
+        except Unreadable:
+            try:
+                kept.unlink()
+            except OSError:
+                pass
     if url is None:
         url = _listed_document(client, cik, accession)
         if url is None:
             raise Unreadable("the filing's directory lists no XML document")
     got = client.get(url, max_bytes=2_000_000, accept="application/xml,text/xml")
     try:
-        kept.parent.mkdir(parents=True, exist_ok=True)
-        kept.write_text(got.text, encoding="utf-8")
-    except OSError:
-        pass
+        parse(got.text)
+    except Unreadable:
+        return got.text, False, url      # the caller says why; nothing unreadable is kept
+    _keep(kept, got.text)
     return got.text, False, url
 
 

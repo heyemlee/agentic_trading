@@ -583,6 +583,44 @@ def test_the_ticker_file_is_asked_for_weekly_and_an_old_copy_serves_when_it_cann
     assert edgar.asked.count(form4.TICKERS_URL) == 2 and reading["outcome"] == sources.OK
 
 
+def test_a_kept_filing_that_was_torn_is_fetched_again_and_kept_whole(tmp_path):
+    """Found in review on 2026-10-14: half a file on the disk was a malformed filing for good."""
+    whole = filing(line("P"), plan=False)
+    kept = tmp_path / "sec_form4" / "filings" / f"{acc(1)}.xml"
+    kept.parent.mkdir(parents=True)
+    kept.write_text(whole[: len(whole) // 2], encoding="utf-8")
+    edgar = one_purchase()
+    _, reading, _ = read(edgar, tmp_path)
+    assert [(i["status"], i["from_cache"]) for i in reading["items"]] == [(sources.OK, False)]
+    assert edgar.asked.count(where(1)) == 1 and kept.read_text(encoding="utf-8") == whole
+    _, again, _ = read(edgar, tmp_path)
+    assert again["items"][0]["from_cache"] is True and edgar.asked.count(where(1)) == 1
+
+
+def test_a_filing_that_does_not_read_is_never_kept(tmp_path):
+    edgar = Edgar({SUBMISSIONS: index((acc(1), "4", "2026-09-22", "2026-09-22T20:15:00.000Z")),
+                   where(1): "<ownershipDocument><unclosed>"})
+    for _ in range(2):
+        _, reading, _ = read(edgar, tmp_path)
+        assert reading["items"][0]["status"] == sources.MALFORMED
+    assert not (tmp_path / "sec_form4" / "filings" / f"{acc(1)}.xml").exists()
+    assert edgar.asked.count(where(1)) == 2, "asked again, not served a broken copy"
+
+
+def test_a_copy_is_moved_into_place_whole_or_not_at_all(tmp_path, monkeypatch):
+    target = tmp_path / "sec_form4" / "company_tickers.json"
+    form4._keep(target, '{"kept": true}')
+    assert json.loads(target.read_text()) == {"kept": True}
+
+    def interrupted(_source, _destination):
+        raise OSError("the disk filled")
+
+    monkeypatch.setattr(form4.os, "replace", interrupted)
+    form4._keep(target, '{"kept": "the second time"}')
+    assert json.loads(target.read_text()) == {"kept": True}, "the earlier copy stands"
+    assert [p.name for p in target.parent.iterdir()] == ["company_tickers.json"], "nothing half-written"
+
+
 # ------------------------------------------------------------------- where it is attached
 def test_the_tool_exists_by_name_and_answers_unavailable_while_the_source_is_off(profiles, monkeypatch, tmp_path):
     monkeypatch.setenv(sources.LOG_ENV, str(tmp_path / sources.LOG_NAME))
