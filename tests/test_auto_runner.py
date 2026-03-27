@@ -16,6 +16,7 @@ from agentic_trading.auto import paper, runner, store, trader
 from agentic_trading.portfolio import load_portfolio
 from agentic_trading.proposals import SUBMITTED
 from agentic_trading.service import ServiceError
+from agentic_trading.service.shapes import MarketStatus
 from tests.auto_market import scripted, write_research
 from tests.test_api import sandbox_service  # noqa: F401 - shared isolated fixture
 
@@ -147,6 +148,48 @@ def test_one_failed_read_of_the_index_does_not_cost_the_session(running, monkeyp
     second = runner.run(sim, research_from=runs)
     assert second["health"]["regime_available"] is False
     assert second["recorded"]["problems"] == [runner.REGIME_UNKNOWN]
+
+
+def test_what_only_describes_the_moment_costs_a_session_only_while_its_market_is_open(running, monkeypatch):
+    """Found in review on 2026-10-14: a pause made on a Saturday was written onto Friday's
+    session -- the one a weekend pass belongs to -- and took a day that had gone well."""
+    _service, sim, _prices, _runs = running
+    profiles, db = sim.profiles(), sim.state_db()
+    plan = store.active_plan(db)
+    friday = "2026-10-09"
+
+    def record(at, tick, *, market_open):
+        monkeypatch.setattr(sim, "market_status", lambda: MarketStatus(is_open=market_open))
+        return runner._record(sim, profiles, db, plan, tick, session=friday, now=at, error=None,
+                              unconfirmed=None)
+
+    opened = datetime(2026, 10, 9, 14, 0, tzinfo=UTC)
+    for minutes in (0, 90):
+        assert record(opened + timedelta(minutes=minutes), _tick(), market_open=True)["problems"] == []
+    paused = _tick(paused={"reason": "weekend", "kind": "person", "at": "x"})
+    saturday = record(datetime(2026, 10, 10, 16, 0, tzinfo=UTC), paused, market_open=False)
+    assert saturday["problems"] == [runner.PAUSED], "the pass still says what it saw"
+    unreadable = _tick(health={"regime_available": False})
+    sunday = record(datetime(2026, 10, 11, 16, 0, tzinfo=UTC), unreadable, market_open=False)
+    assert sunday["problems"] == [runner.REGIME_UNKNOWN] and sunday["session_valid"] is True
+    assert store.sessions_of(db, plan["opening_version"])[friday]["problems"] == []
+    # What is about the session's own record is its problem whenever it is seen.
+    unknown = _tick(health={"unknown_orders": ["p1"]})
+    later = record(datetime(2026, 10, 11, 17, 0, tzinfo=UTC), unknown, market_open=False)
+    assert later["session_valid"] is False
+    assert store.sessions_of(db, plan["opening_version"])[friday]["problems"] == [runner.UNKNOWN_ORDER]
+
+
+def test_a_pause_while_the_market_is_open_costs_the_session_as_it_always_did(running, monkeypatch):
+    _service, sim, _prices, _runs = running
+    profiles, db = sim.profiles(), sim.state_db()
+    plan = store.active_plan(db)
+    monkeypatch.setattr(sim, "market_status", lambda: MarketStatus(is_open=True))
+    paused = _tick(paused={"reason": "lunch", "kind": "person", "at": "x"})
+    row = runner._record(sim, profiles, db, plan, paused, session="2026-10-12",
+                         now=datetime(2026, 10, 12, 16, 0, tzinfo=UTC), error=None, unconfirmed=None)
+    assert row["session_valid"] is False
+    assert store.sessions_of(db, plan["opening_version"])["2026-10-12"]["problems"] == [runner.PAUSED]
 
 
 def test_every_problem_has_words_for_a_person():

@@ -38,7 +38,8 @@ logger = logging.getLogger("agentic_trading.service")
 NEW_YORK = ZoneInfo("America/New_York")
 
 #: What can be wrong with a pass. Any one of them on any pass of a session keeps that session
-#: out of the count; each is a code, because a screen has to say which it was.
+#: out of the count -- those in OF_THE_MOMENT only while the market is open, see below; each is a
+#: code, because a screen has to say which it was.
 PASS_FAILED = "pass_failed"                  # the book could not be read or priced, or the pass raised
 PAUSED = "paused"                            # a person, or the loss line, had the plan stopped
 AUTONOMY_WITHDRAWN = "autonomy_withdrawn"    # an order had ended in a way nobody could account for
@@ -48,6 +49,15 @@ REGIME_UNKNOWN = "regime_unknown"            # the index and volatility data cou
 BOOK_UNCONFIRMED = "book_unconfirmed"        # the simulated book could not be dated to the session
 PROBLEMS = (PASS_FAILED, PAUSED, AUTONOMY_WITHDRAWN, UNKNOWN_ORDER, RESULT_UNKNOWN, REGIME_UNKNOWN,
             BOOK_UNCONFIRMED)
+#: Problems that only say how things stand at the moment of the pass, not what became of the
+#: session's own trading. Seen while the market is shut -- an evening, a weekend, before the open
+#: -- they cost the session nothing: nothing is approved then, and if the plan is still paused or
+#: the index still unreadable when the market opens, the passes in the session record it there.
+#: Found in review on 2026-10-14: a pause made on a Saturday was written onto Friday's session and
+#: took a day that had gone well. The rest stay on the session whenever they are seen, because
+#: each is about its record: a book not dated to it, an order or a position nobody can account
+#: for, a pass that failed, autonomy withdrawn over an order's outcome.
+OF_THE_MOMENT = (PAUSED, REGIME_UNKNOWN)
 
 
 def session_of(now: datetime) -> str:
@@ -243,8 +253,10 @@ def _record(service: Any, profiles: Any, db: Any, plan: dict[str, Any] | None,
     if plan is None:
         return recorded
     version_id = plan["opening_version"]
+    against = [problem for problem in recorded["problems"]
+               if market_open or problem not in OF_THE_MOMENT]
     row = store.mark_pass(db, version_id, session, at=now, market_open=market_open,
-                          problems=recorded["problems"])
+                          problems=against)
     days = store.simulated_days(db, version_id)
     verified = exits_verified(service, profiles, version_id)
     current = (store.version(db, version_id) or {}).get("validation") or {}
