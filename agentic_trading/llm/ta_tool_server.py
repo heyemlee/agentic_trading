@@ -13,6 +13,7 @@ import argparse
 import functools
 import os
 import sys
+from collections.abc import Callable
 
 
 def _quiet(fn):
@@ -60,6 +61,45 @@ def _build_sec_form4(profiles):
 LOCAL_TOOLS = {"fetch_url": _build_fetch_url, "get_sec_form4": _build_sec_form4}
 
 
+# Answers an upstream tool gives that read as a fact about the market when they are a fact about
+# the source. Rewritten after the call, keeping upstream's own words first; upstream is unchanged.
+def _news_feed_said_nothing(answer: str) -> str:
+    """Yahoo's per-symbol feed returning nothing at all is a gap, not a quiet week.
+
+    Upstream answers "No news found for X" both when the feed is empty and, with "between A and
+    B", when it had articles but none in the window. Only the first is rewritten. From about
+    2026-10-02 the feed returned nothing for every symbol (Yahoo's change; upstream's fix,
+    4429078, is after the commit this project pins), and research read the bare sentence as
+    "nothing was reported" -- the opposite of what the project holds a source to: a feed that
+    could not be read is never "nothing to report".
+    """
+    said = answer.strip()
+    if not said.startswith("No news found for ") or " between " in said or "\n" in said:
+        return answer
+    return (f"{said}. Yahoo returned no articles at all for this symbol -- not even outside the "
+            "dates asked for. For a listed fund or company that is a gap in the source, not a "
+            "quiet period (Yahoo's per-symbol news feed went empty for every symbol in October "
+            "2026). Treat company news as unavailable for this run, not as evidence that "
+            "nothing was reported.")
+
+
+ANSWER_NOTES: dict[str, Callable[[str], str]] = {"get_news": _news_feed_said_nothing}
+
+
+def _served(name: str, fn):
+    """The callable as the model is given it: quiet on stdout, and any answer note applied."""
+    note = ANSWER_NOTES.get(name)
+    quiet = _quiet(fn)
+    if note is None:
+        return quiet
+
+    @functools.wraps(fn)
+    def noted(*args, **kwargs):
+        return note(quiet(*args, **kwargs))
+
+    return noted
+
+
 def build_server(tool_names: list[str], config_dir: str | None):
     from tradingagents.agents.utils import agent_utils
     from tradingagents.dataflows.config import set_config
@@ -81,7 +121,7 @@ def build_server(tool_names: list[str], config_dir: str | None):
                 raise SystemExit(f"unknown TradingAgents tool: {name}")
             description = getattr(tool, "description", None) or fn.__doc__ or name
         # structured_output=False: every upstream tool returns markdown/CSV text.
-        server.add_tool(_quiet(fn), name=name, description=description, structured_output=False)
+        server.add_tool(_served(name, fn), name=name, description=description, structured_output=False)
     return server
 
 
