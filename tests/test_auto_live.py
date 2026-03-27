@@ -570,6 +570,25 @@ def test_the_real_account_trades_down_the_one_approval_path(real):
     assert trade["closed_by"] == "code" and trade["realized_usd"] < 0
 
 
+def test_a_purchase_written_before_a_pause_waits_for_a_person_in_the_real_account(real):
+    """Found in review on 2026-10-14: the fifteen-second loop sent it anyway."""
+    real.in_force()
+    real.research("VXUS", confidence=90)
+    real.service.auto_tick()
+    waiting = next(p for p in real.proposals() if p.ticker == "VXUS")
+    assert waiting.status == PROPOSED
+    real.service.auto_pause(scope="live", reason="stepping away", identity="owner")
+    report = real.service.autonomous_reductions()
+    assert report["approved"] == []
+    assert report["declined"] == [{"proposal_id": waiting.proposal_id, "reasons": [
+        "the automatic-trading plan is paused (stepping away); a purchase it wrote waits for a person"]}]
+    assert real.venue._orders == {} and real.held("VXUS") == 0.0
+    # A person may still approve it; code does not, until the plan is resumed.
+    real.service.auto_resume(scope="live", note="back", identity="owner", confirmed=True)
+    assert [row["outcome"] for row in real.service.autonomous_reductions()["approved"]] == ["SUBMITTED"]
+    assert real.held("VXUS") > 0
+
+
 def test_pausing_and_stopping_take_no_password_and_resuming_does(real):
     real.in_force()
     paused = real.service.auto_pause(scope="live", reason="stepping away", identity="owner")

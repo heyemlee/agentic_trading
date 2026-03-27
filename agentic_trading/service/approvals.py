@@ -665,6 +665,9 @@ class ApprovalsMixin:
 
         plan = auto_store.active_plan(store.db) if any(
             p.action in autonomy.OPENING_ACTIONS for p in candidates) else None
+        # Read beside the plan, once: whether it is paused, by a person or at its loss line.
+        held_back = auto_store.state(store.db) if plan is not None else {}
+        paused = held_back if held_back.get("paused") else None
         for proposal in candidates:
             if proposal.authority_version != current_authority:
                 born_under = proposal.authority_version or "no recorded version"
@@ -697,6 +700,13 @@ class ApprovalsMixin:
                         why = (f"the {mode} mode is not among the modes code may open positions "
                                f"under on its own (buckets.{MICRO_BUCKET}.autonomy.open.modes); "
                                "this purchase waits for a person")
+                    # A pause stops what the plan had already written as well as what it would
+                    # write next: a purchase queued overnight is not let through at the open
+                    # because it was written before the pause (found in review, 2026-10-14).
+                    elif paused is not None:
+                        why = ("the automatic-trading plan is paused ("
+                               + str(paused.get("reason") or "no reason given")[:200]
+                               + "); a purchase it wrote waits for a person")
                 if why:
                     report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [why]})
                     continue

@@ -726,6 +726,30 @@ def test_a_pause_stops_openings_and_leaves_the_way_out_open(quick_desk):
     assert lost < 0 and store.state(desk.sim.state_db())["loss_baseline_usd"] == 0.0
 
 
+@pytest.mark.parametrize("kind, by", [(store.PERSON, "owner"), (store.LOSS_LINE, "auto:loss_line")])
+def test_a_pause_also_holds_back_a_purchase_written_before_it(quick_desk, monkeypatch, kind, by):
+    """Found in review on 2026-10-14: a purchase the plan wrote overnight was bought at the open
+    although the plan had been paused in between -- by a person, or at its loss line."""
+    desk = quick_desk
+    monkeypatch.setattr(desk.sim, "market_status", lambda: MarketStatus(is_open=False))
+    desk.research("VXUS", confidence=90)
+    desk.tick()
+    queued = next(p for p in desk.proposals() if p.ticker == "VXUS")
+    assert queued.status == PROPOSED, "written while the market was shut, waiting for the open"
+    store.pause(desk.sim.state_db(), reason="stepping away", by=by, kind=kind)
+    monkeypatch.setattr(desk.sim, "market_status", lambda: MarketStatus(is_open=True))
+    report = desk.sim.autonomous_reductions()
+    assert report["approved"] == [] and "paused (stepping away)" in report["declined"][0]["reasons"][0]
+    desk.tick()
+    assert next(p for p in desk.proposals() if p.ticker == "VXUS").status == PROPOSED
+    assert desk.held("VXUS") == 0.0 and not [o for o in desk.broker._orders.values() if o.symbol == "VXUS"]
+    # Resumed while the purchase is still fresh, code carries it out after all.
+    trader.resume(desk.sim, note="back", by="owner", trade_date=today())
+    desk.tick()
+    assert next(p for p in desk.proposals() if p.ticker == "VXUS").status == EXECUTED
+    assert desk.held("VXUS") > 0
+
+
 def test_reaching_the_loss_line_pauses_the_plan_until_a_person_resumes_it(quick_desk):
     desk = quick_desk
     desk.buy("VTI")
