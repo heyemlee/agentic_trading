@@ -473,23 +473,40 @@
   （能悄悄绕过的是按环境变量指定模型服务和 `TYPESAFE_API_KEY` 两条新路）；我们配置写死了 `fundamental_data: yfinance`，
   升级本身不会请求 SEC，风险在这一项没有被设置页保护。
 
-**2026-10-15 的合入与发布（由你运行，13:00 PDT 收盘以后）**
+**2026-10-15 的收尾决定（你的原话：“按照你的建议都做完就好了”）**
 
-1. 门禁（在分支的 worktree 里）：
-   `cd /Users/l/Desktop/Projects/agentic_trading/.claude/worktrees/amazing-raman-8f2b23 && env PYTHONPATH=$PWD deploy/checks.sh`
-2. 合入（快进）：`git -C /Users/l/Desktop/Projects/agentic_trading merge --ff-only claude/amazing-raman-8f2b23`
-   如果被拒绝，是配置页这期间往 `main` 提交过改动；不要强推，先把分支 rebase 上去。
-3. 推送：`git -C /Users/l/Desktop/Projects/agentic_trading push origin main`
-4. 发布：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh publish --ref main`
-   （合入之后 `main` 就是分支的最新提交；`--ref` 写那个提交号也一样。）
-5. 确认：`readlink /Users/l/Desktop/Projects/agentic_trading_releases/current` 以分支最新提交号结尾；
+- **今天只发布到 `f41d076`**：大盘数据重试（`c11c0c8`）和测试不受宏观日影响（`f41d076`）。分支上其余改动运行行为的提交
+  （`4a51ff3` C、`b307ed3` 回测、`19a8ab8` Form 4 缓存、`b942a75` 暂停拦截、`0e9e713` 休市计天、`8b77e78` 新闻说法）
+  和文档，跟以后基准建仓（A）那一批一起发布，少一次发布。
+- 最小下单额和 `fit_to_limits`：等 A 上线时再定，现在不改。
+- 会话：代码审查、BUY 分析两个已归档。大盘数据修复那个会话**暂不归档**：归档会删掉它的 worktree，
+  而那个 worktree 里有还没发布的提交，A 也要在那里做；等 A 那一批发布之后再归档。
+- worktree：`auto-trading`、`nostalgic-lamport-b3882a` 已删除（内容都已在 `main` 上，分支保留）。
+  `amazing-raman-8f2b23` 保留（理由同上）。
+- 上游迁移 U1–U9 按建议定，U7 选 b（A 跑稳 3–5 个交易日之后再上线迁移）；由写迁移契约的会话记进
+  `docs/UPSTREAM_MIGRATION_CONTRACT_2026-10-15.md`。
+
+**已发布（2026-10-15，实施会话核对过）**
+
+- `main` = `origin/main` = `f41d076`；线上 `20261015T175728Z-f41d076`，10:57 PDT 发布（比计划的收盘后早；当天没有因此多出问题）。
+- 心跳全部正常；模拟账户的策略版本仍是 `sv-b9318e77fdf7`，没有换版本。
+- 有效模拟日现在是 0 / 30：10-14 后来也作废了；10-15 在发布前（旧代码，没有重试）也因为一次 SPY 读取失败作废，
+  失败就在一次 Robinhood 会话断开旁边，和发布无关。发布后再没有出现过读不到。**10-16 是第一天在修复下跑。**
+- 研究时间还没改，仍是周五 13:30（配置和 launchd 都是）。不改也没有问题，研究照旧在 13:30 跑。
+
+**2026-10-15 的合入与发布（由你运行，只到 `f41d076`）**
+
+1. 合入（快进）：`git -C /Users/l/Desktop/Projects/agentic_trading merge --ff-only f41d076`
+   如果被拒绝，是配置页这期间往 `main` 提交过改动；不要强推，告诉实施会话。
+2. 推送：`git -C /Users/l/Desktop/Projects/agentic_trading push origin main`（推送前会自动跑完整门禁）
+3. 13:00 PDT 收盘以后发布：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh publish --ref f41d076`
+4. 确认：`readlink /Users/l/Desktop/Projects/agentic_trading_releases/current` 以 `-f41d076` 结尾；
    `CT_DATA_DIR=/Users/l/Desktop/Projects/agentic_trading /Users/l/Desktop/Projects/agentic_trading_releases/current/.venv/bin/ct-ops status` 心跳正常。
-6. 然后在配置页把研究时间改成周五 07:00（F）。
-7. 第二天看有效模拟日，应该从 10-16 开始累计：
+5. **明早 07:00 之前**在配置页把研究时间改成周五 07:00（F）。
+6. 第二天看有效模拟日，应该从 10-16 开始累计：
    `CT_DATA_DIR=/Users/l/Desktop/Projects/agentic_trading /Users/l/Desktop/Projects/agentic_trading_releases/current/.venv/bin/ct-auto --lang zh sim`
 
-回滚：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh rollback`。这批提交没有新增接口里的存储字段
-（回测卡片多出的 `research_lifetime_minutes` 只在卡片和账本文件里，自动交易的接口返回的是普通字典），退回 `1223f50` 是安全的。
+回滚：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh rollback`。这两个提交不新增任何存储字段，退回 `1223f50` 是安全的。
 
 ## 目标与已确定的选择
 
