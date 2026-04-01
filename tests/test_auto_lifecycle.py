@@ -18,7 +18,8 @@ What is held:
 
 import json
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -786,6 +787,137 @@ def test_reaching_the_loss_line_pauses_the_plan_until_a_person_resumes_it(quick_
     assert again.loss["total_usd"] == pytest.approx(lost["total_usd"] + further, abs=0.01)
     assert again.loss["reached"] is True and again.paused["kind"] == "loss_line"
     assert desk.held("VXUS") == holding.quantity, "the line stops openings; it does not sell"
+
+
+def _person_approves(desk, proposal):
+    """A proposal its owner approved in the console, through the ordinary approval path."""
+    answer = desk.sim.approve(
+        proposal.proposal_id, identity="owner", version=proposal.version(),
+        request_id=f"human-{proposal.proposal_id}", authority_version=proposal.authority_version,
+        terms={"ticker": proposal.ticker, "bucket": proposal.bucket, "action": proposal.action,
+               "notional_usd": proposal.notional_usd, "sell_quantity": proposal.sell_quantity})
+    assert answer["submitted"] is True, answer
+    return desk.sim._store(desk.sim.profiles()).get(proposal.proposal_id)
+
+
+def test_a_stop_a_person_approved_is_still_the_plans_loss_and_reaches_its_line(quick_desk):
+    """Review of 2026-10-14, item 2 (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.2): the line
+    counted only what code itself sold, so a stop the owner approved by hand took its loss off
+    the line, and the pause it should have brought could never come."""
+    desk = quick_desk
+    desk.buy("VTI")
+    desk.move("VTI", 0.88)                                  # past the version's 10% stop
+    desk.tick(approve=False)                                # the stop is written, and waits
+    stop = next(p for p in desk.proposals() if p.action == "SELL")
+    assert stop.status == PROPOSED and stop.strategy_version
+    closed = _person_approves(desk, stop)
+    assert closed.status == EXECUTED and autonomy.was_human(closed) and desk.held("VTI") == 0.0
+
+    lost = desk.tick().loss
+    assert lost["realized_by"] == {"code": 0.0, "person": pytest.approx(-24.0, abs=0.05)}
+    assert lost["realized_usd"] == lost["total_usd"] == pytest.approx(-24.0, abs=0.05)
+    assert lost["known"] is True and lost["reached"] is False, "this plan's own line is wider"
+    # Under a line of $5 the same loss is past it, and the plan pauses itself.
+    tight = {**desk.plan, "envelope": {**desk.plan["envelope"], "loss_pause_usd": 5.0}}
+    store.confirm_plan(desk.sim.state_db(), desk.sim.profiles(), tight, identity="owner", scope="paper")
+    hit = desk.tick()
+    assert hit.loss["reached"] is True and hit.paused["kind"] == "loss_line"
+
+
+def _weekdays_before(day: str, count: int) -> str:
+    out = date.fromisoformat(day)
+    while count:
+        out -= timedelta(days=1)
+        count -= out.weekday() < 5
+    return out.isoformat()
+
+
+def test_a_price_from_before_the_last_session_decides_no_exit_and_leaves_the_result_unknown(
+        desk, monkeypatch):
+    """Contract 2.4: the book accepts a price three weekdays old, and a stop used to be read on
+    one as though it were today's. Too old for the session, nothing that reads a price decides."""
+    from agentic_trading import cli, portfolio
+
+    desk.buy("VTI")
+    quantity = desk.held()
+    old = _weekdays_before(today(), 3)              # inside the book's three, two sessions short
+    priced = cli.build_snapshot
+    stale = {"on": True}
+
+    def snapshot(state, profiles, trade_date, price_lookup=None, identity_lookup=None):
+        def lookup(symbol, as_of):
+            return desk.prices[symbol.upper()], old if stale["on"] else as_of
+        return priced(state, profiles, trade_date, price_lookup or lookup, identity_lookup)
+
+    monkeypatch.setattr(portfolio, "build_snapshot", snapshot)
+    monkeypatch.setattr(cli, "build_snapshot", snapshot)
+    desk.move("VTI", 0.80)                                  # far past the stop
+    desk.research("VXUS", confidence=95)
+    result = desk.tick()
+    call = result.exits[0]["exit"]
+    assert call["due"] is False and call["undecided"] == positions.PRICE_STALE
+    assert call["price_date"] == old and f"价格是 {old[5:]} 的，太旧" in call["text"]["zh"]
+    assert desk.held() == quantity and sold(desk.broker) == 0.0, "not sold on a price that old"
+    # What the plan has lost is not known either, so nothing new is opened.
+    assert result.loss["known"] is False and result.loss["stale"] == ["VTI"]
+    assert result.loss["unpriced"] == [] and result.loss["reached"] is False
+    assert result.signals[0]["diagnosis"]["code"] == "plan_result_unknown"
+    kept = trader.undecided_exits(desk.sim.state_db())
+    assert kept["VTI"]["since"] == kept["VTI"]["last"] == today()
+    assert kept["VTI"]["code"] == positions.PRICE_STALE and kept["VTI"]["price_date"] == old
+
+    # A price for the session again: the stop is read, and met, and the record of it is gone.
+    stale["on"] = False
+    after = desk.tick()
+    assert after.exits[0]["exit"]["reason"] == positions.STOP_LOSS and desk.held() == 0.0
+    assert trader.undecided_exits(desk.sim.state_db()) == {}
+
+
+def test_an_undecided_exit_keeps_the_session_it_began_in_until_it_is_decided(desk):
+    db = desk.sim.state_db()
+    row = {"symbol": "VTI", "strategy_version": "sv-1",
+           "exit": {"due": False, "undecided": positions.PRICE_STALE, "price_date": "2026-10-14",
+                    "text": {"zh": "VTI 的价格是 10-14 的，太旧，今天不判断止损。", "en": "old"}}}
+
+    def on(session):
+        return SimpleNamespace(db=db, snap=SimpleNamespace(trade_date=session))
+
+    assert trader.remember_undecided(on("2026-10-19"), [row])["VTI"]["since"] == "2026-10-19"
+    kept = trader.remember_undecided(on("2026-10-20"), [row])["VTI"]
+    assert (kept["since"], kept["last"], kept["code"]) == ("2026-10-19", "2026-10-20", positions.PRICE_STALE)
+    # Any other reason nothing was decided is kept as well, under its own words.
+    other = {**row, "exit": {"due": False, "undecided": "the fills account for 2 shares and the book holds 3"}}
+    assert trader.remember_undecided(on("2026-10-20"), [other])["VTI"]["code"] == "undecided"
+    # Decided again -- or no longer held -- and the run is over; the next one starts afresh.
+    decided = {**row, "exit": {"due": False, "undecided": None}}
+    assert trader.remember_undecided(on("2026-10-21"), [decided]) == {}
+    assert trader.remember_undecided(on("2026-10-22"), [row])["VTI"]["since"] == "2026-10-22"
+    assert trader.remember_undecided(on("2026-10-22"), []) == {}
+
+
+@pytest.mark.parametrize("price_date, trade_date, stale", [
+    ("2026-10-14", "2026-10-15", False),   # yesterday's close, for today
+    ("2026-10-15", "2026-10-15", False),
+    ("2026-10-13", "2026-10-15", True),    # a whole session, the 14th, went unpriced
+    ("2026-10-16", "2026-10-19", False),   # Friday's, on Monday: a weekend is not a missing day
+    ("2026-10-15", "2026-10-19", True),    # Thursday's on Monday: Friday is missing
+    ("2026-11-25", "2026-11-27", False),   # Wednesday's, the day after Thanksgiving
+    ("2026-12-31", "2027-01-04", False),   # the year's last session, after New Year's Day
+    ("2026-10-16", "2026-10-17", False),   # a Saturday pass, on Friday's
+    ("2026-10-15", "2026-10-17", True),
+    (None, "2026-10-15", True),            # a price nobody can date is old
+    ("not a date", "2026-10-15", True),
+])
+def test_a_price_is_old_when_a_whole_session_went_by_without_one(price_date, trade_date, stale):
+    assert trader.price_stale(price_date, trade_date) is stale
+
+
+def test_without_the_exchange_calendar_a_price_is_aged_in_weekdays(monkeypatch):
+    monkeypatch.setattr(trader, "_exchange_calendar", lambda: None)
+    assert trader.price_stale("2026-10-14", "2026-10-15") is False
+    assert trader.price_stale("2026-10-13", "2026-10-15") is True
+    # Wrong only ever toward "old": the day after Thanksgiving reads Wednesday's close as stale.
+    assert trader.price_stale("2026-11-25", "2026-11-27") is True
 
 
 def test_a_position_that_cannot_be_accounted_for_stops_openings_and_is_never_sold(desk):

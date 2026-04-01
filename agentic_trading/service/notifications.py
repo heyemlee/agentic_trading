@@ -39,6 +39,8 @@ RANKING: dict[str, tuple[str, int, bool]] = {
     # without being asked no longer is, and only a person can say what happens next.
     "auto_trading_stopped": ("high", 2, True),
     "auto_trading_stalled": ("high", 2, True),
+    # A position of the plan's whose stop could not be read for more than a session.
+    "auto_exit_undecided": ("high", 3, True),
     "proposal_waiting": ("high", 3, True),
     "exit_incomplete": ("high", 3, True),
     "proposal_stale": ("normal", 3, True),
@@ -64,6 +66,7 @@ ACTIONS: dict[str, list[str]] = {
     "autonomy_withdrawn": ["reset_autonomy", "open"],
     "auto_trading_stopped": ["open"],
     "auto_trading_stalled": ["open"],
+    "auto_exit_undecided": ["open"],
     "proposal_waiting": ["approve", "reject", "reanalyze"],
     "exit_incomplete": ["continue_exit", "open"],
     "proposal_stale": ["reanalyze", "reject"],
@@ -647,6 +650,35 @@ class NotificationsMixin:
                               "and than buy-and-hold, and no deeper a drawdown. This plan is not "
                               "set to replace by itself, so the change is yours to confirm."},
                     since=look.get("at"), **base))
+            # A position of the plan's whose exit nobody could decide, for longer than a session:
+            # a price too old to read a stop on, or shares nobody can account for. Its stop is
+            # not being watched, and waiting will not show it is fine (contract 2.4, 3.4).
+            from ..auto import trader
+            from ..auto.positions import PRICE_STALE
+            from ..portfolio import trading_days_between
+
+            for symbol, seen in sorted(trader.undecided_exits(db).items()):
+                if trading_days_between(str(seen.get("since")), str(seen.get("last"))) < 1:
+                    continue
+                stale = seen.get("code") == PRICE_STALE
+                said = seen.get("text") or {}
+                out.append(Condition(
+                    id=f"auto_exit_undecided:{symbol}:{seen.get('since')}", kind="auto_exit_undecided",
+                    title=f"automatic trading cannot judge whether to sell {symbol}",
+                    detail=(f"since {seen.get('since')}: {seen.get('detail')}; its stop is not "
+                            "being applied until it can be read")[:300],
+                    detail_i18n={
+                        "zh": ((said.get("zh") or "") + f"从 {seen.get('since')} 起一直不能判断，止损暂时不起作用。"
+                               if stale else
+                               f"从 {seen.get('since')} 起不能判断 {symbol} 是否该按方案退出，止损暂时不起作用。"
+                               "请到自动交易页查看原因。"),
+                        "en": ((said.get("en") or "") + f" It has not been judged since {seen.get('since')}, "
+                               "so its stop is not being applied." if stale else
+                               f"Since {seen.get('since')} it has not been possible to judge whether "
+                               f"{symbol} should leave on the plan's terms, so its stop is not being "
+                               "applied. The automatic-trading page says why.")},
+                    subject=symbol, since=seen.get("since"), notify_kind="backup_overdue",
+                    urgent=True, **base))
             # A pass is expected for as long as there is a plan, or a version that may still hold
             # something. One that has not happened, or keeps failing, while the market is open.
             if (active is not None or plans.versions(db)) and self.market_status().is_open:

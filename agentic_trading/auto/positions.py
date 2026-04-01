@@ -37,6 +37,8 @@ from typing import Any
 from .. import autonomy
 
 STOP_LOSS, TAKE_PROFIT, MAX_HOLDING, TREND_BREAK = "stop_loss", "take_profit", "max_holding", "trend_break"
+#: Why an exit was not decided when the price it would be decided on is too old to stand for today.
+PRICE_STALE = "exit_price_stale"
 #: How close to a stop or a target, in percentage points, is at it.
 AT_THE_LINE = 1e-9
 
@@ -62,6 +64,11 @@ REASONS: dict[str, tuple[str, str]] = {
                   "It has been held {held_days} days, the longest this strategy holds is {limit_days}."),
     TREND_BREAK: ("收盘价 {close} 跌破自己的 {window} 日均线 {average}。",
                   "Its close of {close} is below its own {window}-session average of {average}."),
+}
+#: Why nothing was decided, where that has a sentence of its own.
+UNDECIDED: dict[str, tuple[str, str]] = {
+    PRICE_STALE: ("{symbol} 的价格是 {day} 的，太旧，今天不判断止损。",
+                  "{symbol} is priced from {day}, too old to judge its stop today."),
 }
 
 
@@ -119,8 +126,9 @@ class _Played:
     opened_at: str | None = None
     error: str | None = None
     lives: list[dict[str, Any]] | None = None
-    #: What the plan's own shares realized when sold, by the version whose life they were in.
-    realized: dict[str, float] | None = None
+    #: What the plan's own shares realized when sold, by the version whose life they were in, and
+    #: by who approved the sale: ``{version: {"code": ..., "person": ...}}``.
+    realized: dict[str, dict[str, float]] | None = None
 
 
 def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: str) -> _Played:
@@ -163,7 +171,8 @@ def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: st
                 # At the plan's own average cost, as the ledger books a sale at the holding's.
                 if from_own > 0 and state.version:
                     gained = from_own * (price - state.cost / state.own)
-                    state.realized[state.version] = state.realized.get(state.version, 0.0) + gained
+                    split = state.realized.setdefault(state.version, {"code": 0.0, "person": 0.0})
+                    split["code" if _closed_by_code(order) else "person"] += gained
                 state.cost *= max(0.0, state.own - from_own) / state.own
             state.own -= from_own
             state.other = max(0.0, state.other - (quantity - from_own))
@@ -213,24 +222,27 @@ def closed_trades(*, fills: list[dict[str, Any]], proposals: Any, bucket: str) -
 
 
 def realized_by_version(*, fills: list[dict[str, Any]], proposals: Any,
-                        bucket: str) -> dict[str, float] | None:
-    """What the plan's own shares realized when they were sold, by strategy version.
+                        bucket: str) -> dict[str, dict[str, float]] | None:
+    """What the plan's own shares realized when sold, by strategy version and by who approved it.
 
-    Whoever approved the sale: a stop a person approved, or a sale a person made that reached
-    into the plan's shares, is the plan's loss as much as one code sent. None when the log is
-    too long to replay -- an unknown, which the loss line reports as one rather than as zero.
+    ``{version: {"code": ..., "person": ...}}``. Whoever approved the sale, it is the plan's: a
+    stop a person approved, or a sale a person made that reached into the plan's shares, is the
+    plan's loss as much as one code sent. None when the log is too long to replay -- an unknown,
+    which the loss line reports as one rather than as zero.
     """
     if len(fills) >= autonomy.FILL_REPLAY_LIMIT:
         return None
-    out: dict[str, float] = {}
+    out: dict[str, dict[str, float]] = {}
     symbols = {str(row.get("symbol") or "").upper() for row in fills
                if str(row.get("bucket")) == bucket and row.get("symbol")}
     for symbol in sorted(symbols):
         played = _replay(fills, proposals, bucket, symbol)
         if played.error:
             return None
-        for version, amount in (played.realized or {}).items():
-            out[version] = out.get(version, 0.0) + amount
+        for version, split in (played.realized or {}).items():
+            total = out.setdefault(version, {"code": 0.0, "person": 0.0})
+            for closer, amount in split.items():
+                total[closer] += amount
     return out
 
 
@@ -290,8 +302,14 @@ class ExitCall:
     exit_by: str | None = None
     #: Why nothing could be decided, when nothing could.
     undecided: str | None = None
+    #: The day the price this was decided on, or not decided on, is from.
+    price_date: str | None = None
 
     def text(self) -> dict[str, str] | None:
+        if not self.due and self.undecided in UNDECIDED:
+            zh, en = UNDECIDED[self.undecided]
+            facts = self.facts or {}
+            return {"zh": zh.format(**facts), "en": en.format(**facts)}
         if not self.due or self.reason not in REASONS:
             return None
         zh, en = REASONS[self.reason]
@@ -299,7 +317,8 @@ class ExitCall:
 
     def as_dict(self) -> dict[str, Any]:
         return {"due": self.due, "reason": self.reason, "facts": self.facts,
-                "exit_by": self.exit_by, "undecided": self.undecided, "text": self.text()}
+                "exit_by": self.exit_by, "undecided": self.undecided,
+                "price_date": self.price_date, "text": self.text()}
 
 
 def _day(stamp: str | None) -> date | None:
@@ -310,7 +329,8 @@ def _day(stamp: str | None) -> date | None:
 
 
 def exit_call(position: Managed, version: dict[str, Any] | None, *, price: float | None,
-              today: date, closes: list[float] | None = None) -> ExitCall:
+              today: date, closes: list[float] | None = None, price_date: str | None = None,
+              stale: bool = False) -> ExitCall:
     """Whether this position has met one of its opening version's exit conditions.
 
     Nothing is inferred. Without the version there are no conditions to meet; without a cost or
@@ -319,6 +339,13 @@ def exit_call(position: Managed, version: dict[str, Any] | None, *, price: float
 
     ``closes`` is the fund's finished daily closes, oldest first, for a version with a trend
     rule. Absent or too short, the trend is not known and is not a reason to sell.
+
+    ``stale`` says the price is older than the session before the one this pass is for
+    (``trader.price_stale``), as it is when a vendor misses a day. Then nothing that reads a
+    price is decided -- the stop, the target, the trend -- in either direction: a price from
+    before the move can neither show the stop was met nor that it was not
+    (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.4). The longest holding period needs no
+    price, and is still applied.
     """
     if not position.known or (position.quantity or 0.0) <= autonomy.QUANTITY_TOLERANCE:
         return ExitCall(False, undecided=position.reason or "code holds none of this position")
@@ -332,7 +359,10 @@ def exit_call(position: Managed, version: dict[str, Any] | None, *, price: float
     exit_by = (opened + timedelta(days=longest)).isoformat() if opened and longest > 0 else None
     if opened and longest > 0 and (today - opened).days >= longest:
         return ExitCall(True, MAX_HOLDING, {"held_days": (today - opened).days, "limit_days": longest},
-                        exit_by)
+                        exit_by, price_date=price_date)
+    if stale:
+        return ExitCall(False, facts={"symbol": position.symbol, "day": _short(price_date)},
+                        exit_by=exit_by, undecided=PRICE_STALE, price_date=price_date)
     measurable = not (price is None or not position.cost_basis or position.cost_basis <= 0 or price <= 0)
     if measurable:
         pnl = (price / position.cost_basis - 1.0) * 100.0
@@ -342,17 +372,25 @@ def exit_call(position: Managed, version: dict[str, Any] | None, *, price: float
         # At the line counts as reaching it. The slack is for the arithmetic, not for the market:
         # 90 against a cost of 100 computes to -9.999999999999998, and a stop of 10 must still fire.
         if stop > 0 and pnl <= -stop + AT_THE_LINE:
-            return ExitCall(True, STOP_LOSS, {"pnl_pct": shown, "limit_pct": f"{stop:g}"}, exit_by)
+            return ExitCall(True, STOP_LOSS, {"pnl_pct": shown, "limit_pct": f"{stop:g}"}, exit_by,
+                            price_date=price_date)
         if target > 0 and pnl >= target - AT_THE_LINE:
-            return ExitCall(True, TAKE_PROFIT, {"pnl_pct": shown, "limit_pct": f"{target:g}"}, exit_by)
+            return ExitCall(True, TAKE_PROFIT, {"pnl_pct": shown, "limit_pct": f"{target:g}"}, exit_by,
+                            price_date=price_date)
     # The version's trend rule, on finished closes. It needs no cost, so it is read even when
     # a gain or a loss could not be.
     seen = trend(closes, int(rules.get("trend_window") or 0))
     if seen is not None and seen["below"]:
         return ExitCall(True, TREND_BREAK, {"close": f"{seen['close']:.2f}",
                                             "average": f"{seen['average']:.2f}",
-                                            "window": seen["window"]}, exit_by)
+                                            "window": seen["window"]}, exit_by, price_date=price_date)
     if not measurable:
-        return ExitCall(False, exit_by=exit_by, undecided=(
+        return ExitCall(False, exit_by=exit_by, price_date=price_date, undecided=(
             "no current price or no cost on record, so a loss or a gain cannot be measured"))
-    return ExitCall(False, exit_by=exit_by)
+    return ExitCall(False, exit_by=exit_by, price_date=price_date)
+
+
+def _short(day: str | None) -> str:
+    """A date as the console writes it in a sentence: month and day, the year being this one's."""
+    text = str(day or "")
+    return text[5:10] if len(text) >= 10 and text[4] == "-" else (text or "?")

@@ -31,7 +31,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,7 @@ from .. import autonomy, diagnosis, exits
 from ..evidence import collect_evidence
 from ..micro_live import BUCKET as ACCOUNT
 from ..policy import decide
-from ..portfolio import classify_instrument, upstream_identity_lookup
+from ..portfolio import classify_instrument, trading_days_between, upstream_identity_lookup
 from ..proposals import (
     APPROVED,
     EXPIRED,
@@ -59,6 +60,8 @@ logger = logging.getLogger("agentic_trading.service")
 
 SIGNALS = "auto.signals"
 MAX_SIGNALS = 500
+#: Since which session each position of the plan's has had an exit nobody could decide.
+UNDECIDED = "auto.exits_undecided"
 #: The report each analyst leaves, by the key the evidence check knows it under.
 REPORTS = {"market_report": "market", "news_report": "news",
            "fundamentals_report": "fundamentals", "sentiment_report": "social"}
@@ -420,40 +423,98 @@ def withdraw_moved_exits(book: Book, symbol: str) -> list[str]:
     return withdrawn
 
 
-def plan_loss(book: Book) -> dict[str, Any]:
-    """What the plan's own trading has made or lost: closed trades plus open positions marked.
+@lru_cache(maxsize=1)
+def _exchange_calendar() -> Any:
+    """The NYSE's sessions, built once; None when the calendar cannot be built."""
+    try:
+        import exchange_calendars
 
-    Only what code traded under a strategy version counts. The line this is held to is the
-    person's loss line for the plan, and a loss on a holding they bought themselves is not the
-    plan's to answer for.
+        return exchange_calendars.get_calendar("XNYS")
+    except Exception as exc:  # noqa: BLE001 - weekdays stand in, which only ever errs toward "old"
+        logger.warning("exchange calendar unavailable, so price ages are counted in weekdays: %s", exc)
+        return None
+
+
+def price_stale(price_date: str | None, trade_date: str) -> bool:
+    """Whether a price is too old to decide anything on in the session ``trade_date``.
+
+    Older than the session before it: a whole session went by that the price knows nothing of,
+    as when a vendor misses a day. The book still accepts a price three weekdays old
+    (``portfolio_state.max_price_age_trading_days``), which is right for valuing an account and
+    wrong for a stop: a stop read on Tuesday's price on Thursday answers a question about
+    Tuesday (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.4). Sessions are the exchange's, so a
+    weekend or a holiday is not a missing day; without the calendar they are weekdays, which
+    errs only toward calling a price old. A price whose day is not known is old.
     """
-    own_orders = {p.client_order_id for p in book.proposals
-                  if p.client_order_id and p.strategy_version and autonomy.was_autonomous(p)}
-    realized = sum(float(trade.realized_usd) for trade in book.ledger.realized
-                   if trade.bucket == ACCOUNT and trade.client_order_id in own_orders)
+    try:
+        first = date.fromisoformat(str(price_date or "")[:10]) + timedelta(days=1)
+        last = date.fromisoformat(str(trade_date)[:10]) - timedelta(days=1)
+    except ValueError:
+        return True
+    if first > last:
+        return False
+    calendar = _exchange_calendar()
+    if calendar is not None:
+        try:
+            return len(calendar.sessions_in_range(first.isoformat(), last.isoformat())) > 0
+        except Exception as exc:  # noqa: BLE001 - outside the calendar's years: weekdays instead
+            logger.debug("%s to %s is outside the exchange calendar: %s", first, last, exc)
+    return trading_days_between(str(price_date)[:10], str(trade_date)[:10]) > 1
+
+
+def plan_loss(book: Book) -> dict[str, Any]:
+    """What the plan's positions have made or lost: what their sales realized, and what is open, marked.
+
+    The plan's positions are what a plan bought -- every purchase written under a strategy
+    version, whoever approved it (``positions``) -- and everything their sales realized counts,
+    whoever approved the sale. Until 2026-10-15 only orders code itself approved counted, so a
+    stop a person approved took its loss off the line, and the pause it should have brought
+    could never come (review of 2026-10-14, item 2; docs/AUTO_BASELINE_CONTRACT_2026-10-15.md,
+    2.2). A holding a person bought for themselves is still not the plan's to answer for.
+
+    Realized is at the plan's own average cost, from the replay of the fills, and is split by
+    who approved each sale (``realized_by``). Open positions are marked at the book's prices; one
+    whose price is too old for this session (``price_stale``) is not marked at all. Either way
+    round, a figure that cannot be established leaves the result unknown, and an unknown result
+    is not one inside the line.
+    """
+    split = positions.realized_by_version(fills=book.fills, proposals=book.proposals, bucket=ACCOUNT)
+    realized_by = None
+    if split is not None:
+        realized_by = {"code": 0.0, "person": 0.0}
+        for amounts in split.values():
+            for closer, amount in amounts.items():
+                realized_by[closer] += amount
     bucket = book.snap.buckets[ACCOUNT]
-    prices = {view.symbol: view.price for view in bucket.positions}
-    unrealized, unpriced = 0.0, []
+    views = {view.symbol: view for view in bucket.positions}
+    unrealized, unpriced, stale = 0.0, [], []
     for held in book.managed:
-        if not held.known or not held.cost_basis:
+        view = views.get(held.symbol)
+        if not held.known or not held.cost_basis or view is None:
             unpriced.append(held.symbol)
             continue
-        price = prices.get(held.symbol)
-        if price is None:
-            unpriced.append(held.symbol)
+        if price_stale(view.price_date, book.snap.trade_date):
+            stale.append(held.symbol)
             continue
-        unrealized += (price - held.cost_basis) * float(held.quantity or 0.0)
+        unrealized += (view.price - held.cost_basis) * float(held.quantity or 0.0)
     line = -abs(float(book.plan["envelope"]["loss_pause_usd"]))
-    total = round(realized + unrealized, 2)
     # Measured from where the line last began: the plan's confirmation, or the last time a
     # person looked at a loss-line pause and resumed (``store.resume``).
     baseline = float(store.state(book.db).get("loss_baseline_usd") or 0.0)
+    out = {"realized_usd": None, "realized_by": None, "unrealized_usd": round(unrealized, 2),
+           "total_usd": None, "baseline_usd": baseline, "since_usd": None, "line_usd": line,
+           "known": False, "reached": False, "unpriced": unpriced, "stale": stale}
+    if realized_by is None:
+        # The fills cannot be replayed, so what the plan's sales realized is not known at all.
+        return out
+    realized = sum(realized_by.values())
+    total = round(realized + unrealized, 2)
     since = round(total - baseline, 2)
-    return {"realized_usd": round(realized, 2), "unrealized_usd": round(unrealized, 2),
-            "total_usd": total, "baseline_usd": baseline, "since_usd": since, "line_usd": line,
-            # A position that cannot be valued leaves the result unknown, and an unknown result
-            # is not one that is inside the line.
-            "known": not unpriced, "reached": since <= line, "unpriced": unpriced}
+    out.update(realized_usd=round(realized, 2),
+               realized_by={closer: round(amount, 2) for closer, amount in realized_by.items()},
+               total_usd=total, since_usd=since, known=not unpriced and not stale,
+               reached=since <= line)
+    return out
 
 
 # ---------------------------------------------------------------- one research run, decided once
@@ -647,13 +708,17 @@ def _write_exit(book: Book, held: positions.Managed, *, action: str, quantity: f
 def exit_pass(book: Book, *, today, blocked: list[str]) -> list[dict[str, Any]]:
     """For each position code holds, whether its own strategy says to leave, and the proposal if so."""
     out = []
-    prices = {view.symbol: view.price for view in book.snap.buckets[ACCOUNT].positions}
+    views = {view.symbol: view for view in book.snap.buckets[ACCOUNT].positions}
     for held in book.managed:
         version = store.version(book.db, held.version_id)
         # The trend rule of the version that opened it, if it has one, read on finished closes.
         window = int(((version or {}).get("strategy") or {}).get("trend_window") or 0)
-        call = positions.exit_call(held, version, price=prices.get(held.symbol), today=today,
-                                   closes=book.closes(held.symbol, window) if window > 0 else None)
+        view = views.get(held.symbol)
+        priced_on = view.price_date if view is not None else None
+        call = positions.exit_call(
+            held, version, price=view.price if view is not None else None, today=today,
+            closes=book.closes(held.symbol, window) if window > 0 else None, price_date=priced_on,
+            stale=view is not None and price_stale(priced_on, book.snap.trade_date))
         row = {"symbol": held.symbol, **held.as_dict(), "exit": call.as_dict(), "proposal_id": None}
         if call.due:
             if blocked:
@@ -668,6 +733,39 @@ def exit_pass(book: Book, *, today, blocked: list[str]) -> list[dict[str, Any]]:
                                        run_id=None, why={"reason": call.reason, "facts": call.facts}))
         out.append(row)
     return out
+
+
+def remember_undecided(book: Book, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Keep, by symbol, since which session a position's exit could not be decided.
+
+    A position whose exit was decided again, or that is no longer held, is dropped, so what is
+    kept is always an unbroken run of sessions. Written only when that changes: a pass a minute
+    costs one read while nothing moves. This is what Home reads (``auto_exit_undecided``): a stop
+    that cannot be read for more than a session is a person's to look at, not something to wait
+    out (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.4 and 3.4).
+    """
+    session = book.snap.trade_date
+    with book.db.transaction() as conn:
+        before = dict(book.db.read_meta(UNDECIDED, {}) or {})
+        now: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            call = row.get("exit") or {}
+            if call.get("due") or not call.get("undecided"):
+                continue
+            was = before.get(row["symbol"]) or {}
+            now[row["symbol"]] = {
+                "since": was.get("since") or session, "last": session,
+                "code": call["undecided"] if call["undecided"] == positions.PRICE_STALE else "undecided",
+                "detail": call["undecided"], "price_date": call.get("price_date"),
+                "text": call.get("text"), "strategy_version": row.get("strategy_version")}
+        if now != before:
+            book.db.write_meta(UNDECIDED, now, conn)
+    return now
+
+
+def undecided_exits(db) -> dict[str, dict[str, Any]]:
+    """The positions whose exit could not be decided on the last pass, by symbol."""
+    return dict(db.read_meta(UNDECIDED, {}) or {})
 
 
 # ---------------------------------------------------------------- one pass
@@ -698,6 +796,7 @@ def tick(service: Any, *, runs_dir: Path | None = None, trade_date: str, today=N
         # needing its stop because the plan that opened it was ended.
         result.skipped = "no plan is in force; the positions it opened are still looked after"
         result.exits = exit_pass(book, today=today, blocked=blocked)
+        remember_undecided(book, result.exits)
         if approve and result.exits:
             result.approvals = service.autonomous_reductions()
         return result
@@ -713,6 +812,7 @@ def tick(service: Any, *, runs_dir: Path | None = None, trade_date: str, today=N
                                 "at": paused["at"]}
 
     result.exits = exit_pass(book, today=today, blocked=blocked)
+    remember_undecided(book, result.exits)
 
     seen = seen_signals(db)
     hold = opening_hold(profiles, paused, result.loss)
@@ -803,10 +903,13 @@ def resume(service: Any, *, note: str, by: str, trade_date: str) -> dict[str, An
         loss = result_now(service, trade_date=trade_date)
         if loss is not None:
             if not loss["known"]:
+                missing = ([f"{', '.join(loss['unpriced'])} cannot be valued"] if loss["unpriced"] else []) + (
+                    [f"{', '.join(loss['stale'])} is priced too long ago"] if loss["stale"] else []) + (
+                    ["the record of fills cannot be replayed"] if loss["realized_usd"] is None else [])
                 raise TraderError(
                     "the plan was paused at its loss line and what it has lost cannot be worked "
-                    f"out right now ({', '.join(loss['unpriced'])} cannot be valued), so there is "
-                    "nowhere to measure the line from; it stays paused")
+                    f"out right now ({'; '.join(missing)}), so there is nowhere to measure the "
+                    "line from; it stays paused")
             total = loss["total_usd"]
     return store.resume(db, note=note, by=by, result_usd=total)
 

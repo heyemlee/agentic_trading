@@ -29,7 +29,7 @@ import pytest
 from agentic_trading import autonomy, cli, events, ledger_confirm, portfolio, risk_scenarios
 from agentic_trading import config_changes as cc
 from agentic_trading.auto import gates as gating
-from agentic_trading.auto import modes, paper, runner, store
+from agentic_trading.auto import modes, paper, positions, runner, store, trader
 from agentic_trading.broker import SimulatedBroker
 from agentic_trading.ledger_confirm import confirm_ledgers
 from agentic_trading.portfolio import load_portfolio
@@ -782,6 +782,33 @@ def test_a_plan_that_reaches_its_loss_line_stops_opening_and_says_so(real):
     resumed = real.service.auto_resume(scope="live", note="looked", identity="owner", confirmed=True)
     assert resumed["loss_line_moved"]["from"] == 0.0 and resumed["loss_line_moved"]["to"] < -2.0
     assert _to_do(real, "auto_trading_stopped") == [] and _notices(real, "auto_paused:") == []
+
+
+def test_an_exit_nobody_could_judge_for_more_than_a_session_is_a_to_do(real):
+    """Contract 2.4 and 3.4. One session undecided is a vendor's bad day; past that, a stop of
+    the plan's is not being applied, and only a person can find out why."""
+    real.in_force()
+    said = {"zh": "VTI 的价格是 10-14 的，太旧，今天不判断止损。",
+            "en": "VTI is priced from 10-14, too old to judge its stop today."}
+    seen = {"since": "2026-10-19", "last": "2026-10-19", "code": positions.PRICE_STALE,
+            "detail": positions.PRICE_STALE, "price_date": "2026-10-14", "text": said,
+            "strategy_version": "sv-1"}
+    real.db.write_meta(trader.UNDECIDED, {"VTI": seen})
+    assert _to_do(real, "auto_exit_undecided") == [], "a single session is not yet a to-do"
+
+    real.db.write_meta(trader.UNDECIDED, {"VTI": {**seen, "last": "2026-10-20"}})
+    items = _to_do(real, "auto_exit_undecided")
+    assert len(items) == 1 and items[0]["subject"] == "VTI" and items[0]["actions"] == ["open"]
+    assert (items[0]["severity"], items[0]["requires_person"]) == ("high", True)
+    assert items[0]["link"] == {"page": "auto", "params": {"scope": "live"}}
+    assert items[0]["detail_i18n"]["zh"].startswith(said["zh"]) and "止损暂时不起作用" in items[0]["detail_i18n"]["zh"]
+    told = _notices(real, "auto_exit_undecided:")
+    assert len(told) == 1 and told[0].urgent is True
+
+    # The simulated account's are for its own page, never Home's.
+    real.db.write_meta(trader.UNDECIDED, {})
+    real.sim().state_db().write_meta(trader.UNDECIDED, {"VTI": {**seen, "last": "2026-10-21"}})
+    assert _to_do(real, "auto_exit_undecided") == []
 
 
 def test_a_plan_stopped_by_a_change_of_code_is_a_to_do_that_says_what_to_do(real, monkeypatch):

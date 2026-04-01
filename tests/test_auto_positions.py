@@ -107,13 +107,13 @@ def test_what_the_plans_shares_realized_counts_whoever_approved_the_sale():
     """Review item 2 (2026-10-14): a stop a person approved vanished from the loss line."""
     log = (Log().code_buys(2.0, price=100.0).person_approves_plan_sell(1.0, price=90.0)
            .code_sells(0.5, price=120.0))
-    assert positions.realized_by_version(fills=log.fills, proposals=log.proposals,
-                                         bucket=MICRO) == {V1: pytest.approx(-10.0 + 10.0)}
+    split = positions.realized_by_version(fills=log.fills, proposals=log.proposals, bucket=MICRO)
+    assert split == {V1: {"code": pytest.approx(10.0), "person": pytest.approx(-10.0)}}
     # A person's own sale reaches into the plan's shares only after their own; that part is the
     # plan's loss: 1.0 of theirs at cost 100, then 0.5 of the plan's, both sold at 80.
     reach = Log().code_buys(1.0, price=100.0).person_buys(1.0).person_sells(1.5, price=80.0)
-    assert positions.realized_by_version(fills=reach.fills, proposals=reach.proposals,
-                                         bucket=MICRO) == {V1: pytest.approx(-10.0)}
+    assert positions.realized_by_version(fills=reach.fills, proposals=reach.proposals, bucket=MICRO) == {
+        V1: {"code": 0.0, "person": pytest.approx(-10.0)}}
     # Nothing a person bought for themselves is the plan's, gain or loss.
     own = Log().person_buys(1.0, price=100.0).person_sells(1.0, price=50.0)
     assert positions.realized_by_version(fills=own.fills, proposals=own.proposals, bucket=MICRO) == {}
@@ -259,6 +259,26 @@ def test_a_condition_the_version_does_not_set_never_fires():
 def test_nothing_is_sold_on_a_condition_that_could_not_be_read(position, version, price, says):
     call = positions.exit_call(position, version, price=price, today=DAY)
     assert not call.due and says in call.undecided
+
+
+@pytest.mark.parametrize("price", [50.0, 100.0, 200.0])
+def test_on_a_price_too_old_for_the_session_neither_way_is_decided(price):
+    """Contract 2.4: a price from before the move can show neither that the stop was met nor
+    that it was not -- so a far-gone stop, a held position and a met target all read the same."""
+    trending = {"strategy": {**RULES["strategy"], "trend_window": 3}}
+    call = positions.exit_call(_held(), trending, price=price, today=DAY, closes=[120.0, 110.0, 50.0],
+                               price_date="2026-10-13", stale=True)
+    assert not call.due and call.reason is None and call.undecided == positions.PRICE_STALE
+    assert call.price_date == "2026-10-13" and call.exit_by == "2026-11-05"
+    assert call.text() == {"zh": "VTI 的价格是 10-13 的，太旧，今天不判断止损。",
+                           "en": "VTI is priced from 10-13, too old to judge its stop today."}
+    assert call.as_dict()["price_date"] == "2026-10-13" and call.as_dict()["text"] == call.text()
+
+
+def test_the_longest_holding_needs_no_price_and_is_applied_on_an_old_one():
+    call = positions.exit_call(_held(), RULES, price=50.0, today=date(2026, 11, 5),
+                               price_date="2026-11-02", stale=True)
+    assert call.due and call.reason == positions.MAX_HOLDING and call.price_date == "2026-11-02"
 
 
 # ---------------------------------------------------------------- the authority to sell
