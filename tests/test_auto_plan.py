@@ -236,18 +236,20 @@ def test_a_model_fills_in_a_templates_numbers_and_can_hand_in_nothing_else(profi
     from pydantic import ValidationError
 
     # The shape a model's answer is parsed into has no field for a rule, a condition or code,
-    # and refuses one that is offered.
-    assert set(Strategy.model_fields) == {
+    # and refuses one that is offered. A baseline plan's targets are a field of the strategy,
+    # worked out from the account, and are not in what a model is asked for.
+    assert set(Strategy.model_json_schema()["properties"]) == {
         "template", "max_positions", "position_pct", "min_confidence", "stop_loss_pct",
         "take_profit_pct", "max_holding_days", "trend_window", "universe", "rationale_zh",
         "rationale_en"}
+    assert set(Strategy.model_fields) - set(Strategy.model_json_schema()["properties"]) == {"deployment"}
     for extra in ({"code": "import os; os.system('x')"}, {"entry_rule": "close > sma(5)"},
                   {"leverage": 3}, {"orders": [{"symbol": "TSLA", "side": "buy"}]}):
         with pytest.raises(ValidationError):
             Strategy(**extra)
     # A template is one of the names this system has code for. Anything else -- another
     # strategy's name, or something that is not a name at all -- is replaced, and the plan says so.
-    assert plan.TEMPLATES == {"steady": ("research_etf",), "swing": ("trend_etf",),
+    assert plan.TEMPLATES == {"steady": ("research_etf", "baseline_etf"), "swing": ("trend_etf",),
                               "intraday": ("trend_etf",)}
     for asked in ("martingale_grid", "__import__('os').system('x')", "", "trend_etf"):
         doc = plan.build(profiles, account(profiles), Envelope(modes.STEADY, 100.0),
@@ -255,7 +257,15 @@ def test_a_model_fills_in_a_templates_numbers_and_can_hand_in_nothing_else(profi
         assert doc["strategy"]["template"] == "research_etf"
         note = next(n for n in doc["clamps"] if n["field"] == "template")
         assert note["used"] == "research_etf" and "不是本系统能执行的策略模板" in note["why"]["zh"]
-    assert doc["bounds"]["templates"] == ["research_etf"]
+    assert doc["bounds"]["templates"] == ["research_etf", "baseline_etf"]
+    # And which of the templates it is, is the person's to choose: a model naming the baseline
+    # one -- or handing in targets -- gets the research template, and the plan says so.
+    doc = plan.build(profiles, account(profiles), Envelope(modes.STEADY, 100.0), suggested_by="model",
+                     suggestion=Strategy(template="baseline_etf", universe=["VTI"],
+                                         deployment={"targets": [{"symbol": "VTI", "target_usd": 100.0,
+                                                                  "tranches": 1}]}))
+    assert doc["strategy"]["template"] == "research_etf" and doc["strategy"]["deployment"] is None
+    assert any(n["field"] == "template" and "由你选择" in n["why"]["zh"] for n in doc["clamps"])
     # What it says about its choice is words, shown as words, and kept short.
     long = plan.build(profiles, account(profiles), Envelope(modes.STEADY, 100.0), suggested_by="model",
                       suggestion=Strategy(universe=["VTI"], rationale_zh="理由" * 900, rationale_en="x" * 5000))

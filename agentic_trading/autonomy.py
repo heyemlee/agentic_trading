@@ -164,6 +164,15 @@ MANAGED_EXIT = "managed_exit"
 MANAGED_EXIT_SOURCE = "auto:managed_exit"
 #: The actions that take risk off. Both may be a managed exit; neither is one by default.
 EXIT_ACTIONS = ("SELL", "REDUCE")
+#: What a baseline plan's tranche says it is, in its evidence (docs/AUTO_BASELINE_CONTRACT_
+#: 2026-10-15.md, 2.1, D4). Saying so changes what is asked of it, never whether it is asked:
+#: the Hard Risk engine holds it to the low tier in place of a confidence, and ``permits`` to the
+#: plan's own targets, and neither takes the claim on its word.
+TRANCHE_PURPOSE = "initial_deployment_tranche"
+#: The instrument classes a tranche may be of: the low tier, broad funds and bonds (D4).
+TRANCHE_CLASSES = ("broad_diversified_etf", "bond_or_cash_like_etf")
+#: The one template whose purchases are tranches (``auto.plan``).
+BASELINE_TEMPLATE = "baseline_etf"
 
 
 def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | None,
@@ -171,7 +180,8 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
             requested_quantity: float | None = None, reduced_today: int = 0,
             opened_today: int = 0, now: datetime | None = None,
             floor: PositionFloor | None = None, managed: Any | None = None,
-            exited_today: int = 0) -> Decision:
+            exited_today: int = 0, tranche: dict[str, Any] | None = None,
+            requested_usd: float | None = None) -> Decision:
     """Whether deterministic code may give this proposal its approval.
 
     Two blocks, separately switched, because they are different in kind: reducing cuts risk and
@@ -183,6 +193,14 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
     a SELL may be autonomous, and it is bounded by provenance rather than by a fraction: code may
     sell up to what it bought and not one share of what a person did. Given for anything else,
     or with a quantity that could not be established, it permits nothing.
+
+    ``tranche`` is given for a purchase that says it is a baseline plan's tranche
+    (``TRANCHE_PURPOSE``), with what the version that wrote it says it buys: its template, the
+    target for this fund, and the size of one tranche, read by the caller from the version's
+    own record and not from the proposal. A tranche has no confidence to meet the floor with
+    (contract 2.1, D4); in its place it must be exactly what that version buys -- one of its
+    targets, a low-tier fund, no larger than a tranche -- and everything else asked of an
+    opening is asked of it unchanged.
     """
     reasons: list[str] = []
 
@@ -240,12 +258,27 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
     confidence_floor = cfg.get("min_confidence")
     if confidence_floor is None:
         return refuse(f"buckets.{bucket}.autonomy.{block} declares no min_confidence")
-    # bool is a subclass of int, so `min_confidence: true` would otherwise read as 1.
-    if isinstance(confidence, bool) or not isinstance(confidence, int):
-        return refuse(f"the proposal carries no usable confidence ({confidence!r})")
-    if int(confidence) < int(confidence_floor):
-        return refuse(f"confidence {confidence} is below the autonomous floor of {int(confidence_floor)}; "
-                      "a person decides this one")
+    if block == "open" and tranche is not None:
+        if confidence is not None:
+            return refuse("a tranche carries no confidence of its own; this one does, so it is not one")
+        target = tranche.get("target") or {}
+        if tranche.get("template") != BASELINE_TEMPLATE or not target:
+            return refuse(f"{tranche.get('symbol') or 'this fund'} is not one of the baseline "
+                          "targets of the strategy version that wrote it")
+        if limit_class not in TRANCHE_CLASSES:
+            return refuse(f"a tranche is only ever of a low-tier fund, not {limit_class}")
+        most = float(tranche.get("tranche_usd") or 0.0)
+        if (requested_usd is None or isinstance(requested_usd, bool) or requested_usd <= 0
+                or requested_usd > most + 0.01):
+            return refuse(f"${requested_usd} is not within the ${most:,.2f} tranche the version buys "
+                          f"{target.get('symbol')} in")
+    else:
+        # bool is a subclass of int, so `min_confidence: true` would otherwise read as 1.
+        if isinstance(confidence, bool) or not isinstance(confidence, int):
+            return refuse(f"the proposal carries no usable confidence ({confidence!r})")
+        if int(confidence) < int(confidence_floor):
+            return refuse(f"confidence {confidence} is below the autonomous floor of {int(confidence_floor)}; "
+                          "a person decides this one")
 
     if block == "reduce":
         per_day = cfg.get("max_positions_reduced_per_day")
@@ -301,9 +334,41 @@ def permits(profiles: Profiles, *, bucket: str, action: str, confidence: int | N
     if opened_today >= int(per_day):
         return refuse(f"{opened_today} position(s) already opened autonomously today, at the "
                       f"limit of {int(per_day)}")
+    if tranche is not None:
+        reasons.append(f"a baseline tranche of {limit_class}, within the ${float(tranche['tranche_usd']):,.2f} "
+                       f"the version buys {tranche['target']['symbol']} in; {opened_today} of "
+                       f"{int(per_day)} used today")
+        return Decision(True, reasons)
     reasons.append(f"{limit_class} is openable without a person, confidence {confidence} at or "
                    f"above {int(confidence_floor)}, {opened_today} of {int(per_day)} used today")
     return Decision(True, reasons)
+
+
+def plan_of(proposal) -> str | None:
+    """The plan a purchase was written for, from the note its writer left (``auto.trader``)."""
+    for entry in getattr(proposal, "history", None) or ():
+        if isinstance(entry, dict) and entry.get("event") in ("auto_signal", "auto_tranche") \
+                and entry.get("plan_id"):
+            return str(entry["plan_id"])
+    return None
+
+
+def first_purchase_seen(proposals, *, plan_id: str, bucket: str) -> bool:
+    """Whether a person has approved one of this plan's purchases and the venue filled it.
+
+    Until then, code approves none of the plan's purchases on the real account (contract 2.5):
+    the first is the owner's to send, under the plan's terms. Derived from the records every
+    time -- the approval's own field, the order's final state, the plan the purchase was written
+    for -- and never kept as a flag, so nothing can set it but a filled order a person approved.
+    """
+    for proposal in proposals:
+        if (getattr(proposal, "bucket", None) == bucket
+                and getattr(proposal, "action", None) in OPENING_ACTIONS and was_human(proposal)
+                and plan_of(proposal) == plan_id
+                and (proposal.status == "EXECUTED"
+                     or (proposal.status == "CANCELED" and float(proposal.filled_quantity or 0.0) > 0))):
+            return True
+    return False
 
 
 #: What may appear in ``Proposal.approved_via``. A person's approval comes through the console

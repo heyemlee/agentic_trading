@@ -35,8 +35,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.json_schema import SkipJsonSchema
 
-from .. import diagnosis, sizing
+from .. import autonomy, diagnosis, sizing
 from ..broker import requirements
 from ..portfolio import Position, Snapshot, build_snapshot, classify_instrument
 from ..profile import ConfidenceRequirements, Profiles
@@ -62,11 +63,29 @@ DEFAULT_LOSS_PAUSE_PCT = 10.0
 #: outside this table is replaced (``clamp``). What each template does is ``auto.trader`` --
 #: research in, a position sized by the plan, out at the stop, the target or the holding period.
 TEMPLATES: dict[str, tuple[str, ...]] = {
-    modes.STEADY: ("research_etf",),
+    modes.STEADY: ("research_etf", "baseline_etf"),
     modes.SWING: ("trend_etf",),
     modes.INTRADAY: ("trend_etf",),
 }
 RATIONALE_LIMIT = 400
+
+#: The baseline template (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.1; D1-D6 are the owner's,
+#: 2026-10-15). Research does not talk code into a purchase under it: the owner's own baseline
+#: weights are bought toward in tranches, and research can only say no. Which template a plan
+#: runs is the person's choice, like the envelope; a model never picks it.
+BASELINE = autonomy.BASELINE_TEMPLATE
+#: Its way out, fixed by the template (D5): a holding meant to be long has no term, and a stop
+#: at the widest the steady mode allows.
+BASELINE_EXITS = {"stop_loss_pct": 15.0, "take_profit_pct": 0.0, "max_holding_days": 0,
+                  "trend_window": 0}
+#: What it waits for and what it skips, fixed by the template too (D2, D3, D5).
+BASELINE_FIXED_RULES = {"veto_window_days": 14,
+                        "regime_skips": ["ELEVATED_RISK", "HIGH_RISK", "UNKNOWN"],
+                        "after_stop_cooldown_sessions": 20}
+#: The most tranches a fund is split into, when one order could not carry a configured tranche.
+MAX_TRANCHES = 10
+#: The minimum order a baseline preview compares against the account's own. Shown, never applied.
+WHAT_IF_MINIMUM_USD = 10.0
 
 
 class PlanError(ValueError):
@@ -110,6 +129,10 @@ class Strategy(BaseModel):
     trend_window: int = Field(0, description="Sessions in the trend average; 0 for no trend rule.")
     #: What may be bought, as symbols from the configured universe.
     universe: list[str] = Field(default_factory=list, description="Symbols that may be bought.")
+    #: The baseline template's targets, fund by fund, worked out when the plan is drawn
+    #: (``baseline_deployment``) and held from then on, so a version is the same version for as
+    #: long as it runs. None for every other template. Not part of what a model is asked for.
+    deployment: SkipJsonSchema[dict[str, Any] | None] = None
     #: Why, in a sentence each language the console speaks.
     rationale_zh: str = Field("", description="One or two short sentences in Chinese explaining the choice.")
     rationale_en: str = Field("", description="The same explanation in English.")
@@ -255,8 +278,31 @@ def clamp(strategy: Strategy, bounds: Bounds) -> tuple[Strategy, list[Clamp]]:
     notes: list[Clamp] = []
     data = strategy.model_dump()
 
+    # A strategy is one of the templates local code carries out, with parameters. Whatever
+    # else a suggestion names -- a strategy this system has no code for, or anything that is
+    # not a name at all -- is not run: the mode's own template stands in, and the plan says so.
+    if bounds.templates and data.get("template") not in bounds.templates:
+        asked_template = str(data.get("template"))[:60]
+        notes.append(Clamp("template", asked_template, bounds.templates[0],
+                           f"“{asked_template}” 不是本系统能执行的策略模板，已改用 {bounds.templates[0]}。",
+                           f"{asked_template!r} is not a template this system can carry out; "
+                           f"{bounds.templates[0]} is used instead."))
+        data["template"] = bounds.templates[0]
+    # The baseline template's way out is the template's, not a parameter (D5).
+    fixed = BASELINE_EXITS if data.get("template") == BASELINE else {}
+    if data.get("template") != BASELINE:
+        data["deployment"] = None
+
     def hold(name: str, low: float, high: float, integer: bool = False) -> None:
         asked = data[name]
+        if name in fixed:
+            used = fixed[name]
+            if asked != used:
+                notes.append(Clamp(name, asked, used,
+                                   f"基准建仓模板的 {name} 固定为 {used:g}，已从 {asked} 调整。",
+                                   f"The baseline template fixes {name} at {used:g}; {asked} became {used:g}."))
+            data[name] = used
+            return
         try:
             value = float(asked)
         except (TypeError, ValueError):
@@ -277,16 +323,6 @@ def clamp(strategy: Strategy, bounds: Bounds) -> tuple[Strategy, list[Clamp]]:
     hold("max_holding_days", *bounds.max_holding_days, integer=True)
     hold("trend_window", *bounds.trend_window, integer=True)
 
-    # A strategy is one of the templates local code carries out, with parameters. Whatever
-    # else a suggestion names -- a strategy this system has no code for, or anything that is
-    # not a name at all -- is not run: the mode's own template stands in, and the plan says so.
-    if bounds.templates and data.get("template") not in bounds.templates:
-        asked_template = str(data.get("template"))[:60]
-        notes.append(Clamp("template", asked_template, bounds.templates[0],
-                           f"“{asked_template}” 不是本系统能执行的策略模板，已改用 {bounds.templates[0]}。",
-                           f"{asked_template!r} is not a template this system can carry out; "
-                           f"{bounds.templates[0]} is used instead."))
-        data["template"] = bounds.templates[0]
     # The explanation is words about the strategy and is shown as words. It is kept short.
     for key in ("rationale_zh", "rationale_en"):
         data[key] = str(data.get(key) or "")[:RATIONALE_LIMIT]
@@ -337,6 +373,187 @@ def template_strategy(profiles: Profiles, envelope: Envelope, bounds: Bounds, *,
                       f"research must reach confidence {bounds.min_confidence[0]} to buy, and a "
                       f"position is closed at a {10 if steady else 6}% loss or after "
                       f"{90 if steady else 20} days." + trend_en),
+    )
+
+
+# ---------------------------------------------------------------- the baseline template
+def baseline_rules(profiles: Profiles) -> dict[str, Any]:
+    """The baseline template's rules: the owner's tranches and spacing, and the fixed ones."""
+    configured = _get(profiles, "buckets", "core", "initial_deployment", default={}) or {}
+    if not isinstance(configured, dict):
+        configured = {}
+    return {"tranches": max(1, int(configured.get("tranches") or 3)),
+            "spacing_sessions": max(0, int(configured.get("spacing_trading_days") or 5)),
+            **copy.deepcopy(BASELINE_FIXED_RULES)}
+
+
+def baseline_weights(profiles: Profiles, universe: list[str]) -> dict[str, float]:
+    """The owner's baseline weights (``buckets.core.baseline_allocation_pct_of_core``) for the
+    funds the plan may buy, in the universe's order. Cash, and anything else outside it, is not
+    bought toward: its share stays cash."""
+    table = _get(profiles, "buckets", "core", "baseline_allocation_pct_of_core", default={}) or {}
+    wanted = {str(key).upper(): value for key, value in table.items()} if isinstance(table, dict) else {}
+    out: dict[str, float] = {}
+    for symbol in universe:
+        try:
+            weight = float(wanted.get(symbol.upper()) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(weight) and weight > 0:
+            out[symbol.upper()] = weight
+    return out
+
+
+def _baseline_rooms(profiles: Profiles, snap: Snapshot, envelope: Envelope,
+                    symbols: list[str]) -> tuple[float, dict[str, float], dict[str, float]]:
+    """What these funds may take together, the most one position of each may be worth, and the
+    most one order of each may be -- by the Hard Risk engine's own arithmetic, on the book as it is.
+
+    Together: the plan's capital, the account's cash, and the share of the account their tier
+    may hold. One position: the engine's normal size, which is the most it ever sizes a position
+    a strategy asks for, and the position cap. One order: the order caps. Nothing is approved
+    here; every tranche is still put to the whole engine when it is written and again when sent.
+    """
+    account = envelope.account
+    engine = HardRiskEngine(profiles, halt_file="/nonexistent/plan-preview")
+    bucket = snap.buckets[account]
+    together = [float(envelope.capital_usd)]
+    position: dict[str, float] = {}
+    order: dict[str, float] = {}
+    for symbol in symbols:
+        cls = classify_instrument(symbol, profiles, lambda _symbol: {"quote_type": "ETF"})
+        prop = RiskProposal(ticker=symbol, bucket=account, action="BUY", size_hint="normal",
+                            confidence=100, trade_date=snap.trade_date, cls=cls, autonomous=True,
+                            weight_override_pct=100.0)
+        room = engine.order_room(prop, snap)
+        limits = {item["rule_id"]: item["room"] for item in room["limits"]}
+        held = bucket.market_value_of(symbol)
+        most = float(room["cut_to_fit"]["requested"]) + held
+        if limits.get("HR08") is not None:
+            most = min(most, float(limits["HR08"]) + held)
+        position[symbol] = max(0.0, most)
+        caps = [float(limits[rule]) for rule in ("HR08b", "HR21b") if limits.get(rule) is not None]
+        order[symbol] = min(caps) if caps else math.inf
+        together += [float(limits[rule]) for rule in ("HR07", "HR07c", "HR21")
+                     if limits.get(rule) is not None]
+    return max(0.0, min(together)), position, order
+
+
+def baseline_targets(weights: dict[str, float], *, deployable_usd: float,
+                     position_usd: dict[str, float], order_usd: dict[str, float],
+                     minimum_usd: float, tranches: int,
+                     max_positions: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Each fund's target and how many tranches it is bought in, and the funds left out and why.
+
+    Contract 2.1, in order: the weights scaled to what can be deployed, each held to what one
+    position may be worth; below the minimum order, the smallest weight is left out and the rest
+    shared again, one at a time; then the tranches, as many as the configuration says and no
+    more than the minimum order allows -- more only where one order could not carry a tranche.
+    Beyond the positions the account may hold, the smallest weights are left out first.
+    """
+    order_of = list(weights)
+    kept = dict(sorted(weights.items(), key=lambda item: (-item[1], order_of.index(item[0]))))
+    left_out: list[dict[str, Any]] = []
+    for symbol in list(kept)[max(0, max_positions):]:
+        left_out.append({"symbol": symbol, "baseline_pct": weights[symbol], "share_usd": None,
+                         "code": "tranche_position_limit"})
+        kept.pop(symbol)
+    shares: dict[str, float] = {}
+    while kept:
+        total = sum(kept.values())
+        shares = {symbol: min(deployable_usd * weight / total, position_usd.get(symbol, math.inf))
+                  for symbol, weight in kept.items()}
+        short = [symbol for symbol in kept if shares[symbol] + 1e-9 < minimum_usd]
+        if not short:
+            break
+        smallest = min(short, key=lambda symbol: (kept[symbol], -order_of.index(symbol)))
+        left_out.append({"symbol": smallest, "baseline_pct": weights[smallest],
+                         "share_usd": sizing.floor_cents(shares[smallest]),
+                         "code": "tranche_below_minimum"})
+        kept.pop(smallest)
+    targets = []
+    for symbol, weight in kept.items():
+        target = sizing.floor_cents(shares[symbol])
+        count = max(1, min(int(tranches), int(target // minimum_usd))) if minimum_usd > 0 else int(tranches)
+        one = order_usd.get(symbol, math.inf)
+        if target / count > one + 1e-9:
+            count = min(MAX_TRANCHES, math.ceil(target / one))
+        targets.append({"symbol": symbol, "baseline_pct": weight, "target_usd": target,
+                        "tranches": count})
+    return targets, left_out
+
+
+def baseline_deployment(profiles: Profiles, snap: Snapshot, envelope: Envelope, bounds: Bounds, *,
+                        minimum_usd: float | None = None) -> dict[str, Any]:
+    """What a baseline plan buys toward, fund by fund: worked out once, when the plan is drawn.
+
+    Held in the strategy from then on (``Strategy.deployment``), so what the owner confirmed is
+    what runs, and a version is the same version for as long as it runs -- the simulated record
+    and the real account's start are of one strategy, not of two that came out alike.
+    """
+    weights = baseline_weights(profiles, list(bounds.universe))
+    minimum = minimum_usd if minimum_usd is not None else sizing.minimum_order(profiles, envelope.account)[0]
+    rules = baseline_rules(profiles)
+    deployable, position, order = _baseline_rooms(profiles, snap, envelope, list(weights))
+    targets, left_out = baseline_targets(
+        weights, deployable_usd=deployable, position_usd=position, order_usd=order,
+        minimum_usd=minimum, tranches=rules["tranches"], max_positions=bounds.max_positions[1])
+    return {"baseline_pct": weights, "targets": targets, "left_out": left_out,
+            "max_positions": bounds.max_positions[1],
+            "deployable_usd": sizing.floor_cents(deployable), "minimum_order_usd": float(minimum),
+            "cash_left_usd": round(float(envelope.capital_usd) - sum(t["target_usd"] for t in targets), 2),
+            "rules": rules}
+
+
+def _valid_deployment(found: Any, bounds: Bounds, envelope: Envelope) -> dict[str, Any] | None:
+    """A deployment handed back with a strategy, if it is one this envelope could have drawn."""
+    try:
+        targets = list(found["targets"])
+        total = 0.0
+        for row in targets:
+            if str(row["symbol"]).upper() not in bounds.universe:
+                return None
+            amount, count = float(row["target_usd"]), int(row["tranches"])
+            if not (math.isfinite(amount) and amount > 0 and 1 <= count <= MAX_TRANCHES):
+                return None
+            total += amount
+        if total > float(envelope.capital_usd) + 0.01:
+            return None
+        return {**copy.deepcopy(found), "rules": {**copy.deepcopy(found["rules"]),
+                                                  **copy.deepcopy(BASELINE_FIXED_RULES)}}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def baseline_strategy(envelope: Envelope, bounds: Bounds, deployment: dict[str, Any]) -> Strategy:
+    """The baseline template, for a deployment worked out from the account."""
+    targets = deployment["targets"]
+    capital = float(envelope.capital_usd)
+    largest = max((row["target_usd"] for row in targets), default=0.0)
+    share = min(100.0, max(5.0, round(largest / capital * 100.0, 2))) if capital > 0 else 5.0
+    bought = "、".join(f"{row['symbol']} ${row['target_usd']:,.2f}（{row['tranches']} 批）" for row in targets)
+    bought_en = ", ".join(f"{row['symbol']} ${row['target_usd']:,.2f} in {row['tranches']} tranche(s)"
+                          for row in targets)
+    rules = deployment["rules"]
+    return Strategy(
+        template=BASELINE, max_positions=max(1, len(targets)), position_pct=share,
+        min_confidence=bounds.min_confidence[0], **BASELINE_EXITS,
+        universe=list(bounds.universe), deployment=deployment,
+        rationale_zh=((f"按你的基准比例分批买入：{bought}；" if targets else
+                       "按你的基准比例，没有一只基金分到的金额够最小下单额，一笔也不买；")
+                      + f"其余 ${deployment['cash_left_usd']:,.2f} 留现金。研究只用来否决："
+                      f"{rules['veto_window_days']} 天内研究给出减持或卖出就不买，没研究过的不买。"
+                      f"跌 {BASELINE_EXITS['stop_loss_pct']:g}% 止损，不设最长持有期；止损后 "
+                      f"{rules['after_stop_cooldown_sessions']} 个交易日内不买回。"),
+        rationale_en=((f"Bought toward the owner's baseline weights in tranches: {bought_en}; " if targets
+                       else "No fund's share of the owner's baseline weights reaches the minimum "
+                            "order, so nothing is bought; ")
+                      + f"the other ${deployment['cash_left_usd']:,.2f} stays cash. Research can "
+                      f"only say no: a Sell or Underweight within {rules['veto_window_days']} days "
+                      "vetoes a tranche, and a fund nobody has researched is not bought. A "
+                      f"{BASELINE_EXITS['stop_loss_pct']:g}% stop, no longest holding period, "
+                      f"and {rules['after_stop_cooldown_sessions']} sessions before buying back "
+                      "after a stop."),
     )
 
 
@@ -464,7 +681,12 @@ def proposed_changes(profiles: Profiles, snap: Snapshot, envelope: Envelope,
     # The engine halves a position when evidence is thin or the regime is tense. A minimum above
     # that half size means every such order is dropped, so the minimum is proposed down to it --
     # and only as far as the venue's own minimum, which has to be on record to lower it at all.
-    if half + 1e-9 < minimum and lowest is not None:
+    # Not for the baseline template: its tranches are worked out from the minimum the account
+    # has, and a lower one is a decision of the owner's that its preview only compares
+    # (``what_if_minimum_usd``; contract 2.1).
+    if strategy.template == BASELINE:
+        pass
+    elif half + 1e-9 < minimum and lowest is not None:
         wanted = max(float(math.floor(half)), float(lowest), 1.0)
         if wanted + 1e-9 < minimum:
             out.append(Change(
@@ -668,11 +890,17 @@ def _reason_text(code: str, facts: dict[str, Any]) -> dict[str, str]:
 # ---------------------------------------------------------------- the plan
 def build(profiles: Profiles, snap: Snapshot, envelope: Envelope, *,
           suggestion: Strategy | None = None, suggested_by: str = "template",
-          suggestion_error: str | None = None) -> dict[str, Any]:
+          suggestion_error: str | None = None, template: str | None = None) -> dict[str, Any]:
     """The whole plan for one envelope: the strategy, both feasibility tables, and the changes.
 
     ``suggestion`` is a strategy somebody proposed -- a model, usually. It is clamped like any
     other; given none, the template stands in and the plan says which it was.
+
+    ``template`` is the person's choice of template, and it stands whatever a suggestion names.
+    Absent, a suggestion's own template is kept -- the strategy a simulation ran, handed back to
+    start the real account with -- and failing that the mode's first. A baseline plan's targets
+    are worked out here from the account, unless the strategy handed back already carries the
+    ones it was simulated with (``Strategy.deployment``).
     """
     check_envelope(profiles, envelope)
     account = envelope.account
@@ -684,10 +912,37 @@ def build(profiles: Profiles, snap: Snapshot, envelope: Envelope, *,
     if not bounds.universe:
         raise PlanError("the risk profile names no instrument class code may open on its own "
                         f"(buckets.{account}.autonomy.open.classes), so there is nothing to plan")
+    if template is not None and template not in bounds.templates:
+        raise PlanError(f"{template!r} is not a template the {envelope.mode} mode can run; "
+                        f"one of {', '.join(bounds.templates)}")
+    # A model fills in a template's numbers; which template is not its to say.
+    chosen = template or (suggestion.template if suggestion is not None and suggested_by != "model"
+                          else None)
+    if chosen not in bounds.templates:
+        chosen = bounds.templates[0]
     minimum, _source = sizing.minimum_order(profiles, account)
-    template = template_strategy(profiles, envelope, bounds,
-                                 deployable_usd=min(envelope.capital_usd, equity), minimum_usd=minimum)
-    strategy, clamps = clamp(suggestion or template, bounds)
+    deployment = None
+    if chosen == BASELINE:
+        if (suggestion is not None and suggestion.template == BASELINE
+                and suggested_by == "template" and suggestion.deployment):
+            deployment = _valid_deployment(suggestion.deployment, bounds, envelope)
+        if deployment is None:
+            deployment = baseline_deployment(profiles, snap, envelope, bounds, minimum_usd=minimum)
+            suggestion = None
+        default = baseline_strategy(envelope, bounds, deployment)
+    else:
+        default = template_strategy(profiles, envelope, bounds,
+                                    deployable_usd=min(envelope.capital_usd, equity), minimum_usd=minimum)
+    asked = suggestion or default
+    strategy, clamps = clamp(asked, bounds)
+    if strategy.template != chosen:
+        clamps.append(Clamp("template", strategy.template, chosen,
+                            f"策略模板由你选择，已用 {chosen}。",
+                            f"The template is the person's choice; {chosen} is used."))
+        strategy = default if chosen == BASELINE else strategy.model_copy(update={"template": chosen})
+        strategy, _again = clamp(strategy, bounds)
+    if chosen == BASELINE:
+        strategy = strategy.model_copy(update={"deployment": deployment})
     if suggestion is None:
         suggested_by = "template"
 
@@ -718,6 +973,26 @@ def build(profiles: Profiles, snap: Snapshot, envelope: Envelope, *,
             "evidence": [asdict(item) for item in venue.evidence],
             "open_questions": [{"zh": zh, "en": en} for zh, en in venue.open_questions]},
     }
+    # Where a baseline plan stands, fund by fund: the service's to fill in, because it reads what
+    # research has said (``trader.preview_view``). None for every other template.
+    body["deployment"] = None
+    if strategy.template == BASELINE:
+        # The minimum order is the owner's to change. What it would mean is shown, and that is all.
+        if minimum > WHAT_IF_MINIMUM_USD + 1e-9:
+            weights = (strategy.deployment or {}).get("baseline_pct") or {}
+            deployable, position, order = _baseline_rooms(profiles, snap, envelope, list(weights))
+            rules = (strategy.deployment or {}).get("rules") or baseline_rules(profiles)
+            compared, _out = baseline_targets(
+                weights, deployable_usd=deployable, position_usd=position, order_usd=order,
+                minimum_usd=WHAT_IF_MINIMUM_USD, tranches=int(rules["tranches"]),
+                max_positions=bounds.max_positions[1])
+            body["what_if_minimum_usd"] = {f"{WHAT_IF_MINIMUM_USD:g}": [
+                {"symbol": row["symbol"], "target_usd": row["target_usd"], "tranches": row["tranches"]}
+                for row in compared]}
+        else:
+            body["what_if_minimum_usd"] = None
+    else:
+        body["what_if_minimum_usd"] = None
     body["summary"] = _summary(body)
     # What the loss line is and is not, said wherever the line is shown: it is a check this
     # machine makes between passes, and nothing about it limits what a market can do.
@@ -743,6 +1018,25 @@ def _summary(plan: dict[str, Any]) -> dict[str, str]:
     """What the plan comes to, in one short paragraph per language."""
     envelope, today, proposed = plan["envelope"], plan["today"], plan["under_plan"]
     capital = float(envelope["capital_usd"])
+    deployment = (plan.get("strategy") or {}).get("deployment")
+    if (plan.get("strategy") or {}).get("template") == BASELINE and deployment is not None:
+        rows = deployment.get("targets") or []
+        line = (f"亏损达到 ${envelope['loss_pause_usd']:,.2f}（{envelope['loss_pause_pct']:g}%）时暂停新开仓。",
+                (f"New positions stop once the loss reaches ${envelope['loss_pause_usd']:,.2f} "
+                 f"({envelope['loss_pause_pct']:g}%)."))
+        if rows:
+            zh = ("基准建仓：按你的基准比例分批买入 "
+                  + "、".join(f"{row['symbol']} ${row['target_usd']:,.2f}（{row['tranches']} 批）" for row in rows)
+                  + f"，其余 ${deployment['cash_left_usd']:,.2f} 留现金。" + line[0])
+            en = ("Baseline: bought toward the owner's baseline weights in tranches, "
+                  + ", ".join(f"{row['symbol']} ${row['target_usd']:,.2f} in {row['tranches']}" for row in rows)
+                  + f"; the other ${deployment['cash_left_usd']:,.2f} stays cash. " + line[1])
+        else:
+            zh = (f"基准建仓：按你的基准比例，没有一只基金分到的金额够最小下单额 "
+                  f"${deployment['minimum_order_usd']:,.2f}，一笔也不买。")
+            en = (f"Baseline: no fund's share of the baseline weights reaches the "
+                  f"${deployment['minimum_order_usd']:,.2f} minimum order, so nothing is bought.")
+        return {"zh": zh, "en": en}
     if proposed["any_order"]:
         # Each position by its own figure: the second is sized against what the first left.
         orders = [f"${step['order_usd']:,.2f}" for step in proposed["path"] if step["feasible"]]

@@ -68,7 +68,7 @@ def quicken(risk_profile, per_day):
 class Desk:
     """The simulated account under a confirmed plan, with a venue and a market the test scripts."""
 
-    def __init__(self, tmp_path, monkeypatch, *, cash=1000.0, openings_per_day=None):
+    def __init__(self, tmp_path, monkeypatch, *, cash=1000.0, openings_per_day=None, template=None):
         self.monkeypatch = monkeypatch
         self.prices = dict(risk_scenarios.PRICES)
         live_root = tmp_path / "live"
@@ -87,7 +87,7 @@ class Desk:
         # Every read of the market is the test's own table: no vendor, no venue, no model.
         scripted(monkeypatch, self.prices)
 
-        self.plan = self.live.auto_plan(capital_usd=cash)
+        self.plan = self.live.auto_plan(capital_usd=cash, template=template)
         config = paper.ensure(self.live.profiles(), changes=self.plan["changes"],
                               creates=PLAN_CREATES, plan_id=self.plan["plan_id"])
         self.config = config

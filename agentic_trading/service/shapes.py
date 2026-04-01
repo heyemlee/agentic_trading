@@ -272,6 +272,12 @@ class ProposalSummary(BaseModel):
     #: The authority version the proposal was made under (``GET /config/authority``); None on
     #: a proposal that predates the record, which an approval then asks a person to acknowledge.
     authority_version: str | None = None
+    #: What an automatic-trading plan has to do with it: None for a proposal no plan wrote.
+    #: Derived from the stored proposal and the plan's records on every read, never stored, so
+    #: a release that is rolled back reads nothing new (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md,
+    #: 3.2): origin, tranche, exit terms, whether it is the plan's first real purchase, and the
+    #: reason code would leave it for a person, when the records already say so.
+    plan: dict[str, Any] | None = None
 
 
 class ProposalWorld(BaseModel):

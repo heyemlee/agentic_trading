@@ -235,10 +235,21 @@ class NotificationsMixin:
                               + (" (real money)" if proposal.is_real_money else ""))
                     if original is not None and original.authority_changed_during_research:
                         detail += "; the authority changed while it was being researched"
+                    # The plan's first real-money purchase is an ordinary to-do that says what it
+                    # is (contract 3.4): no kind of its own.
+                    first = bool((proposal.plan or {}).get("first_real_order"))
+                    if first:
+                        detail += "; the plan's first real-money purchase"
                     out.append(Condition(
                         id=f"proposal_waiting:{proposal.proposal_id}:{proposal.version}",
                         kind="proposal_waiting",
                         title=f"{proposal.action} {proposal.ticker} needs your approval",
+                        detail_i18n={
+                            "zh": f"方案在实盘的第一笔买入：${proposal.notional_usd:,.2f} 的 {proposal.ticker}，"
+                                  "由你批准；成交后方案开始自动买入。",
+                            "en": f"The plan's first real-money purchase: ${proposal.notional_usd:,.2f} "
+                                  f"of {proposal.ticker}, yours to approve; once it fills, the plan "
+                                  "buys on its own."} if first else None,
                         detail=detail, link=_link("approvals", proposal=proposal.proposal_id),
                         notify_kind="proposal_waiting", notify_link="/ui/approvals.html",
                         urgent=proposal.is_real_money, **base))

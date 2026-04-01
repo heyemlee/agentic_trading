@@ -71,6 +71,57 @@ CONTINUE_REFUSALS: dict[str, tuple[type[ServiceError], str | None]] = {
 #: record must still read as it did, and getLogger returns the one same object.
 logger = logging.getLogger("agentic_trading.service")
 
+#: Why code leaves a plan's purchase on the real account for the owner (contract 2.5).
+FIRST_REAL_ORDER_WAITS = ("this is the plan's first real-money purchase, and it waits for you; once "
+                          "one you approved has filled, the plan's purchases are approved by code")
+
+#: Why code will not approve a plan's purchase, where the records already say so (contract 3.2).
+#: A closed set; the console shows the text as given.
+WAITS_FOR_PERSON: dict[str, dict[str, str]] = {
+    "first_real_order": {"zh": "这是方案在实盘的第一笔买入，由你批准；成交后方案开始自动买入。",
+                         "en": "This is the plan's first real-money purchase and waits for you; "
+                               "once it fills, the plan buys on its own."},
+    "plan_paused": {"zh": "方案已暂停，它写好的买入要等你批准，或等方案恢复。",
+                    "en": "The plan is paused; a purchase it wrote waits for you, or for the plan "
+                          "to be resumed."},
+    "mode_not_allowed": {"zh": "这个模式没有被允许自动开仓，这笔买入要等你批准。",
+                         "en": "This mode is not one code may open positions under on its own; "
+                               "the purchase waits for you."},
+    "outside_plan": {"zh": "这笔买入不是方案写出的，要等你批准。",
+                     "en": "This purchase was not written by the plan and waits for you."},
+    "version_moved": {"zh": "写这笔买入的策略版本已经不再开仓，要等你批准。",
+                      "en": "The strategy version that wrote this purchase no longer opens "
+                            "positions; it waits for you."},
+    "authority_moved": {"zh": "写出这笔买入之后授权设置变了，要等你批准。",
+                        "en": "The authority changed after this purchase was written; it waits "
+                              "for you."},
+    "autonomy_off": {"zh": "“自动买入”开关是关着的，这笔买入要等你批准。",
+                     "en": "Automatic buying is switched off; the purchase waits for you."},
+}
+
+
+def _tranche_facts(db: Any, proposal: Proposal) -> dict[str, Any] | None:
+    """What the version that wrote this tranche says it buys, or None for anything else.
+
+    From the version's own record, never from what the proposal says about itself: the target
+    for this fund and the size of one tranche of it (contract 2.1). A purchase that calls itself
+    a tranche and names no version, or a version that buys no such thing, gets facts that permit
+    nothing (``autonomy.permits``).
+    """
+    if (proposal.action not in autonomy.OPENING_ACTIONS
+            or str((proposal.evidence or {}).get("purpose") or "") != autonomy.TRANCHE_PURPOSE):
+        return None
+    from ..auto import store as auto_store
+
+    found = auto_store.version(db, proposal.strategy_version) if proposal.strategy_version else None
+    strategy = (found or {}).get("strategy") or {}
+    deployment = strategy.get("deployment") or {}
+    target = next((dict(row) for row in deployment.get("targets") or []
+                   if str(row.get("symbol") or "").upper() == proposal.ticker.upper()), None)
+    tranche_usd = (float(target["target_usd"]) / max(1, int(target["tranches"]))) if target else 0.0
+    return {"template": strategy.get("template"), "symbol": proposal.ticker, "target": target,
+            "tranche_usd": round(tranche_usd, 2)}
+
 
 class ApprovalsMixin:
     """Everything that can place, reduce or reconcile a real order."""
@@ -80,9 +131,90 @@ class ApprovalsMixin:
         profiles = self.profiles()
         store = self._store(profiles)
         items = store.all() if include_closed else store.open_proposals(profiles)
-        return [self._proposal_summary(p, profiles) for p in sorted(items, key=lambda x: x.created_at, reverse=True)]
+        context = self._plan_context(profiles, store) if any(p.strategy_version for p in items) else None
+        return [self._proposal_summary(p, profiles, context=context)
+                for p in sorted(items, key=lambda x: x.created_at, reverse=True)]
 
-    def _proposal_summary(self, p: Proposal, profiles: Profiles) -> ProposalSummary:
+    def _plan_context(self, profiles: Profiles, store: ProposalStore) -> dict[str, Any]:
+        """What the plan block of every proposal is read from, read once for a list of them."""
+        from ..auto import paper
+        from ..auto import store as auto_store
+
+        return {"everything": store.all(), "active": auto_store.active_plan(store.db),
+                "state": auto_store.state(store.db), "paper": paper.is_paper(profiles),
+                "authority": autonomy.note_version(profiles, store.db), "db": store.db}
+
+    def _plan_block(self, p: Proposal, profiles: Profiles,
+                    context: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The plan block of one proposal (contract 3.2), or None for one no plan wrote."""
+        if not p.strategy_version:
+            return None
+        try:
+            from ..auto import modes as auto_modes
+            from ..auto import store as auto_store
+            from ..auto import trader
+
+            context = context or self._plan_context(profiles, self._store(profiles))
+            version = auto_store.version(context["db"], p.strategy_version)
+            strategy = (version or {}).get("strategy") or {}
+            opening = p.action in autonomy.OPENING_ACTIONS
+            noted = next((entry for entry in p.history if isinstance(entry, dict)
+                          and entry.get("event") == "auto_tranche"), None)
+            plan_id = autonomy.plan_of(p) or (version or {}).get("plan_id")
+            others = [q for q in context["everything"] if q.proposal_id != p.proposal_id]
+            first = (opening and not context["paper"] and p.bucket == MICRO_BUCKET and plan_id is not None
+                     and not autonomy.first_purchase_seen(others, plan_id=plan_id, bucket=MICRO_BUCKET))
+            block: dict[str, Any] = {
+                "plan_id": plan_id, "strategy_version": p.strategy_version,
+                "template": strategy.get("template") if version else None,
+                "origin": ("tranche" if trader.is_tranche(p) else
+                           "exit" if p.action in autonomy.EXIT_ACTIONS else "research"),
+                "tranche": ({"index": noted.get("index"), "of": noted.get("of")} if noted else None),
+                # A purchase a plan wrote is the plan's whoever approves it (contract 2.3), and
+                # an exit sells the plan's shares: said so that the screen can say it.
+                "managed_by_plan": True,
+                "exit_terms": None if version is None else {
+                    "stop_loss_pct": strategy.get("stop_loss_pct"),
+                    "take_profit_pct": strategy.get("take_profit_pct"),
+                    "max_holding_days": int(strategy.get("max_holding_days") or 0) or None,
+                    "trend_window": int(strategy.get("trend_window") or 0) or None},
+                "first_real_order": bool(first),
+                "waits_for_person": None,
+            }
+            if version is None:
+                block["missing"] = "version_not_on_record"
+            if opening and p.status == PROPOSED:
+                active = context["active"] or {}
+                cfg = autonomy._cfg(profiles, p.bucket, "open")
+                code = None
+                if not active or p.strategy_version != active.get("opening_version"):
+                    code = "version_moved"
+                elif context["state"].get("paused"):
+                    code = "plan_paused"
+                elif str((active.get("envelope") or {}).get("mode")) not in auto_modes.allowed_modes(
+                        profiles, p.bucket):
+                    code = "mode_not_allowed"
+                elif cfg.get("enabled") is not True:
+                    code = "autonomy_off"
+                elif p.authority_version != context["authority"]:
+                    code = "authority_moved"
+                elif first:
+                    code = "first_real_order"
+                if code:
+                    block["waits_for_person"] = {"code": code, "text": WAITS_FOR_PERSON[code]}
+            return block
+        except Exception as exc:  # noqa: BLE001 - the proposal still shows, and may be decided
+            logger.warning("the plan block of %s could not be derived: %s", p.proposal_id, exc)
+            return {"error": {"code": "plan_block_unavailable",
+                              "text": {"zh": "方案相关的信息暂时读不出来；这张提案照常可以批准或拒绝。",
+                                       "en": "What the plan has to do with this cannot be read right "
+                                             "now; the proposal can still be approved or rejected."}},
+                    "plan_id": None, "strategy_version": p.strategy_version, "template": None,
+                    "origin": None, "tranche": None, "managed_by_plan": None, "exit_terms": None,
+                    "first_real_order": None, "waits_for_person": None}
+
+    def _proposal_summary(self, p: Proposal, profiles: Profiles,
+                          context: dict[str, Any] | None = None) -> ProposalSummary:
         freshness, why = p.freshness(profiles)
         rules = p.freshness_rules(profiles)
         return ProposalSummary(
@@ -113,6 +245,7 @@ class ApprovalsMixin:
             reference_price=p.reference_price,
             run_id=p.run_id,
             authority_version=p.authority_version,
+            plan=self._plan_block(p, profiles, context),
         )
 
     def proposal(self, proposal_id: str) -> ProposalDetail:
@@ -661,6 +794,7 @@ class ApprovalsMixin:
         fills = self._fills_for_replay(profiles) if any(
             p.action in autonomy.EXIT_ACTIONS for p in candidates) else []
         # The automatic-trading plan in force for this account, if there is one. Read once.
+        from ..auto import paper
         from ..auto import store as auto_store
 
         plan = auto_store.active_plan(store.db) if any(
@@ -707,6 +841,12 @@ class ApprovalsMixin:
                         why = ("the automatic-trading plan is paused ("
                                + str(paused.get("reason") or "no reason given")[:200]
                                + "); a purchase it wrote waits for a person")
+                    # On the real account the plan's first purchase is the owner's to send, and
+                    # until one they approved has filled, code approves none (contract 2.5). The
+                    # simulated account starts on its own: that is what it is for.
+                    elif not paper.is_paper(profiles) and not autonomy.first_purchase_seen(
+                            everything, plan_id=str(plan.get("plan_id")), bucket=MICRO_BUCKET):
+                        why = (FIRST_REAL_ORDER_WAITS)
                 if why:
                     report["declined"].append({"proposal_id": proposal.proposal_id, "reasons": [why]})
                     continue
@@ -734,7 +874,8 @@ class ApprovalsMixin:
                 reduced_today=autonomy.reduced_today(everything, MICRO_BUCKET),
                 opened_today=autonomy.opened_today(everything, MICRO_BUCKET),
                 floor=floor, managed=own,
-                exited_today=autonomy.exited_today(everything, MICRO_BUCKET))
+                exited_today=autonomy.exited_today(everything, MICRO_BUCKET),
+                tranche=_tranche_facts(store.db, proposal), requested_usd=proposal.notional_usd)
             if not decision.permitted:
                 # Not a refusal to trade: the proposal stays in the queue for a person.
                 report["declined"].append({"proposal_id": proposal.proposal_id,

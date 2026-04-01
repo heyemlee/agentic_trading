@@ -22,6 +22,7 @@ from agentic_trading import config_changes as cc
 from agentic_trading.auto import modes, runner, store
 from agentic_trading.proposals import EXECUTED
 from agentic_trading.service import ServiceError
+from agentic_trading.service.approvals import FIRST_REAL_ORDER_WAITS
 from tests.auto_market import scripted_history
 from tests.test_auto_live import MICRO, Real
 
@@ -45,10 +46,14 @@ SWING_QUESTION = "buckets.micro_live.autonomy.open.modes"
 
 
 def _buy(real, symbol, confidence=90):
-    """Research says buy; the pass writes it and the approval loop sends it. Returns the proposal."""
+    """Research says buy; the pass writes it and the approval loop sends it -- or, for a plan's
+    first real purchase, the owner does (contract 2.5). Returns the proposal."""
     real.research(symbol, confidence=confidence)
     tick = real.service.auto_tick()
     report = real.service.autonomous_reductions()
+    for row in report["declined"]:
+        if row["reasons"] == [FIRST_REAL_ORDER_WAITS]:
+            real.by_hand(next(p for p in real.proposals() if p.proposal_id == row["proposal_id"]))
     real.forget_research()
     found = [p for p in real.proposals() if p.ticker == symbol and p.action == "BUY"]
     assert found and found[-1].status == EXECUTED, (

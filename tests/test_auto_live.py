@@ -35,6 +35,7 @@ from agentic_trading.ledger_confirm import confirm_ledgers
 from agentic_trading.portfolio import load_portfolio
 from agentic_trading.proposals import EXECUTED, PROPOSED, utcnow
 from agentic_trading.service import Service, ServiceConflict, ServiceError
+from agentic_trading.service.approvals import FIRST_REAL_ORDER_WAITS
 from tests.auto_market import scripted, today, write_research
 from tests.conftest import ROOT, copy_example_ledger, research_as_written
 
@@ -183,6 +184,27 @@ class Real:
         sim = self.sim()
         version = store.active_plan(sim.state_db())["opening_version"]
         assert runner.exits_verified(sim, sim.profiles(), version), "the simulated exit did not happen"
+
+    def by_hand(self, proposal):
+        """The owner approves a waiting proposal in the console, through the ordinary path."""
+        answer = self.service.approve(
+            proposal.proposal_id, identity="owner", version=proposal.version(),
+            request_id=f"owner-{proposal.proposal_id}", authority_version=proposal.authority_version,
+            terms={"ticker": proposal.ticker, "bucket": proposal.bucket, "action": proposal.action,
+                   "notional_usd": proposal.notional_usd, "sell_quantity": proposal.sell_quantity})
+        assert answer["submitted"] is True, answer
+        return next(p for p in self.proposals() if p.proposal_id == proposal.proposal_id)
+
+    def first_purchase(self, symbol, **research):
+        """The plan's first real-money purchase (contract 2.5): written by the pass, left by code
+        for the owner, and approved by them."""
+        self.research(symbol, **research)
+        self.service.auto_tick()
+        report = self.service.autonomous_reductions()
+        waiting = next(p for p in self.proposals() if p.ticker == symbol and p.status == PROPOSED
+                       and p.action in ("BUY", "ADD"))
+        assert {"proposal_id": waiting.proposal_id, "reasons": [FIRST_REAL_ORDER_WAITS]} in report["declined"], report
+        return self.by_hand(waiting)
 
     def confirm_book(self):
         """The daily check of the ledger against the venue, run now."""
@@ -533,11 +555,24 @@ def test_what_is_confirmed_is_what_was_shown_or_nothing_is(real):
 
 
 # ---------------------------------------------------------------- in force
-def test_the_real_account_trades_down_the_one_approval_path(real):
+@pytest.fixture
+def busier(tmp_path, monkeypatch, offline_market_reads):
+    """The real account allowed three new positions a day, for the tests that need a second."""
+    return Real(tmp_path, monkeypatch, openings_per_day=3)
+
+
+def test_the_real_account_trades_down_the_one_approval_path(busier):
+    real = busier
     active = real.in_force()
     profiles = real.service.profiles()
     # The research run now steps aside for the plan (tests/test_auto_path.py).
     assert cli._deferred_to_plan(real.db, MICRO, "VXUS", "BUY")["plan_id"] == active["plan_id"]
+
+    # The plan's first real purchase is the owner's to send (contract 2.5) -- and once they
+    # have, it is the plan's like any other, held to its stop (2.3).
+    first = real.first_purchase("BND", confidence=90)
+    assert first.status == EXECUTED and (first.approved_via, first.approved_by) == ("console", "owner")
+    assert first.strategy_version == active["opening_version"]
 
     real.research("VXUS", confidence=90)
     tick = real.service.auto_tick()
@@ -546,7 +581,7 @@ def test_the_real_account_trades_down_the_one_approval_path(real):
     assert tick["live"]["pass"]["approvals"] is None
     waiting = next(p for p in real.proposals() if p.ticker == "VXUS")
     assert waiting.status == PROPOSED and waiting.strategy_version == active["opening_version"]
-    assert real.venue._orders == {} and real.held("VXUS") == 0.0
+    assert "VXUS" not in {o.symbol for o in real.venue._orders.values()} and real.held("VXUS") == 0.0
 
     report = real.service.autonomous_reductions()
     assert [row["outcome"] for row in report["approved"]] == ["SUBMITTED"]
@@ -555,19 +590,49 @@ def test_the_real_account_trades_down_the_one_approval_path(real):
     assert (opened.approved_via, opened.approved_by) == (autonomy.AUTONOMOUS_VIA, "autonomy:open")
     assert opened.authority_version == autonomy.note_version(profiles, real.db)
     assert real.held("VXUS") > 0 and real.ledger().position("VXUS", MICRO).opened_by == "autonomy:open"
-    view = real.service.auto_live()["positions"][0]
-    assert view["symbol"] == "VXUS" and view["strategy_version"] == active["opening_version"]
+    views = {view["symbol"]: view for view in real.service.auto_live()["positions"]}
+    assert views["VXUS"]["strategy_version"] == views["BND"]["strategy_version"] == active["opening_version"]
 
     # Its stop: written by the pass, sent by the loop, never more than code bought.
     real.move("VXUS", 0.85)
     stopped = real.service.auto_tick()["live"]["pass"]
-    assert stopped["exits"][0]["exit"]["reason"] == "stop_loss"
+    assert {row["symbol"]: row["exit"]["reason"] for row in stopped["exits"]}["VXUS"] == "stop_loss"
     real.service.autonomous_reductions()
     closing = next(p for p in real.proposals() if p.action == "SELL")
     assert closing.status == EXECUTED and closing.approved_by == "autonomy:exit"
     assert real.held("VXUS") == 0.0
     trade = real.service.auto_live()["trades"][0]
     assert trade["closed_by"] == "code" and trade["realized_usd"] < 0
+
+
+def test_the_plans_first_real_purchase_waits_for_the_owner_and_only_the_first(busier):
+    """Contract 2.5. Derived from the records every time: a purchase the owner approved that has
+    filled, written for this plan. Until then code approves none of the plan's purchases."""
+    real = busier
+    active = real.in_force()
+    real.research("VXUS", confidence=90)
+    real.service.auto_tick()
+    waiting = next(p for p in real.proposals() if p.ticker == "VXUS")
+    for _ in range(2):                                        # asked again, the answer is the same
+        report = real.service.autonomous_reductions()
+        assert report["approved"] == [] and report["declined"] == [
+            {"proposal_id": waiting.proposal_id, "reasons": [FIRST_REAL_ORDER_WAITS]}]
+    assert real.venue._orders == {}
+    # Rejected by the owner, it is not the first purchase: the next one still waits.
+    real.service.reject(waiting.proposal_id, reason="not this one")
+    real.forget_research()
+    first = real.first_purchase("BND", confidence=90)
+    assert autonomy.first_purchase_seen(real.proposals(), plan_id=active["plan_id"], bucket=MICRO)
+    assert first.status == EXECUTED
+    # After it, code approves the plan's purchases.
+    real.research("VGIT", confidence=90)
+    real.service.auto_tick()
+    assert [row["outcome"] for row in real.service.autonomous_reductions()["approved"]] == ["SUBMITTED"]
+    assert real.held("VGIT") > 0
+    # The simulated account never waits: it is what the rehearsal is for.
+    sim = real.sim()
+    assert not any(FIRST_REAL_ORDER_WAITS in reason for row in sim.autonomous_reductions()["declined"]
+                   for reason in row["reasons"])
 
 
 def test_a_purchase_written_before_a_pause_waits_for_a_person_in_the_real_account(real):
@@ -583,9 +648,11 @@ def test_a_purchase_written_before_a_pause_waits_for_a_person_in_the_real_accoun
     assert report["declined"] == [{"proposal_id": waiting.proposal_id, "reasons": [
         "the automatic-trading plan is paused (stepping away); a purchase it wrote waits for a person"]}]
     assert real.venue._orders == {} and real.held("VXUS") == 0.0
-    # A person may still approve it; code does not, until the plan is resumed.
+    # Resumed, code still leaves it: it is the plan's first real purchase, and the owner's.
     real.service.auto_resume(scope="live", note="back", identity="owner", confirmed=True)
-    assert [row["outcome"] for row in real.service.autonomous_reductions()["approved"]] == ["SUBMITTED"]
+    report = real.service.autonomous_reductions()
+    assert report["approved"] == [] and report["declined"][0]["reasons"] == [FIRST_REAL_ORDER_WAITS]
+    real.by_hand(waiting)
     assert real.held("VXUS") > 0
 
 
@@ -612,9 +679,7 @@ def test_pausing_and_stopping_take_no_password_and_resuming_does(real):
 
 def test_the_real_plan_stops_opening_when_the_code_it_was_validated_on_changes(real, monkeypatch):
     active = real.in_force()
-    real.research("VXUS", confidence=90)
-    real.service.auto_tick()
-    real.service.autonomous_reductions()
+    real.first_purchase("VXUS", confidence=90)
     quantity = real.held("VXUS")
     assert quantity > 0
 
@@ -672,9 +737,7 @@ def test_the_simulated_configuration_follows_the_real_one(real):
 def test_what_the_account_has_come_to_is_read_from_its_own_marks(real):
     real.in_force()
     assert real.service.auto_live()["record"]["sessions"] == 1, "one pass has run, in one session"
-    real.research("VXUS", confidence=90)
-    real.service.auto_tick()
-    real.service.autonomous_reductions()
+    real.first_purchase("VXUS", confidence=90)
     real.move("VXUS", 0.97)
     real.service.auto_tick()
     live = real.service.auto_live()
@@ -751,9 +814,7 @@ def test_going_into_force_is_announced_even_though_nobody_was_there(real):
 
 def test_a_plan_that_reaches_its_loss_line_stops_opening_and_says_so(real):
     real.in_force(loss_pause_pct=2.0)                         # a line of $2 on $100
-    real.research("VXUS", confidence=90)
-    real.service.auto_tick()
-    real.service.autonomous_reductions()
+    real.first_purchase("VXUS", confidence=90)
     assert real.held("VXUS") > 0
     real.move("VXUS", 0.80)
     passed = real.service.auto_tick()["live"]["pass"]

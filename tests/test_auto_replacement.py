@@ -258,10 +258,8 @@ def test_a_candidate_that_proves_better_is_ready_and_waits_for_the_person(runnin
 def test_the_person_can_make_the_change_with_the_password_and_the_old_strategy_keeps_its_positions(
         running, monkeypatch):
     real, incumbent = running  # noqa: F811
-    # The strategy in force holds something it bought.
-    real.research("VXUS", confidence=90)
-    real.service.auto_tick()
-    real.service.autonomous_reductions()
+    # The strategy in force holds something it bought -- its first, approved by the owner.
+    real.first_purchase("VXUS", confidence=90)
     real.forget_research()
     assert real.held("VXUS") > 0
     candidate = _candidate(real, monkeypatch, max_holding_days=180)

@@ -106,13 +106,18 @@ class AutoTradingMixin:
         return snap, {"open_orders": len(working), "committed_usd": committed}
 
     def auto_plan(self, *, mode: str = modes.STEADY, capital_usd: float | None = None,
-                  loss_pause_pct: float | None = None, ask_model: bool = False) -> dict[str, Any]:
+                  loss_pause_pct: float | None = None, ask_model: bool = False,
+                  template: str | None = None) -> dict[str, Any]:
         """The plan for an envelope, with what the account could order today and under it.
 
         ``capital_usd`` defaults to what the account holds now: the plan is validated at the
         size the account already is, and asks nobody to add money first. ``ask_model`` asks the
         model for the strategy parameters, which spends the subscription research runs on; left
         off, the deterministic template is used and the plan says so. Nothing is written.
+
+        ``template`` is which of the mode's templates the person chose; absent, the mode's first.
+        The baseline template has nothing for a model to choose -- its numbers are the owner's
+        weights and the template's own rules -- so no model is asked for one.
         """
         profiles = self.profiles()
         snap, working = self._auto_snapshot(profiles)
@@ -127,12 +132,13 @@ class AutoTradingMixin:
                             else plan.DEFAULT_LOSS_PAUSE_PCT))
         try:
             suggestion, by, error = None, "template", None
-            if ask_model:
+            if ask_model and template != plan.BASELINE:
                 suggestion, by, error = self._auto_suggestion(profiles, snap, envelope)
             document = plan.build(profiles, snap, envelope, suggestion=suggestion,
-                                  suggested_by=by, suggestion_error=error)
+                                  suggested_by=by, suggestion_error=error, template=template)
         except plan.PlanError as exc:
             raise ServiceError(str(exc)) from exc
+        document["deployment"] = self._auto_deployment_preview(document["strategy"])
         # An order still working holds its cash, and the account places one order at a time.
         document["account"].update(working)
         if working["open_orders"]:
@@ -307,7 +313,7 @@ class AutoTradingMixin:
 
     def _auto_document(self, profiles: Profiles, snap, *, mode: str, capital_usd: float | None,
                        loss_pause_pct: float | None, strategy: dict[str, Any] | None,
-                       as_given: bool = False) -> dict[str, Any]:
+                       as_given: bool = False, template: str | None = None) -> dict[str, Any]:
         """The plan for an envelope and, when one is handed back, for the strategy it was shown with.
 
         A preview is not stored anywhere, so confirming one means building it again and finding
@@ -343,15 +349,55 @@ class AutoTradingMixin:
                 raise ServiceError(f"the strategy handed back is not one a plan can use: {exc}") from exc
             by = str(strategy.get("suggested_by") or "template")[:40]
         try:
-            return plan.build(profiles, snap, envelope, suggestion=suggestion, suggested_by=by,
-                              suggestion_error=error)
+            # The template the person chose, or the one the strategy handed back was shown with.
+            document = plan.build(profiles, snap, envelope, suggestion=suggestion, suggested_by=by,
+                                  suggestion_error=error,
+                                  template=template or (strategy or {}).get("template") or None)
         except plan.PlanError as exc:
             raise ServiceError(str(exc)) from exc
+        document["deployment"] = self._auto_deployment_preview(document["strategy"])
+        return document
+
+    def _auto_deployment_preview(self, strategy: dict[str, Any]) -> dict[str, Any] | None:
+        """A baseline plan's block before anything is bought under it: what research has said of
+        each fund, read from the real account's runs, which both accounts are researched by."""
+        from ..auto import runner, trader
+
+        if not trader.is_baseline(strategy):
+            return None
+        deployment = strategy.get("deployment") or {}
+        try:
+            window = int((deployment.get("rules") or {}).get("veto_window_days") or 14)
+            research = trader.research_by_fund(trader.records_in(self.profiles().project_dir / "runs"),
+                                               window_days=window)
+            return trader.preview_view(deployment, research=research,
+                                       trade_date=runner.session_of(utcnow()))
+        except Exception as exc:  # noqa: BLE001 - a block that cannot be read says so, never guesses
+            logger.warning("the baseline plan's deployment could not be read: %s", exc)
+            return _deployment_unavailable(exc)
+
+    def _auto_deployment(self, db: Any, active: dict[str, Any] | None) -> dict[str, Any] | None:
+        """A baseline plan's block for an account: as its last pass read it, or, before the plan's
+        first pass, as a preview. Each account's own (contract 3.6)."""
+        from ..auto import trader
+
+        strategy = (active or {}).get("strategy") or {}
+        if not trader.is_baseline(strategy):
+            return None
+        try:
+            last = trader.last_deployment(db)
+            if last and last.get("plan_id") == active.get("plan_id") \
+                    and last.get("version") == active.get("opening_version"):
+                return last
+        except Exception as exc:  # noqa: BLE001 - as above
+            logger.warning("the last pass's deployment could not be read: %s", exc)
+            return _deployment_unavailable(exc)
+        return self._auto_deployment_preview(strategy)
 
     def auto_start(self, *, plan_id: str, mode: str = modes.STEADY, capital_usd: float | None = None,
                    loss_pause_pct: float | None = None, strategy: dict[str, Any] | None = None,
                    scope: str = "paper", identity: str | None = None,
-                   confirmed: bool = False) -> dict[str, Any]:
+                   confirmed: bool = False, template: str | None = None) -> dict[str, Any]:
         """Put a previewed plan in force: in the simulated account, or behind every gate, the real one.
 
         ``plan_id`` is the plan the person was shown. It is built again from the same inputs and
@@ -381,7 +427,8 @@ class AutoTradingMixin:
                                "freshness checks and the in-session rule runner are not built")
         snap, _working = self._auto_snapshot(profiles)
         document = self._auto_document(profiles, snap, mode=mode, capital_usd=capital_usd,
-                                       loss_pause_pct=loss_pause_pct, strategy=strategy)
+                                       loss_pause_pct=loss_pause_pct, strategy=strategy,
+                                       template=template)
         if document["plan_id"] != plan_id:
             raise ServiceConflict("the plan is no longer the one that was previewed -- the account "
                                   "or the configuration has moved since; preview it again")
@@ -663,6 +710,7 @@ class AutoTradingMixin:
             "account_mark": marks[max(marks)] if marks else None,
             "last_pass": store.last_pass(db),
             "candidate": self._auto_candidate(profiles),
+            "deployment": self._auto_deployment(db, active),
             # Whether a validated strategy takes over by itself under this plan, and what the
             # last look at one found. Off unless a person turned it on.
             "replacement": {"automatic": bool(store.option(db, "auto_replace", False)),
@@ -1318,6 +1366,7 @@ class AutoTradingMixin:
             "trades": positions.closed_trades(fills=fills, proposals=everything,
                                               bucket=MICRO_BUCKET)[-20:],
             "signals": recent,
+            "deployment": self._auto_deployment(db, active),
             "research": self._auto_research_coverage(
                 (active or {}).get("strategy", {}).get("universe") or []),
         }
@@ -1809,6 +1858,8 @@ class AutoTradingMixin:
         seen = trader.seen_signals(db)
         outcomes: dict[str, int] = {}
         for entry in seen.values():
+            if entry.get("kind") == "tranche":
+                continue                        # a tranche is not a research conclusion
             code = str((entry.get("diagnosis") or {}).get("category") or "unknown")
             outcomes[code] = outcomes.get(code, 0) + 1
         since = equity[0]["date"] if equity else ""
@@ -1933,6 +1984,15 @@ class AutoTradingMixin:
                 "candidates_enabled": study is not None,
                 "on_watchlist": [s for s in wanted if s in watched],
                 "text": text}
+
+
+def _deployment_unavailable(exc: Exception) -> dict[str, Any]:
+    """The block when it cannot be worked out: no progress drawn, and the reason (contract 3.6)."""
+    return {"template": plan.BASELINE, "targets": [], "regime": None, "as_of": None,
+            "error": {"code": "deployment_unavailable",
+                      "text": {"zh": f"现在读不出基准建仓的进度：{type(exc).__name__}。",
+                               "en": f"Where the baseline plan stands cannot be read right now: "
+                                     f"{type(exc).__name__}."}}}
 
 
 def _public_state(state: dict[str, Any]) -> dict[str, Any]:

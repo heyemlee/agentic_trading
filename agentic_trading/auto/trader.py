@@ -36,13 +36,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .. import autonomy, diagnosis, exits
+from .. import autonomy, diagnosis, exits, sizing
+from ..event_calendar import macro_blackout
 from ..evidence import collect_evidence
 from ..micro_live import BUCKET as ACCOUNT
 from ..policy import decide
 from ..portfolio import classify_instrument, trading_days_between, upstream_identity_lookup
 from ..proposals import (
     APPROVED,
+    CANCELED,
+    EXECUTED,
     EXPIRED,
     INVALIDATED,
     PROPOSED,
@@ -54,7 +57,7 @@ from ..proposals import (
 from ..risk import HardRiskEngine
 from ..risk import Proposal as RiskProposal
 from . import bars as bar_source
-from . import modes, positions, store
+from . import modes, paper, positions, store
 
 logger = logging.getLogger("agentic_trading.service")
 
@@ -62,6 +65,8 @@ SIGNALS = "auto.signals"
 MAX_SIGNALS = 500
 #: Since which session each position of the plan's has had an exit nobody could decide.
 UNDECIDED = "auto.exits_undecided"
+#: Where a baseline plan stood, fund by fund, as the last pass read it (contract 3.1).
+DEPLOYMENT = "auto.deployment"
 #: The report each analyst leaves, by the key the evidence check knows it under.
 REPORTS = {"market_report": "market", "news_report": "news",
            "fundamentals_report": "fundamentals", "sentiment_report": "social"}
@@ -567,6 +572,10 @@ def consider(service: Any, book: Book, record: dict[str, Any], run_dir: Path, *,
         return {**answer, **made}
 
     # --- an opening
+    if is_baseline(strategy):
+        # Under the baseline template research is a veto and never a reason to buy: what is
+        # bought is the owner's weights, in tranches (``tranche_pass``; contract 2.1).
+        return no(diagnosis.Reason("baseline_research_not_a_buy"))
     if hold is not None:
         return no(hold)
     if has_position:
@@ -768,6 +777,472 @@ def undecided_exits(db) -> dict[str, dict[str, Any]]:
     return dict(db.read_meta(UNDECIDED, {}) or {})
 
 
+# ---------------------------------------------------------------- the baseline template's tranches
+#: What vetoes a tranche (D2): research saying hold less of it. A rating, or the reviewer's action.
+NEGATIVE_RATINGS = ("underweight", "sell")
+NEGATIVE_REVIEWS = ("SELL", "REDUCE")
+#: The regimes a tranche may be bought in (D3). A tense one, a high-risk one and one nobody could
+#: read all skip it -- the configuration says HIGH_RISK, and the owner added ELEVATED.
+OPEN_REGIMES = ("LOW_RISK", "NORMAL")
+#: How often one tranche is written in one session at most, and how far apart: a tranche turned
+#: back at the venue is tried again, but not every minute for the rest of the day.
+TRANCHE_TRIES_PER_SESSION = 4
+#: The sessions a position of the simulated account is held before its drill (D6).
+DRILL_AFTER_SESSIONS = 5
+
+
+def is_baseline(strategy: dict[str, Any] | None) -> bool:
+    """Whether a strategy is the baseline template's: bought by weights, research a veto."""
+    return str((strategy or {}).get("template") or "") == autonomy.BASELINE_TEMPLATE
+
+
+def is_tranche(proposal: Any) -> bool:
+    """Whether a proposal is one this module wrote as a baseline tranche."""
+    return (str((getattr(proposal, "evidence", None) or {}).get("purpose") or "") == autonomy.TRANCHE_PURPOSE
+            and any(isinstance(entry, dict) and entry.get("event") == "auto_tranche"
+                    for entry in getattr(proposal, "history", None) or ()))
+
+
+def sessions_after(day: str, count: int) -> str:
+    """The session ``count`` sessions after the one ``day`` falls in, or the next if it is none.
+
+    By the exchange's calendar, so a holiday is not a session; by weekdays without it.
+    """
+    import pandas as pd
+
+    calendar = _exchange_calendar()
+    if calendar is not None:
+        try:
+            session = calendar.date_to_session(str(day)[:10], direction="next")
+            return calendar.session_offset(session, int(count)).date().isoformat()
+        except Exception as exc:  # noqa: BLE001 - outside the calendar's years: weekdays instead
+            logger.debug("%s is outside the exchange calendar: %s", day, exc)
+    return (pd.Timestamp(str(day)[:10]) + pd.offsets.BDay(int(count))).date().isoformat()
+
+
+def research_by_fund(records: list[tuple[dict[str, Any], Path]], *, window_days: int,
+                     now: datetime | None = None) -> dict[str, dict[str, Any]]:
+    """The newest finished research about each fund within the window, by symbol.
+
+    A record with no rating says nothing either way and is passed over. A fund with none in the
+    window is absent, which the tranche reads as "not researched": nobody looked, so nothing
+    is bought (D2).
+    """
+    out: dict[str, dict[str, Any]] = {}
+    newest: dict[str, float] = {}
+    for record, _run_dir in records:
+        symbol = str(record.get("ticker") or "").upper()
+        age = _age_seconds(record.get("created_at"), now)
+        if not symbol or age is None or age > window_days * 86400.0:
+            continue
+        # By the research's own clock: files written in the same second come back in no order.
+        if symbol in newest and age >= newest[symbol]:
+            continue
+        rating = str((record.get("upstream_decision") or {}).get("portfolio_manager_signal") or "")
+        if not rating:
+            continue
+        review = str((record.get("policy") or {}).get("reviewer_action") or "") or None
+        newest[symbol] = age
+        out[symbol] = {"run_id": record.get("run_id"), "rating": rating, "reviewer_action": review,
+                       "at": record.get("created_at"),
+                       "negative": rating.strip().lower() in NEGATIVE_RATINGS
+                       or (review or "").upper() in NEGATIVE_REVIEWS}
+    return out
+
+
+def _veto(seen: dict[str, Any]) -> tuple[dict[str, Any], diagnosis.Reason]:
+    rating = str(seen.get("rating") or "")
+    said = rating if rating.strip().lower() in NEGATIVE_RATINGS else str(seen.get("reviewer_action") or rating)
+    reason = diagnosis.Reason("tranche_vetoed", {"day": str(seen.get("at") or "")[5:10], "said": said})
+    return ({"code": "research_negative", "run_id": seen.get("run_id"), "rating": rating,
+             "reviewer_action": seen.get("reviewer_action"), "at": seen.get("at"),
+             "text": reason.text()}, reason)
+
+
+def _filled(proposal: Any) -> bool:
+    return proposal.status == EXECUTED or (proposal.status == CANCELED
+                                           and float(proposal.filled_quantity or 0.0) > 0)
+
+
+def _day_of(stamp: Any) -> str | None:
+    try:
+        made = datetime.fromisoformat(str(stamp))
+    except (TypeError, ValueError):
+        return None
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=UTC)
+    from zoneinfo import ZoneInfo
+
+    return made.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def _ended(book: Book, symbol: str) -> dict[str, Any] | None:
+    """The last time a plan's position in this fund came to an end: when, and by what sale."""
+    lives = [row for row in positions.closed_trades(fills=book.fills, proposals=book.proposals,
+                                                    bucket=ACCOUNT) if row["symbol"] == symbol]
+    if not lives:
+        return None
+    last = lives[-1]
+    closing = next((p for p in book.proposals if p.proposal_id == last.get("closing_proposal")), None)
+    drill = closing is not None and any(
+        isinstance(entry, dict) and entry.get("event") == "auto_exit" and entry.get("reason") == positions.DRILL
+        for entry in closing.history)
+    stop = closing is not None and any(
+        isinstance(entry, dict) and entry.get("event") == "auto_exit" and entry.get("reason") == positions.STOP_LOSS
+        for entry in closing.history)
+    return {"at": last.get("closed_at"), "day": _day_of(last.get("closed_at")), "drill": drill,
+            "stop": stop, "closed_by": last.get("closed_by")}
+
+
+def tranche_facts(book: Book, plan_id: str, symbol: str) -> dict[str, Any]:
+    """Where one fund's tranches stand, read from the records: nothing about them is kept apart.
+
+    How many have filled since the plan's position in it last began, which is waiting, and how
+    its last position ended. A restart, a second process, or a tranche that expired unfilled can
+    neither add one nor lose one (contract 3.6).
+    """
+    mine = [p for p in book.proposals if p.bucket == ACCOUNT and p.ticker == symbol
+            and is_tranche(p) and autonomy.plan_of(p) == plan_id]
+    ended = _ended(book, symbol)
+    since = ended["at"] if ended else None
+
+    def after_end(proposal: Any) -> bool:
+        if since is None:
+            return True
+        at = _age_seconds(proposal.executed_at or proposal.created_at)
+        end = _age_seconds(since)
+        return at is not None and end is not None and at < end
+
+    filled = [p for p in mine if _filled(p) and after_end(p)]
+    waiting = next((p for p in mine if pending(book, p)), None)
+    held = next((view for view in book.managed if view.symbol == symbol), None)
+    price = next((view.price for view in book.snap.buckets[ACCOUNT].positions if view.symbol == symbol), None)
+    held_usd = None
+    if held is None:
+        held_usd = 0.0
+    elif held.known and price is not None:
+        held_usd = round(float(held.quantity or 0.0) * float(price), 2)
+    today = book.snap.trade_date
+    tries = [p for p in mine if p.trade_date == today and not _filled(p) and not pending(book, p)]
+    return {"done": len(filled), "waiting": waiting, "held_usd": held_usd, "ended": ended,
+            "last_fill_day": max((_day_of(p.executed_at or p.created_at) or "" for p in filled), default=None)
+            or None,
+            "tried_today": len(tries), "last_try_at": max((p.created_at for p in tries), default=None)}
+
+
+def tranche_rows(deployment: dict[str, Any], *, facts: dict[str, dict[str, Any]],
+                 research: dict[str, dict[str, Any]], gate: dict[str, Any] | None,
+                 trade_date: str) -> list[dict[str, Any]]:
+    """Each fund of a baseline plan as the console shows it: its target, its progress, its status.
+
+    ``facts`` is ``tranche_facts`` by symbol (empty for a plan not yet started). ``gate`` is why
+    the market says not now -- the regime, the ladder or a release -- or None. The status set is
+    closed (contract 3.1): due, waiting, vetoed, not_researched, regime_gate, cooling_down,
+    below_minimum, position_limit, complete.
+    """
+    rules = deployment.get("rules") or {}
+    rows = []
+    for target in deployment.get("targets") or []:
+        symbol = str(target["symbol"]).upper()
+        of = max(1, int(target["tranches"]))
+        target_usd = float(target["target_usd"])
+        tranche_usd = sizing.floor_cents(target_usd / of)
+        found = facts.get(symbol) or {"done": 0, "waiting": None, "held_usd": 0.0, "ended": None,
+                                      "last_fill_day": None, "tried_today": 0}
+        done = min(of, int(found["done"]))
+        row: dict[str, Any] = {"symbol": symbol, "baseline_pct": target.get("baseline_pct"),
+                               "target_usd": target_usd, "held_usd": found.get("held_usd"),
+                               "tranches": {"planned": of, "done": done}, "next": None,
+                               "status": "due", "veto": None}
+        nxt = {"index": done + 1, "of": of, "usd": tranche_usd}
+        ended = found.get("ended")
+        cooling_until = (sessions_after(ended["day"], int(rules.get("after_stop_cooldown_sessions") or 0))
+                         if ended and ended.get("day") and not ended.get("drill") and done == 0 else None)
+        spaced_from = found.get("last_fill_day") or (ended["day"] if ended and ended.get("drill") and done == 0
+                                                      else None)
+        spacing_until = (sessions_after(spaced_from, int(rules.get("spacing_sessions") or 0))
+                         if spaced_from else None)
+        seen = research.get(symbol)
+        # What stands in the way comes before a tranche already written: one that waits while its
+        # fund is now cooling, gated, vetoed or unresearched no longer stands (``tranche_pass``
+        # withdraws it). The spacing it was written under it had already met.
+        if done >= of:
+            status, due, reason = "complete", None, diagnosis.Reason("tranche_complete", {"of": of})
+        elif cooling_until and trade_date < cooling_until:
+            status, due = "cooling_down", cooling_until
+            reason = diagnosis.Reason("tranche_cooling_down", {
+                "sessions": rules.get("after_stop_cooldown_sessions"), "due": cooling_until[5:]})
+        elif gate is not None:
+            status, due, reason = "regime_gate", None, diagnosis.Reason("tranche_regime_gate", gate)
+        elif seen is not None and seen.get("negative"):
+            veto, reason = _veto(seen)
+            status, due = "vetoed", None
+            row["veto"] = veto
+        elif seen is None:
+            status, due = "not_researched", None
+            reason = diagnosis.Reason("tranche_not_researched", {"days": rules.get("veto_window_days")})
+        elif found.get("waiting") is not None:
+            status, due = "due", trade_date
+            nxt["proposal_id"] = found["waiting"].proposal_id
+            reason = diagnosis.Reason("tranche_written", {"index": done + 1, "of": of,
+                                                          "usd": f"{tranche_usd:,.2f}"})
+        elif spacing_until and trade_date < spacing_until:
+            status, due = "waiting", spacing_until
+            reason = diagnosis.Reason("tranche_not_due", {"due": spacing_until[5:],
+                                                          "spacing": rules.get("spacing_sessions")})
+        else:
+            status, due = "due", trade_date
+            reason = diagnosis.Reason("tranche_due", {"index": done + 1, "of": of,
+                                                      "usd": f"{tranche_usd:,.2f}"})
+        row.update(status=status, next=None if status == "complete" else {**nxt, "due": due},
+                   why=reason.text(), diagnosis=_why(reason))
+        rows.append(row)
+    for left in deployment.get("left_out") or []:
+        code = str(left.get("code") or "tranche_below_minimum")
+        reason = diagnosis.Reason(code, {
+            "usd": f"{float(left['share_usd']):,.2f}" if left.get("share_usd") is not None else None,
+            "minimum": f"{float(deployment.get('minimum_order_usd') or 0):,.2f}",
+            "max": deployment.get("max_positions")})
+        rows.append({"symbol": left["symbol"], "baseline_pct": left.get("baseline_pct"),
+                     "target_usd": 0.0, "held_usd": (facts.get(left["symbol"]) or {}).get("held_usd", 0.0),
+                     "tranches": {"planned": 0, "done": 0}, "next": None, "veto": None,
+                     "status": "position_limit" if code == "tranche_position_limit" else "below_minimum",
+                     "why": reason.text(), "diagnosis": _why(reason)})
+    return rows
+
+
+def market_gate(book: Book) -> dict[str, Any] | None:
+    """Why the market says no tranche today, or None: the regime, the ladder, a release (D3)."""
+    if book.regime.level not in OPEN_REGIMES:
+        return {"gate": "regime", "level": book.regime.level}
+    ladder = book.ladders.governing(ACCOUNT).level
+    if ladder != "NORMAL":
+        return {"gate": "ladder", "level": ladder}
+    blocked, detail = macro_blackout(book.profiles, book.snap.trade_date, autonomous=True)
+    if blocked:
+        return {"gate": "macro", "detail": str(detail)[:200]}
+    return None
+
+
+def _block(deployment: dict[str, Any], rows: list[dict[str, Any]], *, regime: dict[str, Any],
+           as_of: str | None, plan_id: str | None = None, version: str | None = None) -> dict[str, Any]:
+    rules = deployment.get("rules") or {}
+    return {"template": autonomy.BASELINE_TEMPLATE, "plan_id": plan_id, "version": version,
+            "rules": {"tranches": rules.get("tranches"), "spacing_sessions": rules.get("spacing_sessions"),
+                      "veto_window_days": rules.get("veto_window_days"),
+                      "minimum_order_usd": deployment.get("minimum_order_usd"),
+                      "regime_skips": rules.get("regime_skips"),
+                      "after_stop_cooldown_sessions": rules.get("after_stop_cooldown_sessions")},
+            "targets": rows, "cash_left_usd": deployment.get("cash_left_usd"),
+            "regime": regime, "as_of": as_of, "error": None}
+
+
+def deployment_view(book: Book, version: dict[str, Any] | None,
+                    research: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """A baseline plan's ``deployment`` block (contract 3.1), or None for any other plan."""
+    strategy = (version or {}).get("strategy") or {}
+    if book.plan is None or not is_baseline(strategy):
+        return None
+    deployment = strategy.get("deployment") or {}
+    plan_id = book.plan["plan_id"]
+    facts = {str(row["symbol"]).upper(): tranche_facts(book, plan_id, str(row["symbol"]).upper())
+             for row in deployment.get("targets") or []}
+    gate = market_gate(book)
+    return _block(deployment, tranche_rows(deployment, facts=facts, research=research, gate=gate,
+                                           trade_date=book.snap.trade_date),
+                  regime={"level": book.regime.level, "ladder": book.ladders.governing(ACCOUNT).level,
+                          "open": gate is None},
+                  as_of=book.snap.trade_date, plan_id=plan_id, version=(version or {}).get("version_id"))
+
+
+def preview_view(deployment: dict[str, Any], *, research: dict[str, dict[str, Any]],
+                 trade_date: str) -> dict[str, Any]:
+    """The block for a plan nothing has been bought under yet: a preview, or a plan not yet run.
+
+    What research has said is read; the market is not -- a preview prices the account and
+    nothing else, so ``regime`` is unknown rather than guessed, and is the first pass's to say.
+    """
+    return _block(deployment, tranche_rows(deployment, facts={}, research=research, gate=None,
+                                           trade_date=trade_date),
+                  regime={"level": None, "ladder": None, "open": None}, as_of=None)
+
+
+def _write_tranche(book: Book, version_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    """Write one tranche's proposal, sized by the plan and held to every limit by the engine."""
+    profiles, plan = book.profiles, book.plan
+    symbol = row["symbol"]
+    index, of, usd = int(row["next"]["index"]), int(row["next"]["of"]), float(row["next"]["usd"])
+    trade_date = book.snap.trade_date
+    cls = classify_instrument(symbol, profiles, upstream_identity_lookup)
+    evidence = collect_evidence(symbol, trade_date, bucket=ACCOUNT, known_buckets=tuple(book.snap.buckets))
+    evidence.update(purpose=autonomy.TRANCHE_PURPOSE,
+                    tranche={"plan_id": plan["plan_id"], "index": index, "of": of,
+                             "target_usd": row["target_usd"]})
+    bucket = book.snap.buckets[ACCOUNT]
+    equity = bucket.allocation_usd or bucket.equity
+    # The engine sizes a position to a target weight, less what is held: the tranche on top of
+    # whatever the holding is now, a person's shares included, so the caps see all of it.
+    weight = (bucket.market_value_of(symbol) + usd) / equity * 100.0 if equity else 0.0
+    action = "ADD" if book.snap.has_position(symbol, ACCOUNT) else "BUY"
+    mode = modes.TABLE[plan["envelope"]["mode"]]
+    asked = RiskProposal(
+        ticker=symbol, bucket=ACCOUNT, action=action, size_hint="normal", confidence=None,
+        trade_date=trade_date, cls=cls, data_quality=None, missing_information=[],
+        source="auto:tranche", strategy=mode.strategy_tag, evidence=evidence, autonomous=True,
+        weight_override_pct=weight)
+    result = HardRiskEngine(profiles).evaluate(asked, book.snap, book.ladders, book.regime)
+    hard = result.as_dict()
+    if result.verdict != "APPROVE":
+        return {"proposal_id": None, "diagnosis": _why(*diagnosis.classify_record(
+            {"policy": {"final_action": action}, "hard_risk": hard,
+             "final_recommendation": {"action": "NO_TRADE"}}).reasons)}
+    proposal = new_proposal(
+        run_id=None, ticker=symbol, bucket=ACCOUNT, action=action, strategy=mode.strategy_tag,
+        instrument_type=cls.instrument_type, limit_class=cls.limit_class, size_hint="normal",
+        confidence=None, notional_usd=result.proposed_notional_usd,
+        target_weight_pct=result.target_weight_pct_of_allocation, trade_date=trade_date,
+        requires_human_approval=result.requires_human_approval,
+        reference_price=evidence.get("price"), reference_price_date=evidence.get("price_date"),
+        ladder_level_at_proposal=book.ladders.governing(ACCOUNT).level,
+        regime_at_proposal=book.regime.level,
+        portfolio_equity_at_proposal=book.snap.total_equity,
+        bucket_cash_at_proposal=bucket.cash_usd,
+        positions_fingerprint=positions_fingerprint(
+            {p.symbol: p.quantity for p in book.snap.state.positions}),
+        data_quality=None, evidence=evidence, missing_information=[],
+        authority_version=autonomy.note_version(profiles, book.db),
+        weight_override_pct=weight, strategy_version=version_id)
+    proposal.note("auto_tranche", f"tranche {index} of {of} of {symbol} under plan {plan['plan_id']}, "
+                                  f"toward ${float(row['target_usd']):,.2f}",
+                  plan_id=plan["plan_id"], strategy_version=version_id, index=index, of=of,
+                  target_usd=row["target_usd"], sizing=hard.get("sizing"))
+    book.store.save(proposal)
+    book.proposals.append(proposal)
+    return {"proposal_id": proposal.proposal_id, "diagnosis": _why(diagnosis.Reason(
+        "tranche_written", {"index": index, "of": of, "usd": f"{proposal.notional_usd:,.2f}"}))}
+
+
+def _withdraw_tranche(book: Book, proposal: Any, why: str) -> bool:
+    """Withdraw a tranche nobody has acted on, when what it was written under no longer holds."""
+    with book.store.locked():
+        now = book.store.get(proposal.proposal_id)
+        if (now is None or now.status != PROPOSED or now.client_order_id or now.approval_request_id):
+            return False                          # a person, or the pass, reached it first
+        now.status = INVALIDATED
+        now.note("auto_tranche_withdrawn", why)
+        book.store.save(now)
+        book.proposals[:] = [now if p.proposal_id == now.proposal_id else p for p in book.proposals]
+    return True
+
+
+#: The statuses under which a tranche already written no longer stands.
+WITHDRAWN_UNDER = ("vetoed", "regime_gate", "not_researched", "cooling_down")
+
+
+def tranche_pass(book: Book, version: dict[str, Any] | None, research: dict[str, dict[str, Any]], *,
+                 blocked: list[str], hold: diagnosis.Reason | None) -> tuple[list[dict[str, Any]],
+                                                                             dict[str, Any] | None]:
+    """A baseline plan's tranches for this pass: the rows run records show, and the view.
+
+    One tranche at most is written per fund per pass, only where the fund is due and nothing for
+    it is waiting, and the engine decides its size. One that waits while its fund became vetoed,
+    gated or cooling is withdrawn rather than left to be bought at the open. What stops openings
+    -- a pause, an unknown result, an unresolved order -- stops these too.
+    """
+    view = deployment_view(book, version, research)
+    if view is None:
+        return [], None
+    plan_id, version_id = book.plan["plan_id"], (version or {}).get("version_id")
+    out = []
+    for row in view["targets"]:
+        if row["status"] in ("below_minimum", "position_limit", "complete"):
+            continue
+        signal: dict[str, Any] = {"kind": "tranche", "run_id": None, "ticker": row["symbol"],
+                                  "proposal_id": None, "status": row["status"],
+                                  "tranche": None if row["next"] is None else {
+                                      "index": row["next"]["index"], "of": row["next"]["of"]}}
+        facts = tranche_facts(book, plan_id, row["symbol"])
+        waiting = facts.get("waiting")
+        if waiting is not None and row["status"] == "due":
+            signal.update(proposal_id=waiting.proposal_id, diagnosis=_why(diagnosis.Reason(
+                "tranche_written", {"index": row["next"]["index"], "of": row["next"]["of"],
+                                    "usd": f"{waiting.notional_usd:,.2f}"})))
+        elif row["status"] != "due":
+            if row["status"] in WITHDRAWN_UNDER:
+                for proposal in list(book.proposals):
+                    if (proposal.ticker == row["symbol"] and is_tranche(proposal)
+                            and autonomy.plan_of(proposal) == plan_id and pending(book, proposal)
+                            and proposal.status == PROPOSED):
+                        _withdraw_tranche(book, proposal, f"no longer due: {row['status']}")
+            signal["diagnosis"] = row["diagnosis"]
+        elif blocked:
+            signal["diagnosis"] = _why(diagnosis.Reason("unresolved_order"))
+        elif hold is not None:
+            signal["diagnosis"] = _why(hold)
+        elif in_progress(book, row["symbol"]):
+            signal["diagnosis"] = _why(diagnosis.Reason("order_in_progress"))
+        elif facts["tried_today"] >= TRANCHE_TRIES_PER_SESSION or (
+                facts.get("last_try_at") and (_age_seconds(facts["last_try_at"]) or 0.0) < RETRY_AFTER_MINUTES * 60.0):
+            signal["diagnosis"] = _why(diagnosis.Reason("tranche_retry_later", {"tries": facts["tried_today"]}))
+        else:
+            signal.update(_write_tranche(book, version_id, row))
+        _remember(book.db, f"tranche:{plan_id}:{row['symbol']}",
+                  {"kind": "tranche", "ticker": row["symbol"], "proposal_id": signal.get("proposal_id"),
+                   "diagnosis": signal.get("diagnosis")}, final=False)
+        out.append(signal)
+    return out, view
+
+
+def remember_deployment(db, view: dict[str, Any] | None) -> None:
+    """Keep the last pass's view for the console, which must not price an account to show it."""
+    if view is None:
+        if db.read_meta(DEPLOYMENT, None) is not None:
+            db.write_meta(DEPLOYMENT, None)
+        return
+    before = db.read_meta(DEPLOYMENT, None) or {}
+    stamped = {**view, "at": datetime.now(UTC).isoformat()}
+    if {k: v for k, v in before.items() if k != "at"} != view:
+        db.write_meta(DEPLOYMENT, stamped)
+
+
+def last_deployment(db) -> dict[str, Any] | None:
+    found = db.read_meta(DEPLOYMENT, None)
+    return dict(found) if isinstance(found, dict) else None
+
+
+def drill_pass(book: Book, *, blocked: list[str]) -> list[dict[str, Any]]:
+    """The simulated account's one sale of a baseline position, so its exit is seen to work (D6).
+
+    Only in the simulated account, only under a baseline plan, only once a version has no sale
+    of its own on record, and only once a position has been held ``DRILL_AFTER_SESSIONS``. The
+    sale is an ordinary exit of code's shares, approved by code like any other; after it the
+    fund is bought back by the tranche rules. The real account never drills.
+    """
+    if book.plan is None or not paper.is_paper(book.profiles) or not is_baseline(book.plan.get("strategy")):
+        return []
+    version_id = book.plan["opening_version"]
+    lives = positions.closed_trades(fills=book.fills, proposals=book.proposals, bucket=ACCOUNT)
+    if any(row["version"] == version_id and row["closed_by"] == "code" for row in lives) or blocked:
+        return []
+    out = []
+    for held in book.managed:
+        if (held.version_id != version_id or not held.known
+                or (held.quantity or 0.0) <= autonomy.QUANTITY_TOLERANCE or not held.opened_at):
+            continue
+        opened = _day_of(held.opened_at)
+        if not opened or book.snap.trade_date < sessions_after(opened, DRILL_AFTER_SESSIONS):
+            continue
+        if in_progress(book, held.symbol, leaving=True):
+            continue
+        call = positions.ExitCall(True, positions.DRILL, {"sessions": DRILL_AFTER_SESSIONS})
+        row = {"symbol": held.symbol, **held.as_dict(), "exit": call.as_dict(), "proposal_id": None}
+        row.update(_write_exit(book, held, action="SELL", quantity=float(held.quantity), run_id=None,
+                               why={"reason": positions.DRILL, "facts": call.facts}))
+        out.append(row)
+        break                                   # one drill is all the record needs
+    return out
+
+
 # ---------------------------------------------------------------- one pass
 def tick(service: Any, *, runs_dir: Path | None = None, trade_date: str, today=None,
          approve: bool = True) -> Tick:
@@ -818,7 +1293,8 @@ def tick(service: Any, *, runs_dir: Path | None = None, trade_date: str, today=N
     hold = opening_hold(profiles, paused, result.loss)
     settle = settle_seconds(profiles)
     source = Path(runs_dir) if runs_dir is not None else profiles.project_dir / "runs"
-    for record, run_dir in reversed(records_in(source)):          # oldest first
+    records = records_in(source)
+    for record, run_dir in reversed(records):                     # oldest first
         before = seen.get(record["run_id"]) or {}
         retries = int(before.get("retries") or 0)
         if before and before.get("final", True):
@@ -841,6 +1317,17 @@ def tick(service: Any, *, runs_dir: Path | None = None, trade_date: str, today=N
                   {**{k: outcome[k] for k in ("ticker", "proposal_id", "diagnosis")}, "retries": retries},
                   final=is_final(outcome))
         result.signals.append({**outcome, "retry": retries} if retries else outcome)
+
+    # A baseline plan's own purchases, after research has had its say: a veto read this pass
+    # applies to this pass's tranches (contract 2.1).
+    version = store.version(db, plan["opening_version"])
+    window = int((((version or {}).get("strategy") or {}).get("deployment") or {}).get("rules", {})
+                 .get("veto_window_days") or 14)
+    tranches, view = tranche_pass(book, version, research_by_fund(records, window_days=window),
+                                  blocked=blocked, hold=hold)
+    result.signals.extend(tranches)
+    remember_deployment(db, view)
+    result.exits.extend(drill_pass(book, blocked=blocked))
 
     if approve:
         result.approvals = service.autonomous_reductions()

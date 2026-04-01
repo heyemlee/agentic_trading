@@ -49,7 +49,7 @@ UNVALIDATED, SIMULATING, VALIDATED, RETIRED, REJECTED = (
 #: The parts of a plan's strategy that are behaviour. A rationale is words about it, and two
 #: strategies that differ only in how they were explained are the same strategy.
 BEHAVIOUR = ("template", "max_positions", "position_pct", "min_confidence", "stop_loss_pct",
-             "take_profit_pct", "max_holding_days", "trend_window", "universe")
+             "take_profit_pct", "max_holding_days", "trend_window", "universe", "deployment")
 
 
 def _now() -> str:

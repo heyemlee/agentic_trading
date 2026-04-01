@@ -672,6 +672,8 @@ class AutoPlanRequest(BaseModel):
     # Asks the model for the strategy's parameters, on the subscription research runs on.
     # Off, the deterministic template is used and the plan says so.
     ask_model: StrictBool = False
+    # Which of the mode's templates: the person's choice. Absent, the mode's first.
+    template: Literal["research_etf", "baseline_etf", "trend_etf"] | None = None
 
 
 @app.get("/auto-trading", tags=["automatic trading"],
@@ -699,6 +701,8 @@ class AutoStartRequest(BaseModel):
     # The strategy block of the preview, when a model suggested it: asking the model again
     # would be asking a different question. Absent, the deterministic template.
     strategy: dict[str, Any] | None = None
+    # The template the preview was drawn with, when the person chose one.
+    template: Literal["research_etf", "baseline_etf", "trend_etf"] | None = None
     # The simulated account, or the real one. The real one is refused unless every condition in
     # GET /auto-trading/live holds, and then takes the console password.
     scope: Literal["paper", "live"] = "paper"

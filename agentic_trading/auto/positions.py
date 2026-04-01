@@ -37,6 +37,8 @@ from typing import Any
 from .. import autonomy
 
 STOP_LOSS, TAKE_PROFIT, MAX_HOLDING, TREND_BREAK = "stop_loss", "take_profit", "max_holding", "trend_break"
+#: A sale the simulated account makes once, to show code carries a sale through (contract 2.1, D6).
+DRILL = "exit_drill"
 #: Why an exit was not decided when the price it would be decided on is too old to stand for today.
 PRICE_STALE = "exit_price_stale"
 #: How close to a stop or a target, in percentage points, is at it.
@@ -64,6 +66,9 @@ REASONS: dict[str, tuple[str, str]] = {
                   "It has been held {held_days} days, the longest this strategy holds is {limit_days}."),
     TREND_BREAK: ("收盘价 {close} 跌破自己的 {window} 日均线 {average}。",
                   "Its close of {close} is below its own {window}-session average of {average}."),
+    DRILL: ("模拟账户的卖出演练：持有满 {sessions} 个交易日后卖出一次，证明代码能自己走完一次卖出；之后按批次规则买回。",
+            ("A drill in the simulated account: sold once after {sessions} sessions held, to show "
+             "code carries a sale through itself; it is bought back by the tranche rules.")),
 }
 #: Why nothing was decided, where that has a sentence of its own.
 UNDECIDED: dict[str, tuple[str, str]] = {
@@ -184,6 +189,7 @@ def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: st
                 spent, proceeds = life["spent_usd"], life["proceeds_usd"]
                 state.lives.append({
                     **life, "closed_at": at, "closed_by": "code" if _closed_by_code(order) else "person",
+                    "closing_proposal": getattr(order, "proposal_id", None),
                     "bought": round(life["bought"], 8), "sold": round(life["sold"], 8),
                     "spent_usd": round(spent, 2), "proceeds_usd": round(proceeds, 2),
                     "realized_usd": round(proceeds - spent, 2),

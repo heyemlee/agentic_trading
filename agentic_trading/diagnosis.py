@@ -286,10 +286,12 @@ _TEXT: dict[str, tuple[str, str, str]] = {
     "unresolved_order": _say(RISK_PAUSE, "账户里有一笔结果不明的订单，先对账，暂不提交新单。",
                              "An order in the account is unresolved; it is reconciled first, and "
                              "no new order is submitted until then."),
-    "plan_result_unknown": _say(RISK_PAUSE, "有仓位和成交记录对不上，自动交易的盈亏算不出来，暂不新开仓。",
-                                "A position does not match the fills on record, so what automatic "
-                                "trading has made or lost cannot be worked out; nothing new is "
-                                "opened until it can."),
+    "plan_result_unknown": _say(RISK_PAUSE, "有仓位估不出价（价格太旧，或和成交记录对不上），自动交易的盈亏算不出来，"
+                                            "暂不新开仓。",
+                                "A position cannot be valued -- its price is too old, or it does "
+                                "not match the fills on record -- so what automatic trading has "
+                                "made or lost cannot be worked out; nothing new is opened until it "
+                                "can."),
     "autonomy_withdrawn": _say(RISK_PAUSE, "一笔自动订单的结果出了问题，自动下单已停止，等你检查后恢复。",
                                "An automatic order ended in a way nobody could account for, so "
                                "automatic orders have stopped until you look and restore them."),
@@ -323,6 +325,63 @@ _TEXT: dict[str, tuple[str, str, str]] = {
                                      "prices are from after it (about {minutes} min).|The research "
                                      "has only just finished; an order waits until prices are from "
                                      "after it."),
+    # -- a baseline plan's tranches (agentic_trading.auto.trader; contract 2.1 and 3.3)
+    "baseline_research_not_a_buy": _say(NOTHING_TO_DO, "基准方案按你的基准比例分批买入，研究只用来否决，不单独下买单。",
+                                        "Under the baseline plan purchases follow the owner's "
+                                        "baseline weights in tranches; research can only veto "
+                                        "them, and buys nothing by itself."),
+    "tranche_written": _say(PROPOSAL, "写出了第 {index}/{of} 批买入（${usd}）。|写出了一批基准买入。",
+                            "Tranche {index} of {of} (${usd}) was written.|A baseline tranche was "
+                            "written."),
+    "tranche_due": _say(PROPOSAL, "第 {index}/{of} 批（${usd}）已到期，下次运行写出提案。|这一批已到期，下次运行写出提案。",
+                        "Tranche {index} of {of} (${usd}) is due; the next pass writes it.|This "
+                        "tranche is due; the next pass writes it."),
+    "tranche_not_due": _say(NOTHING_TO_DO, "还没到下一批的日期：{due} 起（两批之间至少隔 {spacing} 个交易日）。|"
+                                           "还没到下一批的日期。",
+                            "The next tranche is not due until {due} (tranches are at least "
+                            "{spacing} sessions apart).|The next tranche is not due yet."),
+    "tranche_vetoed": _say(STRATEGY, "{day} 的研究给出“{said_zh}”，这一批不买。|最近的研究给出减持或卖出，这一批不买。",
+                           "Research on {day} said {said}; this tranche is not bought.|Recent "
+                           "research said to hold less of it; this tranche is not bought."),
+    "tranche_not_researched": _say(DATA, "最近 {days} 天没有研究过这只基金，不买。|最近没有研究过这只基金，不买。",
+                                   "Nobody has researched this fund in the last {days} days, so "
+                                   "it is not bought.|Nobody has researched this fund recently, "
+                                   "so it is not bought."),
+    "tranche_regime_gate": _say(RISK_PAUSE, "{gate_zh}，这一批不买。|市场状态或回撤阶梯现在不允许，这一批不买。",
+                                "{gate_en}; this tranche is not bought.|The market regime or the "
+                                "drawdown ladder does not allow it now; this tranche is not "
+                                "bought."),
+    "tranche_cooling_down": _say(RISK_PAUSE, "方案在这只基金上的仓位刚结束，{sessions} 个交易日内不买回，{due} 起再判断。|"
+                                             "方案在这只基金上的仓位刚结束，冷却期内不买回。",
+                                 "The plan's position in this fund has just ended; it is not "
+                                 "bought back for {sessions} sessions, until {due}.|The plan's "
+                                 "position in this fund has just ended; it is not bought back "
+                                 "until its cooling-off period is over."),
+    "tranche_below_minimum": _say(ORDER_LIMIT, "按比例只有 ${usd}，低于最小下单额 ${minimum}，不买。|"
+                                               "按比例分到的金额低于最小下单额，不买。",
+                                  "Its share is ${usd}, under the ${minimum} minimum order, so it "
+                                  "is not bought.|Its share is under the minimum order, so it is "
+                                  "not bought."),
+    "tranche_position_limit": _say(ORDER_LIMIT, "账户最多持有 {max} 个仓位，按基准比例它排在后面，不买。|"
+                                                "账户的仓位数有限，按基准比例它排在后面，不买。",
+                                   "The account holds at most {max} positions, and its baseline "
+                                   "weight ranks below theirs, so it is not bought.|The account's "
+                                   "positions are limited, and its baseline weight ranks below "
+                                   "theirs, so it is not bought."),
+    "tranche_retry_later": _say(ORDER_LIMIT, "这一批今天已经试过 {tries} 次，稍后或下个交易日再试。|这一批稍后再试。",
+                                "This tranche has been tried {tries} time(s) today; it is tried "
+                                "again later.|This tranche is tried again later."),
+    "tranche_complete": _say(NOTHING_TO_DO, "已经分 {of} 批买到目标。|已经买到目标。",
+                             "Bought to its target in {of} tranche(s).|Bought to its target."),
+    "first_real_order": _say(NOT_PERMITTED, "这是方案在实盘的第一笔买入，由你批准；成交后方案开始自动买入。",
+                             "This is the plan's first real-money purchase and waits for you; "
+                             "once it fills, the plan buys on its own."),
+    "exit_price_stale": _say(DATA, "价格是 {day} 的，太旧，今天不判断止损。|价格太旧，今天不判断止损。",
+                             "It is priced from {day}, too old to judge its stop today.|Its price "
+                             "is too old to judge its stop today."),
+    "exit_drill": _say(NOTHING_TO_DO, "模拟账户的卖出演练：证明代码能自己走完一次卖出，之后按批次规则买回。",
+                       "A drill in the simulated account, to show code carries a sale through "
+                       "itself; it is bought back by the tranche rules."),
     # -- a fault
     "risk_engine_error": _say(SYSTEM, "风控计算出错，按拒绝处理。",
                           "The risk engine failed, so the order is refused."),
@@ -362,6 +421,9 @@ _ACTION_ZH = {"BUY": "买入", "ADD": "加仓", "REDUCE": "减仓", "SELL": "卖
               "NO_TRADE": "不交易"}
 _TIER_ZH = {"low": "低风险", "mid": "中风险", "high": "高风险"}
 _REGIME_ZH = {"HIGH_RISK": "高风险", "ELEVATED_RISK": "风险偏高", "UNKNOWN": "未知"}
+#: What research said, as a veto names it: a rating or a reviewer's action.
+_SAID_ZH = {"underweight": "减持", "sell": "卖出", "reduce": "减仓", "overweight": "增持", "buy": "买入",
+            "hold": "持有"}
 
 
 # ---------------------------------------------------------------- what a Hard Risk rule means
@@ -498,6 +560,18 @@ def _presentable(facts: dict[str, Any]) -> dict[str, Any]:
     level = str((facts or {}).get("level") or "")
     if level:
         out["level_zh"] = _REGIME_ZH.get(level, level)
+    said = str((facts or {}).get("said") or "")
+    if said:
+        out["said_zh"] = _SAID_ZH.get(said.lower(), said)
+        out["said"] = said.replace("_", " ")
+    gate = str((facts or {}).get("gate") or "")
+    if gate:
+        out["gate_zh"], out["gate_en"] = {
+            "regime": (f"市场状态是{_REGIME_ZH.get(level, level)}",
+                       f"The market regime is {level.replace('_', ' ').lower()}"),
+            "ladder": (f"回撤阶梯在 {level} 档，不在正常档", f"The drawdown ladder is at {level}, not NORMAL"),
+            "macro": ("今天在宏观数据发布的窗口内", "Today is inside a macro release window"),
+        }.get(gate, ("市场状态或回撤阶梯现在不允许", "The market regime or the ladder does not allow it now"))
     limit = str((facts or {}).get("limit") or "")
     if limit:
         zh, en = LIMIT_NAMES.get(limit, (limit, limit))

@@ -19,7 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from .. import sizing
-from ..autonomy import AUTONOMOUS_ACTION, MANAGED_EXIT, MANAGED_EXIT_SOURCE
+from ..autonomy import (
+    AUTONOMOUS_ACTION,
+    MANAGED_EXIT,
+    MANAGED_EXIT_SOURCE,
+    TRANCHE_CLASSES,
+    TRANCHE_PURPOSE,
+)
 from ..event_calendar import earnings_blackout, macro_blackout, yfinance_next_earnings
 from ..portfolio import BucketView, InstrumentClass, Snapshot, realized_on
 from ..profile import Profiles
@@ -74,6 +80,17 @@ class Proposal:
     # anything above the configured normal size is held to it, and every limit on an order
     # still applies afterwards. None, which is what research produces, sizes from the hint.
     weight_override_pct: float | None = None
+
+
+def _is_tranche(prop: Proposal) -> bool:
+    """Whether this is a baseline plan's tranche: said so in its evidence, and one in fact.
+
+    Only a purchase, only in the real-money bucket, only of a low-tier fund, and only without a
+    confidence of its own -- anything else that calls itself a tranche is judged as what it is.
+    """
+    return (str((prop.evidence or {}).get("purpose") or "") == TRANCHE_PURPOSE
+            and prop.action in ("BUY", "ADD") and prop.bucket == "micro_live"
+            and prop.cls.limit_class in TRANCHE_CLASSES and prop.confidence is None)
 
 
 @dataclass
@@ -381,9 +398,6 @@ class HardRiskEngine:
 
         web_ok, web_detail = check_web_sources(prop.evidence, web_evidence_window(self.p, prop.strategy))
         rule("HR05e", "web evidence provenance and freshness", web_ok, web_detail)
-        rule("HR05d", "missing material information", not prop.missing_information,
-             "; ".join(prop.missing_information) or "no unresolved material information",
-             facts={"count": len(prop.missing_information)})
         conf = prop.confidence
         floor_small = self.p.confidence.floor(prop.bucket, prop.cls.instrument_type, "small",
                                               limit_class=prop.cls.limit_class,
@@ -392,13 +406,39 @@ class HardRiskEngine:
                                                limit_class=prop.cls.limit_class,
                                                autonomous=prop.autonomous)
         floor = max(floor_small, gate_min_conf or 0)
-        if conf is None:
-            rule("HR05", "confidence", False, "no confidence supplied")
-            closed("missing_confidence", "missing confidence")
+        if _is_tranche(prop):
+            # A baseline tranche is bought toward the owner's own weights, not on a research
+            # conclusion (contract 2.1, D4): it has no confidence, no list of missing information
+            # and no reviewed evidence to be held to. In their place it is only ever a purchase
+            # of a low-tier fund in the real-money bucket, which _is_tranche requires, and the
+            # price it is sized on is still checked above (HR05c). A regime that asks a purchase
+            # for a confidence is one a tranche cannot meet, and is refused here as well as by
+            # the plan, which skips such a regime before writing one.
+            rule("HR05d", "missing material information", True,
+                 "a baseline tranche: no research conclusion, so nothing is listed as missing",
+                 blocking=False)
+            if gate_min_conf:
+                rule("HR05", "confidence", False,
+                     f"regime {regime.level} asks a purchase for confidence {gate_min_conf}; a "
+                     "baseline tranche carries none", facts={"confidence": None, "floor": floor})
+            else:
+                rule("HR05", "confidence", True,
+                     "a baseline tranche: bought toward the owner's baseline weights, so no "
+                     "research confidence is asked of it", blocking=False)
         else:
-            rule("HR05", "confidence", conf >= floor, f"confidence {conf} vs floor {floor}",
-                 facts={"confidence": conf, "floor": floor})
-        if prop.data_quality == "poor":
+            rule("HR05d", "missing material information", not prop.missing_information,
+                 "; ".join(prop.missing_information) or "no unresolved material information",
+                 facts={"count": len(prop.missing_information)})
+            if conf is None:
+                rule("HR05", "confidence", False, "no confidence supplied")
+                closed("missing_confidence", "missing confidence")
+            else:
+                rule("HR05", "confidence", conf >= floor, f"confidence {conf} vs floor {floor}",
+                     facts={"confidence": conf, "floor": floor})
+        if _is_tranche(prop):
+            rule("HR05b", "data quality", True, "a baseline tranche: no research evidence to rate",
+                 blocking=False)
+        elif prop.data_quality == "poor":
             rule("HR05b", "data quality", False, "policy reviewer rated the evidence poor; missing: " + "; ".join(prop.missing_information[:4]))
             closed("evidence_poor", "evidence quality poor")
         elif prop.data_quality == "partial":
