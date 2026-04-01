@@ -1150,6 +1150,41 @@ window.CT = (function () {
       summary: pair('其中 2 项会放宽现有限制：在实盘账户上需要控制台密码确认，并等待 24 小时后生效，期间可以撤回。', '2 of these loosen a limit: on the real account they need the console password and take effect after 24 hours, and can be withdrawn until then.') },
     notes: { loss_line: pair('亏损暂停线（$10.00）是本地检查，不是最大亏损的保证。', 'The loss line ($10.00) is a local check. It is not a guarantee of the most that can be lost.') },
   };
+  /* A baseline plan for the same $100 (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 3.1): the
+     owner's weights bought in tranches, research a veto. Invented like everything here. */
+  const baselineDeployment = {
+    baseline_pct: { VTI: 35, VXUS: 10, BND: 15, VGIT: 10, SGOV: 20 },
+    targets: [{ symbol: 'VTI', baseline_pct: 35, target_usd: 35.0, tranches: 1 }],
+    left_out: [{ symbol: 'VXUS', baseline_pct: 10, share_usd: null, code: 'tranche_position_limit' },
+      { symbol: 'BND', baseline_pct: 15, share_usd: 12.85, code: 'tranche_below_minimum' }],
+    max_positions: 3, deployable_usd: 60.0, minimum_order_usd: 25.0, cash_left_usd: 65.0,
+    rules: { tranches: 3, spacing_sessions: 5, veto_window_days: 14, regime_skips: ['ELEVATED_RISK', 'HIGH_RISK', 'UNKNOWN'],
+      after_stop_cooldown_sessions: 20 } };
+  const baseline = { template: 'baseline_etf', max_positions: 1, position_pct: 35.0, min_confidence: 80,
+    stop_loss_pct: 15.0, take_profit_pct: 0.0, max_holding_days: 0, trend_window: 0,
+    universe: ['VTI', 'VXUS', 'BND', 'VGIT', 'SGOV'], deployment: baselineDeployment,
+    rationale: pair('按你的基准比例分批买入：VTI $35.00（1 批）；其余 $65.00 留现金。研究只用来否决。', 'Bought toward the owner\'s baseline weights in tranches: VTI $35.00 in 1 tranche; the other $65.00 stays cash. Research can only say no.'),
+    suggested_by: 'template', suggestion_error: null };
+  const autoBaselineExample = {
+    ...autoPlanExample, plan_id: 'demo0plan0baseline', strategy: baseline,
+    under_plan: { any_order: true, deployable_usd: 35.0, positions: 1,
+      path: [{ symbol: 'VTI', feasible: true, order_usd: 35.0, why_not: null }] },
+    summary: pair('基准建仓：按你的基准比例分批买入 VTI $35.00（1 批），其余 $65.00 留现金。亏损达到 $10.00（10%）时暂停新开仓。',
+      'Baseline: bought toward the owner\'s baseline weights in tranches, VTI $35.00 in 1; the other $65.00 stays cash. New positions stop once the loss reaches $10.00 (10%).'),
+    deployment: { template: 'baseline_etf', plan_id: null, version: null, as_of: null, error: null, cash_left_usd: 65.0,
+      rules: { tranches: 3, spacing_sessions: 5, veto_window_days: 14, minimum_order_usd: 25.0,
+        regime_skips: ['ELEVATED_RISK', 'HIGH_RISK', 'UNKNOWN'], after_stop_cooldown_sessions: 20 },
+      regime: { level: null, ladder: null, open: null },
+      targets: [
+        { symbol: 'VTI', baseline_pct: 35, target_usd: 35.0, held_usd: 0.0, tranches: { planned: 1, done: 0 }, status: 'due', veto: null,
+          next: { index: 1, of: 1, usd: 35.0, due: '2026-10-16' }, why: pair('第 1/1 批（$35.00）已到期，下次运行写出提案。', 'Tranche 1 of 1 ($35.00) is due; the next pass writes it.') },
+        { symbol: 'VXUS', baseline_pct: 10, target_usd: 0.0, held_usd: 0.0, tranches: { planned: 0, done: 0 }, status: 'position_limit', veto: null,
+          next: null, why: pair('账户最多持有 3 个仓位，按基准比例它排在后面，不买。', 'The account holds at most 3 positions, and its baseline weight ranks below theirs, so it is not bought.') },
+        { symbol: 'BND', baseline_pct: 15, target_usd: 0.0, held_usd: 0.0, tranches: { planned: 0, done: 0 }, status: 'below_minimum', veto: null,
+          next: null, why: pair('按比例只有 $12.85，低于最小下单额 $25.00，不买。', 'Its share is $12.85, under the $25.00 minimum order, so it is not bought.') }] },
+    what_if_minimum_usd: { 10: [{ symbol: 'VTI', target_usd: 30.0, tranches: 3 }, { symbol: 'SGOV', target_usd: 17.14, tranches: 1 },
+      { symbol: 'BND', target_usd: 12.85, tranches: 1 }] },
+  };
   const autoLive = {
     checked_at: health.checked_at, account: { scope: 'agentic', account_id: 'micro_live' },
     plan: null, state: { paused: false, reason: null, kind: null }, record: null, request: null, ended: null,
@@ -1181,6 +1216,6 @@ window.CT = (function () {
     approveExecuted, approveReanalysis, research, researchJobs, researchSubjects, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts, advisor,
-    auto, autoLive, autoPlanExample, autoPerformanceExample,
+    auto, autoLive, autoPlanExample, autoBaselineExample, autoPerformanceExample,
   };
 })();

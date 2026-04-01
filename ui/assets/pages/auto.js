@@ -15,7 +15,7 @@ window.Console.page('auto', function (document) {
   const $ = (id) => document.getElementById(id);
   C.mount('auto');
 
-  let scope = 'paper', mode = 'steady', preview = null, busy = false, armed = null;
+  let scope = 'paper', mode = 'steady', template = 'research_etf', preview = null, busy = false, armed = null;
   let sheet = null, compared = null, looked = null;
 
   const money = (v) => (v == null ? '—' : C.usd(Number(v)));
@@ -32,6 +32,7 @@ window.Console.page('auto', function (document) {
 
   function strategyLine(s) {
     if (!s) return '';
+    if (s.template === 'baseline_etf') return t('auto.baselineLine', { stop: s.stop_loss_pct });
     return t('auto.strategyLine', { n: s.max_positions, pct: s.position_pct, conf: s.min_confidence,
       stop: s.stop_loss_pct, days: s.max_holding_days }) +
       (s.trend_window ? ' ' + t('auto.strategyTrend', { w: s.trend_window }) : '') +
@@ -39,6 +40,47 @@ window.Console.page('auto', function (document) {
   }
   const suggestedBy = (s) => t(s?.suggested_by === 'model' ? 'auto.byModel'
     : s?.suggested_by === 'adjustment' ? 'auto.byAdjustment' : 'auto.byTemplate');
+
+  /* ── a baseline plan, fund by fund ─────────────────────────────────
+     The service's block, drawn as it came (contract 3.1): each fund's target, what is held,
+     its tranches and its status, with the engine's sentence for why. A block that could not be
+     read says so and draws no progress. */
+  function deploymentHTML(block, whatIf) {
+    if (!block) return '';
+    if (block.error) return '<p class="banner">' + h(C.said(block.error.text)) + '</p>';
+    const rows = (block.targets || []).map((r) => {
+      const said = [t('auto.trancheStatus.' + r.status)];
+      if (r.tranches?.planned) said.push(t('auto.trancheProgress', { done: r.tranches.done, planned: r.tranches.planned }));
+      if (r.next?.due && r.status !== 'complete') said.push(t('auto.trancheNext', { usd: money(r.next.usd), due: r.next.due }));
+      const why = C.said(r.why);
+      return C.listRow({ title: r.symbol + (r.baseline_pct != null ? ' · ' + r.baseline_pct + '%' : ''),
+        value: r.target_usd ? money(r.target_usd) : '—',
+        note: r.held_usd != null ? t('auto.trancheHeld', { usd: money(r.held_usd) }) : '',
+        sub: said.join(' · ') + (why ? ' — ' + why : '') });
+    }).join('');
+    const vetoes = (block.targets || []).filter((r) => r.veto?.run_id).map((r) =>
+      '<a class="chip" href="lab.html?run=' + encodeURIComponent(r.veto.run_id) + '">' +
+      h(r.symbol + ' · ' + t('auto.vetoRun')) + '</a>').join('');
+    const regime = block.regime || {};
+    const market = regime.open == null ? t('auto.regimeUnknown')
+      : t(regime.open ? 'auto.regimeOpen' : 'auto.regimeClosed', { level: regime.level || '—' });
+    const minimum = whatIf ? Object.keys(whatIf)[0] : null;
+    const compared = minimum ? (whatIf[minimum] || []).map((x) =>
+      t('auto.whatIfItem', { symbol: x.symbol, usd: money(x.target_usd), n: x.tranches })).join(t('auto.listJoin')) : '';
+    return '<div class="list" style="margin-top:12px;">' + rows + row(t('auto.cashLeft'), money(block.cash_left_usd)) + '</div>' +
+      (vetoes ? '<div class="row row-wrap" style="gap:8px;margin-top:8px;">' + vetoes + '</div>' : '') +
+      '<p class="body-sm body-muted" style="margin-top:8px;">' + h(market) + '</p>' +
+      (minimum ? '<p class="body-sm body-muted" style="margin-top:6px;">' + h(t('auto.whatIf', { min: money(Number(minimum)), list: compared || '—' })) + '</p>' : '');
+  }
+  /* What the account decided lately: research runs and, under a baseline plan, its tranches. */
+  function decisionsHTML(signals) {
+    if (!signals?.length) return '';
+    return '<div class="section-head"><h2>' + h(t('auto.decisionsTitle')) + '</h2></div><div class="list">' +
+      signals.slice(0, 12).map((s) => C.listRow({
+        title: (s.ticker || '—') + (s.kind === 'tranche' ? ' · ' + t('auto.trancheKind') : ''),
+        value: C.said(s.diagnosis?.label) || '', note: s.at ? C.dateTime(s.at) : '',
+        sub: C.said(s.diagnosis?.summary) || '' })).join('') + '</div>';
+  }
 
   /* ── which account ──────────────────────────────────────────────── */
   function routeEntry() {
@@ -144,6 +186,12 @@ window.Console.page('auto', function (document) {
           (s.problems || []).map((code) => t('auto.problem.' + code)).join(' · ') ||
             t('auto.notWatched', { n: s.open_passes || 0 }))).join('') + '</div>');
     }
+    if (v.deployment) {
+      parts.push('<div class="section-head"><h2>' + h(t('auto.deploymentTitle')) + '</h2></div>' +
+        (v.deployment.as_of ? '<p class="body-sm body-muted">' + h(t('auto.deploymentAsOf', { d: v.deployment.as_of })) + '</p>' : '') +
+        deploymentHTML(v.deployment, null));
+    }
+    if (scope === 'paper') parts.push(decisionsHTML(v.signals));
     const coverage = scope === 'paper' ? C.said(v.research?.text) : '';
     if (coverage) parts.push('<p class="banner">' + h(coverage) + '</p>');
     if (v.plan?.managing?.length) {
@@ -273,8 +321,18 @@ window.Console.page('auto', function (document) {
         h(modeLabel(key)) + '</button>';
     }).join(''));
   }
+  function renderTemplateChoices() {
+    const offered = mode === 'steady';
+    $('auto-template-wrap').hidden = !offered;
+    if (!offered) return;
+    C.setHTML($('auto-template-choices'), ['research_etf', 'baseline_etf'].map((key) =>
+      '<button class="chip' + (template === key ? ' chip-accent' : '') + '" type="button" role="radio" aria-checked="' +
+      (template === key) + '" data-auto-template="' + key + '">' + h(t('auto.template.' + key)) + '</button>').join(''));
+    say('auto-template-note', t('auto.templateNote.' + template));
+  }
   function renderPlan() {
     renderModeChoices();
+    renderTemplateChoices();
     if (!preview) { C.setHTML($('auto-plan'), ''); return; }
     const p = preview, under = p.under_plan, today = p.today;
     const steps = (under.path || []).map((s) => row(s.symbol, s.feasible ? money(s.order_usd) : t('auto.noOrder'),
@@ -287,6 +345,8 @@ window.Console.page('auto', function (document) {
       '<p class="body-sm body-muted" style="margin-top:6px;">' + h(suggestedBy(p.strategy) +
         (C.said(p.strategy.rationale) ? ' ' + C.said(p.strategy.rationale) : '')) + '</p>' +
       (clamps ? '<ul class="auto-reasons">' + clamps + '</ul>' : '') +
+      (p.deployment ? '<p class="eyebrow" style="margin-top:16px;">' + h(t('auto.deploymentTitle')) + '</p>' +
+        deploymentHTML(p.deployment, p.what_if_minimum_usd) : '') +
       '<div class="list" style="margin-top:12px;">' +
         row(t('auto.deployToday'), money(today.deployable_usd), t('auto.positionsN', { n: today.positions })) +
         row(t('auto.deployPlan'), money(under.deployable_usd), t('auto.positionsN', { n: under.positions })) +
@@ -338,14 +398,19 @@ window.Console.page('auto', function (document) {
   }
   const envelopeOf = () => {
     const capital = Number($('auto-capital').value), loss = Number($('auto-loss').value);
-    return { mode, ...(capital > 0 ? { capital_usd: capital } : {}), ...(loss > 0 ? { loss_pause_pct: loss } : {}) };
+    return { mode, ...(capital > 0 ? { capital_usd: capital } : {}), ...(loss > 0 ? { loss_pause_pct: loss } : {}),
+      /* The research template is the mode's own default, so only the other one is named. */
+      ...(mode === 'steady' && template === 'baseline_etf' ? { template } : {}) };
   };
   const twoTaps = ['pause', 'stop', 'withdraw', 'auto-replace-off'];
 
   async function act(name) {
     if (twoTaps.includes(name) && armed !== name) { armed = name; render(); return; }
     if (name === 'preview') {
-      if (window.CT_DEMO) { preview = D.autoPlanExample || null; say('auto-plan-status', t('auto.demoPreview')); render(); return; }
+      if (window.CT_DEMO) {
+        preview = (mode === 'steady' && template === 'baseline_etf' ? D.autoBaselineExample : D.autoPlanExample) || null;
+        say('auto-plan-status', t('auto.demoPreview')); render(); return;
+      }
       const wanted = envelopeOf();
       const answer = await send('/auto-trading/plan', wanted, 'auto-plan-status');
       if (answer) { preview = { ...answer, asked: wanted }; say('auto-plan-status', ''); render(); }
@@ -426,6 +491,8 @@ window.Console.page('auto', function (document) {
   document.addEventListener('click', (event) => {
     const choice = event.target.closest?.('[data-auto-mode]');
     if (choice && !choice.disabled) { mode = choice.dataset.autoMode; preview = null; render(); return; }
+    const kind = event.target.closest?.('[data-auto-template]');
+    if (kind && !kind.disabled) { template = kind.dataset.autoTemplate; preview = null; render(); return; }
     const control = event.target.closest?.('[data-auto-act]');
     if (control && !control.disabled) { act(control.dataset.autoAct); return; }
     if (armed) { armed = null; render(); }

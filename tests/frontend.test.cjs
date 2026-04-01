@@ -4504,3 +4504,117 @@ test('automatic trading is a page of the console everywhere a page is listed', (
   assert.equal(c.Console.taskLink({ page: 'auto', params: { scope: 'live' } }), 'auto.html?scope=live');
   assert.equal(c.Console.taskLink({ page: 'auto', params: { plan: 'x' } }), null, 'no other parameter is carried');
 });
+
+
+/* The baseline template on the console (docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 3 and 5): the
+   person chooses it, a preview draws each fund as the service worked it out, a running plan
+   shows each fund as its last pass read it, and a proposal a plan wrote says so where it is
+   approved. The page adds labels and nothing else. */
+const templateTap = (c, value) => c.document.dispatchEvent({ type: 'click', target: {
+  closest: selector => selector === '[data-auto-template]' ? { dataset: { autoTemplate: value }, disabled: false } : null } });
+
+test('the steady mode offers two templates, and a baseline preview draws every fund and why', async () => {
+  const sent = [];
+  const example = autoFixtures().autoBaselineExample;
+  const c = autoPage(async (path, body) => { sent.push([path, body]); return path.endsWith('/plan') ? example : { started: true }; });
+  assert.equal(c.element('auto-template-wrap').hidden, false);
+  const choices = c.element('auto-template-choices').innerHTML;
+  assert.match(choices, /aria-checked="true" data-auto-template="research_etf">auto.template.research_etf</);
+  assert.match(choices, /aria-checked="false" data-auto-template="baseline_etf">auto.template.baseline_etf</);
+  templateTap(c, 'baseline_etf');
+  assert.match(c.element('auto-template-note').textContent, /auto.templateNote.baseline_etf/);
+  c.element('auto-capital').value = '100';
+  autoTap(c, 'act', 'preview'); await flush();
+  assert.deepEqual(plain(sent), [['/auto-trading/plan', { mode: 'steady', capital_usd: 100, template: 'baseline_etf' }]]);
+  const plan = c.element('auto-plan').innerHTML;
+  assert.match(plan, /auto.baselineLine 15/, 'the template says what it does, not a confidence it does not use');
+  assert.match(plan, /auto.deploymentTitle/);
+  assert.match(plan, /VTI · 35%[\s\S]*auto.trancheStatus.due · auto.trancheProgress 0 1 · auto.trancheNext \$35\.00 2026-10-16[\s\S]*\$35\.00[\s\S]*auto.trancheHeld \$0\.00/);
+  assert.match(plan, /auto.deployPlan[\s\S]*auto.positionsN 1[\s\S]*\$35\.00/, 'the order it would place first, by the engine');
+  assert.match(plan, /VXUS · 10%[\s\S]*auto.trancheStatus.position_limit[\s\S]*ranks below theirs/);
+  assert.match(plan, /BND · 15%[\s\S]*auto.trancheStatus.below_minimum[\s\S]*\$12\.85, under the \$25\.00 minimum/);
+  assert.match(plan, /auto.cashLeft[\s\S]*\$65\.00/);
+  assert.match(plan, /auto.regimeUnknown/, 'a preview does not read the market, and does not pretend to');
+  assert.match(plan, /auto.whatIf \$10\.00 auto.whatIfItem VTI \$30\.00 3auto.listJoinauto.whatIfItem SGOV \$17\.14 1/);
+  autoTap(c, 'act', 'start-paper'); await flush();
+  assert.equal(sent[1][1].template, 'baseline_etf', 'started as it was previewed');
+  assert.equal(sent[1][1].plan_id, example.plan_id);
+  // A swing plan has one template, so there is nothing to choose and nothing is sent.
+  autoTap(c, 'mode', 'swing');
+  assert.equal(c.element('auto-template-wrap').hidden, true);
+  autoTap(c, 'act', 'preview'); await flush();
+  assert.equal(sent[2][1].template, undefined);
+});
+
+test('a running baseline plan shows each fund as its last pass read it, a veto beside its research', () => {
+  const data = autoReads();
+  const block = autoFixtures().autoBaselineExample.deployment;
+  data.auto.simulation.deployment = { ...block, as_of: '2026-10-16', regime: { level: 'NORMAL', ladder: 'NORMAL', open: true },
+    targets: [{ ...block.targets[0], status: 'vetoed', next: { index: 1, of: 1, usd: 35.0, due: null },
+      veto: { code: 'research_negative', run_id: '2026-10-16_VTI_ab12cd34', rating: 'Underweight',
+        text: { zh: '10-16 的研究给出“减持”，这一批不买。', en: 'Research on 10-16 said Underweight; this tranche is not bought.' } },
+      why: { zh: '10-16 的研究给出“减持”，这一批不买。', en: 'Research on 10-16 said Underweight; this tranche is not bought.' } }] };
+  data.auto.simulation.signals = [{ run_id: 'tranche:demo:VTI', kind: 'tranche', ticker: 'VTI', at: '2026-10-16T14:31:00+00:00',
+    diagnosis: { code: 'tranche_vetoed', label: { zh: '策略不交易', en: 'Strategy says no' },
+      summary: { zh: '10-16 的研究给出“减持”，这一批不买。', en: 'Research on 10-16 said Underweight; this tranche is not bought.' } } }];
+  const c = autoPage(async () => ({}), { data });
+  const detail = c.element('auto-detail').innerHTML;
+  assert.match(detail, /auto.deploymentTitle[\s\S]*auto.deploymentAsOf 2026-10-16/);
+  assert.match(detail, /VTI · 35%[\s\S]*auto.trancheStatus.vetoed[\s\S]*said Underweight/);
+  assert.match(detail, /href="lab.html\?run=2026-10-16_VTI_ab12cd34">VTI · auto.vetoRun</);
+  assert.match(detail, /auto.regimeOpen NORMAL/);
+  assert.match(detail, /auto.decisionsTitle[\s\S]*VTI · auto.trancheKind[\s\S]*Strategy says no/);
+  // A block that could not be read says why, and draws no progress at all.
+  c.CT.auto.simulation.deployment = { template: 'baseline_etf', targets: [], regime: null, as_of: null,
+    error: { code: 'deployment_unavailable', text: { zh: '现在读不出基准建仓的进度：OSError。', en: 'Where the baseline plan stands cannot be read right now: OSError.' } } };
+  c.render();
+  const unreadable = c.element('auto-detail').innerHTML;
+  assert.match(unreadable, /cannot be read right now: OSError/);
+  assert.doesNotMatch(unreadable, /auto.trancheStatus/);
+  // A plan of the other template has no such block.
+  c.CT.auto.simulation.deployment = null; c.render();
+  assert.doesNotMatch(c.element('auto-detail').innerHTML, /auto.deploymentTitle/);
+});
+
+test('a proposal a plan wrote says so beside the button: its source, its terms, a first real purchase', () => {
+  const c = approvalPage();
+  Object.assign(c.CT.proposalDetail, { confidence: null, run_id: null, plan: {
+    plan_id: 'demo0plan0baseline', strategy_version: 'sv-demo00000002', template: 'baseline_etf', origin: 'tranche',
+    tranche: { index: 1, of: 1 }, managed_by_plan: true,
+    exit_terms: { stop_loss_pct: 15.0, take_profit_pct: 0.0, max_holding_days: null, trend_window: null },
+    first_real_order: true, waits_for_person: { code: 'first_real_order', text: {
+      zh: '这是方案在实盘的第一笔买入，由你批准；成交后方案开始自动买入。',
+      en: 'This is the plan\'s first real-money purchase and waits for you; once it fills, the plan buys on its own.' } } } });
+  c.render();
+  const box = c.element('d-plan');
+  assert.equal(box.hidden, false);
+  assert.match(box.innerHTML, /ap.origin.tranche 1 1[\s\S]*ap.exitTerms 15 ap.exitTermNone[\s\S]*ap.firstReal/);
+  assert.doesNotMatch(box.innerHTML, /waits for you/, 'the first purchase is said once, not twice');
+  assert.equal(c.element('d-strength').textContent, 'ap.trancheNoConfidence', 'no confidence is not missing data');
+  // A research purchase under a plan: its own terms, and whatever else would keep code from it.
+  Object.assign(c.CT.proposalDetail, { confidence: 84, plan: { ...c.CT.proposalDetail.plan, origin: 'research', tranche: null,
+    exit_terms: { stop_loss_pct: 10.0, take_profit_pct: 0.0, max_holding_days: 90, trend_window: null },
+    first_real_order: false, waits_for_person: { code: 'plan_paused', text: { zh: '方案已暂停。', en: 'The plan is paused.' } } } });
+  c.render();
+  assert.match(box.innerHTML, /ap.origin.research[\s\S]*ap.exitTerms 10 ap.exitTermDays 90[\s\S]*The plan is paused/);
+  assert.doesNotMatch(box.innerHTML, /ap.firstReal/);
+  assert.equal(c.element('d-strength').textContent, 'ap.notProbability 84');
+  // One whose version is gone says its exits cannot be shown; one no plan wrote has no block.
+  c.CT.proposalDetail.plan = { ...c.CT.proposalDetail.plan, exit_terms: null, missing: 'version_not_on_record', waits_for_person: null };
+  c.render();
+  assert.match(box.innerHTML, /ap.exitTermsMissing/);
+  c.CT.proposalDetail.plan = null; c.render();
+  assert.equal(box.hidden, true);
+});
+
+test('a holding whose exit cannot be judged is a to-do with a name in both languages', () => {
+  const { en, zh } = dictionary();
+  for (const key of ['at.kind.auto_exit_undecided', 'auto.trancheStatus.due', 'auto.trancheStatus.waiting',
+    'auto.trancheStatus.vetoed', 'auto.trancheStatus.not_researched', 'auto.trancheStatus.regime_gate',
+    'auto.trancheStatus.cooling_down', 'auto.trancheStatus.below_minimum', 'auto.trancheStatus.position_limit',
+    'auto.trancheStatus.complete', 'auto.template.research_etf', 'auto.template.baseline_etf',
+    'auto.templateNote.research_etf', 'auto.templateNote.baseline_etf', 'ap.origin.tranche', 'ap.origin.research',
+    'ap.origin.exit']) {
+    assert.ok(en.has(key) && zh.has(key), key);
+  }
+});

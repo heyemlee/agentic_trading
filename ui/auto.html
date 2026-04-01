@@ -73,6 +73,10 @@
     <form id="auto-plan-form" class="stack stack-4" style="margin-top:12px;" onsubmit="return false;">
       <div><p class="eyebrow" id="auto-mode-label" data-i18n="auto.mode">Mode</p>
         <div id="auto-mode-choices" class="row row-wrap" style="gap:8px;margin-top:8px;" role="radiogroup" aria-labelledby="auto-mode-label"></div></div>
+      <!-- Which of the mode's templates: the person's choice, like the two figures below. -->
+      <div id="auto-template-wrap"><p class="eyebrow" id="auto-template-label" data-i18n="auto.template">Template</p>
+        <div id="auto-template-choices" class="row row-wrap" style="gap:8px;margin-top:8px;" role="radiogroup" aria-labelledby="auto-template-label"></div>
+        <p id="auto-template-note" class="body-sm body-muted" style="margin-top:8px;"></p></div>
       <div class="grid-2">
         <div class="field"><label for="auto-capital" data-i18n="auto.capital">Money it may use (USD)</label>
           <input class="input" id="auto-capital" type="number" inputmode="decimal" min="1" step="1" autocomplete="off" /></div>

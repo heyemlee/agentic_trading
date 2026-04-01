@@ -119,6 +119,27 @@ window.Console.page('approvals', function (document) {
       '</p><div class="list list-inset">' + exitReasons(onward.blocked_by) + '</div></div></div>');
   }
 
+  /* What a plan has to do with the proposal, as the service derived it (contract 3.2 and 5.2). */
+  function renderPlanBlock(p) {
+    const box = document.getElementById('d-plan');
+    const plan = p.plan;
+    box.hidden = !plan;
+    if (!plan) { C.setHTML(box, ''); return; }
+    const lines = [];
+    if (plan.error) lines.push(C.said(plan.error.text));
+    if (plan.origin === 'tranche') lines.push(C.t('ap.origin.tranche', { index: plan.tranche?.index ?? '—', of: plan.tranche?.of ?? '—' }));
+    else if (plan.origin) lines.push(C.t('ap.origin.' + plan.origin));
+    if (plan.origin && plan.origin !== 'exit') {
+      const terms = plan.exit_terms;
+      lines.push(terms ? C.t('ap.exitTerms', { stop: terms.stop_loss_pct,
+        term: terms.max_holding_days ? C.t('ap.exitTermDays', { days: terms.max_holding_days }) : C.t('ap.exitTermNone') })
+        : C.t('ap.exitTermsMissing'));
+    }
+    if (plan.first_real_order) lines.push(C.t('ap.firstReal'));
+    if (plan.waits_for_person && plan.waits_for_person.code !== 'first_real_order') lines.push(C.said(plan.waits_for_person.text));
+    C.setHTML(box, lines.map((line) => '<p class="body-sm">' + C.escapeHtml(line) + '</p>').join(''));
+  }
+
   /* With one proposal there is nothing to choose, so the queue stays out of
      the way. With several, the page used to show the first and give no way to
      reach the rest — the count said "3 waiting" and only one was reachable. */
@@ -197,7 +218,10 @@ window.Console.page('approvals', function (document) {
        described; now it is also what the code does. */
     set('d-weight', p.target_weight_pct == null ? ''
       : C.t('ap.weightNoCap', { w: C.pct(p.target_weight_pct), b: C.bucket(p.bucket) }));
-    set('d-strength', C.t('ap.notProbability', { c: p.confidence }));
+    /* A tranche is bought by the owner's weights, not on research: no confidence is not missing data. */
+    set('d-strength', p.confidence == null && p.plan?.origin === 'tranche' ? C.t('ap.trancheNoConfidence')
+      : C.t('ap.notProbability', { c: p.confidence }));
+    renderPlanBlock(p);
     set('d-ref', p.reference_price != null ? C.usd(p.reference_price) : '—');
     set('d-drift', p.freshness && p.freshness.max_price_drift_pct != null
       ? '±' + C.pct(p.freshness.max_price_drift_pct) : '—');
