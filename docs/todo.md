@@ -2,7 +2,8 @@
 
 确认日期：2026-10-06（America/Los_Angeles）
 
-当前状态（2026-10-15）：**原三个阶段和 P2.6 的代码都已发布；模拟账户 2026-10-07 起运行，有效模拟日 1 / 30——10-07 至 10-13 都因“大盘数据读不到”不计，原因已查明、已修好，等你发布；实盘未开放。**
+当前状态（2026-10-15 晚）：**原三个阶段和 P2.6 的代码都已发布；大盘数据修复 `f41d076` 已发布，模拟账户 0 / 30，10-16 是第一天在修复下跑；
+基准建仓（A）那一批已在分支上实施完、门禁全绿，等你合入和收盘后发布（发布后模拟天数从 0 重新数一次）；实盘未开放。**
 短线模式和个股扩展没有实现（只有未开放原因和检查）。
 线上是 `20261007T230510Z-1223f50`（2026-10-07 16:05 PDT 你发布，含配置页重做）；`main` = `origin/main` = `41e0902`，它本身尚未发布，页面上看不出区别。
 **2026-10-14／15 的新提交在分支 `claude/amazing-raman-8f2b23` 上（worktree `.claude/worktrees/amazing-raman-8f2b23`），没有合入、没有发布。**
@@ -412,7 +413,17 @@
   否则是下一次开盘。按 F 改到周五上午之后，研究在开盘时段内完成，实盘当天就能成交；回测没有盘中价格，仍记在下一次开盘成交，
   这是回测比实盘晚的唯一一处。回测必须写明研究的有效期，不写就报错；有效期取自模拟账户判过期用的同一项设置，有用例把两边绑在一起。
 
-**会清零的那一批：设计稿已写好，等你和前端审（2026-10-15）**
+**会清零的那一批：已实施（2026-10-15 晚），等你合入和发布**
+
+- 你说“开工吧”，前端也由实施会话来做。四个提交：`05f3a66`（方案份额）、`0a41d4a`（亏损线、价格过旧）、
+  `eaa9295`（基准建仓模板、分批买入、第一笔等你批准、接口）、`aecb640`（页面）。和设计稿不一样的地方写在设计稿 §9。
+- 要点：$100 账户的基准方案只买 VTI 一笔 **$35**（风控的常规仓位 35% 比单仓上限 40% 更紧），其余 $65 留现金；
+  方案在实盘的第一笔买入一律等你批准，成交后才自动；模拟账户在基准方案下会做一次卖出演练，实盘不会。
+- 合入与发布的步骤在本节末尾“基准建仓（A）那一批的合入与发布”。
+
+以下是实施前的记录，原样保留：
+
+**（实施前）会清零的那一批：设计稿已写好，等你和前端审（2026-10-15）**
 
 - `docs/AUTO_BASELINE_CONTRACT_2026-10-15.md`：A（基准建仓模板 `baseline_etf`）、亏损线（复查第 2 条）、方案份额（存疑 A）、
   价格过旧（存疑 B）、第一笔手动批准、上游升级。没有写代码。
@@ -507,6 +518,24 @@
    `CT_DATA_DIR=/Users/l/Desktop/Projects/agentic_trading /Users/l/Desktop/Projects/agentic_trading_releases/current/.venv/bin/ct-auto --lang zh sim`
 
 回滚：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh rollback`。这两个提交不新增任何存储字段，退回 `1223f50` 是安全的。
+
+**基准建仓（A）那一批的合入与发布（由你运行；分支末端的提交号在实施会话给你的消息里）**
+
+这一批一起带上分支上此前未发布的改动：`4a51ff3`（告诉模型可以买碎股）、`b307ed3`（回测）、`19a8ab8`（Form 4 缓存）、
+`b942a75`（暂停拦住已写好的买入）、`0e9e713`（休市时的问题不算进交易日）、`8b77e78`（新闻为空的说法），和全部文档。
+
+1. 合入（快进）：`git -C /Users/l/Desktop/Projects/agentic_trading merge --ff-only claude/amazing-raman-8f2b23`
+   如果被拒绝，是配置页这期间往 `main` 提交过改动；不要强推，告诉实施会话。
+2. 推送：`git -C /Users/l/Desktop/Projects/agentic_trading push origin main`（推送前会自动跑完整门禁，约 5 分钟）。
+3. 13:00 PDT 收盘以后发布：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh publish --ref <分支末端的提交号>`
+4. 确认：`readlink /Users/l/Desktop/Projects/agentic_trading_releases/current` 以那个提交号结尾；
+   `CT_DATA_DIR=/Users/l/Desktop/Projects/agentic_trading /Users/l/Desktop/Projects/agentic_trading_releases/current/.venv/bin/ct-ops status` 心跳正常。
+5. 模拟账户会自动换到新版本，有效模拟日从 0 / 30 开始。要用 A：手机上“我的 → 方案与模拟”，模式选“稳健”、模板选“基准建仓”，
+   预览，在模拟账户启动。预览里应当看到 VTI $35（1 批）、其余留现金，以及“如果最小下单额是 $10”那一行。
+6. 在 iPhone 上看一遍：自动交易页的“逐只基金”、审批页批准按钮上方的说明（模拟账户里第一批成交后可以在审批页的历史里看到）。
+
+回滚：`/Users/l/Desktop/Projects/agentic_trading/deploy/macos/release.sh rollback`。提案没有新增存储字段；
+旧版本读到基准方案会按研究驱动运行（只在研究说买时才买），不会多买。
 
 ## 目标与已确定的选择
 
