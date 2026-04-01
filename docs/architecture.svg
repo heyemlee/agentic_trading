@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic Trading architecture</title>
+  <desc id="desc">The console reaches a FastAPI service over HTTPS. The service queues research, and the TradingAgents graph runs twelve agents through the Claude Code CLI, whose only tools are MCP data tools: market data, news, filings and an allowlisted web fetch, never a broker. The decision passes a deterministic policy and the Hard Risk Layer to become a proposal, which reaches the console by Web Push. A person approves its exact terms. Execution re-reads the world, runs Hard Risk and 15 preflight checks again, and is the only path to Robinhood Agentic Trading or a simulated venue. Jobs, proposals, orders, fills and ledgers are kept in SQLite in WAL mode. Pulses follow one request in that order.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    .eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; fill: #8e8e93; }
+    .title { font-size: 16px; font-weight: 600; fill: #1d1d1f; }
+    .name { font-size: 14px; font-weight: 600; fill: #1d1d1f; }
+    .sub { font-size: 12.5px; fill: #6e6e73; }
+    .edge { font-size: 11px; fill: #8e8e93; }
+    .card { fill: #ffffff; stroke: #e3e3e8; stroke-width: 1; }
+    .wire { fill: none; stroke: #d6d6dc; stroke-width: 1.5; }
+    .key { fill: none; stroke-width: 3; stroke-linecap: round; }
+    .pulse {
+      fill: none;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-dasharray: 0.14 1.3;
+      stroke-dashoffset: 0.14;
+      opacity: 0;
+      animation: travel 8s linear infinite;
+    }
+    .data { stroke: #0a7cff; }
+    .ai { stroke: #d97757; }
+    .internal { stroke: #0d9488; }
+    .order { stroke: #7c5cff; }
+    .live { animation: breathe 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes travel {
+      0% { stroke-dashoffset: 0.14; opacity: 1; }
+      24% { stroke-dashoffset: -1; opacity: 1; }
+      25%, 100% { stroke-dashoffset: -1; opacity: 0; }
+    }
+    @keyframes breathe {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.8); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse { animation: none; }
+      .live { animation: none; }
+    }
+  </style>
+  <defs>
+    <filter id="lift" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000000" flood-opacity="0.06" />
+    </filter>
+    <!-- In user space: a straight wire has a bounding box with no height, which would clip the glow away -->
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="960" height="600">
+      <feGaussianBlur stdDeviation="2" result="blur" />
+      <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="959" height="599" rx="16" fill="#ffffff" stroke="#ececf0" />
+
+  <!-- The containers go under the wires, their cards over them -->
+  <rect x="228" y="40" width="452" height="540" rx="18" fill="#fafafb" stroke="#e3e3e8" />
+  <rect x="742" y="80" width="204" height="260" rx="18" fill="none" stroke="#e8cfc3" stroke-dasharray="4 4" />
+
+  <!-- Wires -->
+  <path class="wire" d="M150,130 L244,130" />
+  <path class="wire" d="M428,130 L484,130" />
+  <path class="wire" d="M668,130 L752,130" />
+  <path class="wire" d="M844,168 L844,236" />
+  <path class="wire" d="M576,168 L576,236" />
+  <path class="wire" d="M484,274 L428,274" />
+  <path class="wire" d="M336,236 L336,168" />
+  <path class="wire" d="M336,312 L336,380" />
+  <path class="wire" d="M668,410 L752,410" />
+  <path class="wire" d="M668,440 C710,440 710,486 752,486" />
+  <path class="wire" d="M456,458 L456,488" />
+
+  <text class="edge" x="189" y="122" text-anchor="middle">HTTPS</text>
+  <text class="edge" x="189" y="147" text-anchor="middle">Web Push</text>
+  <text class="edge" x="456" y="122" text-anchor="middle">job</text>
+  <text class="edge" x="711" y="122" text-anchor="middle">claude -p</text>
+  <text class="edge" x="854" y="206">tool calls</text>
+  <text class="edge" x="586" y="206">decision</text>
+  <text class="edge" x="456" y="266" text-anchor="middle">proposal</text>
+  <text class="edge" x="346" y="206">review · approve</text>
+  <text class="edge" x="346" y="350">approved terms</text>
+  <text class="edge" x="711" y="402" text-anchor="middle">order</text>
+  <text class="edge" x="466" y="478">fills · ledger</text>
+  <text class="edge" x="844" y="358" text-anchor="middle">research only · no broker tools</text>
+
+  <!-- Pulses: research is requested, queued, run through the CLI and its tools, decided and checked; the proposal
+       reaches the console; the approval comes back, executes, and lands in the ledger -->
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M150,130 L244,130" style="animation-delay: 0s" />
+  <path class="pulse internal" pathLength="1" filter="url(#glow)" d="M428,130 L484,130" style="animation-delay: 0.6s" />
+  <path class="pulse ai" pathLength="1" filter="url(#glow)" d="M668,130 L752,130" style="animation-delay: 1.2s" />
+  <path class="pulse ai" pathLength="1" filter="url(#glow)" d="M844,168 L844,236" style="animation-delay: 1.8s" />
+  <path class="pulse internal" pathLength="1" filter="url(#glow)" d="M576,168 L576,236" style="animation-delay: 2.6s" />
+  <path class="pulse internal" pathLength="1" filter="url(#glow)" d="M484,274 L428,274" style="animation-delay: 3.2s" />
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M336,236 L336,168" style="animation-delay: 3.8s" />
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M244,130 L150,130" style="animation-delay: 4.4s" />
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M150,130 L244,130" style="animation-delay: 5s" />
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M336,168 L336,236" style="animation-delay: 5.6s" />
+  <path class="pulse internal" pathLength="1" filter="url(#glow)" d="M336,312 L336,380" style="animation-delay: 6.2s" />
+  <path class="pulse order" pathLength="1" filter="url(#glow)" d="M668,410 L752,410" style="animation-delay: 6.8s" />
+  <path class="pulse data" pathLength="1" filter="url(#glow)" d="M456,458 L456,488" style="animation-delay: 7.4s" />
+
+  <!-- The console -->
+  <rect class="card" x="24" y="92" width="126" height="120" rx="14" filter="url(#lift)" />
+  <text class="eyebrow" x="40" y="116">WEB APP</text>
+  <text class="title" x="40" y="140">Console</text>
+  <text class="sub" x="40" y="162">14 pages</text>
+  <text class="sub" x="40" y="180">no build step</text>
+  <text class="sub" x="40" y="198">EN · 中文</text>
+  <g transform="translate(116 102) scale(0.2)">
+    <rect width="100" height="100" rx="24" fill="#10251d" />
+    <g fill="none" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="29,55 49,35 61,47" stroke="#eff7ed" />
+      <polyline points="39,53 51,65 71,45" stroke="#88e0a4" />
+    </g>
+  </g>
+
+  <!-- The service -->
+  <circle class="live" cx="248" cy="64" r="4.5" fill="#0d9488" />
+  <text class="name" x="260" y="69">Agentic Trading service</text>
+  <text class="edge" x="668" y="69" text-anchor="end">one release · 4 launchd jobs</text>
+  <g filter="url(#lift)">
+    <rect class="card" x="244" y="92" width="184" height="76" rx="12" />
+    <rect class="card" x="484" y="92" width="184" height="76" rx="12" />
+    <rect class="card" x="244" y="236" width="184" height="76" rx="12" />
+    <rect class="card" x="484" y="236" width="184" height="76" rx="12" />
+    <rect class="card" x="244" y="380" width="424" height="78" rx="12" />
+  </g>
+  <text class="eyebrow" x="260" y="114">API</text>
+  <text class="name" x="260" y="136">FastAPI · service/</text>
+  <text class="sub" x="260" y="156">77 routes · thin layer</text>
+
+  <text class="eyebrow" x="500" y="114">WEEKLY OR ON DEMAND</text>
+  <text class="name" x="500" y="136">TradingAgents</text>
+  <text class="sub" x="500" y="156">LangGraph · 12 agents</text>
+
+  <text class="eyebrow" x="260" y="258">A PERSON</text>
+  <text class="name" x="260" y="280">Approval</text>
+  <text class="sub" x="260" y="300">binds the exact terms</text>
+
+  <text class="eyebrow" x="500" y="258">DETERMINISTIC</text>
+  <text class="name" x="500" y="280">Policy + Hard Risk</text>
+  <text class="sub" x="500" y="300">39 rules, all evaluated</text>
+
+  <text class="eyebrow" x="260" y="402">DETERMINISTIC · ONE ORDER PATH</text>
+  <text class="name" x="260" y="424">Execution</text>
+  <text class="sub" x="260" y="444">re-reads the world · Hard Risk again · 15 preflight checks</text>
+
+  <g filter="url(#lift)">
+    <path d="M244,498 V548 A212,10 0 0 0 668,548 V498" fill="#ffffff" stroke="#e3e3e8" />
+    <ellipse cx="456" cy="498" rx="212" ry="10" fill="#fafafb" stroke="#e3e3e8" />
+  </g>
+  <text class="name" x="456" y="530" text-anchor="middle">SQLite · WAL</text>
+  <text class="sub" x="456" y="549" text-anchor="middle">jobs · proposals · orders · fills · ledgers · audit</text>
+
+  <!-- The model side: nothing in here can reach a venue -->
+  <g filter="url(#lift)">
+    <rect class="card" x="752" y="92" width="184" height="76" rx="14" />
+    <rect class="card" x="752" y="236" width="184" height="92" rx="14" />
+  </g>
+  <circle cx="772" cy="110" r="4.5" fill="#d97757" />
+  <text class="eyebrow" x="784" y="114">MODEL RUNTIME</text>
+  <text class="name" x="768" y="136">Claude Code CLI</text>
+  <text class="sub" x="768" y="156">built-in tools off</text>
+
+  <text class="eyebrow" x="768" y="258">MCP · READ ONLY</text>
+  <text class="name" x="768" y="280">Data tools</text>
+  <text class="sub" x="768" y="300">market · news · filings</text>
+  <text class="sub" x="768" y="318">allowlisted web fetch</text>
+
+  <!-- Venues -->
+  <g filter="url(#lift)">
+    <rect class="card" x="752" y="380" width="184" height="60" rx="14" />
+    <rect class="card" x="752" y="456" width="184" height="60" rx="14" />
+  </g>
+  <text class="name" x="768" y="404">Robinhood Agentic</text>
+  <text class="sub" x="768" y="424">official MCP · OAuth</text>
+  <text class="name" x="768" y="480">Simulated venue</text>
+  <text class="sub" x="768" y="500">simulation · backtests</text>
+
+  <!-- What the pulses mean -->
+  <path class="key data" d="M24,494 L42,494" />
+  <text class="edge" x="50" y="498">data</text>
+  <path class="key ai" d="M24,516 L42,516" />
+  <text class="edge" x="50" y="520">model calls</text>
+  <path class="key internal" d="M24,538 L42,538" />
+  <text class="edge" x="50" y="542">internal</text>
+  <path class="key order" d="M24,560 L42,560" />
+  <text class="edge" x="50" y="564">orders</text>
+</svg>
