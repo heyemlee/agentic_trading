@@ -55,6 +55,14 @@ class Log:
         return self._add("sell", quantity, via="console", version=None, price=price,
                          symbol=symbol, bucket=bucket)
 
+    def person_approves_plan_buy(self, quantity, version=V1, price=100.0, symbol="VTI", bucket=MICRO):
+        return self._add("buy", quantity, via="console", version=version, price=price,
+                         symbol=symbol, bucket=bucket)
+
+    def person_approves_plan_sell(self, quantity, version=V1, price=100.0, symbol="VTI", bucket=MICRO):
+        return self._add("sell", quantity, via="console", version=version, price=price,
+                         symbol=symbol, bucket=bucket)
+
     def view(self, held, symbol="VTI", bucket=MICRO):
         return positions.managed(fills=self.fills, proposals=self.proposals, bucket=bucket,
                                  symbol=symbol, ledger_quantity=held)
@@ -73,6 +81,48 @@ def test_a_persons_purchase_into_the_same_holding_stays_theirs():
     assert (view.quantity, view.other_quantity, view.version_id) == (1.0, 2.0, V1)
     # Bought the other way round, the answer is the same: it is provenance, not order.
     assert Log().person_buys(2.0).code_buys(1.0).view(3.0).quantity == 1.0
+
+
+def test_a_plans_purchase_a_person_approved_is_the_plans():
+    """Review item A (2026-10-14): approved by hand, it had no stop, no holding limit and no place
+    on the loss line. Approving a plan's purchase is accepting its exit terms (design 2.3)."""
+    view = Log().person_approves_plan_buy(1.0, price=100.0).view(1.0)
+    assert (view.quantity, view.version_id, view.other_quantity) == (1.0, V1, 0.0)
+    assert view.cost_basis == pytest.approx(100.0)
+    # A person's own purchase beside it is still theirs.
+    mixed = Log().person_approves_plan_buy(1.0).person_buys(2.0).view(3.0)
+    assert (mixed.quantity, mixed.other_quantity) == (1.0, 2.0)
+
+
+def test_a_life_a_person_ended_is_not_evidence_that_codes_own_exit_works():
+    by_hand = Log().code_buys(1.0).person_approves_plan_sell(1.0, price=90.0)
+    [life] = positions.closed_trades(fills=by_hand.fills, proposals=by_hand.proposals, bucket=MICRO)
+    assert life["closed_by"] == "person"
+    by_code = Log().person_approves_plan_buy(1.0).code_sells(1.0, price=90.0)
+    [life] = positions.closed_trades(fills=by_code.fills, proposals=by_code.proposals, bucket=MICRO)
+    assert life["closed_by"] == "code"
+
+
+def test_what_the_plans_shares_realized_counts_whoever_approved_the_sale():
+    """Review item 2 (2026-10-14): a stop a person approved vanished from the loss line."""
+    log = (Log().code_buys(2.0, price=100.0).person_approves_plan_sell(1.0, price=90.0)
+           .code_sells(0.5, price=120.0))
+    assert positions.realized_by_version(fills=log.fills, proposals=log.proposals,
+                                         bucket=MICRO) == {V1: pytest.approx(-10.0 + 10.0)}
+    # A person's own sale reaches into the plan's shares only after their own; that part is the
+    # plan's loss: 1.0 of theirs at cost 100, then 0.5 of the plan's, both sold at 80.
+    reach = Log().code_buys(1.0, price=100.0).person_buys(1.0).person_sells(1.5, price=80.0)
+    assert positions.realized_by_version(fills=reach.fills, proposals=reach.proposals,
+                                         bucket=MICRO) == {V1: pytest.approx(-10.0)}
+    # Nothing a person bought for themselves is the plan's, gain or loss.
+    own = Log().person_buys(1.0, price=100.0).person_sells(1.0, price=50.0)
+    assert positions.realized_by_version(fills=own.fills, proposals=own.proposals, bucket=MICRO) == {}
+
+
+def test_realized_is_unknown_when_the_log_cannot_be_replayed(monkeypatch):
+    monkeypatch.setattr(autonomy, "FILL_REPLAY_LIMIT", 2)
+    log = Log().code_buys(1.0).code_sells(1.0)
+    assert positions.realized_by_version(fills=log.fills, proposals=log.proposals, bucket=MICRO) is None
 
 
 def test_a_holding_nobody_attributed_to_a_strategy_is_not_managed_at_all():

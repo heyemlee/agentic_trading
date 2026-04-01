@@ -389,8 +389,10 @@ def position_floor(*, fills: list[dict[str, Any]], proposals, bucket: str, symbo
                    ledger_quantity: float | None, pct: float | None) -> PositionFloor:
     """The floor under one position, replayed from the fills that built it.
 
-    The fills are read oldest first and netted. Every purchase a person approved raises a high
-    water mark, and the mark only ever rises while the position lives; a sale that takes the
+    The fills are read oldest first and netted. Every purchase a person made for themselves
+    raises a high water mark, and the mark only ever rises while the position lives. A plan's
+    purchase a person approved is the plan's (``auto.positions``), held to the plan's exits, and
+    raises nothing here: the floor is under what the person chose to own. A sale that takes the
     netted quantity to zero ends that life, and the next purchase starts a new one with a mark
     of its own. So a person buying one share into a position code has already reduced to its
     floor moves the mark not at all, and code regains exactly that one share rather than a
@@ -436,7 +438,8 @@ def position_floor(*, fills: list[dict[str, Any]], proposals, bucket: str, symbo
             running, high, high_at, high_via, cycle_at = 0.0, None, None, None, None
             continue
         approver = by_proposal.get(str(row.get("proposal_id")))
-        if side == "buy" and was_human(approver) and (high is None or running > high):
+        if (side == "buy" and was_human(approver) and not getattr(approver, "strategy_version", None)
+                and (high is None or running > high)):
             high, high_at = running, str(row.get("at") or "") or None
             high_via = getattr(approver, "approved_via", None)
     if ledger_quantity is None:

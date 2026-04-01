@@ -43,17 +43,18 @@ class Log:
         return f"2026-09-10T14:{self._minute:02d}:00+00:00"
 
     def buy(self, quantity: float, *, via: str | None = "console", symbol: str = "VTI",
-            bucket: str = MICRO) -> str:
-        return self._fill("buy", quantity, via=via, symbol=symbol, bucket=bucket)
+            bucket: str = MICRO, version: str | None = None) -> str:
+        return self._fill("buy", quantity, via=via, symbol=symbol, bucket=bucket, version=version)
 
     def sell(self, quantity: float, *, via: str | None = "autonomy", symbol: str = "VTI",
              bucket: str = MICRO) -> str:
         return self._fill("sell", quantity, via=via, symbol=symbol, bucket=bucket)
 
-    def _fill(self, side: str, quantity: float, *, via, symbol, bucket) -> str:
+    def _fill(self, side: str, quantity: float, *, via, symbol, bucket, version=None) -> str:
         p = _proposal(bucket=bucket, ticker=symbol, action="BUY" if side == "buy" else "REDUCE",
                       status=EXECUTED)
         p.approved_via = via
+        p.strategy_version = version
         self.proposals.append(p)
         self.fills.append({"at": self._at(), "proposal_id": p.proposal_id, "bucket": bucket,
                            "symbol": symbol, "side": side, "quantity": quantity, "price": 370.0,
@@ -166,6 +167,18 @@ def test_a_position_reduced_to_almost_nothing_keeps_its_baseline(armed):
 
 
 # ------------------------------------------------------------------ refusals
+
+def test_a_plans_purchase_a_person_approved_raises_no_floor(armed):
+    """It is the plan's, held to the plan's exits (design 2.3), not a share the person chose to own."""
+    log = Log()
+    log.buy(40.0)
+    log.buy(60.0, version="sv-aaaaaaaaaaaa")
+    floor = log.floor(armed, held=100.0)
+    assert (floor.high_water, floor.floor) == (40.0, 10.0)
+    only_plan = Log()
+    only_plan.buy(60.0, version="sv-aaaaaaaaaaaa")
+    assert only_plan.floor(armed, held=60.0).reason == "no purchase in this position's life was approved by a person"
+
 
 def test_a_position_nobody_bought_here_has_no_floor(armed):
     """A transferred-in holding: the book has shares the log cannot explain."""

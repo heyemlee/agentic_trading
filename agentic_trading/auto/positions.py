@@ -5,13 +5,17 @@ that was the state of things before this module, where a holding opened without 
 no baseline a reduction could be measured from and so could never be reduced at all. The
 authority given here is deliberately the narrowest that fixes it.
 
-**Code may sell what code bought, and nothing else.** The quantity is replayed from the fills,
+**Code may sell what the plan bought, and nothing else.** The quantity is replayed from the fills,
 oldest first, exactly as the floor under a person's purchases is (``autonomy.position_floor``),
 and for the same reason: a derivation cannot be lost by a restart or counted twice by a second
-process. A purchase a strategy version approved without a person adds to the managed quantity;
-a purchase a person approved does not, even into the same holding. So a person who adds to a
-position code opened keeps their shares under their own authority, and a holding nobody
-attributed to a strategy -- anything from before this existed -- is not managed at all.
+process. A purchase a plan wrote -- one carrying a strategy version -- adds to the managed
+quantity whoever approved it: approving a plan's purchase is accepting its exit terms
+(docs/AUTO_BASELINE_CONTRACT_2026-10-15.md, 2.3). Until 2026-10-15 only a purchase code approved
+counted, and a plan purchase a person approved was nobody's to manage: no stop, no holding
+limit, no place on the loss line. A purchase a person made for themselves still does not count,
+even into the same holding, so a person who adds to a position code opened keeps those shares
+under their own authority, and a holding nobody attributed to a strategy -- anything from
+before this existed -- is not managed at all.
 
 **An answer that cannot be established is absent, never zero and never "all of it".** A log too
 long to replay, shares the fills cannot explain, a book that could not be read: each leaves the
@@ -90,9 +94,18 @@ class Managed:
 
 
 def _is_managed_order(proposal: Any) -> bool:
-    """Whether a strategy version, and no person, stood behind this order."""
-    return (proposal is not None and autonomy.was_autonomous(proposal)
-            and bool(getattr(proposal, "strategy_version", None)))
+    """Whether this order was a plan's: written under a strategy version, and approved.
+
+    Approved by code or by a person -- either way it is the plan's, and its shares are held to
+    the plan's terms. An order nobody can be shown to have approved is not counted.
+    """
+    return (proposal is not None and bool(getattr(proposal, "strategy_version", None))
+            and (autonomy.was_autonomous(proposal) or autonomy.was_human(proposal)))
+
+
+def _closed_by_code(proposal: Any) -> bool:
+    """Whether code itself approved the sale that ended a life: what proves code's own exit works."""
+    return _is_managed_order(proposal) and autonomy.was_autonomous(proposal)
 
 
 @dataclass
@@ -106,6 +119,8 @@ class _Played:
     opened_at: str | None = None
     error: str | None = None
     lives: list[dict[str, Any]] | None = None
+    #: What the plan's own shares realized when sold, by the version whose life they were in.
+    realized: dict[str, float] | None = None
 
 
 def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: str) -> _Played:
@@ -114,7 +129,7 @@ def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: st
     by_proposal = {p.proposal_id: p for p in proposals}
     rows = [row for row in sorted(fills, key=lambda r: str(r.get("at") or ""))
             if str(row.get("bucket")) == bucket and str(row.get("symbol") or "").upper() == symbol]
-    state = _Played(lives=[])
+    state = _Played(lives=[], realized={})
     life: dict[str, Any] = {}
     for row in rows:
         side = str(row.get("side") or "").lower()
@@ -145,6 +160,10 @@ def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: st
             from_own = min(state.own, from_own)
             had = state.own
             if state.own > tolerance:
+                # At the plan's own average cost, as the ledger books a sale at the holding's.
+                if from_own > 0 and state.version:
+                    gained = from_own * (price - state.cost / state.own)
+                    state.realized[state.version] = state.realized.get(state.version, 0.0) + gained
                 state.cost *= max(0.0, state.own - from_own) / state.own
             state.own -= from_own
             state.other = max(0.0, state.other - (quantity - from_own))
@@ -155,7 +174,7 @@ def _replay(fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: st
             if life and had > tolerance and state.own <= tolerance:
                 spent, proceeds = life["spent_usd"], life["proceeds_usd"]
                 state.lives.append({
-                    **life, "closed_at": at, "closed_by": "code" if automatic else "person",
+                    **life, "closed_at": at, "closed_by": "code" if _closed_by_code(order) else "person",
                     "bought": round(life["bought"], 8), "sold": round(life["sold"], 8),
                     "spent_usd": round(spent, 2), "proceeds_usd": round(proceeds, 2),
                     "realized_usd": round(proceeds - spent, 2),
@@ -191,6 +210,28 @@ def closed_trades(*, fills: list[dict[str, Any]], proposals: Any, bucket: str) -
     for symbol in symbols:
         out.extend(_replay(fills, proposals, bucket, symbol).lives or [])
     return sorted(out, key=lambda row: str(row.get("closed_at") or ""))
+
+
+def realized_by_version(*, fills: list[dict[str, Any]], proposals: Any,
+                        bucket: str) -> dict[str, float] | None:
+    """What the plan's own shares realized when they were sold, by strategy version.
+
+    Whoever approved the sale: a stop a person approved, or a sale a person made that reached
+    into the plan's shares, is the plan's loss as much as one code sent. None when the log is
+    too long to replay -- an unknown, which the loss line reports as one rather than as zero.
+    """
+    if len(fills) >= autonomy.FILL_REPLAY_LIMIT:
+        return None
+    out: dict[str, float] = {}
+    symbols = {str(row.get("symbol") or "").upper() for row in fills
+               if str(row.get("bucket")) == bucket and row.get("symbol")}
+    for symbol in sorted(symbols):
+        played = _replay(fills, proposals, bucket, symbol)
+        if played.error:
+            return None
+        for version, amount in (played.realized or {}).items():
+            out[version] = out.get(version, 0.0) + amount
+    return out
 
 
 def managed(*, fills: list[dict[str, Any]], proposals: Any, bucket: str, symbol: str,
