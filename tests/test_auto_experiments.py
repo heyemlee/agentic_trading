@@ -325,16 +325,24 @@ def test_the_simulation_is_reported_beside_its_comparators_and_apart_from_backte
     assert empty["simulation"]["window"] == {"start": None, "end": None, "sessions": 0}
 
     sim = service._auto_paper()
-    # Four sessions of passes, and a history in which all four have finished.
+    # Four sessions of passes, and a history in which all four have finished. Four weekdays from
+    # the session the account was opened in: counted in calendar days, as they once were, a
+    # Friday's next two fell on the weekend, which belongs to the Friday, and the passes after the
+    # deposit overwrote the mark taken before it -- so on every Friday, Saturday and Sunday in New
+    # York the deposit read as a result (the pre-push gate met it at 21:30 PDT on 2026-10-15).
     scripted_history(monkeypatch, last=(date.fromisoformat(today()) + timedelta(days=10)).isoformat())
-    now = datetime.combine(date.fromisoformat(today()), datetime.min.time(), tzinfo=UTC).replace(hour=15)
+    sessions, day = [], date.fromisoformat(runner.session_of(datetime.now(UTC)))
+    while len(sessions) < 4:
+        if day.weekday() < 5:
+            sessions.append(datetime.combine(day, datetime.min.time(), tzinfo=UTC).replace(hour=15))
+        day += timedelta(days=1)
     write_research(runs, "VTI", confidence=88, serial=1)
     write_research(runs, "VXUS", rating="Hold", confidence=60, serial=2)
-    runner.run(sim, research_from=runs, now=now)
+    runner.run(sim, research_from=runs, now=sessions[0])
     service.auto_fund(amount_usd=50.0, kind="deposit")
     prices["VTI"] = round(prices["VTI"] * 1.05, 4)
-    for step in (1, 2, 3):
-        runner.run(sim, research_from=runs, now=now + timedelta(days=step))
+    for when in sessions[1:]:
+        runner.run(sim, research_from=runs, now=when)
     service.auto_backtest(start="2025-01-02", end="2025-12-31")
 
     report = service.auto_performance()

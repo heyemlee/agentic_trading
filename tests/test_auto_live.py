@@ -161,9 +161,17 @@ class Real:
 
     def record(self, version, sessions):
         """Sessions as the runner records them: two open-market passes ninety minutes apart, and
-        nothing wrong on either. Written through the function the runner writes them with."""
+        nothing wrong on either. Written through the function the runner writes them with.
+
+        Every one of them before the session the runner is in now, by the runner's own clock
+        (``runner.session_of``: New York's date, a weekend belonging to the Friday). Counted from
+        yesterday in UTC, as it once was, they took in today's New York session between midnight
+        UTC and midnight in New York -- 17:00 to 21:00 in California -- and a test's own passes
+        then landed on a day already recorded: one that paused the plan at its loss line spoiled
+        it, and 30 sessions counted as 29. The pre-push gate met it at 19:35 PDT on 2026-10-15."""
         db = self.sim().state_db()
-        day = datetime.now(UTC).replace(hour=15, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        current = datetime.fromisoformat(runner.session_of(datetime.now(UTC)))
+        day = current.replace(hour=15, tzinfo=UTC) - timedelta(days=1)
         done = 0
         while done < sessions:
             if day.weekday() < 5:
