@@ -9,7 +9,7 @@ real, that what is started is what was previewed, that a session counts toward t
 when the account was actually run through it, and that money put in is never reported as made.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -209,7 +209,13 @@ def test_a_session_counts_only_when_it_was_watched_and_nothing_was_wrong(desk, m
     _preview, started = start(service)
     sim = service._auto_paper()
     version = started["opening_version"]
-    first = datetime.now(UTC).replace(hour=15, minute=0, second=0, microsecond=0)
+    # Weekday sessions from the one the runner is in now (runner.session_of: New York's date, a
+    # weekend belonging to the Friday). Counted from today in UTC, as they once were, a Saturday
+    # or Sunday rolled day(0) on to Monday and day(1) onto the same Monday, whose ten-minute
+    # passes then spoiled the session day(0) had counted -- 1 where 2 was right, on every
+    # weekend in UTC (the pre-push gate met it at 21:16 PDT on 2026-10-16).
+    first = datetime.combine(date.fromisoformat(runner.session_of(datetime.now(UTC))),
+                             datetime.min.time(), tzinfo=UTC).replace(hour=15)
 
     def day(offset):
         """Two passes, an hour and a bit apart, in the session ``offset`` weekdays on."""

@@ -14,7 +14,7 @@ History is invented by the tests (tests/auto_market.py). Nothing here reads a ma
 """
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
@@ -263,12 +263,25 @@ def test_a_backtest_is_kept_with_its_ledgers_and_says_it_is_not_a_test(desk):
 def test_research_recorded_live_inside_the_window_is_replayed_as_it_was(desk, monkeypatch):
     service, _prices, runs = desk
     last = scripted_history(monkeypatch, last=(date.fromisoformat(today()) + timedelta(days=120)).isoformat())
-    write_research(runs, "VTI", confidence=88, serial=1)
-    write_research(runs, "VXUS", confidence=75, serial=2)                 # a Buy, under the plan's bar of 80
-    write_research(runs, "BND", rating="Hold", confidence=70, serial=3)   # no conclusion to act on
-    # From yesterday, so that research written "half an hour ago" is inside the window whatever
-    # time of day this runs.
-    opened = (date.fromisoformat(today()) - timedelta(days=1)).isoformat()
+    # Concluded at 15:00 in New York in the session before today's, while the market was open, so
+    # the replay may act on it at once; and the window opens a week before that, so it begins
+    # before the day the strategy is fixed on (the day the account is valued at, which is that
+    # same session). Both once came from the calendar -- research written half an hour ago, a
+    # window opened yesterday -- and both broke over a weekend. From Friday's close to Saturday
+    # morning in New York the research was over two days old by Monday's open and lapsed under
+    # its lifetime, so nothing was bought (the pre-push gate met it at 21:16 PDT on 2026-10-16);
+    # and on a Sunday or a Monday, yesterday came after the Friday the strategy was fixed on, so
+    # the window read as out of sample.
+    session = date.fromisoformat(today()) - timedelta(days=1)
+    while session.weekday() >= 5:
+        session -= timedelta(days=1)
+    concluded = datetime.combine(session, time(15), tzinfo=bt.NEW_YORK)
+    age = (datetime.now(UTC) - concluded).total_seconds() / 60
+    write_research(runs, "VTI", confidence=88, serial=1, age_minutes=age)
+    write_research(runs, "VXUS", confidence=75, serial=2, age_minutes=age)  # a Buy, under the plan's bar of 80
+    write_research(runs, "BND", rating="Hold", confidence=70, serial=3,
+                   age_minutes=age)                                         # no conclusion to act on
+    opened = (session - timedelta(days=7)).isoformat()
     answer = service.auto_backtest(start=opened, end=last)
     card = answer["card"]
     assert answer["grounded"] is True and "strategy" in card["artifacts"]
