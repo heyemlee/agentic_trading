@@ -44,7 +44,7 @@ one adapter that reaches the broker.
 - **Automation earns real money in simulation.** A plan a person confirms runs first in a simulated account on the
   same code path, with its own database and a venue that cannot be the real one. A mode needs 30 valid simulated
   sessions before real money; a new strategy replaces the running one only after 180 and one comparison.
-- **One order path, tested offline.** 1,875 pytest tests and 231 frontend cases run with no venue, credential or
+- **One order path, tested offline.** 1,876 pytest tests and 231 frontend cases run with no venue, credential or
   model call, and an AST test keeps `service/approvals.py` the only live module that can place an order.
 
 ## Architecture
@@ -180,7 +180,7 @@ Research needs a signed-in Claude Code CLI; never set `ANTHROPIC_API_KEY`, which
 ## Test
 
 ```bash
-deploy/checks.sh                         # Ruff, 1,875 pytest tests, 231 frontend cases, secret scan
+deploy/checks.sh                         # Ruff, 1,876 pytest tests, 231 frontend cases, secret scan
 uv run ct-risk-scenarios                 # the 18 Hard Risk scenarios as a table
 uv run ct-execution-scenarios            # the 17 proposal-to-order cases
 node tools/check_navigation.cjs          # console navigation in a mobile browser on a synthetic API

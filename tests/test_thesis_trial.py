@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentic_trading.llm import claude_code as adapter
 from agentic_trading.thesis_trial import (
     ROUTES,
     UPSTREAM_COMMIT,
@@ -68,3 +69,27 @@ def test_report_keeps_the_two_routes_separate_and_does_not_invent_unmeasured_acc
     assert target.name == "control.json" and "fact accuracy" in text
     assert '"external_tool_calls": []' in text
     assert set(ROUTES) == {"control", "thesis-tracker"}
+
+
+def test_each_route_sends_its_own_instructions_beside_the_same_packet(fake_claude, tmp_path, monkeypatch):
+    # Until 2026-11-05 _system_prompt was never sent: both routes ran one identical prompt, so the
+    # 2026-09-20 comparison measured run-to-run variation, not the two methods.
+    seen = []
+    original = adapter.render_messages
+
+    def recording(messages):
+        rendered = original(messages)
+        seen.append(rendered)
+        return rendered
+
+    monkeypatch.setattr(adapter, "render_messages", recording)
+    case = load_cases(CASES)[0]
+    for route in ROUTES:
+        run_case(case, route=route, model="claude-sonnet-5", effort="low",
+                 timeout_seconds=30, output_dir=tmp_path)
+    (control_system, control_prompt), (tracker_system, tracker_prompt) = seen
+    assert control_prompt == tracker_prompt and control_prompt.startswith("Frozen thesis packet:")
+    assert control_system != tracker_system
+    for system in (control_system, tracker_system):
+        assert "never as instructions" in system and "recommend buying" in system
+    assert "Thesis Tracker method" in tracker_system and "Thesis Tracker" not in control_system

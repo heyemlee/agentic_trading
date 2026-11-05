@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Literal
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from .llm.claude_code import USAGE_LOG, ClaudeCodeChatModel, reset_usage_log, usage_summary
@@ -148,7 +149,11 @@ def run_case(case: ThesisCase, *, route: str, model: str, effort: str | None,
     llm = ClaudeCodeChatModel(model=model, effort=effort, timeout_seconds=timeout_seconds,
                               max_turns=3, max_turns_ceiling=3, claude_bin=claude_bin,
                               work_dir=str(root / case.case_id / route), role="thesis_trial")
-    assessment = llm.with_structured_output(ThesisAssessment).invoke(_prompt(case))
+    # The route is its system prompt; the packet is the only user message. Until 2026-11-05 only
+    # the packet was sent, so both routes ran one identical prompt under the CLI's default system
+    # prompt and the 2026-09-20 run compared nothing.
+    messages = [SystemMessage(content=_system_prompt(route)), HumanMessage(content=_prompt(case))]
+    assessment = llm.with_structured_output(ThesisAssessment).invoke(messages)
     elapsed = round(time.monotonic() - started, 1)
     calls = list(USAGE_LOG)
     external_tool_calls = [call["tool"] for entry in calls for call in entry.get("tool_calls", [])

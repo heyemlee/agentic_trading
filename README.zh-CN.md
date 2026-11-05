@@ -33,7 +33,7 @@
 - **批准的是条款，执行前重新核对。** 你批准的是某一版提案和固定的条款。下单前重新读取价格、现金、持仓、交易时段、回撤和市况，再跑一遍硬风控；17 个执行用例全部通过，其中重复提交也只发出一笔订单。
 - **不能交易的模型运行时。** Claude Code CLI 被包装成 LangChain chat model，关闭内置工具并使用 `--strict-mcp-config`，agent 只能看到 MCP 数据工具。Robinhood 官方 MCP 服务器只作为确定性 Python 的传输通道；只要研究环境可能碰到券商工具，预检就拒绝动用真钱。
 - **自动交易先在模拟里证明自己。** 你确认过的方案先在模拟账户里运行：同一套代码路径，独立的数据库，而且连不到真实券商。一个模式至少要有 30 个有效模拟交易日才能用真钱；新策略要满 180 个交易日并通过一次对比，才能替换正在运行的策略。
-- **唯一的下单路径，全部离线测试。** 1,875 个 pytest 测试和 231 个前端用例都不连券商、不用凭据、不调模型；一个 AST 测试保证 `service/approvals.py` 是唯一能实盘下单的模块。
+- **唯一的下单路径，全部离线测试。** 1,876 个 pytest 测试和 231 个前端用例都不连券商、不用凭据、不调模型；一个 AST 测试保证 `service/approvals.py` 是唯一能实盘下单的模块。
 
 ## 系统架构
 
@@ -138,7 +138,7 @@ uv run ct-trigger manual --ticker VTI    # 用已登录的 Claude Code CLI 排�
 ## 测试
 
 ```bash
-deploy/checks.sh                         # Ruff、1,875 个 pytest 测试、231 个前端用例、密钥扫描
+deploy/checks.sh                         # Ruff、1,876 个 pytest 测试、231 个前端用例、密钥扫描
 uv run ct-risk-scenarios                 # 以表格形式运行 18 个硬风控场景
 uv run ct-execution-scenarios            # 17 个从提案到订单的用例
 node tools/check_navigation.cjs          # 在移动端浏览器里用模拟 API 检查控制台导航

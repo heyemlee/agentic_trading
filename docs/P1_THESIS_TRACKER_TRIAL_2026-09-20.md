@@ -112,3 +112,19 @@ agreement measures. Therefore it does **not** advance to a persistent `thesis_ch
 account binding, or any proposal-producing route. The reports remain available for diagnosis of
 the shared label failures and response-format behaviour before a materially revised trial is
 considered.
+
+## Correction — 2026-11-05
+
+Run 1 did not compare the two prompts. `run_case` sent only the frozen packet: `_system_prompt(route)`
+was defined but never called, from the harness's first commit until 2026-11-05. Both routes
+therefore sent the identical request under the Claude Code CLI's default system prompt, and the
+route changed nothing but the report's file name and `license` field. Neither route received the
+trial's own instructions either; the disabled tools and an output schema without a trade field
+are what kept both in bounds, and `external_tool_calls` stayed empty.
+
+The differences in the Run 1 table are therefore run-to-run variation of one prompt, not a
+difference between the control and the Tracker, and the decision above rests on no comparison.
+The Tracker stays unadopted for lack of evidence, not on Run 1's evidence. The harness now sends
+each route's instructions as the system prompt, and `tests/test_thesis_trial.py` holds that. A
+real comparison needs a new run, which spends the subscription production research also uses;
+when to run it is the owner's decision.
