@@ -41,8 +41,6 @@ AT_TARGET = "at_target"
 TARGET_BELOW_MINIMUM = "target_below_minimum"
 LIMIT_BELOW_MINIMUM = "limit_below_minimum"
 LIMIT_EXHAUSTED = "limit_exhausted"
-#: The codes under which nothing may be ordered.
-INFEASIBLE = (AT_TARGET, TARGET_BELOW_MINIMUM, LIMIT_BELOW_MINIMUM, LIMIT_EXHAUSTED)
 
 
 def fits_to_limits(profiles: Any, bucket: str) -> bool:

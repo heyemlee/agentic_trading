@@ -646,13 +646,6 @@ TIGHTENED, LOOSENED, MIXED, UNRELATED, UNKNOWN_CHANGE = (
     "tightened", "loosened", "mixed", "unrelated", "unknown")
 NEEDS_ACKNOWLEDGEMENT = frozenset({LOOSENED, MIXED, UNKNOWN_CHANGE})
 
-#: Reasons an action cannot be taken by anyone, a person included.
-HUMAN_BLOCKS = ("kill_switch", "real_money_disabled", "mode_recommend_only", "stage", "preflight",
-                "ladder_halt", "config_error")
-#: Reasons only deterministic code may not take it. A person still can.
-AUTONOMOUS_BLOCKS = ("not_enabled", "no_min_confidence", "no_min_remaining", "no_classes",
-                     "withdrawn", "never_autonomous", "pending_change", "authority_changed")
-
 ACTIONS = ("BUY", "ADD", "REDUCE", "SELL")
 
 
@@ -713,11 +706,6 @@ def version_of(inputs: dict[str, Any]) -> str:
 
     blob = json.dumps(inputs, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
-
-
-def current_version(profiles: Profiles, db) -> str:
-    """The authority version of this moment, for a caller that needs only the version."""
-    return version_of(authority_inputs(profiles, db))
 
 
 def version_history(db) -> list[dict[str, Any]]:

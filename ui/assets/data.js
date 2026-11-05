@@ -341,58 +341,6 @@ window.CT = (function () {
     },
   };
 
-  const approveExecuted = {
-    proposal_id: "2026-09-08-VTI-f4c6ec7f",
-    status: "EXECUTED",
-    outcome: "SUBMITTED",
-    submitted: true,
-    duplicate_prevented: false,
-    order: {
-      order_id: "b7f3...",
-      client_order_id: "ct-2026-09-08-VTI-a1b2c3d4-1",
-      symbol: "VTI",
-      side: "buy",
-      quantity: 0.0918,
-      notional: 35.0,
-      order_type: "market",
-      status: "filled",
-      filled_quantity: 0.0918,
-      filled_avg_price: 381.55,
-      limit_price: null,
-      submitted_at: "2026-09-08T14:32:11+00:00",
-      reason: null,
-    },
-    error: null,
-    reasons: [
-      "venue binding: micro_live may execute at robinhood",
-      "freshness: core_conservative: 3 min old, inside the 960 min window",
-      "approval: approval is 0 min old (limit 60 min)",
-      "venue price 381.5500 (last_trade, spread 0.02%)",
-      "price 381.55 vs 381.42 at analysis: +0.03% (band ±3.0%)",
-      "venue pre-trade review passed with no alerts",
-      "ledger updated: buy 0.0918 VTI @ 381.5500 in micro_live",
-    ],
-    message: "the order was submitted and the portfolio was updated",
-  };
-
-  const approveReanalysis = {
-    proposal_id: "2026-09-08-VTI-f4c6ec7f",
-    status: "REANALYSIS_REQUIRED",
-    outcome: "REANALYZE",
-    submitted: false,
-    duplicate_prevented: false,
-    order: null,
-    error: null,
-    reasons: [
-      "venue binding: micro_live may execute at robinhood",
-      "freshness: core_conservative: 47 min old, inside the 960 min window",
-      "venue price 396.80 (last_trade, spread 0.03%)",
-      "price 396.80 vs 381.42 at analysis: +4.03% (band ±3.0%)",
-      "the move is larger than this strategy tolerates; the thesis needs a fresh analysis, not a re-priced old order",
-    ],
-    message: "the world changed materially since the analysis; this idea needs fresh research rather than a re-priced old order",
-  };
-
   /* Why each of these runs ended as it did, in the shape the API returns it
      (agentic_trading/diagnosis.py). All four were rated Hold with nothing held. */
   const DECLINED = {
@@ -1213,7 +1161,7 @@ window.CT = (function () {
 
   return {
     health, portfolio, risk, microLive, proposals, proposalDetail,
-    approveExecuted, approveReanalysis, research, researchJobs, researchSubjects, orders,
+    research, researchJobs, researchSubjects, orders,
     schedule, operations, notifications, evaluation, evaluationExamples, labRoster, labTrace,
     pushDevices: { devices: [] }, authSessions, activity, config, authority, attention, accounts, advisor,
     auto, autoLive, autoPlanExample, autoBaselineExample, autoPerformanceExample,

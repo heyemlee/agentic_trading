@@ -345,7 +345,6 @@ class BucketView:
     sectors_pct: dict[str, float] = field(default_factory=dict)      # direct sector exposure (stocks + sector ETFs)
     classes_pct: dict[str, float] = field(default_factory=dict)      # of allocation, by limit class
     stocks_pct: float = 0.0
-    limit_class_pct: dict[str, float] = field(default_factory=dict)
 
     @property
     def n_positions(self) -> int:
@@ -447,7 +446,6 @@ def build_snapshot(
         sleeves["cash"] = b.cash_usd / basis * 100.0 if basis else 0.0
         b.sleeves_pct = dict(sleeves)
         b.sectors_pct = dict(sectors)
-        b.limit_class_pct = dict(classes)
         b.groups_held = dict(groups)
         b.classes_pct = dict(classes)
         b.stocks_pct = classes.get("individual_stock", 0.0)
@@ -627,15 +625,6 @@ def cash_flow_summary(state: PortfolioState) -> dict[str, float]:
     totals: dict[str, float] = defaultdict(float)
     for flow in state.cash_flows:
         if flow.kind in FUNDING_KINDS:
-            totals[flow.bucket] += float(flow.amount_usd)
-    return {bucket: round(value, 2) for bucket, value in totals.items()}
-
-
-def income_summary(state: PortfolioState) -> dict[str, float]:
-    """Net income per bucket -- interest and dividends less fees -- from the flows recorded."""
-    totals: dict[str, float] = defaultdict(float)
-    for flow in state.cash_flows:
-        if flow.kind in INCOME_KINDS:
             totals[flow.bucket] += float(flow.amount_usd)
     return {bucket: round(value, 2) for bucket, value in totals.items()}
 

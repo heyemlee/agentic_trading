@@ -43,8 +43,8 @@ MAX_HISTORY = 50
 PERSON, LOSS_LINE = "person", "loss_line"
 
 #: Where a version stands. A version is born unvalidated and nothing but its own record moves it.
-UNVALIDATED, SIMULATING, VALIDATED, RETIRED, REJECTED = (
-    "unvalidated", "simulating", "validated", "retired", "rejected")
+UNVALIDATED, SIMULATING, VALIDATED, REJECTED = (
+    "unvalidated", "simulating", "validated", "rejected")
 
 #: The parts of a plan's strategy that are behaviour. A rationale is words about it, and two
 #: strategies that differ only in how they were explained are the same strategy.

@@ -119,8 +119,6 @@ class Blocker:
 #: Steady alone: it is the first to open, and the only one whose every part -- research says
 #: buy, a stop, a term -- was something the account already allowed before modes existed.
 DEFAULT_OPEN_MODES = (STEADY,)
-#: Where the risk profile says which modes those are. A list, like the classes beside it.
-OPEN_MODES_PATH = "buckets.{account}.autonomy.open.modes"
 
 
 def allowed_modes(profiles: Any, account: str = "micro_live") -> tuple[str, ...]:

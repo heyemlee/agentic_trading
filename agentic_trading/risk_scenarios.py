@@ -86,7 +86,6 @@ class Scenario:
     expect_rules_failed: tuple[str, ...] = ()
     stock_info: dict[str, Any] | None = None
     strategy: str = "long_only_diversified"
-    expect_human_approval: bool = True
 
 
 def build_scenarios() -> list[Scenario]:
