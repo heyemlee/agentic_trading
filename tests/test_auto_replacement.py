@@ -17,13 +17,14 @@ The market is the test's own straight lines (tests/auto_market.py): VTI rises, V
 figure here says anything about a real strategy.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 
 from agentic_trading import events
 from agentic_trading.auto import bars as bar_source
 from agentic_trading.auto import experiments, modes, replacement, runner, store
+from agentic_trading.auto.backtest import NEW_YORK
 from agentic_trading.auto.gates import Gate
 from agentic_trading.service import Service, ServiceError
 from agentic_trading.service.shapes import MarketStatus
@@ -78,8 +79,21 @@ def _research_in_the_window(real, *, days_ago=150, ticker="VTI"):  # noqa: F811
 
     A hundred and fifty days back by default: far enough that a strategy holding for ninety days
     has sold by the end of the window, and one holding for a hundred and eighty has not.
+
+    Concluded at 15:00 in New York on a weekday, while the market was open, so the replay may act
+    on it at once. It was once exactly ``days_ago * 1440`` minutes before now. A hundred and fifty
+    days is twenty-one weeks and three days, so on a Monday evening that landed on a Friday
+    evening in New York, after the close; research lives two days, so it lapsed over the weekend,
+    before Monday's open, nothing was bought, and both strategies returned +0.00%. Seven tests
+    failed that way (the pre-push gate met it at 15:14 PST on 2026-11-09). It is the cause behind
+    f0aa621: research dated by the calendar instead of by a session.
     """
-    return real.research(ticker, confidence=90, age_minutes=days_ago * 1440)
+    session = date.fromisoformat(today()) - timedelta(days=days_ago)
+    while session.weekday() >= 5:
+        session -= timedelta(days=1)
+    concluded = datetime.combine(session, time(15), tzinfo=NEW_YORK)
+    age = (datetime.now(UTC) - concluded).total_seconds() / 60
+    return real.research(ticker, confidence=90, age_minutes=age)
 
 
 @pytest.fixture
